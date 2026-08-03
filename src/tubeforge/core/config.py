@@ -62,6 +62,18 @@ class PipelineConfig(BaseModel):
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
 
 
+class WorkerConfig(BaseModel):
+    """Conservative lease and retry settings for a single homelab worker."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_active_jobs: int = Field(default=1, ge=1, le=1)
+    lease_seconds: int = Field(default=300, ge=10, le=3600)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    retry_base_seconds: int = Field(default=30, ge=1, le=3600)
+    retry_max_seconds: int = Field(default=900, ge=1, le=86_400)
+
+
 class Settings(BaseModel):
     """Complete non-secret TubeForge configuration."""
 
@@ -70,6 +82,7 @@ class Settings(BaseModel):
     app: AppConfig
     database: DatabaseConfig
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
 
 
 def load_settings(config_path: Path | None = None) -> Settings:

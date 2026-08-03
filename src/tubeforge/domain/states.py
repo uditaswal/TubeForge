@@ -54,6 +54,7 @@ class JobState(StrEnum):
     FAILED_RETRYABLE = "failed_retryable"
     FAILED_VALIDATION = "failed_validation"
     AUTH_REQUIRED = "auth_required"
+    FAILED_EXHAUSTED = "failed_exhausted"
     CANCELLED = "cancelled"
 
 
