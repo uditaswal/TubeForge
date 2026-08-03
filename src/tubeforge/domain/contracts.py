@@ -163,10 +163,15 @@ class ContentPackage(DomainModel):
 
 
 class VoiceRequest(DomainModel):
+    """Provider-neutral request for a single stable narration phrase."""
+
     text: str = Field(min_length=1, max_length=12_000)
     language: str = Field(min_length=2, max_length=35)
     voice_id: str = Field(min_length=1, max_length=200)
     section_id: str = Field(min_length=1, max_length=64)
+    phrase_id: str | None = Field(default=None, min_length=1, max_length=100)
+    output_path: str | None = Field(default=None, max_length=4_096)
+    settings: tuple[tuple[str, str], ...] = ()
 
 
 class VoiceResult(DomainModel):

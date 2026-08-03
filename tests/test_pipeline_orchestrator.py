@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import wave
 
 import pytest
 
-from tubeforge.core.config import DatabaseConfig, FakeProviderConfig
+from tubeforge.core.config import DatabaseConfig, FakeProviderConfig, VoicePipelineConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.models import Base
 from tubeforge.db.repositories import ApprovalRepository, ArtifactRepository, JobRepository
@@ -13,6 +14,30 @@ from tubeforge.domain.contracts import ContentRequest, SourceReference
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
 from tubeforge.providers.fake import FakeContentProvider, FakeMediaProvider, FakePublisher, FakeVoiceProvider
+
+
+class OfflineProbe:
+    def inspect(self, path: Path) -> dict[str, object]:
+        with wave.open(str(path), "rb") as stream:
+            return {"duration_seconds": stream.getnframes() / stream.getframerate(), "streams": []}
+
+
+class OfflineAssembler:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def assemble(self, inputs: tuple[Path, ...], output: Path, *, pause_seconds: float = 0.0) -> None:
+        self.calls += 1
+        with wave.open(str(inputs[0]), "rb") as source:
+            params = source.getparams()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(output), "wb") as target:
+            target.setparams(params)
+            for index, path in enumerate(inputs):
+                with wave.open(str(path), "rb") as source:
+                    target.writeframes(source.readframes(source.getnframes()))
+                if index < len(inputs) - 1:
+                    target.writeframes(b"\x00" * int(round(pause_seconds * params.framerate)) * params.nchannels * params.sampwidth)
 
 
 def request() -> ContentRequest:
@@ -25,7 +50,7 @@ def pipeline(tmp_path: Path):
     Base.metadata.create_all(database.engine)
     settings = FakeProviderConfig(artifact_root=tmp_path / "provider")
     content, media, voice, publisher = FakeContentProvider(), FakeMediaProvider(settings), FakeVoiceProvider(settings), FakePublisher()
-    runner = PipelineOrchestrator(JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory), content, media, voice, publisher, tmp_path / "artifacts")
+    runner = PipelineOrchestrator(JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory), content, media, voice, publisher, tmp_path / "artifacts", voice_config=VoicePipelineConfig(pause_seconds=0.15), audio_assembler=OfflineAssembler(), ffprobe=OfflineProbe())
     try:
         yield runner, content, media, voice, publisher
     finally:
@@ -79,7 +104,7 @@ def test_duplicate_execution_reuses_checkpoint_and_upload_receipt(pipeline) -> N
 def test_provider_failures_preserve_exact_stage_and_classification(tmp_path: Path, failure: Exception, expected: JobState) -> None:
     database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'failure.db'}")); Base.metadata.create_all(database.engine)
     settings = FakeProviderConfig(artifact_root=tmp_path / "provider")
-    runner = PipelineOrchestrator(JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory), FakeContentProvider(failure), FakeMediaProvider(settings), FakeVoiceProvider(settings), FakePublisher(), tmp_path / "artifacts")
+    runner = PipelineOrchestrator(JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory), FakeContentProvider(failure), FakeMediaProvider(settings), FakeVoiceProvider(settings), FakePublisher(), tmp_path / "artifacts", audio_assembler=OfflineAssembler(), ffprobe=OfflineProbe())
     try:
         runner.jobs.create("job-failure", request())
         result = runner.run("job-failure")

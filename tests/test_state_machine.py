@@ -23,6 +23,7 @@ def test_valid_phase_one_workflow_requires_each_approval() -> None:
     for target in (
         JobState.VOICE_GENERATION,
         JobState.CAPTION_GENERATION,
+        JobState.VOICE_READY,
         JobState.PREVIEW_RENDERING,
         JobState.PREVIEW_APPROVAL_REQUIRED,
     ):

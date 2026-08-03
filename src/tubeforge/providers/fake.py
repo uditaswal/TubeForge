@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import wave
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,10 +37,16 @@ class FakeVoiceProvider:
         self.calls += 1
         if self.failure:
             raise self.failure
-        payload = f"fake voice|{request.section_id}|{request.text}".encode()
-        destination = self.settings.artifact_root / "voice" / f"{request.section_id}.audio"
+        # A tiny valid PCM WAV keeps offline tests realistic without a native TTS.
+        frames = max(800, len(request.text.encode("utf-8")) * 80)
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as stream:
+            stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(8_000)
+            stream.writeframes(b"\x00\x00" * frames)
+        payload = buffer.getvalue()
+        destination = Path(request.output_path) if request.output_path else self.settings.artifact_root / "voice" / f"{request.phrase_id or request.section_id}.wav"
         _atomic_write(destination, payload)
-        return VoiceResult(artifact_path=str(destination), duration_seconds=max(0.1, len(request.text) / 20), checksum_sha256=_checksum(payload), provider_name="fake-voice")
+        return VoiceResult(artifact_path=str(destination), duration_seconds=frames / 8_000, checksum_sha256=_checksum(payload), provider_name="fake-voice")
 
 
 class FakeMediaProvider:
