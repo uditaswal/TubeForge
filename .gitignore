@@ -9,3 +9,6 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 data/
+*.db
+*.db-shm
+*.db-wal

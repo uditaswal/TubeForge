@@ -24,6 +24,16 @@ def test_fresh_sqlite_database_upgrades_to_head(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_alembic_creates_missing_sqlite_parent(tmp_path: Path) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    database_path = tmp_path / "missing" / "parent" / "migrated.db"
+    config = Config(str(repository_root / "alembic.ini"))
+    config.set_main_option("script_location", str(repository_root / "migrations"))
+    config.cmd_opts = Namespace(x=[f"database_url=sqlite:///{database_path}"])
+    command.upgrade(config, "head")
+    assert database_path.is_file()
+
+
 def test_upgrade_from_m4_revision(tmp_path: Path) -> None:
     repository_root = Path(__file__).resolve().parents[1]
     database_url = f"sqlite:///{tmp_path / 'upgrade.db'}"
