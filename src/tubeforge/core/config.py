@@ -53,6 +53,34 @@ class FakeProviderConfig(BaseModel):
     voice_id: str = Field(default="fake-voice", min_length=1, max_length=200)
     media_license: str = Field(default="CC0-1.0", min_length=1, max_length=200)
 
+class MediaPipelineConfig(BaseModel):
+    """Safe, provider-neutral M8 asset acquisition policy."""
+
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(default="fake", pattern=r"^(fake|wikimedia)$")
+    cache_root: Path = Path("./data/cache/assets")
+    allowed_hosts: tuple[str, ...] = ("upload.wikimedia.org", "commons.wikimedia.org")
+    allowed_licenses: tuple[str, ...] = ("CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain")
+    allowed_media_types: tuple[str, ...] = ("image", "video")
+    timeout_seconds: int = Field(default=30, ge=1, le=300)
+    max_redirects: int = Field(default=0, ge=0, le=5)
+    max_bytes: int = Field(default=100_000_000, ge=1_024, le=2_000_000_000)
+    max_width: int = Field(default=12_000, ge=1, le=20_000)
+    max_height: int = Field(default=12_000, ge=1, le=20_000)
+    max_duration_seconds: float = Field(default=900, gt=0, le=86_400)
+    min_width: int = Field(default=64, ge=1, le=20_000)
+    min_height: int = Field(default=64, ge=1, le=20_000)
+    allowed_extensions: tuple[str, ...] = (".jpg", ".jpeg", ".png", ".webp", ".mp4", ".webm", ".mov")
+    retries: int = Field(default=3, ge=0, le=10)
+    wikimedia_api_url: str = "https://commons.wikimedia.org/w/api.php"
+
+    @field_validator("allowed_hosts", "allowed_licenses", "allowed_media_types", "allowed_extensions")
+    @classmethod
+    def require_nonempty_unique_values(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(item.strip() for item in value if item.strip())
+        if not normalized or len({item.casefold() for item in normalized}) != len(normalized):
+            raise ValueError("must contain unique nonblank values")
+        return normalized
 
 class CodexProviderConfig(BaseModel):
     """Non-secret limits for the opt-in Codex CLI content adapter."""
@@ -121,6 +149,7 @@ class PipelineConfig(BaseModel):
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
     piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
+    media: MediaPipelineConfig = Field(default_factory=MediaPipelineConfig)
 
 
 class WorkerConfig(BaseModel):

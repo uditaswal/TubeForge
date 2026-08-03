@@ -45,6 +45,24 @@ pipeline:
     pause_seconds: 0.15
     caption_line_length: 42
     duration_tolerance_seconds: 0.15
+  media:
+    provider: "fake"
+    cache_root: "./data/cache/assets"
+    allowed_hosts: ["upload.wikimedia.org", "commons.wikimedia.org"]
+    allowed_licenses: ["CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain"]
+    allowed_media_types: ["image", "video"]
+    timeout_seconds: 30
+    max_redirects: 0
+    max_bytes: 100000000
+    max_width: 12000
+    max_height: 12000
+    max_duration_seconds: 900
+    min_width: 64
+    min_height: 64
+    allowed_extensions: [".png", ".mp4", ".webm"]
+    retries: 3
+    wikimedia_api_url: "https://commons.wikimedia.org/w/api.php"
+
 worker:
   max_active_jobs: 1
   lease_seconds: 300

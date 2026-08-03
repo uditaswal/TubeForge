@@ -181,19 +181,55 @@ class VoiceResult(DomainModel):
     provider_name: str = Field(min_length=1, max_length=100)
 
 
-class AssetSearchRequest(DomainModel):
+class MediaSearchRequest(DomainModel):
+    """Provider-neutral, deterministic request derived from one approved scene."""
+
+    scene_id: str = Field(min_length=1, max_length=64)
     queries: tuple[str, ...] = Field(min_length=1, max_length=10)
     visual_type: str = Field(min_length=1, max_length=100)
     required_license: str = Field(min_length=1, max_length=200)
+    orientation: str = Field(default="landscape", pattern=r"^(landscape|portrait|square|any)$")
+
+    @model_validator(mode="after")
+    def require_safe_queries(self) -> MediaSearchRequest:
+        if any(not query.strip() or len(query) > 300 for query in self.queries):
+            raise ValueError("media search queries must be nonblank and bounded")
+        if any("youtube.com" in query.casefold() or "youtu.be" in query.casefold() for query in self.queries):
+            raise ValueError("media searches must not target YouTube videos")
+        return self
+
+
+AssetSearchRequest = MediaSearchRequest
 
 
 class AssetCandidate(DomainModel):
-    provider_asset_id: str = Field(min_length=1, max_length=300)
+    """Rights-bearing media candidate. Free-to-view metadata is insufficient."""
+
+    provider_asset_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,299}$")
     source_url: HttpUrl
+    download_url: HttpUrl | None = None
+    source_version: str | None = Field(default=None, max_length=200)
+    local_path: str | None = Field(default=None, max_length=4096)
+    media_type: str = Field(default="image", pattern=r"^(image|video)$")
+    width: int | None = Field(default=None, ge=1, le=20_000)
+    height: int | None = Field(default=None, ge=1, le=20_000)
+    duration_seconds: float | None = Field(default=None, gt=0, le=86_400)
     author: str | None = Field(default=None, max_length=300)
     license_name: str = Field(min_length=1, max_length=300)
+    license_url: HttpUrl | None = None
     attribution_text: str | None = Field(default=None, max_length=2_000)
+    attribution_required: bool = False
+    editorial_only: bool = False
+    review_required: bool = False
     retrieved_at: datetime
+
+    @model_validator(mode="after")
+    def require_complete_rights(self) -> AssetCandidate:
+        if self.license_name.casefold() in {"unknown", "free", "free to view", "n/a"}:
+            raise ValueError("asset licence must be explicitly reusable")
+        if self.attribution_required and not self.attribution_text:
+            raise ValueError("attribution-required assets need attribution text")
+        return self
 
 
 class PublishPrivacy(StrEnum):

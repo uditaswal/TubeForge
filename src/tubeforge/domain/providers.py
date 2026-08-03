@@ -6,7 +6,7 @@ from typing import Protocol
 
 from tubeforge.domain.contracts import (
     AssetCandidate,
-    AssetSearchRequest,
+    MediaSearchRequest,
     ContentPackage,
     ContentRequest,
     PublishRequest,
@@ -27,7 +27,7 @@ class VoiceProvider(Protocol):
 
 
 class MediaProvider(Protocol):
-    def search(self, request: AssetSearchRequest) -> list[AssetCandidate]:
+    def search(self, request: MediaSearchRequest) -> list[AssetCandidate]:
         """Return licensed media candidates without downloading them."""
 
 

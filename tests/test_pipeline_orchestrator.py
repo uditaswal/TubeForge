@@ -133,3 +133,41 @@ def test_all_approval_gates_fail_closed(pipeline) -> None:
     approve(runner, "job-gates", ApprovalGate.PREVIEW)
     assert runner.run("job-gates").state is JobState.PUBLISH_APPROVAL_REQUIRED
     assert runner.artifacts.get("job-gates", JobState.PUBLISH_APPROVAL_REQUIRED, "public_receipt") is None
+
+def test_assets_stage_acquires_validated_fake_asset_and_reuses_checkpoint(tmp_path: Path) -> None:
+    from tubeforge.db.repositories import AssetCacheRepository
+    from tubeforge.pipeline.assets import AssetAcquisitionService, AssetDownloader, AssetLimits
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'assets.db'}")); Base.metadata.create_all(database.engine)
+    settings = FakeProviderConfig(artifact_root=tmp_path / "provider")
+    media = FakeMediaProvider(settings)
+    runner = PipelineOrchestrator(JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory), FakeContentProvider(), media, FakeVoiceProvider(settings), FakePublisher(), tmp_path / "artifacts", audio_assembler=OfflineAssembler(), ffprobe=OfflineProbe(), asset_acquirer=AssetAcquisitionService(AssetCacheRepository(database.session_factory), AssetDownloader(tmp_path / "cache", AssetLimits(frozenset({"example.invalid"}), frozenset({"CC0-1.0"})))))
+    try:
+        runner.jobs.create("job-assets", request())
+        assert runner.run("job-assets").state is JobState.SCRIPT_APPROVAL_REQUIRED
+        approve(runner, "job-assets", ApprovalGate.SCRIPT)
+        assert runner.run("job-assets").state is JobState.PREVIEW_APPROVAL_REQUIRED
+        manifest = runner._required_json("job-assets", JobState.ASSET_ACQUISITION, "asset_manifest")
+        accepted = manifest["scenes"]["scene-1"]
+        assert Path(accepted["path"]).is_file() and accepted["validation"]["media_type"] == "image"
+        assert runner._required_json("job-assets", JobState.ASSET_ACQUISITION, "license_manifest")["assets"][0]["provider_asset_id"].startswith("fake-")
+        calls = media.calls
+        runner.run("job-assets")
+        assert media.calls == calls
+    finally:
+        database.dispose()
+
+def test_assets_cancellation_before_checkpoint_preserves_cache(tmp_path: Path) -> None:
+    from tubeforge.db.repositories import AssetCacheRepository
+    from tubeforge.pipeline.assets import AssetAcquisitionService, AssetDownloader, AssetLimits
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'cancel.db'}")); Base.metadata.create_all(database.engine)
+    settings = FakeProviderConfig(artifact_root=tmp_path / "provider")
+    runner = PipelineOrchestrator(JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory), FakeContentProvider(), FakeMediaProvider(settings), FakeVoiceProvider(settings), FakePublisher(), tmp_path / "artifacts", audio_assembler=OfflineAssembler(), ffprobe=OfflineProbe(), asset_acquirer=AssetAcquisitionService(AssetCacheRepository(database.session_factory), AssetDownloader(tmp_path / "cache", AssetLimits(frozenset({"example.invalid"}), frozenset({"CC0-1.0"})))))
+    try:
+        runner.jobs.create("job-cancel-assets", request()); runner.run("job-cancel-assets"); approve(runner, "job-cancel-assets", ApprovalGate.SCRIPT)
+        state = [False]
+        def cancelled() -> bool:
+            state[0] = True
+            return state[0]
+        assert runner.run("job-cancel-assets", cancellation_requested=cancelled).state is JobState.CANCELLED
+        assert runner.artifacts.get("job-cancel-assets", JobState.ASSET_ACQUISITION, "asset_manifest") is None
+    finally: database.dispose()

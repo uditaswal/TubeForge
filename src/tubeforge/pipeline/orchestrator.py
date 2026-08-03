@@ -12,10 +12,11 @@ from pydantic import ValidationError
 from tubeforge.core.config import VoicePipelineConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
-from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, ExternalOperationRepository, JobRepository, PipelineJob
-from tubeforge.domain.contracts import AssetSearchRequest, ContentPackage, PublishPrivacy, PublishRequest, VoiceRequest
+from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobRepository, PipelineJob
+from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, PublishPrivacy, PublishRequest, VoiceRequest
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
+from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, attribution_manifest, scene_request, select_candidate
 from tubeforge.pipeline.captions import render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
@@ -32,7 +33,7 @@ class PipelineCancellation(RuntimeError):
 class PipelineOrchestrator:
     """Run one job synchronously, committing only short persistence operations."""
 
-    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None) -> None:
+    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.content, self.media, self.voice, self.publisher = content, media, voice, publisher
         self.artifact_root, self.machine = artifact_root, PipelineStateMachine()
@@ -40,6 +41,8 @@ class PipelineOrchestrator:
         self.voice_config = voice_config or VoicePipelineConfig()
         self.audio_assembler = audio_assembler or FFmpegAudioAssembler(str(self.voice_config.ffmpeg_executable), self.voice_config.ffmpeg_threads)
         self.ffprobe = ffprobe or FFprobe(str(self.voice_config.ffprobe_executable))
+        self.asset_limits = asset_limits or AssetLimits(frozenset({"example.invalid", "upload.wikimedia.org", "commons.wikimedia.org"}), frozenset({"CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain"}))
+        self.asset_acquirer = asset_acquirer or AssetAcquisitionService(AssetCacheRepository(artifacts._session_factory), AssetDownloader(artifact_root.parent / "cache" / "assets", self.asset_limits))
 
     def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None) -> PipelineJob:
         """Advance until an approval gate, terminal state, or classified failure."""
@@ -57,7 +60,7 @@ class PipelineOrchestrator:
                 continue
             try:
                 self._run_stage(job, cancellation_requested)
-            except PipelineCancellation:
+            except (PipelineCancellation, AssetAcquisitionCancelled):
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
                 return self.jobs.update_state(job.id, cancelled.state, cancelled.resume_state)
             except (RetryableProviderError, ProviderValidationError, ProviderAuthenticationError, ValidationError) as error:
@@ -86,12 +89,24 @@ class PipelineOrchestrator:
             if approval is None: return
             self._transition(job, JobState.ASSET_ACQUISITION, approvals=frozenset({ApprovalGate.SCRIPT})); return
         if job.state is JobState.ASSET_ACQUISITION:
-            package = self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package")
-            if self._load_json_artifact(job.id, JobState.ASSET_ACQUISITION, "license_manifest") is None:
-                assets = []
-                for scene in package["scene_plans"]:
-                    assets.extend(candidate.model_dump(mode="json") for candidate in self.media.search(AssetSearchRequest(queries=tuple(scene["search_queries"]), visual_type=scene["visual_type"], required_license="licensed")))
-                self._checkpoint_json(job.id, JobState.ASSET_ACQUISITION, "license_manifest", {"assets": assets})
+            package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
+            manifest = self._load_json_artifact(job.id, JobState.ASSET_ACQUISITION, "asset_manifest") or {"scenes": {}}
+            accepted = manifest["scenes"]
+            for scene in package.scene_plans:
+                if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before asset search")
+                current = accepted.get(scene.scene_id)
+                if current and self._accepted_asset_valid(current): continue
+                request = scene_request(scene)
+                candidate = select_candidate(self.media.search(request), request, self.asset_limits)
+                if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before asset acquisition")
+                path, cache_key, metadata = self.asset_acquirer.acquire(type(self.media).__name__, candidate, cancellation_requested)
+                accepted[scene.scene_id] = {"scene_id": scene.scene_id, "request": request.model_dump(mode="json"), "candidate": candidate.model_dump(mode="json"), "cache_key": cache_key, "path": str(path), "checksum_sha256": metadata["checksum_sha256"], "validation": metadata}
+                self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", manifest)
+            if any(not self._accepted_asset_valid(accepted.get(scene.scene_id)) for scene in package.scene_plans): raise ProviderValidationError("not every scene has a validated accepted asset")
+            selected = {scene_id: AssetCandidate.model_validate(item["candidate"]) for scene_id, item in accepted.items()}
+            self._replace_json(job.id, JobState.ASSET_ACQUISITION, "license_manifest", attribution_manifest(selected))
+            self._transition(job, JobState.ASSETS_READY); return
+        if job.state is JobState.ASSETS_READY:
             self._transition(job, JobState.VOICE_GENERATION); return
         if job.state is JobState.VOICE_GENERATION:
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
@@ -224,6 +239,13 @@ class PipelineOrchestrator:
         if artifact and Path(artifact.path).is_file() and self._checksum(Path(artifact.path)) == artifact.checksum_sha256: return artifact
         return None
 
+
+    def _accepted_asset_valid(self, value: object) -> bool:
+        try:
+            if not isinstance(value, dict): return False
+            path=Path(str(value["path"])); validation=value["validation"]
+            return path.is_file() and path.stat().st_size > 0 and self._checksum(path)==value["checksum_sha256"] and validation["checksum_sha256"]==value["checksum_sha256"] and validation["validation_version"]=="m8-v1" and AssetCandidate.model_validate(value["candidate"]) is not None
+        except (KeyError, OSError, TypeError, ValueError): return False
     def _result_is_valid(self, result: object) -> bool:
         if not isinstance(result, dict):
             return False

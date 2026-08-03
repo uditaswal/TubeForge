@@ -37,3 +37,16 @@ def test_configuration_rejects_non_sqlite_database() -> None:
                 "database": {"url": "postgresql://example.invalid/tubeforge"},
             }
         )
+
+def test_media_provider_defaults_to_fake_and_wikimedia_is_explicit() -> None:
+    from tubeforge.core.config import FakeProviderConfig, MediaPipelineConfig
+    from tubeforge.providers.fake import FakeMediaProvider
+    from tubeforge.providers.media.factory import create_media_provider
+    from tubeforge.providers.media.wikimedia import WikimediaCommonsProvider
+    assert isinstance(create_media_provider(MediaPipelineConfig(), FakeProviderConfig()), FakeMediaProvider)
+    assert isinstance(create_media_provider(MediaPipelineConfig(provider="wikimedia"), FakeProviderConfig()), WikimediaCommonsProvider)
+
+def test_default_yaml_uses_safe_fake_media_policy() -> None:
+    settings = load_settings()
+    assert settings.pipeline.media.provider == "fake"
+    assert settings.pipeline.media.max_redirects == 0

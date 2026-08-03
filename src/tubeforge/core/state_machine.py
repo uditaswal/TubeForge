@@ -27,7 +27,8 @@ class PipelineStateMachine:
         JobState.CONTENT_GENERATING: JobState.CONTENT_READY,
         JobState.CONTENT_READY: JobState.SCRIPT_APPROVAL_REQUIRED,
         JobState.SCRIPT_APPROVAL_REQUIRED: JobState.ASSET_ACQUISITION,
-        JobState.ASSET_ACQUISITION: JobState.VOICE_GENERATION,
+        JobState.ASSET_ACQUISITION: JobState.ASSETS_READY,
+        JobState.ASSETS_READY: JobState.VOICE_GENERATION,
         JobState.VOICE_GENERATION: JobState.CAPTION_GENERATION,
         # Voice readiness is only durable after narration and both caption formats validate.
         JobState.CAPTION_GENERATION: JobState.VOICE_READY,

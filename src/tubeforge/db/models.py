@@ -66,6 +66,24 @@ class ArtifactRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AssetCacheRecord(Base):
+    """Durable single-writer reservation for validated on-disk media."""
+    __tablename__ = "asset_cache"
+    __table_args__ = (UniqueConstraint("cache_key", name="uq_asset_cache_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cache_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    reservation_token: Mapped[str | None] = mapped_column(String(64))
+    reservation_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    path: Mapped[str | None] = mapped_column(Text)
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64))
+    metadata_json: Mapped[str | None] = mapped_column(Text)
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ApprovalRecord(Base):
     """An immutable approved/rejected gate decision for a job."""
 
