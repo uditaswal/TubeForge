@@ -1,0 +1,8 @@
+app:
+  name: "TubeForge"
+  environment: "development"
+  bind_host: "127.0.0.1"
+  port: 8080
+database:
+  url: "sqlite:///./data/tubeforge.db"
+  busy_timeout_ms: 5000
