@@ -17,3 +17,11 @@ def test_sqlite_connections_enable_wal_and_busy_timeout(tmp_path: Path) -> None:
             assert connection.execute(text("PRAGMA busy_timeout")).scalar_one() == 3210
     finally:
         database.dispose()
+
+
+def test_file_backed_sqlite_creates_missing_parent_from_project_root(tmp_path: Path) -> None:
+    relative_database = Path("test-output") / "nested" / "database.db"
+    from tubeforge.db.session import prepare_sqlite_database_url
+    url = prepare_sqlite_database_url(f"sqlite:///./{relative_database}", project_root=tmp_path)
+    assert Path(url.database).is_file() is False
+    assert Path(url.database).parent == tmp_path / "test-output" / "nested"

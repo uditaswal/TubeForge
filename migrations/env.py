@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from tubeforge.core.config import load_settings
+from tubeforge.db.session import prepare_sqlite_database_url
 from tubeforge.db.models import Base
 
 config = context.config
@@ -26,7 +27,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     section = config.get_section(config.config_ini_section, {})
-    section["sqlalchemy.url"] = database_url()
+    section["sqlalchemy.url"] = prepare_sqlite_database_url(database_url()).render_as_string(hide_password=False)
     connectable = engine_from_config(
         section, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
