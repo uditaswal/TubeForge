@@ -13,6 +13,16 @@ pipeline:
     artifact_root: "./data/fake-artifacts"
     voice_id: "fake-voice"
     media_license: "CC0-1.0"
+  codex:
+    executable: "codex"
+    model: "gpt-5.2-codex"
+    timeout_seconds: 900
+    max_output_bytes: 2000000
+    max_diagnostic_bytes: 8192
+    reservation_seconds: 1200
+    repair_attempt_limit: 0
+    prompt_template_version: "m6-content-v1"
+    max_prompt_chars: 60000
 worker:
   max_active_jobs: 1
   lease_seconds: 300

@@ -19,7 +19,7 @@ def test_fresh_sqlite_database_upgrades_to_head(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260803_0003"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260803_0004"
     finally:
         engine.dispose()
 
@@ -45,5 +45,20 @@ def test_upgrade_from_m4_revision(tmp_path: Path) -> None:
     try:
         with engine.connect() as connection:
             assert connection.execute(text("SELECT attempt_count FROM pipeline_jobs")).keys() == ["attempt_count"]
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_from_worker_lease_revision_adds_generation_cache(tmp_path: Path) -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    database_url = f"sqlite:///{tmp_path / 'worker-upgrade.db'}"
+    config = Config(str(repository_root / "alembic.ini")); config.set_main_option("script_location", str(repository_root / "migrations"))
+    config.cmd_opts = Namespace(x=[f"database_url={database_url}"])
+    command.upgrade(config, "20260803_0003")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT cache_key FROM generation_cache")).keys() == ["cache_key"]
     finally:
         engine.dispose()
