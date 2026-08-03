@@ -77,14 +77,50 @@ class CodexProviderConfig(BaseModel):
         return value
 
 
-class PipelineConfig(BaseModel):
-    """Safe M4 orchestration settings."""
+class PiperProviderConfig(BaseModel):
+    """Opt-in local Piper settings; paths are resolved from the repository root."""
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str = Field(default="fake", pattern=r"^(fake|codex)$")
+    executable: Path | str = "piper"
+    model_path: Path | None = None
+    config_path: Path | None = None
+    voice_id: str = Field(default="piper", min_length=1, max_length=200)
+    speaker: int | None = Field(default=None, ge=0, le=10_000)
+    output_format: str = Field(default="wav", pattern=r"^wav$")
+    sample_rate: int | None = Field(default=None, ge=8_000, le=96_000)
+    timeout_seconds: int = Field(default=120, ge=1, le=3_600)
+    max_output_bytes: int = Field(default=100_000_000, ge=1_024, le=2_000_000_000)
+    max_diagnostic_bytes: int = Field(default=8_192, ge=256, le=65_536)
+    threads: int = Field(default=1, ge=1, le=4)
+    cache_root: Path = Path("./data/cache/tts")
+    adapter_version: str = Field(default="m7-piper-v1", min_length=1, max_length=100)
+
+
+class VoicePipelineConfig(BaseModel):
+    """Deterministic narration, assembly, and phrase-caption limits."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_root: Path = Path("./data/artifacts")
+    ffmpeg_executable: Path | str = "ffmpeg"
+    ffprobe_executable: Path | str = "ffprobe"
+    ffmpeg_threads: int = Field(default=1, ge=1, le=4)
+    pause_seconds: float = Field(default=0.15, ge=0, le=5)
+    caption_line_length: int = Field(default=42, ge=10, le=120)
+    duration_tolerance_seconds: float = Field(default=0.15, ge=0.01, le=2)
+
+
+class PipelineConfig(BaseModel):
+    """Safe provider selection and deterministic M7 voice settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(default="fake", pattern=r"^(fake|codex|piper)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
+    piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
+    voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
 
 
 class WorkerConfig(BaseModel):
@@ -128,15 +164,32 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
 
 def validate_selected_provider(settings: Settings) -> None:
-    """Fail early with a non-secret explanation for an enabled Codex adapter."""
+    """Fail early only for the explicitly selected external executable."""
+    if settings.pipeline.provider == "piper":
+        piper = settings.pipeline.piper
+        if piper.model_path is None:
+            raise RuntimeError("pipeline.piper.model_path is required when pipeline.provider is piper")
+        model = _resolve_path(piper.model_path)
+        if not model.is_file():
+            raise RuntimeError("pipeline.piper.model_path does not exist or is not a file")
+        if piper.config_path is not None and not _resolve_path(piper.config_path).is_file():
+            raise RuntimeError("pipeline.piper.config_path does not exist or is not a file")
+        _validate_executable(piper.executable, "pipeline.piper.executable")
+        return
     if settings.pipeline.provider != "codex":
         return
     codex = settings.pipeline.codex
-    executable = Path(codex.executable)
+    _validate_executable(codex.executable, "pipeline.codex.executable")
+
+
+def _resolve_path(value: Path) -> Path:
+    return value if value.is_absolute() else REPOSITORY_ROOT / value
+
+
+def _validate_executable(value: Path | str, field_name: str) -> None:
+    executable = Path(value)
     if executable.parent != Path("."):
-        if not executable.is_file():
-            raise RuntimeError(f"pipeline.codex.executable does not exist or is not a file: {executable}")
-    elif shutil.which(codex.executable) is None:
-        raise RuntimeError(
-            "pipeline.codex.executable is not on PATH; install Codex CLI or set an explicit executable path"
-        )
+        if not _resolve_path(executable).is_file():
+            raise RuntimeError(f"{field_name} does not exist or is not a file")
+    elif shutil.which(str(value)) is None:
+        raise RuntimeError(f"{field_name} is not on PATH; install it or set an explicit executable path")

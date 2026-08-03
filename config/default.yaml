@@ -23,6 +23,28 @@ pipeline:
     repair_attempt_limit: 0
     prompt_template_version: "m6-content-v1"
     max_prompt_chars: 60000
+  piper:
+    executable: "piper"
+    model_path: null
+    config_path: null
+    voice_id: "piper"
+    speaker: null
+    output_format: "wav"
+    sample_rate: null
+    timeout_seconds: 120
+    max_output_bytes: 100000000
+    max_diagnostic_bytes: 8192
+    threads: 1
+    cache_root: "./data/cache/tts"
+    adapter_version: "m7-piper-v1"
+  voice:
+    artifact_root: "./data/artifacts"
+    ffmpeg_executable: "ffmpeg"
+    ffprobe_executable: "ffprobe"
+    ffmpeg_threads: 1
+    pause_seconds: 0.15
+    caption_line_length: 42
+    duration_tolerance_seconds: 0.15
 worker:
   max_active_jobs: 1
   lease_seconds: 300
