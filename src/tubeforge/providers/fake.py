@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import base64
 import wave
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,7 +61,9 @@ class FakeMediaProvider:
         if self.failure:
             raise self.failure
         digest = _checksum("|".join(request.queries).encode())[:12]
-        return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic test asset", retrieved_at=datetime.now(UTC))]
+        path = self.settings.artifact_root / "media" / f"{digest}.png"
+        _atomic_write(path, base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLAtwAAAABJRU5ErkJggg=="))
+        return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", download_url=f"https://example.invalid/assets/{digest}.png", local_path=str(path), media_type="image", width=1, height=1, author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic test asset", retrieved_at=datetime.now(UTC))]
 
 
 class FakePublisher:

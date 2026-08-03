@@ -21,6 +21,7 @@ def test_valid_phase_one_workflow_requires_each_approval() -> None:
         snapshot = machine.transition(snapshot, target)
     snapshot = machine.transition(snapshot, JobState.ASSET_ACQUISITION, approvals=frozenset({ApprovalGate.SCRIPT}))
     for target in (
+        JobState.ASSETS_READY,
         JobState.VOICE_GENERATION,
         JobState.CAPTION_GENERATION,
         JobState.VOICE_READY,

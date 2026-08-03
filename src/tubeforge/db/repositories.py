@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.domain.contracts import ContentRequest
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.db.models import ApprovalRecord, ArtifactRecord, ExternalOperationRecord, GenerationCacheRecord, PipelineJobRecord
+from tubeforge.db.models import ApprovalRecord, ArtifactRecord, AssetCacheRecord, ExternalOperationRecord, GenerationCacheRecord, PipelineJobRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,3 +313,41 @@ class GenerationCacheRepository:
 def _as_utc(value: datetime) -> datetime:
     """Treat SQLite's timezone-naive storage values as UTC, as do PostgreSQL values."""
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+@dataclass(frozen=True, slots=True)
+class AssetCacheReservation:
+    cache_key: str
+    token: str
+
+@dataclass(frozen=True, slots=True)
+class CachedAsset:
+    path: str
+    checksum_sha256: str
+    metadata: dict[str, object]
+
+class AssetCacheRepository:
+    """Short-transaction durable cache ownership; IO occurs outside this class."""
+    def __init__(self, session_factory: sessionmaker[Session]) -> None: self._session_factory = session_factory
+    def reserve_or_get(self, key: str, *, now: datetime, reservation_seconds: int) -> CachedAsset | AssetCacheReservation | None:
+        now=_as_utc(now); token=secrets.token_hex(32); expires=now+timedelta(seconds=reservation_seconds)
+        try:
+            with self._session_factory.begin() as session:
+                record=session.scalar(select(AssetCacheRecord).where(AssetCacheRecord.cache_key==key))
+                if record is None:
+                    session.add(AssetCacheRecord(cache_key=key,state="reserved",reservation_token=token,reservation_expires_at=expires,path=None,checksum_sha256=None,metadata_json=None,failure_message=None,created_at=now,updated_at=now,accepted_at=None)); return AssetCacheReservation(key,token)
+                if record.state=="accepted" and record.path and record.checksum_sha256 and record.metadata_json: return CachedAsset(record.path,record.checksum_sha256,json.loads(record.metadata_json))
+                if record.reservation_expires_at is None or _as_utc(record.reservation_expires_at) <= now:
+                    record.state="reserved"; record.reservation_token=token; record.reservation_expires_at=expires; record.updated_at=now; return AssetCacheReservation(key,token)
+                return None
+        except IntegrityError:
+            # A competing insert committed; a fresh session observes its durable state.
+            return self.reserve_or_get(key, now=now, reservation_seconds=reservation_seconds)
+    def invalidate(self, key: str, *, now: datetime) -> None:
+        """Release a corrupt accepted entry; the binary is deliberately retained."""
+        with self._session_factory.begin() as session:
+            session.execute(update(AssetCacheRecord).where(AssetCacheRecord.cache_key == key, AssetCacheRecord.state == "accepted").values(state="invalid", reservation_token=None, reservation_expires_at=None, failure_message="cached file failed revalidation", updated_at=_as_utc(now)))
+
+    def accept(self, reservation: AssetCacheReservation, asset: CachedAsset, *, now: datetime) -> bool:
+        with self._session_factory.begin() as session:
+            result=session.execute(update(AssetCacheRecord).where(AssetCacheRecord.cache_key==reservation.cache_key,AssetCacheRecord.state=="reserved",AssetCacheRecord.reservation_token==reservation.token).values(state="accepted",path=asset.path,checksum_sha256=asset.checksum_sha256,metadata_json=json.dumps(asset.metadata,sort_keys=True),reservation_token=None,reservation_expires_at=None,updated_at=_as_utc(now),accepted_at=_as_utc(now),failure_message=None))
+            return result.rowcount==1

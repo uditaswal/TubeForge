@@ -23,6 +23,7 @@ class PipelineStage(StrEnum):
     CONTENT_READY = "content_ready"
     SCRIPT_APPROVAL_REQUIRED = "script_approval_required"
     ASSET_ACQUISITION = "asset_acquisition"
+    ASSETS_READY = "assets_ready"
     VOICE_GENERATION = "voice_generation"
     VOICE_READY = "voice_ready"
     CAPTION_GENERATION = "caption_generation"
@@ -43,6 +44,7 @@ class JobState(StrEnum):
     CONTENT_READY = PipelineStage.CONTENT_READY
     SCRIPT_APPROVAL_REQUIRED = PipelineStage.SCRIPT_APPROVAL_REQUIRED
     ASSET_ACQUISITION = PipelineStage.ASSET_ACQUISITION
+    ASSETS_READY = PipelineStage.ASSETS_READY
     VOICE_GENERATION = PipelineStage.VOICE_GENERATION
     VOICE_READY = PipelineStage.VOICE_READY
     CAPTION_GENERATION = PipelineStage.CAPTION_GENERATION
