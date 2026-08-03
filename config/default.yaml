@@ -6,3 +6,10 @@ app:
 database:
   url: "sqlite:///./data/tubeforge.db"
   busy_timeout_ms: 5000
+pipeline:
+  provider: "fake"
+  fake:
+    enabled: true
+    artifact_root: "./data/fake-artifacts"
+    voice_id: "fake-voice"
+    media_license: "CC0-1.0"

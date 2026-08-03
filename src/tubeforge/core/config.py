@@ -42,6 +42,26 @@ class DatabaseConfig(BaseModel):
         return value
 
 
+class FakeProviderConfig(BaseModel):
+    """Non-secret deterministic provider settings used by development and tests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    artifact_root: Path = Path("./data/fake-artifacts")
+    voice_id: str = Field(default="fake-voice", min_length=1, max_length=200)
+    media_license: str = Field(default="CC0-1.0", min_length=1, max_length=200)
+
+
+class PipelineConfig(BaseModel):
+    """Safe M4 orchestration settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(default="fake", pattern=r"^fake$")
+    fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
+
+
 class Settings(BaseModel):
     """Complete non-secret TubeForge configuration."""
 
@@ -49,6 +69,7 @@ class Settings(BaseModel):
 
     app: AppConfig
     database: DatabaseConfig
+    pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
 
 
 def load_settings(config_path: Path | None = None) -> Settings:

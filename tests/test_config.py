@@ -26,6 +26,7 @@ database:
     assert settings.app.environment == "test"
     assert settings.app.port == 9090
     assert settings.database.busy_timeout_ms == 1234
+    assert settings.pipeline.provider == "fake"
 
 
 def test_configuration_rejects_non_sqlite_database() -> None:
