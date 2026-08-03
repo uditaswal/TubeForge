@@ -45,7 +45,7 @@ class PipelineStateMachine:
     _FAILURE_STATES = frozenset(
         {JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED}
     )
-    _TERMINAL_STATES = frozenset({JobState.PUBLISHED, JobState.CANCELLED})
+    _TERMINAL_STATES = frozenset({JobState.PUBLISHED, JobState.CANCELLED, JobState.FAILED_EXHAUSTED})
 
     def transition(
         self,

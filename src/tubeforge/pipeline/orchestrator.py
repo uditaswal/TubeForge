@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Callable
 
 from pydantic import ValidationError
 
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
-from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, JobRepository, PipelineJob
+from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, ExternalOperationRepository, JobRepository, PipelineJob
 from tubeforge.domain.contracts import AssetSearchRequest, PublishPrivacy, PublishRequest, VoiceRequest
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
@@ -23,17 +24,21 @@ class PipelineInterrupted(RuntimeError):
 class PipelineOrchestrator:
     """Run one job synchronously, committing only short persistence operations."""
 
-    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path) -> None:
+    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.content, self.media, self.voice, self.publisher = content, media, voice, publisher
         self.artifact_root, self.machine = artifact_root, PipelineStateMachine()
+        self.external_operations = external_operations
 
-    def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None) -> PipelineJob:
+    def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None) -> PipelineJob:
         """Advance until an approval gate, terminal state, or classified failure."""
         while True:
             job = self.jobs.get(job_id)
-            if job.state in {JobState.PUBLISHED, JobState.CANCELLED}:
+            if job.state in {JobState.PUBLISHED, JobState.CANCELLED, JobState.FAILED_EXHAUSTED}:
                 return job
+            if cancellation_requested is not None and cancellation_requested():
+                cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
+                return self.jobs.update_state(job.id, cancelled.state, cancelled.resume_state)
             if job.state in {JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED}:
                 target = job.resume_state
                 assert target is not None
@@ -98,7 +103,7 @@ class PipelineOrchestrator:
         if job.state is JobState.PRIVATE_UPLOADING:
             final = self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
             if self._load_json_artifact(job.id, JobState.PRIVATE_UPLOADING, "private_receipt") is None:
-                result = self.publisher.upload(PublishRequest(platform="youtube", artifact_path=final.path, metadata=self._metadata(job), privacy=PublishPrivacy.PRIVATE, idempotency_key=f"{job.id}:private"))
+                result = self._upload_once(job, "private", final.path, PublishPrivacy.PRIVATE)
                 self._checkpoint_json(job.id, JobState.PRIVATE_UPLOADING, "private_receipt", result.model_dump(mode="json"))
             self._transition(job, JobState.PUBLISH_APPROVAL_REQUIRED); return
         if job.state is JobState.PUBLISH_APPROVAL_REQUIRED:
@@ -106,7 +111,7 @@ class PipelineOrchestrator:
             if approval is None: return
             final = self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
             if self._load_json_artifact(job.id, JobState.PUBLISH_APPROVAL_REQUIRED, "public_receipt") is None:
-                result = self.publisher.upload(PublishRequest(platform="youtube", artifact_path=final.path, metadata=self._metadata(job), privacy=PublishPrivacy.PUBLIC, idempotency_key=f"{job.id}:public", public_publish_approval_id=approval.id))
+                result = self._upload_once(job, "public", final.path, PublishPrivacy.PUBLIC, approval.id)
                 self._checkpoint_json(job.id, JobState.PUBLISH_APPROVAL_REQUIRED, "public_receipt", result.model_dump(mode="json"))
             self._transition(job, JobState.PUBLISHED, approvals=frozenset({ApprovalGate.PUBLIC_PUBLISH})); return
         raise RuntimeError(f"unsupported pipeline state: {job.state.value}")
@@ -158,3 +163,18 @@ class PipelineOrchestrator:
     def _metadata(self, job: PipelineJob):
         from tubeforge.domain.contracts import VideoMetadata
         return VideoMetadata.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package")["metadata"])
+
+    def _upload_once(self, job: PipelineJob, operation: str, path: str, privacy: PublishPrivacy, approval_id: str | None = None):
+        """Use a durable key/receipt so recovery never starts a second upload."""
+        key = f"{job.id}:{operation}"
+        if self.external_operations is not None:
+            receipt = self.external_operations.receipt(key)
+            if receipt is not None:
+                from tubeforge.domain.contracts import PublishResult
+                return PublishResult.model_validate(receipt)
+            if not self.external_operations.reserve(job.id, operation, key):
+                raise ProviderValidationError(f"external operation pending reconciliation: {operation}")
+        result = self.publisher.upload(PublishRequest(platform="youtube", artifact_path=path, metadata=self._metadata(job), privacy=privacy, idempotency_key=key, public_publish_approval_id=approval_id))
+        if self.external_operations is not None:
+            self.external_operations.complete(key, result.model_dump(mode="json"))
+        return result
