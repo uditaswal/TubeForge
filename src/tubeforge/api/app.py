@@ -7,13 +7,14 @@ from fastapi import FastAPI, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from tubeforge.core.config import Settings, load_settings
+from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.db.session import Database, create_database
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Create the HTTP application using explicit settings when supplied."""
     application_settings = settings or load_settings()
+    validate_selected_provider(application_settings)
     database = create_database(application_settings.database)
 
     @asynccontextmanager

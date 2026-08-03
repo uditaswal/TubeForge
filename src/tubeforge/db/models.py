@@ -76,3 +76,26 @@ class ApprovalRecord(Base):
     gate: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class GenerationCacheRecord(Base):
+    """A single-writer reservation and accepted content generation by cache key."""
+
+    __tablename__ = "generation_cache"
+    __table_args__ = (UniqueConstraint("cache_key", name="uq_generation_cache_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cache_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    normalized_request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    reservation_token: Mapped[str | None] = mapped_column(String(64))
+    reservation_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    package_json: Mapped[str | None] = mapped_column(Text)
+    provenance_json: Mapped[str | None] = mapped_column(Text)
+    usage_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

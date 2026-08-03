@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -53,13 +54,37 @@ class FakeProviderConfig(BaseModel):
     media_license: str = Field(default="CC0-1.0", min_length=1, max_length=200)
 
 
+class CodexProviderConfig(BaseModel):
+    """Non-secret limits for the opt-in Codex CLI content adapter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    executable: str = Field(default="codex", min_length=1, max_length=4_096)
+    model: str = Field(default="gpt-5.2-codex", min_length=1, max_length=200)
+    timeout_seconds: int = Field(default=900, ge=1, le=7_200)
+    max_output_bytes: int = Field(default=2_000_000, ge=1_024, le=20_000_000)
+    max_diagnostic_bytes: int = Field(default=8_192, ge=256, le=65_536)
+    reservation_seconds: int = Field(default=1_200, ge=10, le=14_400)
+    repair_attempt_limit: int = Field(default=0, ge=0, le=5)
+    prompt_template_version: str = Field(default="m6-content-v1", min_length=1, max_length=100)
+    max_prompt_chars: int = Field(default=60_000, ge=1_000, le=200_000)
+
+    @field_validator("executable", "model", "prompt_template_version")
+    @classmethod
+    def require_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+
 class PipelineConfig(BaseModel):
     """Safe M4 orchestration settings."""
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str = Field(default="fake", pattern=r"^fake$")
+    provider: str = Field(default="fake", pattern=r"^(fake|codex)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
+    codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
 
 
 class WorkerConfig(BaseModel):
@@ -97,4 +122,21 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     if not isinstance(raw_config, dict):
         raise RuntimeError(f"configuration must be a YAML mapping: {selected_path}")
-    return Settings.model_validate(raw_config)
+    settings = Settings.model_validate(raw_config)
+    validate_selected_provider(settings)
+    return settings
+
+
+def validate_selected_provider(settings: Settings) -> None:
+    """Fail early with a non-secret explanation for an enabled Codex adapter."""
+    if settings.pipeline.provider != "codex":
+        return
+    codex = settings.pipeline.codex
+    executable = Path(codex.executable)
+    if executable.parent != Path("."):
+        if not executable.is_file():
+            raise RuntimeError(f"pipeline.codex.executable does not exist or is not a file: {executable}")
+    elif shutil.which(codex.executable) is None:
+        raise RuntimeError(
+            "pipeline.codex.executable is not on PATH; install Codex CLI or set an explicit executable path"
+        )

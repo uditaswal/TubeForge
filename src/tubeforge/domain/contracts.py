@@ -62,6 +62,7 @@ class CitedClaim(DomainModel):
     confidence: ConfidenceLevel
     review_status: ClaimReviewStatus
     human_review_required: bool
+    time_sensitive: bool = False
 
     @model_validator(mode="after")
     def require_review_for_uncertain_claims(self) -> CitedClaim:
@@ -69,6 +70,8 @@ class CitedClaim(DomainModel):
             raise ValueError("low-confidence claims must require human review")
         if self.review_status is ClaimReviewStatus.NEEDS_REVIEW and not self.human_review_required:
             raise ValueError("claims needing review must require human review")
+        if self.time_sensitive and not self.human_review_required:
+            raise ValueError("time-sensitive claims must require human review")
         return self
 
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import hashlib
+import secrets
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -12,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.domain.contracts import ContentRequest
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.db.models import ApprovalRecord, ArtifactRecord, ExternalOperationRecord, PipelineJobRecord
+from tubeforge.db.models import ApprovalRecord, ArtifactRecord, ExternalOperationRecord, GenerationCacheRecord, PipelineJobRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +39,19 @@ class Artifact:
     path: str
     checksum_sha256: str
     provenance: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationCacheReservation:
+    cache_key: str
+    token: str
+
+
+@dataclass(frozen=True, slots=True)
+class CachedGeneration:
+    package: dict[str, object]
+    provenance: dict[str, object]
+    usage: dict[str, object]
 
 
 class JobRepository:
@@ -202,3 +217,99 @@ class ExternalOperationRepository:
 
 def _artifact_from_record(record: ArtifactRecord) -> Artifact:
     return Artifact(record.job_id, JobState(record.stage), record.name, record.path, record.checksum_sha256, json.loads(record.provenance_json))
+
+
+def _normalize_cache_value(value: object) -> object:
+    """Canonicalize harmless serialization differences while preserving content."""
+    import unicodedata
+
+    if isinstance(value, str):
+        return unicodedata.normalize("NFC", value.replace("\r\n", "\n").replace("\r", "\n")).strip()
+    if isinstance(value, dict):
+        return {key: _normalize_cache_value(item) for key, item in sorted(value.items())}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_cache_value(item) for item in value]
+    return value
+
+
+class GenerationCacheRepository:
+    """Durable content cache with expiring, token-bound single-writer reservations."""
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    @staticmethod
+    def key_material(request: ContentRequest, provider: str, model: str, prompt_version: str) -> str:
+        value = {
+            "model": model,
+            "normalized_request": _normalize_cache_value(request.model_dump(mode="json")),
+            "prompt_version": prompt_version,
+            "provider": provider,
+        }
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    @classmethod
+    def cache_key(cls, request: ContentRequest, provider: str, model: str, prompt_version: str) -> str:
+        return hashlib.sha256(cls.key_material(request, provider, model, prompt_version).encode("utf-8")).hexdigest()
+
+    def reserve_or_get(
+        self, request: ContentRequest, provider: str, model: str, prompt_version: str, *, now: datetime, reservation_seconds: int
+    ) -> CachedGeneration | GenerationCacheReservation | None:
+        """Return accepted data, a writer token, or None while another valid writer owns it."""
+        now = _as_utc(now)
+        key = self.cache_key(request, provider, model, prompt_version)
+        material = self.key_material(request, provider, model, prompt_version)
+        token = secrets.token_hex(32)
+        expires = now + timedelta(seconds=reservation_seconds)
+        try:
+            with self._session_factory.begin() as session:
+                session.add(GenerationCacheRecord(cache_key=key, normalized_request_json=material, provider=provider, model=model, prompt_version=prompt_version, state="reserved", reservation_token=token, reservation_expires_at=expires, package_json=None, provenance_json=None, usage_json=None, created_at=now, updated_at=now, accepted_at=None))
+            return GenerationCacheReservation(key, token)
+        except IntegrityError:
+            with self._session_factory.begin() as session:
+                record = session.scalar(select(GenerationCacheRecord).where(GenerationCacheRecord.cache_key == key))
+                if record is None:
+                    return None
+                if record.state == "accepted" and record.package_json and record.provenance_json and record.usage_json:
+                    return CachedGeneration(json.loads(record.package_json), json.loads(record.provenance_json), json.loads(record.usage_json))
+                expires_at = _as_utc(record.reservation_expires_at) if record.reservation_expires_at else None
+                if record.state == "reserved" and expires_at and expires_at <= now:
+                    statement = (
+                        update(GenerationCacheRecord)
+                        .where(
+                            GenerationCacheRecord.cache_key == key,
+                            GenerationCacheRecord.state == "reserved",
+                            GenerationCacheRecord.reservation_expires_at <= now,
+                        )
+                        .values(
+                            reservation_token=token,
+                            reservation_expires_at=expires,
+                            normalized_request_json=material,
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    result = session.execute(statement)
+                    if result.rowcount == 1:
+                        return GenerationCacheReservation(key, token)
+                return None
+
+    def accept(self, reservation: GenerationCacheReservation, package: dict[str, object], provenance: dict[str, object], usage: dict[str, object], *, now: datetime) -> bool:
+        now = _as_utc(now)
+        with self._session_factory.begin() as session:
+            result = session.execute(
+                update(GenerationCacheRecord)
+                .where(
+                    GenerationCacheRecord.cache_key == reservation.cache_key,
+                    GenerationCacheRecord.state == "reserved",
+                    GenerationCacheRecord.reservation_token == reservation.token,
+                )
+                .values(state="accepted", reservation_token=None, reservation_expires_at=None, package_json=json.dumps(package, sort_keys=True), provenance_json=json.dumps(provenance, sort_keys=True), usage_json=json.dumps(usage, sort_keys=True), accepted_at=now, updated_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            return result.rowcount == 1
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Treat SQLite's timezone-naive storage values as UTC, as do PostgreSQL values."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
