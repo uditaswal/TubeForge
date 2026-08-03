@@ -1,8 +1,9 @@
 # TubeForge
 
 TubeForge is a self-hosted YouTube production pipeline. This initial scaffold
-provides configuration loading, database migration support, and a health
-endpoint only. It deliberately contains no content, media, rendering, or
+provides configuration loading, database migration support, a health endpoint,
+and pure provider-neutral content contracts plus a resumable pipeline state
+policy. It deliberately contains no provider adapters, media processing, or
 publishing integrations.
 
 ## Local development
