@@ -138,6 +138,44 @@ class VoicePipelineConfig(BaseModel):
     caption_line_length: int = Field(default=42, ge=10, le=120)
     duration_tolerance_seconds: float = Field(default=0.15, ge=0.01, le=2)
 
+class RenderProfile(BaseModel):
+    """Bounded deterministic profile for the low-resolution review render."""
+
+    model_config = ConfigDict(extra="forbid")
+    width: int = Field(default=854, ge=160, le=3840)
+    height: int = Field(default=480, ge=90, le=2160)
+    fps: int = Field(default=30, ge=1, le=60)
+    pixel_format: str = Field(default="yuv420p", pattern=r"^[A-Za-z0-9_]+$")
+    video_codec: str = Field(default="libx264", pattern=r"^[A-Za-z0-9_.-]+$")
+    audio_codec: str = Field(default="aac", pattern=r"^[A-Za-z0-9_.-]+$")
+    audio_bitrate: str = Field(default="128k", pattern=r"^[0-9]+[kKmM]$")
+    threads: int = Field(default=1, ge=1, le=4)
+    timeout_seconds: int = Field(default=900, ge=1, le=7200)
+    ffprobe_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    minimum_free_bytes: int = Field(default=250_000_000, ge=1)
+    sync_tolerance_seconds: float = Field(default=0.25, ge=0.01, le=2)
+    caption_font_size: int = Field(default=26, ge=12, le=96)
+    renderer_version: str = Field(default="m9-preview-v1", min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def require_16_by_9(self) -> "RenderProfile":
+        if abs(self.width / self.height - 16 / 9) > 0.02:
+            raise ValueError("preview resolution must be 16:9")
+        return self
+
+
+
+class PreviewRenderConfig(RenderProfile):
+    """Bounded deterministic profile for the low-resolution review render."""
+
+
+class FinalRenderConfig(RenderProfile):
+    """Bounded deterministic profile for final source rendering."""
+
+    width: int = Field(default=1920, ge=160, le=3840)
+    height: int = Field(default=1080, ge=90, le=2160)
+    audio_bitrate: str = "160k"
+    renderer_version: str = "m10-final-v1"
 
 class PipelineConfig(BaseModel):
     """Safe provider selection and deterministic M7 voice settings."""
@@ -149,6 +187,8 @@ class PipelineConfig(BaseModel):
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
     piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
+    preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
+    final: FinalRenderConfig = Field(default_factory=FinalRenderConfig)
     media: MediaPipelineConfig = Field(default_factory=MediaPipelineConfig)
 
 

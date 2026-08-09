@@ -179,16 +179,29 @@ class ApprovalRepository:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
 
-    def record(self, approval_id: str, job_id: str, gate: ApprovalGate, status: ApprovalStatus = ApprovalStatus.APPROVED) -> None:
-        try:
-            with self._session_factory.begin() as session:
-                session.add(ApprovalRecord(id=approval_id, job_id=job_id, gate=gate.value, status=status.value, created_at=datetime.now(UTC)))
-        except IntegrityError as error:
-            raise ValueError(f"approval already exists: {approval_id}") from error
+    def record(self, approval_id: str, job_id: str, gate: ApprovalGate, status: ApprovalStatus = ApprovalStatus.APPROVED, *, actor: str | None = None, reviewed_identity: str | None = None, audit: dict[str, object] | None = None) -> None:
+        """Store one immutable human decision; duplicate requests are idempotent."""
+        with self._session_factory.begin() as session:
+            existing = session.get(ApprovalRecord, approval_id)
+            if existing is not None:
+                if (existing.job_id, existing.gate, existing.status, existing.reviewed_identity) != (job_id, gate.value, status.value, reviewed_identity):
+                    raise ValueError(f"approval id conflicts with existing decision: {approval_id}")
+                return
+            session.add(ApprovalRecord(id=approval_id, job_id=job_id, gate=gate.value, status=status.value, created_at=datetime.now(UTC), actor=actor, reviewed_identity=reviewed_identity, audit_json=json.dumps(audit or {}, sort_keys=True)))
 
-    def approved(self, job_id: str, gate: ApprovalGate) -> ApprovalRecord | None:
+    def approved(self, job_id: str, gate: ApprovalGate, *, reviewed_identity: str | None = None) -> ApprovalRecord | None:
         with self._session_factory() as session:
-            return session.scalar(select(ApprovalRecord).where(ApprovalRecord.job_id == job_id, ApprovalRecord.gate == gate.value, ApprovalRecord.status == ApprovalStatus.APPROVED.value).order_by(ApprovalRecord.created_at.desc()))
+            query = select(ApprovalRecord).where(ApprovalRecord.job_id == job_id, ApprovalRecord.gate == gate.value, ApprovalRecord.status == ApprovalStatus.APPROVED.value)
+            if reviewed_identity is not None:
+                query = query.where(ApprovalRecord.reviewed_identity == reviewed_identity)
+            return session.scalar(query.order_by(ApprovalRecord.created_at.desc()))
+
+    def rejected(self, job_id: str, gate: ApprovalGate, *, reviewed_identity: str | None = None) -> ApprovalRecord | None:
+        with self._session_factory() as session:
+            query = select(ApprovalRecord).where(ApprovalRecord.job_id == job_id, ApprovalRecord.gate == gate.value, ApprovalRecord.status == ApprovalStatus.REJECTED.value)
+            if reviewed_identity is not None:
+                query = query.where(ApprovalRecord.reviewed_identity == reviewed_identity)
+            return session.scalar(query.order_by(ApprovalRecord.created_at.desc()))
 
 
 def _job_from_record(record: PipelineJobRecord) -> PipelineJob:

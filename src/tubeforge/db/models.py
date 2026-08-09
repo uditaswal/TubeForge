@@ -94,6 +94,9 @@ class ApprovalRecord(Base):
     gate: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(200))
+    reviewed_identity: Mapped[str | None] = mapped_column(String(64), index=True)
+    audit_json: Mapped[str | None] = mapped_column(Text)
 
 
 class GenerationCacheRecord(Base):

@@ -9,7 +9,7 @@ from typing import Callable
 
 from pydantic import ValidationError
 
-from tubeforge.core.config import VoicePipelineConfig
+from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, VoicePipelineConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
 from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobRepository, PipelineJob
@@ -20,6 +20,7 @@ from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetAcquisitio
 from tubeforge.pipeline.captions import render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
+from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline
 
 
 class PipelineInterrupted(RuntimeError):
@@ -33,7 +34,7 @@ class PipelineCancellation(RuntimeError):
 class PipelineOrchestrator:
     """Run one job synchronously, committing only short persistence operations."""
 
-    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None) -> None:
+    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.content, self.media, self.voice, self.publisher = content, media, voice, publisher
         self.artifact_root, self.machine = artifact_root, PipelineStateMachine()
@@ -41,6 +42,8 @@ class PipelineOrchestrator:
         self.voice_config = voice_config or VoicePipelineConfig()
         self.audio_assembler = audio_assembler or FFmpegAudioAssembler(str(self.voice_config.ffmpeg_executable), self.voice_config.ffmpeg_threads)
         self.ffprobe = ffprobe or FFprobe(str(self.voice_config.ffprobe_executable))
+        self.preview_renderer = preview_renderer or PreviewRenderer(PreviewRenderConfig())
+        self.final_renderer = final_renderer or PreviewRenderer(FinalRenderConfig())
         self.asset_limits = asset_limits or AssetLimits(frozenset({"example.invalid", "upload.wikimedia.org", "commons.wikimedia.org"}), frozenset({"CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain"}))
         self.asset_acquirer = asset_acquirer or AssetAcquisitionService(AssetCacheRepository(artifacts._session_factory), AssetDownloader(artifact_root.parent / "cache" / "assets", self.asset_limits))
 
@@ -48,7 +51,7 @@ class PipelineOrchestrator:
         """Advance until an approval gate, terminal state, or classified failure."""
         while True:
             job = self.jobs.get(job_id)
-            if job.state in {JobState.PUBLISHED, JobState.CANCELLED, JobState.FAILED_EXHAUSTED}:
+            if job.state in {JobState.FINAL_READY, JobState.CANCELLED, JobState.FAILED_EXHAUSTED}:
                 return job
             if cancellation_requested is not None and cancellation_requested():
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
@@ -60,7 +63,7 @@ class PipelineOrchestrator:
                 continue
             try:
                 self._run_stage(job, cancellation_requested)
-            except (PipelineCancellation, AssetAcquisitionCancelled):
+            except (PipelineCancellation, AssetAcquisitionCancelled, PreviewRenderCancelled):
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
                 return self.jobs.update_state(job.id, cancelled.state, cancelled.resume_state)
             except (RetryableProviderError, ProviderValidationError, ProviderAuthenticationError, ValidationError) as error:
@@ -70,7 +73,7 @@ class PipelineOrchestrator:
             job = self.jobs.get(job_id)
             if interrupt_after is job.state:
                 raise PipelineInterrupted(f"interrupted after {job.state.value}")
-            if job.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_APPROVAL_REQUIRED, JobState.PUBLISH_APPROVAL_REQUIRED}:
+            if job.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY}:
                 return job
 
     def _run_stage(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None = None) -> None:
@@ -145,7 +148,7 @@ class PipelineOrchestrator:
             if abs(final_duration - expected_duration) > self.voice_config.duration_tolerance_seconds:
                 raise ProviderValidationError("assembled narration duration exceeds configured tolerance")
             cues = timed_phrases(phrases, durations, self.voice_config.pause_seconds)
-            self._replace_json(job.id, JobState.VOICE_GENERATION, "timing_map", {"final_duration_seconds": final_duration, "expected_duration_seconds": expected_duration, "phrases": [{"phrase_id": cue.phrase.phrase_id, "start_seconds": cue.start_seconds, "end_seconds": cue.end_seconds, "duration_seconds": cue.end_seconds - cue.start_seconds} for cue in cues]})
+            self._replace_json(job.id, JobState.VOICE_GENERATION, "timing_map", {"final_duration_seconds": final_duration, "expected_duration_seconds": expected_duration, "phrases": [{"phrase_id": cue.phrase.phrase_id, "section_id": cue.phrase.section_id, "start_seconds": cue.start_seconds, "end_seconds": cue.end_seconds, "duration_seconds": cue.end_seconds - cue.start_seconds} for cue in cues]})
             self._transition(job, JobState.CAPTION_GENERATION); return
         if job.state is JobState.CAPTION_GENERATION:
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
@@ -162,32 +165,50 @@ class PipelineOrchestrator:
         if job.state is JobState.VOICE_READY:
             self._transition(job, JobState.PREVIEW_RENDERING); return
         if job.state is JobState.PREVIEW_RENDERING:
-            self._checkpoint_generated(job.id, JobState.PREVIEW_RENDERING, "preview", "preview.mp4", "synthetic preview")
-            self._transition(job, JobState.PREVIEW_APPROVAL_REQUIRED); return
-        if job.state is JobState.PREVIEW_APPROVAL_REQUIRED:
-            approval = self.approvals.approved(job.id, ApprovalGate.PREVIEW)
+            preview, identity = self._render_checkpoint(job, self.preview_renderer, JobState.PREVIEW_RENDERING, "preview", "preview.mp4", cancellation_requested)
+            self._transition(job, JobState.PREVIEW_READY); return
+        if job.state is JobState.PREVIEW_READY:
+            manifest = self._required_json(job.id, JobState.PREVIEW_RENDERING, "preview_manifest")
+            identity = str(manifest["render_identity"])
+            if self.approvals.rejected(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity):
+                raise ProviderValidationError("preview was explicitly rejected")
+            approval = self.approvals.approved(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity)
             if approval is None: return
-            self._transition(job, JobState.FINAL_RENDERING, approvals=frozenset({ApprovalGate.PREVIEW})); return
+            self._transition(job, JobState.PREVIEW_APPROVED, approvals=frozenset({ApprovalGate.PREVIEW})); return
+        if job.state is JobState.PREVIEW_APPROVED:
+            self._transition(job, JobState.FINAL_RENDERING); return
         if job.state is JobState.FINAL_RENDERING:
-            self._checkpoint_generated(job.id, JobState.FINAL_RENDERING, "final", "final.mp4", "synthetic final")
-            self._transition(job, JobState.PRIVATE_UPLOAD_READY); return
-        if job.state is JobState.PRIVATE_UPLOAD_READY:
-            self._transition(job, JobState.PRIVATE_UPLOADING); return
-        if job.state is JobState.PRIVATE_UPLOADING:
-            final = self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
-            if self._load_json_artifact(job.id, JobState.PRIVATE_UPLOADING, "private_receipt") is None:
-                result = self._upload_once(job, "private", final.path, PublishPrivacy.PRIVATE)
-                self._checkpoint_json(job.id, JobState.PRIVATE_UPLOADING, "private_receipt", result.model_dump(mode="json"))
-            self._transition(job, JobState.PUBLISH_APPROVAL_REQUIRED); return
-        if job.state is JobState.PUBLISH_APPROVAL_REQUIRED:
-            approval = self.approvals.approved(job.id, ApprovalGate.PUBLIC_PUBLISH)
-            if approval is None: return
-            final = self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
-            if self._load_json_artifact(job.id, JobState.PUBLISH_APPROVAL_REQUIRED, "public_receipt") is None:
-                result = self._upload_once(job, "public", final.path, PublishPrivacy.PUBLIC, approval.id)
-                self._checkpoint_json(job.id, JobState.PUBLISH_APPROVAL_REQUIRED, "public_receipt", result.model_dump(mode="json"))
-            self._transition(job, JobState.PUBLISHED, approvals=frozenset({ApprovalGate.PUBLIC_PUBLISH})); return
+            preview_manifest = self._required_json(job.id, JobState.PREVIEW_RENDERING, "preview_manifest")
+            identity = str(preview_manifest["render_identity"])
+            approval = self.approvals.approved(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity)
+            if approval is None or self.approvals.rejected(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity):
+                raise ProviderValidationError("final render requires approval of this exact preview")
+            self._render_checkpoint(job, self.final_renderer, JobState.FINAL_RENDERING, "final", "final.mp4", cancellation_requested, approval_identity=identity, approval_id=approval.id)
+            self._transition(job, JobState.FINAL_READY); return
         raise RuntimeError(f"unsupported pipeline state: {job.state.value}")
+
+    def _render_checkpoint(self, job: PipelineJob, renderer: PreviewRenderer, stage: JobState, name: str, filename: str, cancellation_requested: Callable[[], bool] | None, *, approval_identity: str | None = None, approval_id: str | None = None) -> tuple[Artifact, str]:
+        """Render only after every source checkpoint has been revalidated."""
+        package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
+        narration = self._required_artifact(job.id, JobState.VOICE_GENERATION, "narration")
+        captions = self._required_artifact(job.id, JobState.CAPTION_GENERATION, "captions")
+        timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
+        assets = self._required_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest").get("scenes")
+        if not isinstance(assets, dict): raise ProviderValidationError("accepted asset manifest is invalid")
+        if any(not self._accepted_asset_valid(value) for value in assets.values()): raise ProviderValidationError("accepted asset was modified or is unsafe")
+        segments = build_timeline(package, timing, assets, tolerance=renderer.config.sync_tolerance_seconds)
+        identity = renderer.identity(segments, Path(narration.path), Path(captions.path), approval_identity=approval_identity)
+        existing = self._valid_artifact(job.id, stage, name)
+        manifest = self._load_json_artifact(job.id, stage, f"{name}_manifest")
+        if existing and manifest and manifest.get("render_identity") == identity:
+            renderer.validate(Path(existing.path), segments[-1].end_seconds)
+            return existing, identity
+        output = self._artifact_path(job.id, filename)
+        result = renderer.render(segments, Path(narration.path), Path(captions.path), output, cancellation_requested=cancellation_requested)
+        provenance = {"render_identity": identity, "inputs": {"narration": narration.checksum_sha256, "captions": captions.checksum_sha256, "assets": [segment.asset_checksum for segment in segments]}, "validation": result["metadata"], "command": result["command"], "approval_identity": approval_identity, "approval_id": approval_id}
+        artifact = self.artifacts.save(Artifact(job.id, stage, name, str(output), str(result["checksum_sha256"]), provenance))
+        self._replace_json(job.id, stage, f"{name}_manifest", {**provenance, "artifact_checksum": artifact.checksum_sha256})
+        return artifact, identity
 
     def _transition(self, job: PipelineJob, target: JobState, **kwargs: object) -> None:
         snapshot = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), target, **kwargs)

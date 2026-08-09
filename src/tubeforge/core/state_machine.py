@@ -33,22 +33,19 @@ class PipelineStateMachine:
         # Voice readiness is only durable after narration and both caption formats validate.
         JobState.CAPTION_GENERATION: JobState.VOICE_READY,
         JobState.VOICE_READY: JobState.PREVIEW_RENDERING,
-        JobState.PREVIEW_RENDERING: JobState.PREVIEW_APPROVAL_REQUIRED,
-        JobState.PREVIEW_APPROVAL_REQUIRED: JobState.FINAL_RENDERING,
-        JobState.FINAL_RENDERING: JobState.PRIVATE_UPLOAD_READY,
-        JobState.PRIVATE_UPLOAD_READY: JobState.PRIVATE_UPLOADING,
-        JobState.PRIVATE_UPLOADING: JobState.PUBLISH_APPROVAL_REQUIRED,
-        JobState.PUBLISH_APPROVAL_REQUIRED: JobState.PUBLISHED,
+        JobState.PREVIEW_RENDERING: JobState.PREVIEW_READY,
+        JobState.PREVIEW_READY: JobState.PREVIEW_APPROVED,
+        JobState.PREVIEW_APPROVED: JobState.FINAL_RENDERING,
+        JobState.FINAL_RENDERING: JobState.FINAL_READY,
     }
     _APPROVAL_REQUIREMENTS: dict[JobState, ApprovalGate] = {
         JobState.ASSET_ACQUISITION: ApprovalGate.SCRIPT,
-        JobState.FINAL_RENDERING: ApprovalGate.PREVIEW,
-        JobState.PUBLISHED: ApprovalGate.PUBLIC_PUBLISH,
+        JobState.PREVIEW_APPROVED: ApprovalGate.PREVIEW,
     }
     _FAILURE_STATES = frozenset(
         {JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED}
     )
-    _TERMINAL_STATES = frozenset({JobState.PUBLISHED, JobState.CANCELLED, JobState.FAILED_EXHAUSTED})
+    _TERMINAL_STATES = frozenset({JobState.FINAL_READY, JobState.CANCELLED, JobState.FAILED_EXHAUSTED})
 
     def transition(
         self,
