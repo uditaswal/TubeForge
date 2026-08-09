@@ -89,12 +89,18 @@ class JobRepository:
         The conditional UPDATE is the correctness primitive on SQLite and remains
         valid on PostgreSQL, where callers may additionally benefit from row locks.
         """
-        runnable = [state.value for state in JobState if state not in {
-            JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_APPROVAL_REQUIRED,
-            JobState.PUBLISH_APPROVAL_REQUIRED, JobState.PUBLISHED, JobState.CANCELLED,
-            JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED, JobState.FAILED_EXHAUSTED,
+        blocked = {
+            JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY,
+            JobState.FINAL_READY, JobState.CANCELLED, JobState.FAILED_VALIDATION,
+            JobState.AUTH_REQUIRED, JobState.FAILED_EXHAUSTED,
             JobState.FAILED_RETRYABLE,
-        }]
+            # Retained only so M8 rows remain readable; never resume them
+            # automatically because they may represent external side effects.
+            JobState.PREVIEW_APPROVAL_REQUIRED, JobState.PRIVATE_UPLOAD_READY,
+            JobState.PRIVATE_UPLOADING, JobState.PUBLISH_APPROVAL_REQUIRED,
+            JobState.PUBLISHED,
+        }
+        runnable = [state.value for state in JobState if state not in blocked]
         lease_expiry = now + __import__("datetime").timedelta(seconds=lease_seconds)
         with self._session_factory.begin() as session:
             # Reclaiming abandoned leases is deliberately part of the brief transaction.

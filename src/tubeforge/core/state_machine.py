@@ -45,7 +45,13 @@ class PipelineStateMachine:
     _FAILURE_STATES = frozenset(
         {JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED}
     )
-    _TERMINAL_STATES = frozenset({JobState.FINAL_READY, JobState.CANCELLED, JobState.FAILED_EXHAUSTED})
+    _TERMINAL_STATES = frozenset({
+        JobState.FINAL_READY, JobState.PUBLISHED, JobState.CANCELLED,
+        JobState.FAILED_EXHAUSTED,
+    })
+    _PREVIEW_INVALIDATION_STATES = frozenset({
+        JobState.PREVIEW_READY, JobState.PREVIEW_APPROVED, JobState.FINAL_RENDERING,
+    })
 
     def transition(
         self,
@@ -71,6 +77,8 @@ class PipelineStateMachine:
                 snapshot, target, operator_resolved=operator_resolved,
                 authentication_restored=authentication_restored,
             )
+        if target is JobState.PREVIEW_RENDERING and current in self._PREVIEW_INVALIDATION_STATES:
+            return PipelineSnapshot(state=target)
         expected = self._NORMAL_TRANSITIONS.get(current)
         if target is not expected:
             raise InvalidTransitionError(f"cannot transition from {current.value} to {target.value}")
