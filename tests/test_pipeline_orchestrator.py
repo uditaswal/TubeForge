@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 import wave
 
@@ -10,8 +11,9 @@ from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidatio
 from tubeforge.db.models import Base
 from tubeforge.db.repositories import ApprovalRepository, ArtifactRepository, JobRepository
 from tubeforge.db.session import create_database
-from tubeforge.domain.contracts import ContentRequest, SourceReference
+from tubeforge.domain.contracts import AssetCandidate, ContentRequest, SourceReference
 from tubeforge.domain.states import ApprovalGate, JobState
+from tubeforge.pipeline.assets import AssetLimits
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
 from tubeforge.providers.fake import FakeContentProvider, FakeMediaProvider, FakePublisher, FakeVoiceProvider
 
@@ -171,3 +173,23 @@ def test_assets_cancellation_before_checkpoint_preserves_cache(tmp_path: Path) -
         assert runner.run("job-cancel-assets", cancellation_requested=cancelled).state is JobState.CANCELLED
         assert runner.artifacts.get("job-cancel-assets", JobState.ASSET_ACQUISITION, "asset_manifest") is None
     finally: database.dispose()
+
+def test_persisted_assets_revalidate_current_policy_on_resume(pipeline) -> None:
+    runner, *_ = pipeline
+    path = Path(__file__)
+    checksum = runner._checksum(path)
+    base = AssetCandidate(provider_asset_id="persisted", source_url="https://example.invalid/persisted.png", license_name="CC0-1.0", retrieved_at=datetime.now(UTC)).model_dump(mode="json")
+    value = {"path": str(path), "checksum_sha256": checksum, "validation": {"checksum_sha256": checksum, "validation_version": "m8-v1"}, "candidate": base}
+    assert runner._accepted_asset_valid(value)
+    runner.asset_limits = AssetLimits(frozenset({"example.invalid"}), frozenset({"CC BY 4.0"}))
+    assert not runner._accepted_asset_valid(value)
+    runner.asset_limits = AssetLimits(frozenset({"example.invalid"}), frozenset({"CC0-1.0"}))
+    value["candidate"]["review_required"] = True
+    assert not runner._accepted_asset_valid(value)
+    value["candidate"]["review_required"] = False
+    value["candidate"]["attribution_required"] = True
+    value["candidate"]["attribution_text"] = "Credit required"
+    assert not runner._accepted_asset_valid(value)
+    value["candidate"]["attribution_required"] = False
+    value["candidate"]["attribution_text"] = None
+    assert runner._accepted_asset_valid(value)

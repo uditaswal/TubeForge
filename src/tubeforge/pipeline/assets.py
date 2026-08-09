@@ -48,7 +48,7 @@ def scene_request(scene: ScenePlan) -> MediaSearchRequest:
     return MediaSearchRequest(scene_id=scene.scene_id, queries=tuple(" ".join(query.split()) for query in scene.search_queries), visual_type=scene.visual_type, required_license="licensed", orientation=orientation)
 
 def select_candidate(candidates: list[AssetCandidate], request: MediaSearchRequest, limits: AssetLimits) -> AssetCandidate:
-    eligible = [candidate for candidate in candidates if candidate.media_type in limits.allowed_media_types and candidate.license_name.casefold() in {value.casefold() for value in limits.allowed_licenses} and not candidate.editorial_only and not candidate.review_required and not candidate.attribution_required]
+    eligible = [candidate for candidate in candidates if asset_policy_valid(candidate, limits)]
     if not eligible:
         raise ProviderValidationError(f"no permitted licensed asset for scene {request.scene_id}")
     def rank(candidate: AssetCandidate) -> tuple[int, int, int, str]:
@@ -60,6 +60,16 @@ def select_candidate(candidates: list[AssetCandidate], request: MediaSearchReque
         pixels = -(candidate.width or 0) * (candidate.height or 0)
         return review, orientation, pixels, candidate.provider_asset_id
     return sorted(eligible, key=rank)[0]
+
+def asset_policy_valid(candidate: AssetCandidate, limits: AssetLimits) -> bool:
+    """Return whether an asset satisfies the active acquisition policy."""
+    return (
+        candidate.media_type in limits.allowed_media_types
+        and candidate.license_name.casefold() in {value.casefold() for value in limits.allowed_licenses}
+        and not candidate.editorial_only
+        and not candidate.review_required
+        and not candidate.attribution_required
+    )
 
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
@@ -94,7 +104,7 @@ class AssetDownloader:
                     total+=len(chunk)
                     if total > self.limits.max_bytes: raise ProviderValidationError("asset exceeds configured byte limit")
                     outgoing.write(chunk)
-            temporary.replace(target); metadata={"checksum_sha256":_checksum(target),"bytes":total,"content_type":"image/png","validation_version":self.validation_version,"cached_at":datetime.now(UTC).isoformat(),**inspect_media(target,candidate.media_type,self.limits)}; _atomic_json(target.with_suffix(".json"),metadata); return target,key,metadata
+            metadata={"checksum_sha256":_checksum(temporary),"bytes":total,"content_type":"image/png","validation_version":self.validation_version,"cached_at":datetime.now(UTC).isoformat(),**inspect_media(temporary,candidate.media_type,self.limits)}; os.replace(temporary, target); _atomic_json(target.with_suffix(".json"),metadata); return target,key,metadata
         except Exception:
             temporary.unlink(missing_ok=True); raise
     def download(self, provider: str, candidate: AssetCandidate, cancellation_requested: Callable[[], bool] | None = None) -> tuple[Path, str, dict[str, object]]:
@@ -153,8 +163,8 @@ class AssetDownloader:
             if total == 0: raise ProviderValidationError("asset response is empty")
             extension = mimetypes.guess_extension(content_type) or ".bin"
             final = target.with_suffix(extension)
-            temporary.replace(final)
-            metadata = {"checksum_sha256": _checksum(final), "bytes": total, "content_type": content_type, "validation_version": self.validation_version, "cached_at": datetime.now(UTC).isoformat(), **inspect_media(final, candidate.media_type, self.limits)}
+            metadata = {"checksum_sha256": _checksum(temporary), "bytes": total, "content_type": content_type, "validation_version": self.validation_version, "cached_at": datetime.now(UTC).isoformat(), **inspect_media(temporary, candidate.media_type, self.limits)}
+            os.replace(temporary, final)
             _atomic_json(metadata_path, metadata)
             return final, key, metadata
         except Exception:
@@ -189,10 +199,9 @@ def inspect_media(path: Path, expected_type: str, limits: AssetLimits, *, ffprob
         if header.startswith(b"\x89PNG\r\n\x1a\n") and len(header) >= 24:
             width=int.from_bytes(header[16:20],"big"); height=int.from_bytes(header[20:24],"big"); container="png"
         elif header.startswith(b"\xff\xd8"):
-            # JPEG dimensions require marker parsing; ffprobe remains the safe inspector.
-            width=height=0; container="jpeg"
+            width, height = _jpeg_dimensions(path); container="jpeg"
         else: raise ProviderValidationError("image signature is unsupported or corrupt")
-        if width and (width < limits.min_width or height < limits.min_height or width > limits.max_width or height > limits.max_height or width * height > limits.max_pixels): raise ProviderValidationError("image dimensions exceed configured limits")
+        if width < limits.min_width or height < limits.min_height or width > limits.max_width or height > limits.max_height or width * height > limits.max_pixels: raise ProviderValidationError("image dimensions exceed configured limits")
         return {"media_type":"image","container":container,"width":width,"height":height,"duration_seconds":None}
     command=[ffprobe,"-v","error","-show_entries","format=format_name,duration:stream=codec_type,codec_name,width,height","-of","json",str(path)]
     try: result=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30,check=False,shell=False)
@@ -205,6 +214,41 @@ def inspect_media(path: Path, expected_type: str, limits: AssetLimits, *, ffprob
     except (ValueError, KeyError, StopIteration, TypeError, json.JSONDecodeError) as error: raise ProviderValidationError("media lacks a usable video stream") from error
     if width > limits.max_width or height > limits.max_height or duration <= 0 or duration > limits.max_duration_seconds: raise ProviderValidationError("media dimensions or duration are invalid")
     return {"media_type":"video","container":str(data["format"].get("format_name","")),"width":width,"height":height,"duration_seconds":duration,"codec":str(stream.get("codec_name",""))}
+def _jpeg_dimensions(path: Path) -> tuple[int, int]:
+    """Read JPEG dimensions from marker segments, failing closed."""
+    with path.open("rb") as stream:
+        if stream.read(2) != b"\xff\xd8":
+            raise ProviderValidationError("JPEG signature is corrupt")
+        while True:
+            if stream.read(1) != b"\xff":
+                break
+            marker = stream.read(1)
+            while marker == b"\xff":
+                marker = stream.read(1)
+            if not marker or marker == b"\x00":
+                break
+            code = marker[0]
+            if code == 0xD9:
+                break
+            if 0xD0 <= code <= 0xD7 or code == 0x01:
+                continue
+            raw_length = stream.read(2)
+            if len(raw_length) != 2:
+                break
+            length = int.from_bytes(raw_length, "big")
+            if length < 2:
+                break
+            payload = stream.read(length - 2)
+            if len(payload) != length - 2:
+                break
+            if 0xC0 <= code <= 0xC3 or 0xC5 <= code <= 0xC7 or 0xC9 <= code <= 0xCB or 0xCD <= code <= 0xCF:
+                if len(payload) >= 5:
+                    height = int.from_bytes(payload[1:3], "big")
+                    width = int.from_bytes(payload[3:5], "big")
+                    if width > 0 and height > 0:
+                        return width, height
+                break
+    raise ProviderValidationError("JPEG dimensions cannot be determined")
 class AssetAcquisitionService:
     """Coordinates cache ownership around all slow download and validation work."""
     def __init__(self, cache: AssetCacheRepository, downloader: AssetDownloader, *, reservation_seconds: int = 300) -> None:

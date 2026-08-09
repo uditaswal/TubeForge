@@ -16,7 +16,7 @@ from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepo
 from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, PublishPrivacy, PublishRequest, VoiceRequest
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
-from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, attribution_manifest, scene_request, select_candidate
+from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, scene_request, select_candidate
 from tubeforge.pipeline.captions import render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
@@ -244,7 +244,10 @@ class PipelineOrchestrator:
         try:
             if not isinstance(value, dict): return False
             path=Path(str(value["path"])); validation=value["validation"]
-            return path.is_file() and path.stat().st_size > 0 and self._checksum(path)==value["checksum_sha256"] and validation["checksum_sha256"]==value["checksum_sha256"] and validation["validation_version"]=="m8-v1" and AssetCandidate.model_validate(value["candidate"]) is not None
+            candidate_data = value["candidate"]
+            if not isinstance(candidate_data, dict) or not {"license_name", "editorial_only", "review_required", "attribution_required"}.issubset(candidate_data): return False
+            candidate = AssetCandidate.model_validate(candidate_data)
+            return path.is_file() and path.stat().st_size > 0 and self._checksum(path)==value["checksum_sha256"] and validation["checksum_sha256"]==value["checksum_sha256"] and validation["validation_version"]=="m8-v1" and asset_policy_valid(candidate, self.asset_limits)
         except (KeyError, OSError, TypeError, ValueError): return False
     def _result_is_valid(self, result: object) -> bool:
         if not isinstance(result, dict):

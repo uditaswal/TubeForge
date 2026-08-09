@@ -228,3 +228,54 @@ def test_asset_limits_use_validated_media_configuration() -> None:
     from tubeforge.pipeline.assets import asset_limits_from_config
     limits = asset_limits_from_config(MediaPipelineConfig(max_bytes=2048, max_redirects=2, allowed_hosts=("assets.example",), allowed_licenses=("CC0-1.0",)))
     assert limits.max_bytes == 2048 and limits.max_redirects == 2 and limits.allowed_hosts == frozenset({"assets.example"})
+
+def _jpeg(width: int, height: int) -> bytes:
+    return b"\xff\xd8\xff\xc0\x00\x11\x08" + height.to_bytes(2, "big") + width.to_bytes(2, "big") + b"\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00\xff\xd9"
+
+
+def test_jpeg_validation_requires_real_dimensions_and_applies_limits(tmp_path: Path) -> None:
+    from tubeforge.pipeline.assets import inspect_media
+    image = tmp_path / "known.jpg"; image.write_bytes(_jpeg(4, 3))
+    limits = AssetLimits(frozenset(), frozenset(), min_width=4, min_height=3, max_width=4, max_height=3, max_pixels=12)
+    assert inspect_media(image, "image", limits)["width"] == 4
+    with pytest.raises(ProviderValidationError): inspect_media(image, "image", AssetLimits(frozenset(), frozenset(), min_width=5))
+    with pytest.raises(ProviderValidationError): inspect_media(image, "image", AssetLimits(frozenset(), frozenset(), max_width=3))
+    with pytest.raises(ProviderValidationError): inspect_media(image, "image", AssetLimits(frozenset(), frozenset(), max_pixels=11))
+    malformed = tmp_path / "malformed.jpg"; malformed.write_bytes(b"\xff\xd8\xff\xc0\x00\x11\x08\x00")
+    with pytest.raises(ProviderValidationError, match="dimensions"): inspect_media(malformed, "image", AssetLimits(frozenset(), frozenset()))
+    zero = tmp_path / "zero.jpg"; zero.write_bytes(_jpeg(0, 3))
+    with pytest.raises(ProviderValidationError, match="dimensions"): inspect_media(zero, "image", AssetLimits(frozenset(), frozenset()))
+
+
+def test_download_validates_temp_file_before_atomic_promotion(tmp_path: Path, monkeypatch) -> None:
+    from tubeforge.pipeline.assets import AssetDownloader
+    png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1).to_bytes(4, "big") + (1).to_bytes(4, "big")
+    downloader = AssetDownloader(tmp_path / "cache", AssetLimits(frozenset({"media.example.invalid"}), frozenset({"CC0-1.0"})), _Opener(_Chunks([png])))
+    value = candidate("promote")
+    import tubeforge.pipeline.assets as assets
+    original_replace, calls = assets.os.replace, []
+    def replace(source, destination):
+        calls.append((Path(source), Path(destination)))
+        return original_replace(source, destination)
+    monkeypatch.setattr(assets.os, "replace", replace)
+    path, _, _ = downloader.download("test", value)
+    assert path.is_file() and calls[0][0].suffix == ".part" and calls[0][1] == path
+
+
+def test_failed_download_validation_leaves_no_final_artifact(tmp_path: Path) -> None:
+    from tubeforge.pipeline.assets import AssetDownloader
+    downloader = AssetDownloader(tmp_path / "cache", AssetLimits(frozenset({"media.example.invalid"}), frozenset({"CC0-1.0"})), _Opener(_Chunks([b"not an image"])))
+    with pytest.raises(ProviderValidationError): downloader.download("test", candidate("invalid"))
+    assert not [path for path in (tmp_path / "cache").rglob("*") if path.is_file()]
+
+
+def test_failed_download_validation_does_not_overwrite_existing_final_asset(tmp_path: Path) -> None:
+    from tubeforge.pipeline.assets import AssetDownloader
+    downloader = AssetDownloader(tmp_path / "cache", AssetLimits(frozenset({"media.example.invalid"}), frozenset({"CC0-1.0"})), _Opener(_Chunks([b"not an image"])))
+    value = candidate("preserve-final")
+    key = downloader.cache_key("test", value)
+    final = tmp_path / "cache" / key[:2] / f"{key}.png"
+    final.parent.mkdir(parents=True)
+    final.write_bytes(b"previous-valid-asset")
+    with pytest.raises(ProviderValidationError): downloader.download("test", value)
+    assert final.read_bytes() == b"previous-valid-asset"
