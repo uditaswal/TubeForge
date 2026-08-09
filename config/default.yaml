@@ -40,11 +40,35 @@ pipeline:
   voice:
     artifact_root: "./data/artifacts"
     ffmpeg_executable: "ffmpeg"
-    ffprobe_executable: "ffprobe"
-    ffmpeg_threads: 1
-    pause_seconds: 0.15
-    caption_line_length: 42
-    duration_tolerance_seconds: 0.15
+  preview:
+    width: 854
+    height: 480
+    fps: 30
+    pixel_format: "yuv420p"
+    video_codec: "libx264"
+    audio_codec: "aac"
+    audio_bitrate: "128k"
+    threads: 1
+    timeout_seconds: 900
+    ffprobe_timeout_seconds: 30
+    minimum_free_bytes: 250000000
+    sync_tolerance_seconds: 0.25
+    caption_font_size: 26
+  final:
+    width: 1920
+    height: 1080
+    fps: 30
+    pixel_format: "yuv420p"
+    video_codec: "libx264"
+    audio_codec: "aac"
+    audio_bitrate: "160k"
+    threads: 1
+    timeout_seconds: 1800
+    ffprobe_timeout_seconds: 30
+    minimum_free_bytes: 500000000
+    sync_tolerance_seconds: 0.25
+    caption_font_size: 34
+    renderer_version: "m10-final-v1"
   media:
     provider: "fake"
     cache_root: "./data/cache/assets"

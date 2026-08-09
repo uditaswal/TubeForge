@@ -26,19 +26,14 @@ def test_valid_phase_one_workflow_requires_each_approval() -> None:
         JobState.CAPTION_GENERATION,
         JobState.VOICE_READY,
         JobState.PREVIEW_RENDERING,
-        JobState.PREVIEW_APPROVAL_REQUIRED,
+        JobState.PREVIEW_READY,
     ):
         snapshot = machine.transition(snapshot, target)
-    snapshot = machine.transition(snapshot, JobState.FINAL_RENDERING, approvals=frozenset({ApprovalGate.PREVIEW}))
-    for target in (
-        JobState.PRIVATE_UPLOAD_READY,
-        JobState.PRIVATE_UPLOADING,
-        JobState.PUBLISH_APPROVAL_REQUIRED,
-    ):
-        snapshot = machine.transition(snapshot, target)
-    snapshot = machine.transition(snapshot, JobState.PUBLISHED, approvals=frozenset({ApprovalGate.PUBLIC_PUBLISH}))
+    snapshot = machine.transition(snapshot, JobState.PREVIEW_APPROVED, approvals=frozenset({ApprovalGate.PREVIEW}))
+    snapshot = machine.transition(snapshot, JobState.FINAL_RENDERING)
+    snapshot = machine.transition(snapshot, JobState.FINAL_READY)
 
-    assert snapshot.state is JobState.PUBLISHED
+    assert snapshot.state is JobState.FINAL_READY
 
 
 def test_invalid_transition_cannot_skip_required_approval() -> None:
@@ -47,13 +42,13 @@ def test_invalid_transition_cannot_skip_required_approval() -> None:
         machine.transition(PipelineSnapshot(JobState.CONTENT_READY), JobState.ASSET_ACQUISITION)
     with pytest.raises(InvalidTransitionError, match="script approval"):
         machine.transition(PipelineSnapshot(JobState.SCRIPT_APPROVAL_REQUIRED), JobState.ASSET_ACQUISITION)
-    with pytest.raises(InvalidTransitionError, match="public_publish approval"):
-        machine.transition(PipelineSnapshot(JobState.PUBLISH_APPROVAL_REQUIRED), JobState.PUBLISHED)
+    with pytest.raises(InvalidTransitionError, match="preview approval"):
+        machine.transition(PipelineSnapshot(JobState.PREVIEW_READY), JobState.PREVIEW_APPROVED)
 
 
 def test_terminal_states_cannot_transition() -> None:
     machine = PipelineStateMachine()
-    for terminal in (JobState.PUBLISHED, JobState.CANCELLED):
+    for terminal in (JobState.FINAL_READY, JobState.CANCELLED):
         with pytest.raises(InvalidTransitionError, match="terminal"):
             machine.transition(PipelineSnapshot(terminal), JobState.CONTENT_GENERATING)
 
@@ -76,7 +71,7 @@ def test_validation_and_auth_failures_require_recovery_actions() -> None:
         machine.transition(validation_failed, JobState.CONTENT_GENERATING)
     assert machine.transition(validation_failed, JobState.CONTENT_GENERATING, operator_resolved=True).state is JobState.CONTENT_GENERATING
 
-    auth_failed = machine.transition(PipelineSnapshot(JobState.PRIVATE_UPLOADING), JobState.AUTH_REQUIRED)
+    auth_failed = machine.transition(PipelineSnapshot(JobState.FINAL_RENDERING), JobState.AUTH_REQUIRED)
     with pytest.raises(InvalidTransitionError, match="authentication"):
-        machine.transition(auth_failed, JobState.PRIVATE_UPLOADING)
-    assert machine.transition(auth_failed, JobState.PRIVATE_UPLOADING, authentication_restored=True).state is JobState.PRIVATE_UPLOADING
+        machine.transition(auth_failed, JobState.FINAL_RENDERING)
+    assert machine.transition(auth_failed, JobState.FINAL_RENDERING, authentication_restored=True).state is JobState.FINAL_RENDERING

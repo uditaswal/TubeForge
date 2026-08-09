@@ -28,12 +28,10 @@ class PipelineStage(StrEnum):
     VOICE_READY = "voice_ready"
     CAPTION_GENERATION = "caption_generation"
     PREVIEW_RENDERING = "preview_rendering"
-    PREVIEW_APPROVAL_REQUIRED = "preview_approval_required"
+    PREVIEW_READY = "preview_ready"
+    PREVIEW_APPROVED = "preview_approved"
     FINAL_RENDERING = "final_rendering"
-    PRIVATE_UPLOAD_READY = "private_upload_ready"
-    PRIVATE_UPLOADING = "private_uploading"
-    PUBLISH_APPROVAL_REQUIRED = "publish_approval_required"
-    PUBLISHED = "published"
+    FINAL_READY = "final_ready"
 
 
 class JobState(StrEnum):
@@ -49,12 +47,10 @@ class JobState(StrEnum):
     VOICE_READY = PipelineStage.VOICE_READY
     CAPTION_GENERATION = PipelineStage.CAPTION_GENERATION
     PREVIEW_RENDERING = PipelineStage.PREVIEW_RENDERING
-    PREVIEW_APPROVAL_REQUIRED = PipelineStage.PREVIEW_APPROVAL_REQUIRED
+    PREVIEW_READY = PipelineStage.PREVIEW_READY
+    PREVIEW_APPROVED = PipelineStage.PREVIEW_APPROVED
     FINAL_RENDERING = PipelineStage.FINAL_RENDERING
-    PRIVATE_UPLOAD_READY = PipelineStage.PRIVATE_UPLOAD_READY
-    PRIVATE_UPLOADING = PipelineStage.PRIVATE_UPLOADING
-    PUBLISH_APPROVAL_REQUIRED = PipelineStage.PUBLISH_APPROVAL_REQUIRED
-    PUBLISHED = PipelineStage.PUBLISHED
+    FINAL_READY = PipelineStage.FINAL_READY
     FAILED_RETRYABLE = "failed_retryable"
     FAILED_VALIDATION = "failed_validation"
     AUTH_REQUIRED = "auth_required"
