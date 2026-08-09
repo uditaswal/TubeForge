@@ -6,7 +6,7 @@ import wave
 
 import pytest
 
-from tubeforge.core.config import DatabaseConfig, FakeProviderConfig, PreviewRenderConfig, VoicePipelineConfig
+from tubeforge.core.config import AppConfig, DatabaseConfig, FakeProviderConfig, PreviewRenderConfig, Settings, VoicePipelineConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.models import Base
 from tubeforge.db.repositories import ApprovalRepository, ArtifactRepository, JobRepository
@@ -154,6 +154,67 @@ def test_all_approval_gates_fail_closed(pipeline) -> None:
     preview = runner._required_json("job-gates", JobState.PREVIEW_RENDERING, "preview_manifest"); runner.approvals.record("job-gates-preview", "job-gates", ApprovalGate.PREVIEW, reviewed_identity=preview["render_identity"])
     assert runner.run("job-gates").state is JobState.FINAL_READY
     assert runner.artifacts.get("job-gates", JobState.FINAL_READY, "public_receipt") is None
+
+
+@pytest.mark.parametrize("change", ["narration", "captions", "timing", "asset", "deleted_preview", "tampered_preview"])
+def test_stale_preview_inputs_require_a_new_preview_approval(pipeline, change: str) -> None:
+    runner, *_ = pipeline
+    job_id = f"stale-{change}"
+    runner.jobs.create(job_id, request())
+    runner.run(job_id); approve(runner, job_id, ApprovalGate.SCRIPT)
+    assert runner.run(job_id).state is JobState.PREVIEW_READY
+    old_manifest = runner._required_json(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
+    runner.approvals.record(f"{job_id}-preview", job_id, ApprovalGate.PREVIEW, reviewed_identity=old_manifest["render_identity"])
+
+    if change == "narration":
+        artifact = runner._required_artifact(job_id, JobState.VOICE_GENERATION, "narration")
+        path = Path(artifact.path); path.write_bytes(path.read_bytes() + b"changed")
+        runner._save_file(job_id, JobState.VOICE_GENERATION, "narration", path, artifact.provenance)
+    elif change == "captions":
+        artifact = runner._required_artifact(job_id, JobState.CAPTION_GENERATION, "captions")
+        path = Path(artifact.path); path.write_bytes(path.read_bytes() + b"\nNOTE changed\n")
+        runner._save_file(job_id, JobState.CAPTION_GENERATION, "captions", path, artifact.provenance)
+    elif change == "timing":
+        timing = runner._required_json(job_id, JobState.VOICE_GENERATION, "timing_map")
+        timing["review_marker"] = "changed"
+        runner._replace_json(job_id, JobState.VOICE_GENERATION, "timing_map", timing)
+    elif change == "asset":
+        manifest = runner._required_json(job_id, JobState.ASSET_ACQUISITION, "asset_manifest")
+        asset = manifest["scenes"]["scene-1"]
+        path = Path(asset["path"]); path.write_bytes(path.read_bytes() + b"changed")
+        asset["checksum_sha256"] = runner._checksum(path)
+        asset["validation"]["checksum_sha256"] = asset["checksum_sha256"]
+        runner._replace_json(job_id, JobState.ASSET_ACQUISITION, "asset_manifest", manifest)
+    else:
+        preview = runner._required_artifact(job_id, JobState.PREVIEW_RENDERING, "preview")
+        path = Path(preview.path)
+        if change == "deleted_preview": path.unlink()
+        else: path.write_bytes(b"tampered-preview")
+
+    assert runner.run(job_id).state is JobState.PREVIEW_READY
+    refreshed = runner._required_json(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
+    assert refreshed["render_identity"] != old_manifest["render_identity"]
+    assert runner.run(job_id).state is JobState.PREVIEW_READY
+    runner.approvals.record(f"{job_id}-new-preview", job_id, ApprovalGate.PREVIEW, reviewed_identity=refreshed["render_identity"])
+    assert runner.run(job_id).state is JobState.FINAL_READY
+
+
+def test_explicit_render_profiles_reach_default_renderers(tmp_path: Path) -> None:
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'profiles.db'}")); Base.metadata.create_all(database.engine)
+    settings = FakeProviderConfig(artifact_root=tmp_path / "provider")
+    app_settings = Settings(
+        app=AppConfig(name="test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'profiles.db'}"),
+        pipeline={"fake": {"artifact_root": str(tmp_path / "provider")}, "voice": {"artifact_root": str(tmp_path / "artifacts")}, "preview": {"width": 1280, "height": 720}, "final": {"width": 1280, "height": 720}},
+    )
+    runner = PipelineOrchestrator.from_settings(
+        app_settings, JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory),
+        FakeContentProvider(), FakeMediaProvider(settings), FakeVoiceProvider(settings), FakePublisher(),
+    )
+    try:
+        assert runner.preview_renderer.config.width == 1280
+        assert runner.final_renderer.config.width == 1280
+    finally:
+        database.dispose()
 
 def test_assets_stage_acquires_validated_fake_asset_and_reuses_checkpoint(tmp_path: Path) -> None:
     from tubeforge.db.repositories import AssetCacheRepository

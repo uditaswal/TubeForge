@@ -32,6 +32,13 @@ class PipelineStage(StrEnum):
     PREVIEW_APPROVED = "preview_approved"
     FINAL_RENDERING = "final_rendering"
     FINAL_READY = "final_ready"
+    # Legacy persisted values.  New workflow transitions intentionally never
+    # enter these states, but existing M8 databases must remain readable.
+    PREVIEW_APPROVAL_REQUIRED = "preview_approval_required"
+    PRIVATE_UPLOAD_READY = "private_upload_ready"
+    PRIVATE_UPLOADING = "private_uploading"
+    PUBLISH_APPROVAL_REQUIRED = "publish_approval_required"
+    PUBLISHED = "published"
 
 
 class JobState(StrEnum):
@@ -51,6 +58,11 @@ class JobState(StrEnum):
     PREVIEW_APPROVED = PipelineStage.PREVIEW_APPROVED
     FINAL_RENDERING = PipelineStage.FINAL_RENDERING
     FINAL_READY = PipelineStage.FINAL_READY
+    PREVIEW_APPROVAL_REQUIRED = PipelineStage.PREVIEW_APPROVAL_REQUIRED
+    PRIVATE_UPLOAD_READY = PipelineStage.PRIVATE_UPLOAD_READY
+    PRIVATE_UPLOADING = PipelineStage.PRIVATE_UPLOADING
+    PUBLISH_APPROVAL_REQUIRED = PipelineStage.PUBLISH_APPROVAL_REQUIRED
+    PUBLISHED = PipelineStage.PUBLISHED
     FAILED_RETRYABLE = "failed_retryable"
     FAILED_VALIDATION = "failed_validation"
     AUTH_REQUIRED = "auth_required"

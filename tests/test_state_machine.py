@@ -48,9 +48,15 @@ def test_invalid_transition_cannot_skip_required_approval() -> None:
 
 def test_terminal_states_cannot_transition() -> None:
     machine = PipelineStateMachine()
-    for terminal in (JobState.FINAL_READY, JobState.CANCELLED):
+    for terminal in (JobState.FINAL_READY, JobState.PUBLISHED, JobState.CANCELLED):
         with pytest.raises(InvalidTransitionError, match="terminal"):
             machine.transition(PipelineSnapshot(terminal), JobState.CONTENT_GENERATING)
+
+
+def test_stale_preview_can_only_rewind_to_new_preview() -> None:
+    machine = PipelineStateMachine()
+    assert machine.transition(PipelineSnapshot(JobState.PREVIEW_READY), JobState.PREVIEW_RENDERING).state is JobState.PREVIEW_RENDERING
+    assert machine.transition(PipelineSnapshot(JobState.FINAL_RENDERING), JobState.PREVIEW_RENDERING).state is JobState.PREVIEW_RENDERING
 
 
 def test_retryable_failure_resumes_only_failed_stage() -> None:
