@@ -6,8 +6,8 @@ import wave
 
 import pytest
 
-from tubeforge.core.config import AppConfig, DatabaseConfig, FakeProviderConfig, PreviewRenderConfig, PublicationPreparationConfig, Settings, VoicePipelineConfig
-from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
+from tubeforge.core.config import AppConfig, DatabaseConfig, FakeProviderConfig, PreviewRenderConfig, PublicationPreparationConfig, Settings, VoicePipelineConfig, YouTubePublishingConfig
+from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.models import Base
 from tubeforge.db.repositories import ApprovalRepository, ArtifactRepository, JobRepository
 from tubeforge.db.session import create_database
@@ -15,8 +15,9 @@ from tubeforge.domain.contracts import AssetCandidate, ContentRequest, SourceRef
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import AssetLimits
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
+from tubeforge.pipeline.publication import identity as publication_identity
 from tubeforge.rendering.preview import checksum
-from tubeforge.providers.fake import FakeContentProvider, FakeMediaProvider, FakePublisher, FakeVoiceProvider
+from tubeforge.providers.fake import FakeContentProvider, FakeMediaProvider, FakePublisher, FakeVoiceProvider, FakeYouTubePublisher
 
 
 class OfflineProbe:
@@ -342,3 +343,90 @@ def test_publication_thumbnail_cleanup_on_cancellation(pipeline) -> None:
     runner.run(job_id)
     assert runner.run(job_id, cancellation_requested=lambda: True).state is JobState.CANCELLED
     assert not runner._artifact_path(job_id, "thumbnail.png.tmp").exists()
+
+
+def _publication_ready_for_youtube(runner: PipelineOrchestrator, job_id: str) -> str:
+    """Drive the local stages, then approve the exact M13 external intent."""
+    runner.jobs.create(job_id, request()); runner.run(job_id); approve(runner, job_id, ApprovalGate.SCRIPT); runner.run(job_id)
+    preview = runner._required_json(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
+    runner.approvals.record(f"{job_id}-preview", job_id, ApprovalGate.PREVIEW, reviewed_identity=preview["render_identity"])
+    runner.run(job_id); assert runner.run(job_id).state is JobState.PUBLICATION_APPROVAL_REQUIRED
+    package = runner._required_json(job_id, JobState.PUBLICATION_PREPARING, "publication_package")
+    runner.approvals.record(f"{job_id}-publication", job_id, ApprovalGate.PUBLICATION_PREPARATION, reviewed_identity=package["publication_identity"])
+    assert runner.run(job_id).state is JobState.PUBLICATION_READY
+    identity = publication_identity({"package_identity": package["publication_identity"], "channel_id": "fake-channel", "privacy": "private", "implementation_version": "m13-youtube-v1"})
+    runner.approvals.record(f"{job_id}-publish", job_id, ApprovalGate.PUBLISH, reviewed_identity=identity)
+    return identity
+
+
+def _enable_fake_youtube(runner: PipelineOrchestrator, publisher: FakeYouTubePublisher, tmp_path: Path) -> None:
+    runner.publisher = publisher
+    runner.youtube_config = YouTubePublishingConfig(enabled=True, dry_run=False, client_secret_path=tmp_path / "client.json", token_storage_path=tmp_path / "token.json", expected_channel_id="fake-channel")
+
+
+def test_youtube_success_and_restart_after_remote_id_never_create_twice(pipeline, tmp_path: Path) -> None:
+    runner, *_ = pipeline; publisher = FakeYouTubePublisher(); _enable_fake_youtube(runner, publisher, tmp_path)
+    identity = _publication_ready_for_youtube(runner, "youtube-restart")
+    package_identity = str(runner._required_json("youtube-restart", JobState.PUBLICATION_PREPARING, "publication_package")["publication_identity"])
+    record = runner.publications.ensure("youtube-restart", identity, package_identity, "fake-channel", {})
+    remote_id = "persisted-video"; publisher.videos[remote_id] = {"privacy": "private"}
+    runner.publications.update(identity, remote_video_id=remote_id, state="remote_created")
+    assert runner.run("youtube-restart").state is JobState.PUBLICATION_VERIFICATION_PENDING
+    assert runner.run("youtube-restart").state is JobState.PUBLISHED
+    assert publisher.create_calls == 0 and publisher.metadata_calls == publisher.thumbnail_calls == 1
+
+
+def test_ambiguous_creation_requires_reconciliation_and_never_recreates(pipeline, tmp_path: Path) -> None:
+    runner, *_ = pipeline; publisher = FakeYouTubePublisher(outcomes={"create": [AmbiguousProviderError("unknown")]}); _enable_fake_youtube(runner, publisher, tmp_path)
+    identity = _publication_ready_for_youtube(runner, "youtube-ambiguous")
+    assert runner.run("youtube-ambiguous").state is JobState.FAILED_VALIDATION
+    assert publisher.create_calls == 1
+    assert runner.publications.get(identity).state == "creation_ambiguous"
+    assert runner.run("youtube-ambiguous", operator_resolved=True).state is JobState.FAILED_VALIDATION
+    assert publisher.create_calls == 1
+
+
+def test_metadata_and_thumbnail_recovery_only_repeat_the_incomplete_mutation(pipeline, tmp_path: Path) -> None:
+    runner, *_ = pipeline; publisher = FakeYouTubePublisher(outcomes={"metadata": [RetryableProviderError("temporary")], "thumbnail": [RetryableProviderError("temporary")]}); _enable_fake_youtube(runner, publisher, tmp_path)
+    identity = _publication_ready_for_youtube(runner, "youtube-recover")
+    assert runner.run("youtube-recover").state is JobState.FAILED_RETRYABLE
+    assert publisher.create_calls == 1 and publisher.metadata_calls == 1 and publisher.thumbnail_calls == 0
+    assert runner.publications.get(identity).remote_video_id
+    assert runner.run("youtube-recover").state is JobState.FAILED_RETRYABLE
+    assert publisher.create_calls == 1 and publisher.metadata_calls == 2 and publisher.thumbnail_calls == 1
+    assert runner.run("youtube-recover").state is JobState.PUBLICATION_VERIFICATION_PENDING
+    assert runner.run("youtube-recover").state is JobState.PUBLISHED
+    assert publisher.create_calls == 1 and publisher.metadata_calls == 2 and publisher.thumbnail_calls == 2
+
+
+def test_mutation_boundary_rechecks_channel_and_dry_run_has_no_mutations(pipeline, tmp_path: Path) -> None:
+    runner, *_ = pipeline; publisher = FakeYouTubePublisher(); _enable_fake_youtube(runner, publisher, tmp_path)
+    _publication_ready_for_youtube(runner, "youtube-channel-race")
+    channels = iter(("fake-channel", "other-channel")); publisher.authenticated_channel_id = lambda: next(channels)  # type: ignore[method-assign]
+    assert runner.run("youtube-channel-race").state is JobState.AUTH_REQUIRED
+    assert publisher.create_calls == publisher.metadata_calls == publisher.thumbnail_calls == 0
+    runner, *_ = pipeline; publisher = FakeYouTubePublisher(); runner.publisher = publisher
+    runner.youtube_config = YouTubePublishingConfig(enabled=True, dry_run=True, client_secret_path=tmp_path / "client.json", token_storage_path=tmp_path / "token.json", expected_channel_id="fake-channel")
+    _publication_ready_for_youtube(runner, "youtube-dry-run")
+    assert runner.run("youtube-dry-run").state is JobState.PUBLICATION_READY
+    assert publisher.create_calls == publisher.metadata_calls == publisher.thumbnail_calls == publisher.channel_lookup_calls == 0
+
+
+def test_cancellation_after_remote_id_keeps_recovery_record_and_stops_followups(pipeline, tmp_path: Path) -> None:
+    runner, *_ = pipeline; publisher = FakeYouTubePublisher(); _enable_fake_youtube(runner, publisher, tmp_path)
+    identity = _publication_ready_for_youtube(runner, "youtube-cancel-after-create")
+    cancelled = [False]; original = publisher.create_or_resume_video
+    def create_then_cancel(*args, **kwargs):
+        remote_id = original(*args, **kwargs); cancelled[0] = True; return remote_id
+    publisher.create_or_resume_video = create_then_cancel  # type: ignore[method-assign]
+    assert runner.run("youtube-cancel-after-create", cancellation_requested=lambda: cancelled[0]).state is JobState.CANCELLED
+    record = runner.publications.get(identity)
+    assert record is not None and record.remote_video_id and not record.metadata_applied and not record.thumbnail_applied
+    assert publisher.create_calls == 1 and publisher.metadata_calls == publisher.thumbnail_calls == 0
+
+
+def test_publishing_disabled_needs_no_authentication_or_provider_calls(pipeline) -> None:
+    runner, *_ = pipeline; publisher = FakeYouTubePublisher(); runner.publisher = publisher
+    _publication_ready_for_youtube(runner, "youtube-disabled")
+    assert runner.run("youtube-disabled").state is JobState.PUBLICATION_READY
+    assert publisher.create_calls == publisher.metadata_calls == publisher.thumbnail_calls == publisher.channel_lookup_calls == 0

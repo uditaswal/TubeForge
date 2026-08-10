@@ -260,6 +260,28 @@ class PublishResult(DomainModel):
     receipt_id: str = Field(min_length=1, max_length=500)
 
 
+class RemoteProcessingState(StrEnum):
+    PROCESSING = "processing"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class RemotePublicationSnapshot(DomainModel):
+    """Provider-neutral, read-only view of a single persisted remote video ID."""
+
+    video_id: str = Field(min_length=1, max_length=500)
+    exists: bool
+    processing: RemoteProcessingState = RemoteProcessingState.UNKNOWN
+    processing_reason: str | None = Field(default=None, max_length=1_000)
+    privacy: PublishPrivacy | None = None
+    title: str | None = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=10_000)
+    tags: tuple[str, ...] | None = Field(default=None, max_length=100)
+    # Data API exposes generated thumbnail URLs, not proof of exact uploaded bytes.
+    thumbnail_present: bool | None = None
+
+
 def _require_unique_ids(items: tuple[object, ...], field_name: str) -> None:
     values = [getattr(item, field_name) for item in items]
     if len(values) != len(set(values)):

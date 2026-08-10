@@ -206,6 +206,33 @@ class PublicationPreparationConfig(BaseModel):
             raise ValueError("thumbnail resolution must be 16:9")
         return self
 
+
+class YouTubePublishingConfig(BaseModel):
+    """Explicitly opt-in, secret-free configuration for M13 publication."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    dry_run: bool = True
+    provider: str = Field(default="youtube", pattern=r"^youtube$")
+    client_secret_path: Path | None = None
+    token_storage_path: Path | None = None
+    expected_channel_id: str | None = Field(default=None, min_length=1, max_length=200)
+    privacy: str = Field(default="private", pattern=r"^(private|unlisted|public)$")
+    chunk_size_bytes: int = Field(default=8_388_608, ge=262_144, le=64_000_000)
+    implementation_version: str = Field(default="m13-youtube-v1", min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def require_external_paths_when_enabled(self) -> "YouTubePublishingConfig":
+        if self.enabled and (self.client_secret_path is None or self.token_storage_path is None or self.expected_channel_id is None):
+            raise ValueError("enabled YouTube publishing requires client_secret_path, token_storage_path, and expected_channel_id")
+        return self
+
+class PublicationVerificationConfig(BaseModel):
+    """Bounded, passive M14 processing verification policy."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    pending_poll_seconds: int = Field(default=300, ge=30, le=86_400)
+    maximum_processing_wait_seconds: int = Field(default=86_400, ge=300, le=604_800)
+
 class PipelineConfig(BaseModel):
     """Safe provider selection and deterministic M7 voice settings."""
 
@@ -219,6 +246,8 @@ class PipelineConfig(BaseModel):
     preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
     final: FinalRenderConfig = Field(default_factory=FinalRenderConfig)
     publication: PublicationPreparationConfig = Field(default_factory=PublicationPreparationConfig)
+    youtube: YouTubePublishingConfig = Field(default_factory=YouTubePublishingConfig)
+    verification: PublicationVerificationConfig = Field(default_factory=PublicationVerificationConfig)
     media: MediaPipelineConfig = Field(default_factory=MediaPipelineConfig)
 
 
