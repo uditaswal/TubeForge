@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from tubeforge.core.config import FakeProviderConfig
-from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
+from tubeforge.core.errors import ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RetryableProviderError
 from tubeforge.domain.contracts import (AssetCandidate, AssetSearchRequest, CitedClaim, ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest, PublishRequest, PublishResult, ScenePlan, ScriptSection, ThumbnailBrief, VideoMetadata, VoiceRequest, VoiceResult)
 
 
@@ -80,6 +80,43 @@ class FakePublisher:
             digest = _checksum(request.idempotency_key.encode())[:16]
             self._results[request.idempotency_key] = PublishResult(platform=request.platform, remote_id=f"fake-{digest}", privacy=request.privacy, receipt_id=f"receipt-{digest}")
         return self._results[request.idempotency_key]
+
+
+class FakeYouTubePublisher:
+    """Deterministic in-memory M13 fake; it never contacts YouTube."""
+    def __init__(self, channel_id: str = "fake-channel", failure: Exception | None = None, *, outcomes: dict[str, list[Exception | None]] | None = None) -> None:
+        self.channel_id, self.failure, self.creates, self.create_calls, self.metadata_calls, self.thumbnail_calls, self.reconcile_calls, self.channel_lookup_calls = channel_id, failure, 0, 0, 0, 0, 0, 0
+        self.outcomes = outcomes or {}; self.videos: dict[str, dict[str, object]] = {}
+    def _outcome(self, operation: str) -> None:
+        values = self.outcomes.get(operation, [])
+        if values:
+            failure = values.pop(0)
+            if failure: raise failure
+        if self.failure: raise self.failure
+    def authenticated_channel_id(self) -> str:
+        self.channel_lookup_calls += 1; self._outcome("channel_lookup"); return self.channel_id
+    def create_or_resume_video(self, request: PublishRequest, *, resume_token: str | None = None, cancellation_requested=None) -> str:
+        self.create_calls += 1
+        self._outcome("create")
+        if cancellation_requested and cancellation_requested(): raise ProviderCancellation("fake upload cancelled")
+        key = request.idempotency_key; remote_id = f"fake-{_checksum(key.encode())[:16]}"
+        if remote_id not in self.videos: self.creates += 1; self.videos[remote_id] = {"privacy": request.privacy.value}
+        return remote_id
+    def apply_metadata(self, remote_video_id: str, request: PublishRequest) -> None:
+        self.metadata_calls += 1
+        self._outcome("metadata")
+        self.videos[remote_video_id]["metadata"] = request.metadata.model_dump(mode="json")
+    def set_thumbnail(self, remote_video_id: str, thumbnail_path: str) -> None:
+        self.thumbnail_calls += 1
+        self._outcome("thumbnail")
+        self.videos[remote_video_id]["thumbnail"] = thumbnail_path
+    def fetch_video(self, remote_video_id: str) -> dict[str, object] | None:
+        self.reconcile_calls += 1; self._outcome("reconcile"); return self.videos.get(remote_video_id)
+    def fetch_publication_snapshot(self, remote_video_id: str):
+        from tubeforge.domain.contracts import RemotePublicationSnapshot
+        value = self.fetch_video(remote_video_id)
+        if value is None: return RemotePublicationSnapshot(video_id=remote_video_id, exists=False)
+        return RemotePublicationSnapshot(video_id=remote_video_id, exists=True, processing=value.get("processing", "succeeded"), privacy=value.get("privacy"), title=(value.get("metadata") or {}).get("title_options", [value.get("title")])[0], description=(value.get("metadata") or {}).get("description", value.get("description")), tags=tuple((value.get("metadata") or {}).get("tags", value.get("tags", ()))) if value.get("tags") is not None or value.get("metadata") else None, thumbnail_present=bool(value.get("thumbnail")) if "thumbnail" in value else None)
 
 
 def _atomic_write(destination: Path, payload: bytes) -> None:

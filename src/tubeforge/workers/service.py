@@ -33,6 +33,8 @@ class WorkerService:
             )
             if result.state is JobState.FAILED_RETRYABLE:
                 return self._schedule_retry(result)
+            if result.state is JobState.PUBLICATION_VERIFICATION_PENDING:
+                return self.jobs.defer_verification(result.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=self.orchestrator.verification_config.pending_poll_seconds))
             return result
         except PipelineInterrupted:
             # Simulates process death: leave the lease so another worker can recover it.

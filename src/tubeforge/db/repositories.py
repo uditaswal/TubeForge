@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.domain.contracts import ContentRequest
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.db.models import ApprovalRecord, ArtifactRecord, AssetCacheRecord, ExternalOperationRecord, GenerationCacheRecord, PipelineJobRecord
+from tubeforge.db.models import ApprovalRecord, ArtifactRecord, AssetCacheRecord, ExternalOperationRecord, GenerationCacheRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +93,7 @@ class JobRepository:
             JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY,
             JobState.PUBLICATION_APPROVAL_REQUIRED, JobState.PUBLICATION_READY, JobState.CANCELLED, JobState.FAILED_VALIDATION,
             JobState.AUTH_REQUIRED, JobState.FAILED_EXHAUSTED,
+            JobState.PUBLICATION_VERIFICATION_PENDING,
             JobState.FAILED_RETRYABLE,
             # Retained only so M8 rows remain readable; never resume them
             # automatically because they may represent external side effects.
@@ -109,6 +110,7 @@ class JobRepository:
                 PipelineJobRecord.state.in_(runnable),
                 and_(PipelineJobRecord.state == JobState.FAILED_RETRYABLE.value, PipelineJobRecord.next_retry_at <= now),
                 and_(PipelineJobRecord.state == JobState.AUTH_REQUIRED.value, PipelineJobRecord.authentication_restored_at.is_not(None)),
+                and_(PipelineJobRecord.state == JobState.PUBLICATION_VERIFICATION_PENDING.value, PipelineJobRecord.next_retry_at <= now),
             )
             candidate = session.scalar(select(PipelineJobRecord.id).where(eligible, PipelineJobRecord.claim_owner.is_(None)).order_by(PipelineJobRecord.created_at, PipelineJobRecord.id).limit(1))
             if candidate is None:
@@ -146,6 +148,15 @@ class JobRepository:
             record.updated_at = now
             session.flush(); return _job_from_record(record)
 
+    def defer_verification(self, job_id: str, worker_id: str, *, now: datetime, next_retry_at: datetime) -> PipelineJob:
+        """Release a pending M14 check without consuming a transient-failure retry."""
+        with self._session_factory.begin() as session:
+            record = session.get(PipelineJobRecord, job_id)
+            if record is None or record.claim_owner != worker_id: raise KeyError(f"job is not claimed by {worker_id}")
+            record.next_retry_at = next_retry_at
+            record.claim_owner = record.claimed_at = record.heartbeat_at = record.lease_expires_at = None
+            record.updated_at = now; session.flush(); return _job_from_record(record)
+
     def update_state(self, job_id: str, state: JobState, resume_state: JobState | None = None, failure_message: str | None = None) -> PipelineJob:
         with self._session_factory.begin() as session:
             record = session.get(PipelineJobRecord, job_id)
@@ -177,6 +188,31 @@ class ArtifactRepository:
             else:
                 record.path, record.checksum_sha256, record.provenance_json = artifact.path, artifact.checksum_sha256, json.dumps(artifact.provenance, sort_keys=True)
         return artifact
+
+
+class PublicationRepository:
+    """Persist M13 remote progress before each externally visible operation."""
+    def __init__(self, session_factory: sessionmaker[Session]) -> None: self._session_factory = session_factory
+    def get(self, publication_identity: str) -> PublicationRecord | None:
+        with self._session_factory() as session: return session.scalar(select(PublicationRecord).where(PublicationRecord.publication_identity == publication_identity))
+    def ensure(self, job_id: str, identity: str, package_identity: str, channel_id: str, provenance: dict[str, object]) -> PublicationRecord:
+        with self._session_factory.begin() as session:
+            record = session.scalar(select(PublicationRecord).where(PublicationRecord.publication_identity == identity))
+            if record is None:
+                record = PublicationRecord(job_id=job_id, publication_identity=identity, package_identity=package_identity, channel_id=channel_id, state="pending", remote_video_id=None, metadata_applied=False, thumbnail_applied=False, provenance_json=json.dumps(provenance, sort_keys=True), error_message=None, created_at=datetime.now(UTC), updated_at=datetime.now(UTC)); session.add(record)
+            session.flush(); return record
+    def update(self, identity: str, **values: object) -> PublicationRecord:
+        with self._session_factory.begin() as session:
+            record = session.scalar(select(PublicationRecord).where(PublicationRecord.publication_identity == identity))
+            if record is None: raise KeyError(identity)
+            for key, value in values.items(): setattr(record, key, value)
+            record.updated_at = datetime.now(UTC); session.flush(); return record
+    def observe(self, identity: str, health: str, snapshot: dict[str, object], drift: dict[str, object]) -> None:
+        with self._session_factory.begin() as session:
+            session.add(PublicationObservationRecord(publication_identity=identity, health=health, snapshot_json=json.dumps(snapshot, sort_keys=True), drift_json=json.dumps(drift, sort_keys=True), observed_at=datetime.now(UTC)))
+    def observations(self, identity: str) -> list[PublicationObservationRecord]:
+        with self._session_factory() as session:
+            return list(session.scalars(select(PublicationObservationRecord).where(PublicationObservationRecord.publication_identity == identity).order_by(PublicationObservationRecord.id)))
 
 
 class ApprovalRepository:

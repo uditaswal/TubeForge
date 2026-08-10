@@ -82,6 +82,20 @@ pipeline:
     thumbnail_width: 1280
     thumbnail_height: 720
     thumbnail_max_bytes: 2000000
+  youtube:
+    enabled: false
+    dry_run: true
+    provider: "youtube"
+    client_secret_path: null
+    token_storage_path: null
+    expected_channel_id: null
+    privacy: "private"
+    chunk_size_bytes: 8388608
+    implementation_version: "m13-youtube-v1"
+  verification:
+    enabled: true
+    pending_poll_seconds: 300
+    maximum_processing_wait_seconds: 86400
   media:
     provider: "fake"
     cache_root: "./data/cache/assets"

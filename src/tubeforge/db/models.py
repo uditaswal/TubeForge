@@ -66,6 +66,36 @@ class ArtifactRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class PublicationRecord(Base):
+    """Non-secret durable progress for one external publication intent."""
+    __tablename__ = "publications"
+    __table_args__ = (UniqueConstraint("publication_identity", name="uq_publications_identity"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    publication_identity: Mapped[str] = mapped_column(String(64), nullable=False)
+    package_identity: Mapped[str] = mapped_column(String(64), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    remote_video_id: Mapped[str | None] = mapped_column(String(200))
+    metadata_applied: Mapped[bool] = mapped_column(nullable=False, default=False)
+    thumbnail_applied: Mapped[bool] = mapped_column(nullable=False, default=False)
+    provenance_json: Mapped[str] = mapped_column(Text, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PublicationObservationRecord(Base):
+    """Compact append-only M14 remote observations; contains no credentials."""
+    __tablename__ = "publication_observations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    publication_identity: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    health: Mapped[str] = mapped_column(String(32), nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    drift_json: Mapped[str] = mapped_column(Text, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AssetCacheRecord(Base):
     """Durable single-writer reservation for validated on-disk media."""
     __tablename__ = "asset_cache"

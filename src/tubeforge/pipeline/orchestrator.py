@@ -5,16 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
 
 from pydantic import ValidationError
 
-from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, PublicationPreparationConfig, Settings, VoicePipelineConfig
-from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
+from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, PublicationPreparationConfig, PublicationVerificationConfig, Settings, VoicePipelineConfig, YouTubePublishingConfig
+from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RemoteResourceMissingError, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
-from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobRepository, PipelineJob
-from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, PublishPrivacy, PublishRequest, VoiceRequest
+from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobRepository, PipelineJob, PublicationRepository
+from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, VideoMetadata, VoiceRequest
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, scene_request, select_candidate
@@ -36,7 +37,7 @@ class PipelineCancellation(RuntimeError):
 class PipelineOrchestrator:
     """Run one job synchronously, committing only short persistence operations."""
 
-    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None) -> None:
+    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None, youtube_config: YouTubePublishingConfig | None = None, verification_config: PublicationVerificationConfig | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.content, self.media, self.voice, self.publisher = content, media, voice, publisher
         self.artifact_root, self.machine = artifact_root, PipelineStateMachine()
@@ -47,6 +48,9 @@ class PipelineOrchestrator:
         self.preview_renderer = preview_renderer or PreviewRenderer(preview_config or PreviewRenderConfig())
         self.final_renderer = final_renderer or PreviewRenderer(final_config or FinalRenderConfig())
         self.publication_config = publication_config or PublicationPreparationConfig()
+        self.youtube_config = youtube_config or YouTubePublishingConfig()
+        self.verification_config = verification_config or PublicationVerificationConfig()
+        self.publications = PublicationRepository(artifacts._session_factory)
         self.asset_limits = asset_limits or AssetLimits(frozenset({"example.invalid", "upload.wikimedia.org", "commons.wikimedia.org"}), frozenset({"CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain"}))
         self.asset_acquirer = asset_acquirer or AssetAcquisitionService(AssetCacheRepository(artifacts._session_factory), AssetDownloader(artifact_root.parent / "cache" / "assets", self.asset_limits))
 
@@ -57,14 +61,14 @@ class PipelineOrchestrator:
             jobs, artifacts, approvals, content, media, voice, publisher,
             settings.pipeline.voice.artifact_root, external_operations,
             voice_config=settings.pipeline.voice, preview_config=settings.pipeline.preview,
-            final_config=settings.pipeline.final, publication_config=settings.pipeline.publication,
+            final_config=settings.pipeline.final, publication_config=settings.pipeline.publication, youtube_config=settings.pipeline.youtube, verification_config=settings.pipeline.verification,
         )
 
     def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None) -> PipelineJob:
         """Advance until an approval gate, terminal state, or classified failure."""
         while True:
             job = self.jobs.get(job_id)
-            if job.state in {JobState.PUBLICATION_READY, JobState.CANCELLED, JobState.FAILED_EXHAUSTED}:
+            if job.state in {JobState.CANCELLED, JobState.FAILED_EXHAUSTED, JobState.PUBLISHED} or (job.state is JobState.PUBLICATION_READY and not self.youtube_config.enabled):
                 return job
             if cancellation_requested is not None and cancellation_requested():
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
@@ -76,7 +80,7 @@ class PipelineOrchestrator:
                 continue
             try:
                 self._run_stage(job, cancellation_requested)
-            except (PipelineCancellation, AssetAcquisitionCancelled, PreviewRenderCancelled):
+            except (PipelineCancellation, ProviderCancellation, AssetAcquisitionCancelled, PreviewRenderCancelled):
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
                 return self.jobs.update_state(job.id, cancelled.state, cancelled.resume_state)
             except (RetryableProviderError, ProviderValidationError, ProviderAuthenticationError, ValidationError) as error:
@@ -86,7 +90,7 @@ class PipelineOrchestrator:
             job = self.jobs.get(job_id)
             if interrupt_after is job.state:
                 raise PipelineInterrupted(f"interrupted after {job.state.value}")
-            if job.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY, JobState.PUBLICATION_APPROVAL_REQUIRED}:
+            if job.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY, JobState.PUBLICATION_APPROVAL_REQUIRED, JobState.PUBLICATION_READY, JobState.PUBLICATION_VERIFICATION_PENDING}:
                 return job
 
     def _run_stage(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None = None) -> None:
@@ -219,7 +223,109 @@ class PipelineOrchestrator:
             package["effective_approval_id"] = decision.id
             self._replace_json(job.id, JobState.PUBLICATION_PREPARING, "publication_package", package)
             self._transition(job, JobState.PUBLICATION_READY, approvals=frozenset({ApprovalGate.PUBLICATION_PREPARATION})); return
+        if job.state is JobState.PUBLICATION_READY:
+            self._publish_checkpoint(job, cancellation_requested); return
+        if job.state is JobState.PUBLISHING:
+            self._publish_checkpoint(job, cancellation_requested); return
+        if job.state is JobState.PUBLICATION_VERIFICATION_PENDING:
+            self._verify_publication(job, cancellation_requested); return
+        if job.state is JobState.PUBLICATION_RECONCILING:
+            self._transition(job, JobState.PUBLISHED); return
         raise RuntimeError(f"unsupported pipeline state: {job.state.value}")
+
+    def _publish_checkpoint(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None) -> None:
+        """M13's only mutating boundary; each remote step follows a durable update."""
+        package = self._required_json(job.id, JobState.PUBLICATION_PREPARING, "publication_package")
+        config = self.youtube_config
+        if not config.enabled or config.dry_run: return
+        provider = self.publisher
+        if not all(hasattr(provider, name) for name in ("authenticated_channel_id", "create_or_resume_video", "apply_metadata", "set_thumbnail", "fetch_video")):
+            raise ProviderValidationError("configured publisher does not implement the YouTube publishing boundary")
+        channel = provider.authenticated_channel_id()
+        if channel != config.expected_channel_id: raise ProviderAuthenticationError("authenticated YouTube channel does not match configured channel")
+        intent = {"package_identity": package["publication_identity"], "channel_id": channel, "privacy": config.privacy, "implementation_version": config.implementation_version}
+        identity = publication_identity(intent)
+        decision = self.approvals.approved(job.id, ApprovalGate.PUBLISH, reviewed_identity=identity)
+        if decision is None: return
+        record = self.publications.ensure(job.id, identity, str(package["publication_identity"]), channel, intent)
+        if record.state == "creation_ambiguous":
+            raise ProviderValidationError("upload outcome is ambiguous; reconcile manually before a new upload")
+        if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before YouTube mutation")
+        metadata = VideoMetadata(title_options=(str(package["metadata"]["title"]),), description=str(package["metadata"]["description"]), tags=tuple(package["metadata"]["tags"]))
+        request = PublishRequest(platform="youtube", artifact_path=str(package["final_video"]["path"]), metadata=metadata, privacy=PublishPrivacy(config.privacy), idempotency_key=identity)
+        if record.remote_video_id is None:
+            if provider.authenticated_channel_id() != channel:
+                raise ProviderAuthenticationError("authenticated YouTube channel changed before upload")
+            try: remote_id = provider.create_or_resume_video(request, cancellation_requested=cancellation_requested)
+            except AmbiguousProviderError as error:
+                self.publications.update(identity, state="creation_ambiguous", error_message="remote creation outcome unknown")
+                raise ProviderValidationError("upload outcome is ambiguous; no automatic retry will create another video") from error
+            record = self.publications.update(identity, remote_video_id=remote_id, state="remote_created")
+        else:
+            remote = provider.fetch_video(str(record.remote_video_id))
+            if remote is None:
+                self.publications.update(identity, state="reconciliation_required", error_message="recorded remote video is missing")
+                raise RemoteResourceMissingError("recorded YouTube video is missing; manual reconciliation required")
+        if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled after YouTube video creation")
+        if not record.metadata_applied:
+            if provider.authenticated_channel_id() != channel:
+                raise ProviderAuthenticationError("authenticated YouTube channel changed before metadata update")
+            provider.apply_metadata(str(record.remote_video_id), request); record = self.publications.update(identity, metadata_applied=True, state="metadata_applied")
+        if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before YouTube thumbnail update")
+        if not record.thumbnail_applied:
+            if provider.authenticated_channel_id() != channel:
+                raise ProviderAuthenticationError("authenticated YouTube channel changed before thumbnail update")
+            provider.set_thumbnail(str(record.remote_video_id), str(package["thumbnail"]["path"])); record = self.publications.update(identity, thumbnail_applied=True, state="thumbnail_applied")
+        # Upload mutations are complete. M14 performs the first read-only health check separately.
+        self.publications.update(identity, state="verification_pending")
+        self._transition(job, JobState.PUBLISHING, approvals=frozenset({ApprovalGate.PUBLISH})) if job.state is JobState.PUBLICATION_READY else None
+        if job.state is JobState.PUBLISHING: self._transition(job, JobState.PUBLICATION_VERIFICATION_PENDING)
+
+    def _verify_publication(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None) -> None:
+        """M14's strictly read-only remote reconciliation boundary."""
+        if not self.verification_config.enabled:
+            self._transition(job, JobState.PUBLICATION_RECONCILING); return
+        if cancellation_requested and cancellation_requested():
+            raise PipelineCancellation("cancelled before publication reconciliation")
+        package = self._required_json(job.id, JobState.PUBLICATION_PREPARING, "publication_package")
+        identity = publication_identity({"package_identity": package["publication_identity"], "channel_id": self.youtube_config.expected_channel_id, "privacy": self.youtube_config.privacy, "implementation_version": self.youtube_config.implementation_version})
+        record = self.publications.get(identity)
+        if record is None or not record.remote_video_id or record.package_identity != str(package["publication_identity"]):
+            raise ProviderValidationError("publication identity is inconsistent; manual reconciliation required")
+        provider = self.publisher
+        if not hasattr(provider, "fetch_publication_snapshot"):
+            raise ProviderValidationError("configured publisher cannot perform read-only publication reconciliation")
+        snapshot: RemotePublicationSnapshot = provider.fetch_publication_snapshot(str(record.remote_video_id))
+        if cancellation_requested and cancellation_requested():
+            raise PipelineCancellation("cancelled after publication reconciliation")
+        health, drift, message = self._publication_health(package, record.created_at, snapshot)
+        self.publications.observe(identity, health, snapshot.model_dump(mode="json"), drift)
+        self.publications.update(identity, state=health, error_message=message)
+        if health == "healthy":
+            self._transition(job, JobState.PUBLICATION_RECONCILING); return
+        if health == "pending": return
+        raise ProviderValidationError(message or f"publication health is {health}")
+
+    def _publication_health(self, package: dict[str, object], created_at: datetime, snapshot: RemotePublicationSnapshot) -> tuple[str, dict[str, object], str | None]:
+        if not snapshot.exists:
+            return "remote_missing", {}, "recorded remote video is missing; TubeForge will not recreate it"
+        if snapshot.processing is RemoteProcessingState.FAILED:
+            return "failed", {}, snapshot.processing_reason or "YouTube processing failed"
+        if snapshot.processing in {RemoteProcessingState.PROCESSING, RemoteProcessingState.UNKNOWN}:
+            elapsed = (datetime.now(UTC) - created_at).total_seconds()
+            if elapsed > self.verification_config.maximum_processing_wait_seconds:
+                return "intervention_required", {}, "YouTube processing exceeded the configured wait limit"
+            return "pending", {}, None
+        expected = package["metadata"]
+        drift: dict[str, object] = {}
+        if snapshot.privacy is None or snapshot.privacy.value != self.youtube_config.privacy: drift["privacy"] = {"expected": self.youtube_config.privacy, "observed": snapshot.privacy.value if snapshot.privacy else None}
+        if snapshot.title != expected["title"]: drift["title"] = {"expected": expected["title"], "observed": snapshot.title}
+        if snapshot.description != expected["description"]: drift["description"] = {"expected": expected["description"], "observed": snapshot.description}
+        if snapshot.tags is not None and {tag.casefold() for tag in snapshot.tags} != {str(tag).casefold() for tag in expected["tags"]}: drift["tags"] = {"expected": expected["tags"], "observed": list(snapshot.tags)}
+        # Exact thumbnail bytes cannot be proven through Data API; missing metadata is a known problem.
+        if snapshot.thumbnail_present is False: drift["thumbnail"] = {"expected": "present", "observed": "absent"}
+        if drift: return "drift_detected", drift, "remote publication differs from approved package"
+        return "healthy", {"thumbnail": "verification_limited" if snapshot.thumbnail_present is None else "present"}, None
 
     def _publication_checkpoints(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None) -> None:
         """Build independent, locally validated M12 metadata and thumbnail checkpoints."""

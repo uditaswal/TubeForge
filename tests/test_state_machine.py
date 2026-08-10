@@ -48,7 +48,7 @@ def test_invalid_transition_cannot_skip_required_approval() -> None:
 
 def test_terminal_states_cannot_transition() -> None:
     machine = PipelineStateMachine()
-    for terminal in (JobState.PUBLICATION_READY, JobState.PUBLISHED, JobState.CANCELLED):
+    for terminal in (JobState.PUBLISHED, JobState.CANCELLED):
         with pytest.raises(InvalidTransitionError, match="terminal"):
             machine.transition(PipelineSnapshot(terminal), JobState.CONTENT_GENERATING)
 
