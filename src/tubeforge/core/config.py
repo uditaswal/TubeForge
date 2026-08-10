@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG_PATH = REPOSITORY_ROOT / "config" / "default.yaml"
+SUPPORTED_VIDEO_ENCODERS = {"libx264": "h264", "libx265": "hevc"}
+SUPPORTED_AUDIO_ENCODERS = {"aac": "aac", "libopus": "opus"}
 
 
 class AppConfig(BaseModel):
@@ -145,6 +147,7 @@ class RenderProfile(BaseModel):
     width: int = Field(default=854, ge=160, le=3840)
     height: int = Field(default=480, ge=90, le=2160)
     fps: int = Field(default=30, ge=1, le=60)
+    fps_tolerance: float = Field(default=0.05, ge=0, le=0.25)
     pixel_format: str = Field(default="yuv420p", pattern=r"^[A-Za-z0-9_]+$")
     video_codec: str = Field(default="libx264", pattern=r"^[A-Za-z0-9_.-]+$")
     audio_codec: str = Field(default="aac", pattern=r"^[A-Za-z0-9_.-]+$")
@@ -161,6 +164,10 @@ class RenderProfile(BaseModel):
     def require_16_by_9(self) -> "RenderProfile":
         if abs(self.width / self.height - 16 / 9) > 0.02:
             raise ValueError("preview resolution must be 16:9")
+        if self.video_codec not in SUPPORTED_VIDEO_ENCODERS:
+            raise ValueError(f"unsupported video encoder: {self.video_codec}")
+        if self.audio_codec not in SUPPORTED_AUDIO_ENCODERS:
+            raise ValueError(f"unsupported audio encoder: {self.audio_codec}")
         return self
 
 
@@ -177,6 +184,28 @@ class FinalRenderConfig(RenderProfile):
     audio_bitrate: str = "160k"
     renderer_version: str = "m10-final-v1"
 
+
+class PublicationPreparationConfig(BaseModel):
+    """Local M12 metadata and thumbnail policy, enforced before approval."""
+
+    model_config = ConfigDict(extra="forbid")
+    title_max_length: int = Field(default=100, ge=1, le=500)
+    description_max_length: int = Field(default=5_000, ge=1, le=10_000)
+    tag_max_count: int = Field(default=30, ge=1, le=100)
+    tag_max_length: int = Field(default=100, ge=1, le=500)
+    tag_payload_max_length: int = Field(default=500, ge=1, le=2_000)
+    metadata_template_version: str = Field(default="m12-metadata-v1", min_length=1, max_length=100)
+    thumbnail_template_version: str = Field(default="m12-thumbnail-v1", min_length=1, max_length=100)
+    thumbnail_width: int = Field(default=1280, ge=160, le=3840)
+    thumbnail_height: int = Field(default=720, ge=90, le=2160)
+    thumbnail_max_bytes: int = Field(default=2_000_000, ge=1_024, le=10_000_000)
+
+    @model_validator(mode="after")
+    def require_16_by_9_thumbnail(self) -> "PublicationPreparationConfig":
+        if abs(self.thumbnail_width / self.thumbnail_height - 16 / 9) > 0.02:
+            raise ValueError("thumbnail resolution must be 16:9")
+        return self
+
 class PipelineConfig(BaseModel):
     """Safe provider selection and deterministic M7 voice settings."""
 
@@ -189,6 +218,7 @@ class PipelineConfig(BaseModel):
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
     preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
     final: FinalRenderConfig = Field(default_factory=FinalRenderConfig)
+    publication: PublicationPreparationConfig = Field(default_factory=PublicationPreparationConfig)
     media: MediaPipelineConfig = Field(default_factory=MediaPipelineConfig)
 
 

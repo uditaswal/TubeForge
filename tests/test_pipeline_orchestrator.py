@@ -6,7 +6,7 @@ import wave
 
 import pytest
 
-from tubeforge.core.config import AppConfig, DatabaseConfig, FakeProviderConfig, PreviewRenderConfig, Settings, VoicePipelineConfig
+from tubeforge.core.config import AppConfig, DatabaseConfig, FakeProviderConfig, PreviewRenderConfig, PublicationPreparationConfig, Settings, VoicePipelineConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.models import Base
 from tubeforge.db.repositories import ApprovalRepository, ArtifactRepository, JobRepository
@@ -47,6 +47,7 @@ class OfflineAssembler:
 class OfflineRenderer:
     def __init__(self) -> None:
         self.config = PreviewRenderConfig(minimum_free_bytes=1)
+        self.template_version = "offline-renderer-v1"
         self.calls = 0
 
     def identity(self, segments, narration, captions, *, approval_identity=None):
@@ -55,7 +56,7 @@ class OfflineRenderer:
 
     def validate(self, path: Path, expected: float) -> dict[str, object]:
         if not path.is_file() or path.stat().st_size == 0: raise ProviderValidationError("missing fake video")
-        return {"duration_seconds": expected, "width": self.config.width, "height": self.config.height}
+        return {"duration_seconds": expected, "width": self.config.width, "height": self.config.height, "fps": self.config.fps, "video_codec": "h264", "audio_codec": "aac"}
 
     def render(self, segments, narration, captions, output: Path, *, cancellation_requested=None):
         if cancellation_requested and cancellation_requested(): raise RuntimeError("cancelled")
@@ -119,6 +120,27 @@ def test_duplicate_execution_reuses_checkpoint_and_upload_receipt(pipeline) -> N
     runner.run("job-duplicate")
     assert content.calls == voice.calls == 1
     assert publisher.calls == 0
+
+
+def test_renderer_template_version_invalidates_preview_checkpoint(pipeline) -> None:
+    runner, *_ = pipeline
+    runner.jobs.create("job-renderer-version", request())
+    runner.run("job-renderer-version"); approve(runner, "job-renderer-version", ApprovalGate.SCRIPT)
+    assert runner.run("job-renderer-version").state is JobState.PREVIEW_READY
+    old_manifest = runner._required_json("job-renderer-version", JobState.PREVIEW_RENDERING, "preview_manifest")
+    calls = runner.preview_renderer.calls
+    runner.preview_renderer.template_version = "offline-renderer-v2"
+    assert runner.run("job-renderer-version").state is JobState.PREVIEW_READY
+    refreshed = runner._required_json("job-renderer-version", JobState.PREVIEW_RENDERING, "preview_manifest")
+    assert runner.preview_renderer.calls == calls + 1
+    assert refreshed["render_identity"] != old_manifest["render_identity"]
+    assert refreshed["renderer_template_version"] == "offline-renderer-v2"
+    assert refreshed["probe"]["video_codec"] == "h264"
+    assert refreshed["probe"]["audio_codec"] == "aac"
+    assert refreshed["probe"]["fps"] == 30
+    assert refreshed["probe"]["width"] == 854
+    assert refreshed["probe"]["height"] == 480
+    assert refreshed["probe"]["duration_seconds"] > 0
 
 
 @pytest.mark.parametrize(("failure", "expected"), [(ProviderValidationError("bad output"), JobState.FAILED_VALIDATION), (RetryableProviderError("temporary"), JobState.FAILED_RETRYABLE), (ProviderAuthenticationError("expired"), JobState.AUTH_REQUIRED)])
@@ -273,3 +295,50 @@ def test_persisted_assets_revalidate_current_policy_on_resume(pipeline) -> None:
     value["candidate"]["attribution_required"] = False
     value["candidate"]["attribution_text"] = None
     assert runner._accepted_asset_valid(value)
+
+
+def test_publication_preparation_is_local_resumable_and_requires_exact_approval(pipeline) -> None:
+    runner, _, _, _, publisher = pipeline
+    job_id = "publication-ready"
+    runner.jobs.create(job_id, request())
+    runner.run(job_id); approve(runner, job_id, ApprovalGate.SCRIPT)
+    runner.run(job_id)
+    preview = runner._required_json(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
+    runner.approvals.record(f"{job_id}-preview", job_id, ApprovalGate.PREVIEW, reviewed_identity=preview["render_identity"])
+    assert runner.run(job_id).state is JobState.FINAL_READY
+    assert runner.run(job_id).state is JobState.PUBLICATION_APPROVAL_REQUIRED
+    package = runner._required_json(job_id, JobState.PUBLICATION_PREPARING, "publication_package")
+    metadata = runner._required_json(job_id, JobState.PUBLICATION_PREPARING, "metadata")
+    thumbnail = runner._required_artifact(job_id, JobState.PUBLICATION_PREPARING, "thumbnail")
+    assert metadata["title"] and metadata["provenance"]["template_version"] == "m12-metadata-v1"
+    assert Path(thumbnail.path).is_file() and package["thumbnail"]["thumbnail_identity"]
+    assert publisher.calls == 0
+    runner.approvals.record(f"{job_id}-publication", job_id, ApprovalGate.PUBLICATION_PREPARATION, reviewed_identity=package["publication_identity"])
+    assert runner.run(job_id).state is JobState.PUBLICATION_READY
+
+
+def test_publication_template_versions_invalidate_independent_checkpoints(pipeline) -> None:
+    runner, *_ = pipeline
+    job_id = "publication-version"
+    runner.jobs.create(job_id, request()); runner.run(job_id); approve(runner, job_id, ApprovalGate.SCRIPT); runner.run(job_id)
+    preview = runner._required_json(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
+    runner.approvals.record(f"{job_id}-preview", job_id, ApprovalGate.PREVIEW, reviewed_identity=preview["render_identity"])
+    runner.run(job_id); assert runner.run(job_id).state is JobState.PUBLICATION_APPROVAL_REQUIRED
+    old_metadata = runner._required_json(job_id, JobState.PUBLICATION_PREPARING, "metadata")
+    old_thumbnail = runner._required_json(job_id, JobState.PUBLICATION_PREPARING, "thumbnail_provenance")
+    runner.publication_config = PublicationPreparationConfig(metadata_template_version="m12-metadata-v2")
+    runner.jobs.update_state(job_id, JobState.PUBLICATION_PREPARING)
+    assert runner.run(job_id).state is JobState.PUBLICATION_APPROVAL_REQUIRED
+    assert runner._required_json(job_id, JobState.PUBLICATION_PREPARING, "metadata")["metadata_identity"] != old_metadata["metadata_identity"]
+    assert runner._required_json(job_id, JobState.PUBLICATION_PREPARING, "thumbnail_provenance")["thumbnail_identity"] == old_thumbnail["thumbnail_identity"]
+
+
+def test_publication_thumbnail_cleanup_on_cancellation(pipeline) -> None:
+    runner, *_ = pipeline
+    job_id = "publication-cancel"
+    runner.jobs.create(job_id, request()); runner.run(job_id); approve(runner, job_id, ApprovalGate.SCRIPT); runner.run(job_id)
+    preview = runner._required_json(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
+    runner.approvals.record(f"{job_id}-preview", job_id, ApprovalGate.PREVIEW, reviewed_identity=preview["render_identity"])
+    runner.run(job_id)
+    assert runner.run(job_id, cancellation_requested=lambda: True).state is JobState.CANCELLED
+    assert not runner._artifact_path(job_id, "thumbnail.png.tmp").exists()

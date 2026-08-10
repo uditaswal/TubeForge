@@ -91,7 +91,7 @@ class JobRepository:
         """
         blocked = {
             JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY,
-            JobState.FINAL_READY, JobState.CANCELLED, JobState.FAILED_VALIDATION,
+            JobState.PUBLICATION_APPROVAL_REQUIRED, JobState.PUBLICATION_READY, JobState.CANCELLED, JobState.FAILED_VALIDATION,
             JobState.AUTH_REQUIRED, JobState.FAILED_EXHAUSTED,
             JobState.FAILED_RETRYABLE,
             # Retained only so M8 rows remain readable; never resume them
@@ -193,21 +193,40 @@ class ApprovalRepository:
                 if (existing.job_id, existing.gate, existing.status, existing.reviewed_identity) != (job_id, gate.value, status.value, reviewed_identity):
                     raise ValueError(f"approval id conflicts with existing decision: {approval_id}")
                 return
-            session.add(ApprovalRecord(id=approval_id, job_id=job_id, gate=gate.value, status=status.value, created_at=datetime.now(UTC), actor=actor, reviewed_identity=reviewed_identity, audit_json=json.dumps(audit or {}, sort_keys=True)))
+            decision = self._decision_query(job_id, gate, reviewed_identity)
+            effective = session.scalar(decision)
+            if effective is not None:
+                if effective.status != status.value:
+                    raise ValueError("approval decision conflicts with existing decision")
+                return
+            session.add(ApprovalRecord(id=approval_id, job_id=job_id, gate=gate.value, status=status.value, created_at=datetime.now(UTC), actor=actor, reviewed_identity=reviewed_identity, decision_identity=self._decision_identity(reviewed_identity), audit_json=json.dumps(audit or {}, sort_keys=True)))
+
+    @staticmethod
+    def _decision_identity(reviewed_identity: str | None) -> str:
+        """Return the non-null database key for a reviewed identity."""
+        return reviewed_identity or ""
+
+    @staticmethod
+    def _decision_query(job_id: str, gate: ApprovalGate, reviewed_identity: str | None):
+        return select(ApprovalRecord).where(
+            ApprovalRecord.job_id == job_id,
+            ApprovalRecord.gate == gate.value,
+            ApprovalRecord.decision_identity == ApprovalRepository._decision_identity(reviewed_identity),
+        )
+
+    def decision(self, job_id: str, gate: ApprovalGate, *, reviewed_identity: str | None = None) -> ApprovalRecord | None:
+        with self._session_factory() as session:
+            return session.scalar(self._decision_query(job_id, gate, reviewed_identity))
 
     def approved(self, job_id: str, gate: ApprovalGate, *, reviewed_identity: str | None = None) -> ApprovalRecord | None:
         with self._session_factory() as session:
-            query = select(ApprovalRecord).where(ApprovalRecord.job_id == job_id, ApprovalRecord.gate == gate.value, ApprovalRecord.status == ApprovalStatus.APPROVED.value)
-            if reviewed_identity is not None:
-                query = query.where(ApprovalRecord.reviewed_identity == reviewed_identity)
-            return session.scalar(query.order_by(ApprovalRecord.created_at.desc()))
+            decision = session.scalar(self._decision_query(job_id, gate, reviewed_identity))
+            return decision if decision and decision.status == ApprovalStatus.APPROVED.value else None
 
     def rejected(self, job_id: str, gate: ApprovalGate, *, reviewed_identity: str | None = None) -> ApprovalRecord | None:
         with self._session_factory() as session:
-            query = select(ApprovalRecord).where(ApprovalRecord.job_id == job_id, ApprovalRecord.gate == gate.value, ApprovalRecord.status == ApprovalStatus.REJECTED.value)
-            if reviewed_identity is not None:
-                query = query.where(ApprovalRecord.reviewed_identity == reviewed_identity)
-            return session.scalar(query.order_by(ApprovalRecord.created_at.desc()))
+            decision = session.scalar(self._decision_query(job_id, gate, reviewed_identity))
+            return decision if decision and decision.status == ApprovalStatus.REJECTED.value else None
 
 
 def _job_from_record(record: PipelineJobRecord) -> PipelineJob:

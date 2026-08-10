@@ -53,6 +53,7 @@ pipeline:
     ffprobe_timeout_seconds: 30
     minimum_free_bytes: 250000000
     sync_tolerance_seconds: 0.25
+    fps_tolerance: 0.05
     caption_font_size: 26
   final:
     width: 1920
@@ -67,8 +68,20 @@ pipeline:
     ffprobe_timeout_seconds: 30
     minimum_free_bytes: 500000000
     sync_tolerance_seconds: 0.25
+    fps_tolerance: 0.05
     caption_font_size: 34
     renderer_version: "m10-final-v1"
+  publication:
+    title_max_length: 100
+    description_max_length: 5000
+    tag_max_count: 30
+    tag_max_length: 100
+    tag_payload_max_length: 500
+    metadata_template_version: "m12-metadata-v1"
+    thumbnail_template_version: "m12-thumbnail-v1"
+    thumbnail_width: 1280
+    thumbnail_height: 720
+    thumbnail_max_bytes: 2000000
   media:
     provider: "fake"
     cache_root: "./data/cache/assets"

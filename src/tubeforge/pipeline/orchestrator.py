@@ -10,7 +10,7 @@ from typing import Callable
 
 from pydantic import ValidationError
 
-from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, Settings, VoicePipelineConfig
+from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, PublicationPreparationConfig, Settings, VoicePipelineConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
 from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobRepository, PipelineJob
@@ -20,6 +20,7 @@ from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, scene_request, select_candidate
 from tubeforge.pipeline.captions import render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
+from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
 from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline
 
@@ -35,7 +36,7 @@ class PipelineCancellation(RuntimeError):
 class PipelineOrchestrator:
     """Run one job synchronously, committing only short persistence operations."""
 
-    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None) -> None:
+    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.content, self.media, self.voice, self.publisher = content, media, voice, publisher
         self.artifact_root, self.machine = artifact_root, PipelineStateMachine()
@@ -45,6 +46,7 @@ class PipelineOrchestrator:
         self.ffprobe = ffprobe or FFprobe(str(self.voice_config.ffprobe_executable))
         self.preview_renderer = preview_renderer or PreviewRenderer(preview_config or PreviewRenderConfig())
         self.final_renderer = final_renderer or PreviewRenderer(final_config or FinalRenderConfig())
+        self.publication_config = publication_config or PublicationPreparationConfig()
         self.asset_limits = asset_limits or AssetLimits(frozenset({"example.invalid", "upload.wikimedia.org", "commons.wikimedia.org"}), frozenset({"CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain"}))
         self.asset_acquirer = asset_acquirer or AssetAcquisitionService(AssetCacheRepository(artifacts._session_factory), AssetDownloader(artifact_root.parent / "cache" / "assets", self.asset_limits))
 
@@ -55,14 +57,14 @@ class PipelineOrchestrator:
             jobs, artifacts, approvals, content, media, voice, publisher,
             settings.pipeline.voice.artifact_root, external_operations,
             voice_config=settings.pipeline.voice, preview_config=settings.pipeline.preview,
-            final_config=settings.pipeline.final,
+            final_config=settings.pipeline.final, publication_config=settings.pipeline.publication,
         )
 
     def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None) -> PipelineJob:
         """Advance until an approval gate, terminal state, or classified failure."""
         while True:
             job = self.jobs.get(job_id)
-            if job.state in {JobState.FINAL_READY, JobState.CANCELLED, JobState.FAILED_EXHAUSTED}:
+            if job.state in {JobState.PUBLICATION_READY, JobState.CANCELLED, JobState.FAILED_EXHAUSTED}:
                 return job
             if cancellation_requested is not None and cancellation_requested():
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
@@ -84,7 +86,7 @@ class PipelineOrchestrator:
             job = self.jobs.get(job_id)
             if interrupt_after is job.state:
                 raise PipelineInterrupted(f"interrupted after {job.state.value}")
-            if job.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY}:
+            if job.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY, JobState.PUBLICATION_APPROVAL_REQUIRED}:
                 return job
 
     def _run_stage(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None = None) -> None:
@@ -183,10 +185,10 @@ class PipelineOrchestrator:
                 self._transition(job, JobState.PREVIEW_RENDERING); return
             manifest = self._required_json(job.id, JobState.PREVIEW_RENDERING, "preview_manifest")
             identity = str(manifest["render_identity"])
-            if self.approvals.rejected(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity):
+            approval = self.approvals.decision(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity)
+            if approval is not None and approval.status == "rejected":
                 raise ProviderValidationError("preview was explicitly rejected")
-            approval = self.approvals.approved(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity)
-            if approval is None: return
+            if approval is None or approval.status != "approved": return
             self._transition(job, JobState.PREVIEW_APPROVED, approvals=frozenset({ApprovalGate.PREVIEW})); return
         if job.state is JobState.PREVIEW_APPROVED:
             self._transition(job, JobState.FINAL_RENDERING); return
@@ -195,12 +197,79 @@ class PipelineOrchestrator:
                 self._transition(job, JobState.PREVIEW_RENDERING); return
             preview_manifest = self._required_json(job.id, JobState.PREVIEW_RENDERING, "preview_manifest")
             identity = str(preview_manifest["render_identity"])
-            approval = self.approvals.approved(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity)
-            if approval is None or self.approvals.rejected(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity):
+            approval = self.approvals.decision(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity)
+            if approval is None or approval.status != "approved":
                 raise ProviderValidationError("final render requires approval of this exact preview")
             self._render_checkpoint(job, self.final_renderer, JobState.FINAL_RENDERING, "final", "final.mp4", cancellation_requested, approval_identity=identity, approval_id=approval.id)
             self._transition(job, JobState.FINAL_READY); return
+        if job.state is JobState.FINAL_READY:
+            self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
+            self._transition(job, JobState.PUBLICATION_PREPARING); return
+        if job.state is JobState.PUBLICATION_PREPARING:
+            self._publication_checkpoints(job, cancellation_requested)
+            self._transition(job, JobState.PUBLICATION_APPROVAL_REQUIRED); return
+        if job.state is JobState.PUBLICATION_APPROVAL_REQUIRED:
+            package = self._publication_package(job)
+            effective_identity = str(package["publication_identity"])
+            decision = self.approvals.decision(job.id, ApprovalGate.PUBLICATION_PREPARATION, reviewed_identity=effective_identity)
+            if decision is not None and decision.status == "rejected":
+                raise ProviderValidationError("publication preparation was explicitly rejected")
+            if decision is None or decision.status != "approved":
+                return
+            package["effective_approval_id"] = decision.id
+            self._replace_json(job.id, JobState.PUBLICATION_PREPARING, "publication_package", package)
+            self._transition(job, JobState.PUBLICATION_READY, approvals=frozenset({ApprovalGate.PUBLICATION_PREPARATION})); return
         raise RuntimeError(f"unsupported pipeline state: {job.state.value}")
+
+    def _publication_checkpoints(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None) -> None:
+        """Build independent, locally validated M12 metadata and thumbnail checkpoints."""
+        final = self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
+        final_manifest = self._required_json(job.id, JobState.FINAL_RENDERING, "final_manifest")
+        content = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
+        package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
+        timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
+        metadata_inputs = {"content_identity": content.checksum_sha256, "final_render_identity": final_manifest.get("render_identity"), "generator": {"provider": "deterministic-local", "model": None}, "template_version": self.publication_config.metadata_template_version, "config": self.publication_config.model_dump(mode="json", include={"title_max_length", "description_max_length", "tag_max_count", "tag_max_length", "tag_payload_max_length", "metadata_template_version"}), "timing_identity": self._required_artifact(job.id, JobState.VOICE_GENERATION, "timing_map").checksum_sha256}
+        metadata_identity = publication_identity(metadata_inputs)
+        current = self._load_json_artifact(job.id, JobState.PUBLICATION_PREPARING, "metadata")
+        if current is None or current.get("metadata_identity") != metadata_identity:
+            data = metadata_from_package(package, timing, self.publication_config)
+            self._replace_json(job.id, JobState.PUBLICATION_PREPARING, "metadata", {**data, "metadata_identity": metadata_identity, "provenance": {**metadata_inputs, "validation": data["validation"]}})
+        metadata = self._required_json(job.id, JobState.PUBLICATION_PREPARING, "metadata")
+        assets = self._required_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest").get("scenes", {})
+        if not isinstance(assets, dict) or not assets or any(not self._accepted_asset_valid(value) for value in assets.values()):
+            raise ProviderValidationError("thumbnail requires currently approved source assets")
+        thumbnail_inputs = {"asset_identities": sorted(str(value["checksum_sha256"]) for value in assets.values()), "content_identity": content.checksum_sha256, "title": metadata["title"], "template_version": self.publication_config.thumbnail_template_version, "dimensions": [self.publication_config.thumbnail_width, self.publication_config.thumbnail_height], "renderer_version": "m12-local-png-v1"}
+        thumbnail_identity = publication_identity(thumbnail_inputs)
+        thumbnail = self._valid_artifact(job.id, JobState.PUBLICATION_PREPARING, "thumbnail")
+        thumbnail_manifest = self._load_json_artifact(job.id, JobState.PUBLICATION_PREPARING, "thumbnail_provenance")
+        reusable = thumbnail is not None and thumbnail_manifest is not None and thumbnail_manifest.get("thumbnail_identity") == thumbnail_identity
+        if reusable:
+            validate_thumbnail(Path(thumbnail.path), self.publication_config)
+        else:
+            if cancellation_requested and cancellation_requested():
+                raise PipelineCancellation("cancelled before thumbnail generation")
+            output = self._artifact_path(job.id, "thumbnail.png")
+            temporary = output.with_suffix(".png.tmp")
+            try:
+                render_thumbnail(temporary, thumbnail_identity=thumbnail_identity, title=str(metadata["title"]), width=self.publication_config.thumbnail_width, height=self.publication_config.thumbnail_height)
+                validation = validate_thumbnail(temporary, self.publication_config)
+                if cancellation_requested and cancellation_requested():
+                    raise PipelineCancellation("cancelled before thumbnail promotion")
+                temporary.replace(output)
+                thumbnail = self._save_file(job.id, JobState.PUBLICATION_PREPARING, "thumbnail", output, {"thumbnail_identity": thumbnail_identity, **thumbnail_inputs, **validation})
+                self._replace_json(job.id, JobState.PUBLICATION_PREPARING, "thumbnail_provenance", {"thumbnail_identity": thumbnail_identity, "artifact_checksum": thumbnail.checksum_sha256, **thumbnail_inputs, **validation})
+            finally:
+                temporary.unlink(missing_ok=True)
+        self._replace_json(job.id, JobState.PUBLICATION_PREPARING, "publication_package", self._publication_package(job, final=final, metadata=metadata))
+
+    def _publication_package(self, job: PipelineJob, *, final: Artifact | None = None, metadata: dict[str, object] | None = None) -> dict[str, object]:
+        final = final or self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
+        final_manifest = self._required_json(job.id, JobState.FINAL_RENDERING, "final_manifest")
+        metadata = metadata or self._required_json(job.id, JobState.PUBLICATION_PREPARING, "metadata")
+        thumbnail = self._required_artifact(job.id, JobState.PUBLICATION_PREPARING, "thumbnail")
+        thumbnail_provenance = self._required_json(job.id, JobState.PUBLICATION_PREPARING, "thumbnail_provenance")
+        value = {"final_video": {"path": final.path, "checksum_sha256": final.checksum_sha256, "render_identity": final_manifest.get("render_identity")}, "metadata": {key: metadata[key] for key in ("title", "description", "tags", "chapters", "metadata_identity")}, "thumbnail": {"path": thumbnail.path, "checksum_sha256": thumbnail.checksum_sha256, "thumbnail_identity": thumbnail_provenance["thumbnail_identity"]}, "provenance": {"metadata": metadata["provenance"], "thumbnail": thumbnail_provenance}}
+        return {**value, "publication_identity": publication_identity(value), "effective_approval_id": None}
 
     def _render_checkpoint(self, job: PipelineJob, renderer: PreviewRenderer, stage: JobState, name: str, filename: str, cancellation_requested: Callable[[], bool] | None, *, approval_identity: str | None = None, approval_id: str | None = None) -> tuple[Artifact, str]:
         """Render only after every source checkpoint has been revalidated."""
@@ -210,13 +279,13 @@ class PipelineOrchestrator:
         )
         existing = self._valid_artifact(job.id, stage, name)
         manifest = self._load_json_artifact(job.id, stage, f"{name}_manifest")
-        if existing and manifest and manifest.get("source_render_identity") == source_render_identity and manifest.get("input_identity") == input_identity:
+        if existing and manifest and manifest.get("source_render_identity") == source_render_identity and manifest.get("input_identity") == input_identity and manifest.get("renderer_template_version") == renderer.template_version:
             renderer.validate(Path(existing.path), segments[-1].end_seconds)
             return existing, str(manifest["render_identity"])
         output = self._artifact_path(job.id, filename)
         result = renderer.render(segments, Path(narration.path), Path(captions.path), output, cancellation_requested=cancellation_requested)
         identity = hashlib.sha256(json.dumps({"source_render_identity": source_render_identity, "artifact_checksum": result["checksum_sha256"], "render_instance": uuid.uuid4().hex}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        provenance = {"render_identity": identity, "source_render_identity": source_render_identity, "input_identity": input_identity, "inputs": inputs, "validation": result["metadata"], "command": result["command"], "approval_identity": approval_identity, "approval_id": approval_id}
+        provenance = {"render_identity": identity, "source_render_identity": source_render_identity, "renderer_template_version": renderer.template_version, "input_identity": input_identity, "inputs": inputs, "probe": result["metadata"], "validation": result["metadata"], "command": result["command"], "approval_identity": approval_identity, "approval_id": approval_id}
         artifact = self.artifacts.save(Artifact(job.id, stage, name, str(output), str(result["checksum_sha256"]), provenance))
         self._replace_json(job.id, stage, f"{name}_manifest", {**provenance, "artifact_checksum": artifact.checksum_sha256})
         return artifact, identity
@@ -250,7 +319,7 @@ class PipelineOrchestrator:
                 return False
             if manifest.get("input_identity") != input_identity or manifest.get("inputs") != inputs:
                 return False
-            if manifest.get("source_render_identity") != expected_source_identity:
+            if manifest.get("source_render_identity") != expected_source_identity or manifest.get("renderer_template_version") != self.preview_renderer.template_version:
                 return False
             self.preview_renderer.validate(Path(preview.path), segments[-1].end_seconds)
             return True

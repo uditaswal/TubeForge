@@ -37,16 +37,20 @@ class PipelineStateMachine:
         JobState.PREVIEW_READY: JobState.PREVIEW_APPROVED,
         JobState.PREVIEW_APPROVED: JobState.FINAL_RENDERING,
         JobState.FINAL_RENDERING: JobState.FINAL_READY,
+        JobState.FINAL_READY: JobState.PUBLICATION_PREPARING,
+        JobState.PUBLICATION_PREPARING: JobState.PUBLICATION_APPROVAL_REQUIRED,
+        JobState.PUBLICATION_APPROVAL_REQUIRED: JobState.PUBLICATION_READY,
     }
     _APPROVAL_REQUIREMENTS: dict[JobState, ApprovalGate] = {
         JobState.ASSET_ACQUISITION: ApprovalGate.SCRIPT,
         JobState.PREVIEW_APPROVED: ApprovalGate.PREVIEW,
+        JobState.PUBLICATION_READY: ApprovalGate.PUBLICATION_PREPARATION,
     }
     _FAILURE_STATES = frozenset(
         {JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED}
     )
     _TERMINAL_STATES = frozenset({
-        JobState.FINAL_READY, JobState.PUBLISHED, JobState.CANCELLED,
+        JobState.PUBLICATION_READY, JobState.PUBLISHED, JobState.CANCELLED,
         JobState.FAILED_EXHAUSTED,
     })
     _PREVIEW_INVALIDATION_STATES = frozenset({

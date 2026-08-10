@@ -1,15 +1,27 @@
 """Deterministic FFmpeg preview rendering with validated argument arrays."""
 from __future__ import annotations
-import hashlib, json, shutil, subprocess
+import hashlib, json, shutil, subprocess, time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from tubeforge.core.config import RenderProfile
+from tubeforge.core.config import RenderProfile, SUPPORTED_AUDIO_ENCODERS, SUPPORTED_VIDEO_ENCODERS
 from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
 from tubeforge.domain.contracts import ContentPackage
 
 class PreviewRenderCancelled(RuntimeError): pass
+RENDERER_TEMPLATE_VERSION = "m11-render-template-v1"
+
+def parse_frame_rate(value: str) -> float:
+    """Parse ffprobe's rational frame-rate representation."""
+    try:
+        numerator, denominator = value.split("/", 1)
+        rate = float(numerator) / float(denominator)
+    except (AttributeError, ValueError, ZeroDivisionError) as error:
+        raise ProviderValidationError("ffprobe returned an invalid frame rate") from error
+    if rate <= 0:
+        raise ProviderValidationError("ffprobe returned a nonpositive frame rate")
+    return rate
 
 def checksum(path: Path) -> str:
     digest=hashlib.sha256()
@@ -68,9 +80,9 @@ class PreviewFFprobe:
         except (UnicodeDecodeError,json.JSONDecodeError) as error: raise ProviderValidationError("ffprobe returned invalid preview metadata") from error
 
 class PreviewRenderer:
-    def __init__(self,config:RenderProfile,*,ffmpeg:str="ffmpeg",probe:PreviewFFprobe|None=None)->None: self.config,self.ffmpeg,self.probe=config,ffmpeg,probe or PreviewFFprobe(timeout_seconds=config.ffprobe_timeout_seconds)
+    def __init__(self,config:RenderProfile,*,ffmpeg:str="ffmpeg",probe:PreviewFFprobe|None=None,process_factory:Callable[..., Any]=subprocess.Popen,template_version:str=RENDERER_TEMPLATE_VERSION,poll_seconds:float=0.1)->None: self.config,self.ffmpeg,self.probe,self.process_factory,self.template_version,self.poll_seconds=config,ffmpeg,probe or PreviewFFprobe(timeout_seconds=config.ffprobe_timeout_seconds),process_factory,template_version,poll_seconds
     def identity(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path, *, approval_identity: str | None = None)->str:
-        value={"renderer":self.config.renderer_version,"settings":self.config.model_dump(mode="json"),"narration":checksum(narration),"captions":checksum(captions),"segments":[(s.scene_id,s.section_id,s.start_seconds,s.end_seconds,s.asset_checksum,s.media_type) for s in segments],"transition":"cut", "approval_identity": approval_identity}
+        value={"renderer":self.config.renderer_version,"template_version":self.template_version,"settings":self.config.model_dump(mode="json"),"narration":checksum(narration),"captions":checksum(captions),"segments":[(s.scene_id,s.section_id,s.start_seconds,s.end_seconds,s.asset_checksum,s.media_type) for s in segments],"transition":"cut", "approval_identity": approval_identity}
         return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(",",":")).encode()).hexdigest()
     def command(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path)->list[str]:
         command=[self.ffmpeg,"-nostdin","-y","-v","error","-threads",str(self.config.threads)]; filters=[]
@@ -85,8 +97,9 @@ class PreviewRenderer:
         data=self.probe.inspect(path); streams=data.get("streams"); video=next((x for x in streams if x.get("codec_type")=="video"),None) if isinstance(streams,list) else None; audio=next((x for x in streams if x.get("codec_type")=="audio"),None) if isinstance(streams,list) else None
         try: duration=float(data["format"]["duration"]); width,height=int(video["width"]),int(video["height"]); rate=str(video["avg_frame_rate"]); sample_rate,channels=int(audio["sample_rate"]),int(audio["channels"])
         except (KeyError,TypeError,ValueError) as error: raise ProviderValidationError("preview requires complete video and audio streams") from error
-        if duration<=0 or abs(duration-expected)>self.config.sync_tolerance_seconds or (width,height)!=(self.config.width,self.config.height) or rate in {"0/0",""} or video.get("codec_name") not in {"h264", self.config.video_codec} or audio.get("codec_name") not in {"aac", self.config.audio_codec} or sample_rate<=0 or channels<=0: raise ProviderValidationError("preview stream metadata is invalid")
-        return {"duration_seconds":duration,"width":width,"height":height,"frame_rate":rate,"video_codec":"h264","audio_codec":"aac","sample_rate":sample_rate,"channels":channels}
+        fps=parse_frame_rate(rate); expected_video=SUPPORTED_VIDEO_ENCODERS[self.config.video_codec]; expected_audio=SUPPORTED_AUDIO_ENCODERS[self.config.audio_codec]
+        if duration<=0 or abs(duration-expected)>self.config.sync_tolerance_seconds or (width,height)!=(self.config.width,self.config.height) or abs(fps-self.config.fps)>self.config.fps_tolerance or video.get("codec_name")!=expected_video or audio.get("codec_name")!=expected_audio or sample_rate<=0 or channels<=0: raise ProviderValidationError("preview stream metadata is invalid")
+        return {"duration_seconds":duration,"width":width,"height":height,"frame_rate":rate,"fps":fps,"video_codec":str(video["codec_name"]),"audio_codec":str(audio["codec_name"]),"sample_rate":sample_rate,"channels":channels}
     def render(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path,*,cancellation_requested:Callable[[],bool]|None=None)->dict[str,Any]:
         if not narration.is_file() or not captions.is_file() or narration.stat().st_size==0 or captions.stat().st_size==0: raise ProviderValidationError("preview narration or captions are missing")
         if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview command construction")
@@ -95,8 +108,21 @@ class PreviewRenderer:
         temporary=output.with_suffix(output.suffix+".part"); temporary.unlink(missing_ok=True); command=self.command(segments,narration,captions,temporary)
         try:
             if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before FFmpeg execution")
-            result=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=self.config.timeout_seconds,check=False,shell=False)
-            if result.returncode: raise RetryableProviderError("FFmpeg preview render failed")
+            # FFmpeg can emit enough diagnostics to fill a PIPE while a long
+            # render is being polled.  We classify failures by exit status, so
+            # discard the bounded diagnostic stream instead of risking a child
+            # blocked on an unread pipe.
+            process=self.process_factory(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
+            deadline=time.monotonic()+self.config.timeout_seconds
+            while process.poll() is None:
+                if cancellation_requested and cancellation_requested():
+                    self._stop_process(process, graceful=True)
+                    raise PreviewRenderCancelled("cancelled during FFmpeg execution")
+                if time.monotonic() >= deadline:
+                    self._stop_process(process, graceful=False)
+                    raise subprocess.TimeoutExpired(command,self.config.timeout_seconds)
+                time.sleep(self.poll_seconds)
+            if process.returncode: raise RetryableProviderError("FFmpeg preview render failed")
             if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview validation")
             metadata=self.validate(temporary,segments[-1].end_seconds)
             if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview acceptance")
@@ -104,3 +130,18 @@ class PreviewRenderer:
         except subprocess.TimeoutExpired as error: raise RetryableProviderError("FFmpeg preview render timed out") from error
         except OSError as error: raise ProviderValidationError("FFmpeg executable is unavailable") from error
         finally: temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _stop_process(process: Any, *, graceful: bool) -> None:
+        """Stop and reap a child process without leaving FFmpeg behind."""
+        if process.poll() is not None:
+            return
+        if graceful:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+                return
+            except subprocess.TimeoutExpired:
+                pass
+        process.kill()
+        process.wait(timeout=5)
