@@ -43,7 +43,7 @@ def test_worker_claims_eligible_job_and_skips_waiting_or_terminal_states(tmp_pat
 
         for index, state in enumerate((
             JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY,
-            JobState.FINAL_READY, JobState.PUBLISHED,
+            JobState.PUBLICATION_APPROVAL_REQUIRED, JobState.PUBLICATION_READY, JobState.PUBLISHED,
         )):
             job_id = f"blocked-{index}"
             jobs.create(job_id, _request())

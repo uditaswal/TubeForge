@@ -32,6 +32,9 @@ class PipelineStage(StrEnum):
     PREVIEW_APPROVED = "preview_approved"
     FINAL_RENDERING = "final_rendering"
     FINAL_READY = "final_ready"
+    PUBLICATION_PREPARING = "publication_preparing"
+    PUBLICATION_APPROVAL_REQUIRED = "publication_approval_required"
+    PUBLICATION_READY = "publication_ready"
     # Legacy persisted values.  New workflow transitions intentionally never
     # enter these states, but existing M8 databases must remain readable.
     PREVIEW_APPROVAL_REQUIRED = "preview_approval_required"
@@ -58,6 +61,9 @@ class JobState(StrEnum):
     PREVIEW_APPROVED = PipelineStage.PREVIEW_APPROVED
     FINAL_RENDERING = PipelineStage.FINAL_RENDERING
     FINAL_READY = PipelineStage.FINAL_READY
+    PUBLICATION_PREPARING = PipelineStage.PUBLICATION_PREPARING
+    PUBLICATION_APPROVAL_REQUIRED = PipelineStage.PUBLICATION_APPROVAL_REQUIRED
+    PUBLICATION_READY = PipelineStage.PUBLICATION_READY
     PREVIEW_APPROVAL_REQUIRED = PipelineStage.PREVIEW_APPROVAL_REQUIRED
     PRIVATE_UPLOAD_READY = PipelineStage.PRIVATE_UPLOAD_READY
     PRIVATE_UPLOADING = PipelineStage.PRIVATE_UPLOADING
@@ -75,6 +81,7 @@ class ApprovalGate(StrEnum):
 
     SCRIPT = "script"
     PREVIEW = "preview"
+    PUBLICATION_PREPARATION = "publication_preparation"
     PUBLIC_PUBLISH = "public_publish"
 
 

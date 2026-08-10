@@ -88,6 +88,9 @@ class ApprovalRecord(Base):
     """An immutable approved/rejected gate decision for a job."""
 
     __tablename__ = "approvals"
+    # SQL unique constraints allow multiple NULL values.  Keep the nullable
+    # public identity for legacy records, but constrain a normalized key.
+    __table_args__ = (UniqueConstraint("job_id", "gate", "decision_identity", name="uq_approvals_decision"),)
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -96,6 +99,7 @@ class ApprovalRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     actor: Mapped[str | None] = mapped_column(String(200))
     reviewed_identity: Mapped[str | None] = mapped_column(String(64), index=True)
+    decision_identity: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
     audit_json: Mapped[str | None] = mapped_column(Text)
 
 
