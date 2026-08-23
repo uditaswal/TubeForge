@@ -165,6 +165,7 @@ class VoicePipelineConfig(BaseModel):
     pause_seconds: float = Field(default=0.15, ge=0, le=5)
     caption_line_length: int = Field(default=42, ge=10, le=120)
     duration_tolerance_seconds: float = Field(default=0.15, ge=0.01, le=2)
+    target_duration_tolerance_ratio: float = Field(default=0.20, ge=0.01, le=0.50)
 
 class RenderProfile(BaseModel):
     """Bounded deterministic profile for the low-resolution review render."""

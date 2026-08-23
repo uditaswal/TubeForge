@@ -142,7 +142,7 @@ def test_rejected_script_can_be_locally_revised_and_reapproved(pipeline) -> None
     assert runner.run(job_id).state is JobState.SCRIPT_APPROVAL_REQUIRED
     runner.approvals.record("script-revision-rejected", job_id, ApprovalGate.SCRIPT, ApprovalStatus.REJECTED)
     original = runner._required_json(job_id, JobState.CONTENT_GENERATING, "content_package")
-    original["script_sections"][0]["narration"] = "Rain revised by the operator."
+    original["script_sections"][0]["narration"] = original["script_sections"][0]["narration"].replace("offline", "revised", 1)
     revised = ContentPackage.model_validate(original)
     artifact = runner._replace_json(job_id, JobState.CONTENT_GENERATING, "content_package", revised.model_dump(mode="json"))
     runner.approvals.record("script-revision-approved", job_id, ApprovalGate.SCRIPT, reviewed_identity=artifact.checksum_sha256)
