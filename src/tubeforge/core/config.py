@@ -84,6 +84,32 @@ class MediaPipelineConfig(BaseModel):
             raise ValueError("must contain unique nonblank values")
         return normalized
 
+
+class SourceIngestionConfig(BaseModel):
+    """Opt-in, bounded retrieval policy for the factual sources of one job."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    allowed_hosts: tuple[str, ...] = ()
+    timeout_seconds: int = Field(default=20, ge=1, le=300)
+    max_bytes: int = Field(default=2_000_000, ge=1_024, le=20_000_000)
+    max_chars: int = Field(default=24_000, ge=1_000, le=24_000)
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def require_unique_hosts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(host.strip().casefold() for host in value if host.strip())
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("allowed_hosts must contain unique nonblank values")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_hosts_when_enabled(self) -> "SourceIngestionConfig":
+        if self.enabled and not self.allowed_hosts:
+            raise ValueError("source ingestion requires at least one allowed host when enabled")
+        return self
+
 class CodexProviderConfig(BaseModel):
     """Non-secret limits for the opt-in Codex CLI content adapter."""
 
@@ -233,12 +259,69 @@ class PublicationVerificationConfig(BaseModel):
     pending_poll_seconds: int = Field(default=300, ge=30, le=86_400)
     maximum_processing_wait_seconds: int = Field(default=86_400, ge=300, le=604_800)
 
+class AnalyticsConfig(BaseModel):
+    """Bounded post-publication, read-only collection policy."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    initial_delay_hours: int = Field(default=24, ge=0, le=720)
+    collection_interval_hours: int = Field(default=24, ge=1, le=720)
+    collection_horizon_days: int = Field(default=30, ge=1, le=3650)
+    query_version: str = Field(default="m15-v1", min_length=1, max_length=100)
+
+class PerformanceConfig(BaseModel):
+    """Deterministic M16 evaluation thresholds."""
+    model_config = ConfigDict(extra="forbid")
+    evaluator_version: str = Field(default="m16-v1", min_length=1, max_length=100)
+    proposal_version: str = Field(default="m16-proposal-v1", min_length=1, max_length=100)
+    min_views_for_retention: int = Field(default=100, ge=0)
+    min_impressions_for_ctr: int = Field(default=500, ge=0)
+    baseline_min_videos: int = Field(default=5, ge=1)
+
+class OptimizationCandidateConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    max_title_candidates: int = Field(default=3, ge=1, le=3)
+    max_thumbnail_candidates: int = Field(default=2, ge=1, le=3)
+    template_version: str = Field(default="m17-v1", min_length=1, max_length=100)
+
+class OptimizationExecutionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    dry_run: bool = True
+    executor_version: str = Field(default="m18-v1", min_length=1, max_length=100)
+
+class OptimizationExperimentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    minimum_observation_hours: int = Field(default=24, ge=1, le=8760)
+    evaluation_window_days: int = Field(default=7, ge=1, le=365)
+
+class OptimizationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidates: OptimizationCandidateConfig = Field(default_factory=OptimizationCandidateConfig)
+    execution: OptimizationExecutionConfig = Field(default_factory=OptimizationExecutionConfig)
+    experiment: OptimizationExperimentConfig = Field(default_factory=OptimizationExperimentConfig)
+
+class LearningConfig(BaseModel):
+    """Deterministic M20--M23 post-experiment learning policy."""
+    model_config = ConfigDict(extra="forbid")
+    evaluator_version: str = Field(default="m20-v1", min_length=1, max_length=100)
+    recommendation_version: str = Field(default="m22-v1", min_length=1, max_length=100)
+    brief_template_version: str = Field(default="m23-v1", min_length=1, max_length=100)
+    minimum_post_hours: int = Field(default=24, ge=1, le=8760)
+    minimum_views: int = Field(default=100, ge=0)
+    minimum_history_videos: int = Field(default=3, ge=1, le=1000)
+    max_active_recommendations: int = Field(default=5, ge=1, le=20)
+
 class PipelineConfig(BaseModel):
     """Safe provider selection and deterministic M7 voice settings."""
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str = Field(default="fake", pattern=r"^(fake|codex|piper)$")
+    # ``provider`` is retained only to read older configuration files. New
+    # deployments select the independent content and voice adapters below.
+    provider: str | None = Field(default=None, pattern=r"^(fake|codex|piper)$")
+    content_provider: str = Field(default="fake", pattern=r"^(fake|codex)$")
+    voice_provider: str = Field(default="fake", pattern=r"^(fake|piper)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
     piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
@@ -248,7 +331,31 @@ class PipelineConfig(BaseModel):
     publication: PublicationPreparationConfig = Field(default_factory=PublicationPreparationConfig)
     youtube: YouTubePublishingConfig = Field(default_factory=YouTubePublishingConfig)
     verification: PublicationVerificationConfig = Field(default_factory=PublicationVerificationConfig)
+    analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
+    performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
+    optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
+    learning: LearningConfig = Field(default_factory=LearningConfig)
     media: MediaPipelineConfig = Field(default_factory=MediaPipelineConfig)
+    sources: SourceIngestionConfig = Field(default_factory=SourceIngestionConfig)
+
+    @model_validator(mode="after")
+    def normalize_legacy_provider(self) -> "PipelineConfig":
+        """Map legacy one-provider settings without blocking Codex plus Piper."""
+        if self.provider is None:
+            return self
+        if self.provider == "fake":
+            if self.content_provider != "fake" or self.voice_provider != "fake":
+                raise ValueError("legacy pipeline.provider=fake conflicts with explicit provider selection")
+            return self
+        expected_content = "codex" if self.provider == "codex" else "fake"
+        expected_voice = "piper" if self.provider == "piper" else "fake"
+        if self.content_provider != "fake" or self.voice_provider != "fake":
+            if (self.content_provider, self.voice_provider) != (expected_content, expected_voice):
+                raise ValueError("legacy pipeline.provider conflicts with explicit provider selection")
+        else:
+            self.content_provider = expected_content
+            self.voice_provider = expected_voice
+        return self
 
 
 class WorkerConfig(BaseModel):
@@ -258,9 +365,16 @@ class WorkerConfig(BaseModel):
 
     max_active_jobs: int = Field(default=1, ge=1, le=1)
     lease_seconds: int = Field(default=300, ge=10, le=3600)
+    heartbeat_seconds: int = Field(default=60, ge=1, le=600)
     max_attempts: int = Field(default=3, ge=1, le=20)
     retry_base_seconds: int = Field(default=30, ge=1, le=3600)
     retry_max_seconds: int = Field(default=900, ge=1, le=86_400)
+
+    @model_validator(mode="after")
+    def require_heartbeat_before_expiry(self) -> "WorkerConfig":
+        if self.heartbeat_seconds >= self.lease_seconds:
+            raise ValueError("worker.heartbeat_seconds must be shorter than worker.lease_seconds")
+        return self
 
 
 class Settings(BaseModel):
@@ -292,8 +406,8 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
 
 def validate_selected_provider(settings: Settings) -> None:
-    """Fail early only for the explicitly selected external executable."""
-    if settings.pipeline.provider == "piper":
+    """Fail early for every explicitly selected external executable."""
+    if settings.pipeline.voice_provider == "piper":
         piper = settings.pipeline.piper
         if piper.model_path is None:
             raise RuntimeError("pipeline.piper.model_path is required when pipeline.provider is piper")
@@ -304,7 +418,7 @@ def validate_selected_provider(settings: Settings) -> None:
             raise RuntimeError("pipeline.piper.config_path does not exist or is not a file")
         _validate_executable(piper.executable, "pipeline.piper.executable")
         return
-    if settings.pipeline.provider != "codex":
+    if settings.pipeline.content_provider != "codex":
         return
     codex = settings.pipeline.codex
     _validate_executable(codex.executable, "pipeline.codex.executable")

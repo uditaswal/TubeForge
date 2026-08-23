@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from tubeforge.core.config import YouTubePublishingConfig
 from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RetryableProviderError
-from tubeforge.domain.contracts import PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot
+from tubeforge.domain.contracts import AnalyticsMetric, AnalyticsSnapshotData, MetricAvailability, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot
 
 SCOPES = ("https://www.googleapis.com/auth/youtube.upload",)
+ANALYTICS_SCOPES = ("https://www.googleapis.com/auth/yt-analytics.readonly",)
+ANALYTICS_METRICS = ("views", "estimatedMinutesWatched", "averageViewDuration", "averageViewPercentage", "impressions", "impressionsClickThroughRate", "likes", "comments", "subscribersGained", "subscribersLost")
 
 
 class YouTubeDataApiPublisher:
     """Small adapter around official clients, with file-backed resumable uploads."""
-    def __init__(self, config: YouTubePublishingConfig, *, build_service: Callable[..., Any] | None = None) -> None:
-        self.config = config; self._build_service = build_service; self._service: Any | None = None
+    def __init__(self, config: YouTubePublishingConfig, *, build_service: Callable[..., Any] | None = None, build_analytics_service: Callable[..., Any] | None = None) -> None:
+        self.config = config; self._build_service = build_service; self._build_analytics_service = build_analytics_service; self._service: Any | None = None; self._analytics_service: Any | None = None
 
     def _client(self) -> Any:
         if self._service is not None: return self._service
@@ -85,6 +88,44 @@ class YouTubeDataApiPublisher:
             return RemotePublicationSnapshot(video_id=remote_video_id, exists=True, processing=processing, processing_reason=details.get("processingFailureReason") or details.get("processingIssuesAvailability"), privacy=PublishPrivacy(privacy) if privacy in {"private", "unlisted", "public"} else None, title=snippet.get("title"), description=snippet.get("description"), tags=tuple(snippet["tags"]) if isinstance(snippet.get("tags"), list) else None, thumbnail_present=bool((snippet.get("thumbnails") or {})))
         except Exception as error: raise _classify_google_error(error) from error
 
+    def fetch_video_analytics(self, remote_video_id: str, channel_id: str, report_start: date, report_end: date) -> AnalyticsSnapshotData:
+        """Fetch only owner metrics. API responses are normalized before leaving the adapter."""
+        try:
+            service = self._analytics_client()
+            response = service.reports().query(ids=f"channel=={channel_id}", startDate=report_start.isoformat(), endDate=report_end.isoformat(), metrics=",".join(ANALYTICS_METRICS), filters=f"video=={remote_video_id}").execute()
+            headers = [str(header.get("name")) for header in response.get("columnHeaders", []) if isinstance(header, dict)]
+            rows = response.get("rows", [])
+            if not isinstance(rows, list) or not rows:
+                metrics = {name: AnalyticsMetric(availability=MetricAvailability.NOT_YET_REPORTED) for name in ANALYTICS_METRICS}
+                return AnalyticsSnapshotData(video_id=remote_video_id, channel_id=channel_id, report_start=report_start, report_end=report_end, observed_at=datetime.now(UTC), metrics=metrics, completeness="unavailable")
+            row = rows[0]
+            if not isinstance(row, list): raise ProviderValidationError("YouTube Analytics returned a malformed row")
+            values = dict(zip(headers, row, strict=False))
+            metrics = {name: _analytics_metric(values.get(name), name) for name in ANALYTICS_METRICS}
+            available = sum(metric.availability is MetricAvailability.AVAILABLE for metric in metrics.values())
+            return AnalyticsSnapshotData(video_id=remote_video_id, channel_id=channel_id, report_start=report_start, report_end=report_end, observed_at=datetime.now(UTC), metrics=metrics, completeness="complete" if available == len(metrics) else "partial")
+        except ProviderValidationError: raise
+        except Exception as error: raise _classify_google_error(error) from error
+
+    def _analytics_client(self) -> Any:
+        if self._analytics_service is not None: return self._analytics_service
+        if self.config.client_secret_path is None or self.config.token_storage_path is None:
+            raise ProviderAuthenticationError("YouTube OAuth paths are not configured")
+        try:
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+        except ImportError as error:
+            raise ProviderValidationError("install TubeForge Google publishing dependencies") from error
+        token = Path(self.config.token_storage_path)
+        if not token.is_file(): raise ProviderAuthenticationError("YouTube token is missing; run explicit interactive authorization before headless analytics")
+        try: credentials = Credentials.from_authorized_user_file(str(token), SCOPES + ANALYTICS_SCOPES)
+        except Exception as error: raise ProviderAuthenticationError("YouTube token is invalid") from error
+        if not credentials.valid: raise ProviderAuthenticationError("YouTube token is invalid or expired; restore required analytics scopes explicitly")
+        if hasattr(credentials, "has_scopes") and not credentials.has_scopes(ANALYTICS_SCOPES):
+            raise ProviderAuthenticationError("YouTube token lacks the required YouTube Analytics read-only scope")
+        self._analytics_service = (self._build_analytics_service or build)("youtubeAnalytics", "v2", credentials=credentials, cache_discovery=False)
+        return self._analytics_service
+
 
 def _classify_google_error(error: Exception, *, ambiguous: bool = False) -> Exception:
     status = getattr(getattr(error, "resp", None), "status", None)
@@ -92,3 +133,14 @@ def _classify_google_error(error: Exception, *, ambiguous: bool = False) -> Exce
     if status in {403, 404, 400}: return ProviderValidationError("YouTube rejected the publication request")
     if status in {408, 429, 500, 502, 503, 504}: return RetryableProviderError("YouTube temporary failure")
     return AmbiguousProviderError("YouTube upload result is unknown; reconcile before any new upload") if ambiguous else RetryableProviderError("YouTube request failed")
+
+
+def _analytics_metric(value: object, name: str) -> AnalyticsMetric:
+    if value is None: return AnalyticsMetric(availability=MetricAvailability.UNAVAILABLE)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return AnalyticsMetric(availability=MetricAvailability.UNAVAILABLE)
+    if name in {"views", "impressions", "likes", "comments", "subscribersGained", "subscribersLost"}:
+        return AnalyticsMetric(value=int(number))
+    return AnalyticsMetric(value=number)

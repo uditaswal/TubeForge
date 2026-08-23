@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
@@ -15,13 +16,14 @@ from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, Public
 from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RemoteResourceMissingError, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
 from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobRepository, PipelineJob, PublicationRepository
-from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, VideoMetadata, VoiceRequest
+from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, ContentRequest, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, SourceReference, VideoMetadata, VoiceRequest
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, scene_request, select_candidate
 from tubeforge.pipeline.captions import render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
+from tubeforge.pipeline.sources import SourceIngestor, source_packet
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
 from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline
 
@@ -34,10 +36,17 @@ class PipelineCancellation(RuntimeError):
     """Internal signal raised between costly phrase boundaries."""
 
 
+class PipelineOwnershipLost(PipelineCancellation):
+    """The worker no longer owns this job, so it must not promote work."""
+
+
+_ownership_check: ContextVar[Callable[..., bool] | None] = ContextVar("tubeforge_ownership_check", default=None)
+
+
 class PipelineOrchestrator:
     """Run one job synchronously, committing only short persistence operations."""
 
-    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None, youtube_config: YouTubePublishingConfig | None = None, verification_config: PublicationVerificationConfig | None = None) -> None:
+    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None, youtube_config: YouTubePublishingConfig | None = None, verification_config: PublicationVerificationConfig | None = None, source_ingestor: SourceIngestor | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.content, self.media, self.voice, self.publisher = content, media, voice, publisher
         self.artifact_root, self.machine = artifact_root, PipelineStateMachine()
@@ -53,6 +62,7 @@ class PipelineOrchestrator:
         self.publications = PublicationRepository(artifacts._session_factory)
         self.asset_limits = asset_limits or AssetLimits(frozenset({"example.invalid", "upload.wikimedia.org", "commons.wikimedia.org"}), frozenset({"CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain"}))
         self.asset_acquirer = asset_acquirer or AssetAcquisitionService(AssetCacheRepository(artifacts._session_factory), AssetDownloader(artifact_root.parent / "cache" / "assets", self.asset_limits))
+        self.source_ingestor = source_ingestor
 
     @classmethod
     def from_settings(cls, settings: Settings, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, external_operations: ExternalOperationRepository | None = None) -> "PipelineOrchestrator":
@@ -64,15 +74,32 @@ class PipelineOrchestrator:
             final_config=settings.pipeline.final, publication_config=settings.pipeline.publication, youtube_config=settings.pipeline.youtube, verification_config=settings.pipeline.verification,
         )
 
-    def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None) -> PipelineJob:
+    def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None, ownership_check: Callable[..., bool] | None = None) -> PipelineJob:
+        """Run with an optional worker-owned execution guard."""
+        token = _ownership_check.set(ownership_check)
+        try:
+            def guarded_cancellation() -> bool:
+                return bool(cancellation_requested and cancellation_requested()) or bool(ownership_check and not ownership_check())
+
+            try:
+                return self._run(job_id, operator_resolved=operator_resolved, authentication_restored=authentication_restored, interrupt_after=interrupt_after, cancellation_requested=guarded_cancellation)
+            except PipelineOwnershipLost:
+                return self.jobs.get(job_id)
+        finally:
+            _ownership_check.reset(token)
+
+    def _run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None) -> PipelineJob:
         """Advance until an approval gate, terminal state, or classified failure."""
         while True:
+            self._ensure_ownership()
             job = self.jobs.get(job_id)
             if job.state in {JobState.CANCELLED, JobState.FAILED_EXHAUSTED, JobState.PUBLISHED} or (job.state is JobState.PUBLICATION_READY and not self.youtube_config.enabled):
                 return job
             if cancellation_requested is not None and cancellation_requested():
+                self._ensure_ownership(force=True)
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
-                return self.jobs.update_state(job.id, cancelled.state, cancelled.resume_state)
+                self._update_state(job.id, cancelled.state, cancelled.resume_state)
+                return self.jobs.get(job.id)
             if job.state in {JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED}:
                 target = job.resume_state
                 assert target is not None
@@ -80,13 +107,19 @@ class PipelineOrchestrator:
                 continue
             try:
                 self._run_stage(job, cancellation_requested)
+            except PipelineOwnershipLost:
+                return self.jobs.get(job.id)
             except (PipelineCancellation, ProviderCancellation, AssetAcquisitionCancelled, PreviewRenderCancelled):
+                self._ensure_ownership(force=True)
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
-                return self.jobs.update_state(job.id, cancelled.state, cancelled.resume_state)
+                self._update_state(job.id, cancelled.state, cancelled.resume_state)
+                return self.jobs.get(job.id)
             except (RetryableProviderError, ProviderValidationError, ProviderAuthenticationError, ValidationError) as error:
+                self._ensure_ownership(force=True)
                 failure = JobState.AUTH_REQUIRED if isinstance(error, ProviderAuthenticationError) else JobState.FAILED_VALIDATION if isinstance(error, (ProviderValidationError, ValidationError)) else JobState.FAILED_RETRYABLE
                 failed = self.machine.transition(PipelineSnapshot(job.state), failure)
-                return self.jobs.update_state(job.id, failed.state, failed.resume_state, str(error))
+                self._update_state(job.id, failed.state, failed.resume_state, str(error))
+                return self.jobs.get(job.id)
             job = self.jobs.get(job_id)
             if interrupt_after is job.state:
                 raise PipelineInterrupted(f"interrupted after {job.state.value}")
@@ -99,13 +132,18 @@ class PipelineOrchestrator:
         if job.state is JobState.CONTENT_GENERATING:
             package = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
             if package is None:
-                package = self.content.generate_package(job.request).model_dump(mode="json")
+                package = self.content.generate_package(self._effective_content_request(job)).model_dump(mode="json")
                 self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "content_package", package)
             self._transition(job, JobState.CONTENT_READY); return
         if job.state is JobState.CONTENT_READY:
             self._transition(job, JobState.SCRIPT_APPROVAL_REQUIRED); return
         if job.state is JobState.SCRIPT_APPROVAL_REQUIRED:
-            approval = self.approvals.approved(job.id, ApprovalGate.SCRIPT)
+            package = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
+            # New revisions require approval of these exact bytes.  The fallback
+            # preserves pre-revision jobs created before identities were added.
+            approval = self.approvals.approved(job.id, ApprovalGate.SCRIPT, reviewed_identity=package.checksum_sha256)
+            if approval is None:
+                approval = self.approvals.approved(job.id, ApprovalGate.SCRIPT)
             if approval is None: return
             self._transition(job, JobState.ASSET_ACQUISITION, approvals=frozenset({ApprovalGate.SCRIPT})); return
         if job.state is JobState.ASSET_ACQUISITION:
@@ -235,6 +273,7 @@ class PipelineOrchestrator:
 
     def _publish_checkpoint(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None) -> None:
         """M13's only mutating boundary; each remote step follows a durable update."""
+        self._ensure_ownership(force=True)
         package = self._required_json(job.id, JobState.PUBLICATION_PREPARING, "publication_package")
         config = self.youtube_config
         if not config.enabled or config.dry_run: return
@@ -256,10 +295,13 @@ class PipelineOrchestrator:
         if record.remote_video_id is None:
             if provider.authenticated_channel_id() != channel:
                 raise ProviderAuthenticationError("authenticated YouTube channel changed before upload")
+            self._ensure_ownership(force=True)
             try: remote_id = provider.create_or_resume_video(request, cancellation_requested=cancellation_requested)
             except AmbiguousProviderError as error:
+                self._ensure_ownership(force=True)
                 self.publications.update(identity, state="creation_ambiguous", error_message="remote creation outcome unknown")
                 raise ProviderValidationError("upload outcome is ambiguous; no automatic retry will create another video") from error
+            self._ensure_ownership(force=True)
             record = self.publications.update(identity, remote_video_id=remote_id, state="remote_created")
         else:
             remote = provider.fetch_video(str(record.remote_video_id))
@@ -270,12 +312,18 @@ class PipelineOrchestrator:
         if not record.metadata_applied:
             if provider.authenticated_channel_id() != channel:
                 raise ProviderAuthenticationError("authenticated YouTube channel changed before metadata update")
-            provider.apply_metadata(str(record.remote_video_id), request); record = self.publications.update(identity, metadata_applied=True, state="metadata_applied")
+            self._ensure_ownership(force=True)
+            provider.apply_metadata(str(record.remote_video_id), request)
+            self._ensure_ownership(force=True)
+            record = self.publications.update(identity, metadata_applied=True, state="metadata_applied")
         if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before YouTube thumbnail update")
         if not record.thumbnail_applied:
             if provider.authenticated_channel_id() != channel:
                 raise ProviderAuthenticationError("authenticated YouTube channel changed before thumbnail update")
-            provider.set_thumbnail(str(record.remote_video_id), str(package["thumbnail"]["path"])); record = self.publications.update(identity, thumbnail_applied=True, state="thumbnail_applied")
+            self._ensure_ownership(force=True)
+            provider.set_thumbnail(str(record.remote_video_id), str(package["thumbnail"]["path"]))
+            self._ensure_ownership(force=True)
+            record = self.publications.update(identity, thumbnail_applied=True, state="thumbnail_applied")
         # Upload mutations are complete. M14 performs the first read-only health check separately.
         self.publications.update(identity, state="verification_pending")
         self._transition(job, JobState.PUBLISHING, approvals=frozenset({ApprovalGate.PUBLISH})) if job.state is JobState.PUBLICATION_READY else None
@@ -299,6 +347,7 @@ class PipelineOrchestrator:
         if cancellation_requested and cancellation_requested():
             raise PipelineCancellation("cancelled after publication reconciliation")
         health, drift, message = self._publication_health(package, record.created_at, snapshot)
+        self._ensure_ownership(force=True)
         self.publications.observe(identity, health, snapshot.model_dump(mode="json"), drift)
         self.publications.update(identity, state=health, error_message=message)
         if health == "healthy":
@@ -389,10 +438,12 @@ class PipelineOrchestrator:
             renderer.validate(Path(existing.path), segments[-1].end_seconds)
             return existing, str(manifest["render_identity"])
         output = self._artifact_path(job.id, filename)
+        self._ensure_ownership(force=True)
         result = renderer.render(segments, Path(narration.path), Path(captions.path), output, cancellation_requested=cancellation_requested)
+        self._ensure_ownership(force=True)
         identity = hashlib.sha256(json.dumps({"source_render_identity": source_render_identity, "artifact_checksum": result["checksum_sha256"], "render_instance": uuid.uuid4().hex}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         provenance = {"render_identity": identity, "source_render_identity": source_render_identity, "renderer_template_version": renderer.template_version, "input_identity": input_identity, "inputs": inputs, "probe": result["metadata"], "validation": result["metadata"], "command": result["command"], "approval_identity": approval_identity, "approval_id": approval_id}
-        artifact = self.artifacts.save(Artifact(job.id, stage, name, str(output), str(result["checksum_sha256"]), provenance))
+        artifact = self._save_artifact(Artifact(job.id, stage, name, str(output), str(result["checksum_sha256"]), provenance))
         self._replace_json(job.id, stage, f"{name}_manifest", {**provenance, "artifact_checksum": artifact.checksum_sha256})
         return artifact, identity
 
@@ -443,7 +494,26 @@ class PipelineOrchestrator:
 
     def _transition(self, job: PipelineJob, target: JobState, **kwargs: object) -> None:
         snapshot = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), target, **kwargs)
-        self.jobs.update_state(job.id, snapshot.state, snapshot.resume_state)
+        self._update_state(job.id, snapshot.state, snapshot.resume_state)
+
+    def _ensure_ownership(self, *, force: bool = False) -> None:
+        check = _ownership_check.get()
+        if check is not None and not check(force=force):
+            raise PipelineOwnershipLost("worker lease ownership was lost")
+
+    def _update_state(self, job_id: str, state: JobState, resume_state: JobState | None = None, failure_message: str | None = None) -> None:
+        self._ensure_ownership(force=True)
+        check = _ownership_check.get()
+        if check is None:
+            self.jobs.update_state(job_id, state, resume_state, failure_message)
+            return
+        worker_id, clock = self._ownership_context(check)
+        if worker_id is None:
+            raise PipelineOwnershipLost("worker ownership callback does not identify its owner")
+        now = clock()
+        result = self.jobs.update_state_if_claimed(job_id, worker_id, now=now, state=state, resume_state=resume_state, failure_message=failure_message)
+        if result is None:
+            raise PipelineOwnershipLost("worker lease ownership was lost before state transition")
 
     def _artifact_path(self, job_id: str, filename: str) -> Path:
         return self.artifact_root / job_id / filename
@@ -453,9 +523,10 @@ class PipelineOrchestrator:
         encoded = contents.encode()
         if existing and Path(existing.path).read_bytes() == encoded:
             return existing
+        self._ensure_ownership(force=True)
         path = self._artifact_path(job_id, filename)
         self._atomic_write(path, encoded)
-        return self.artifacts.save(Artifact(job_id, stage, name, str(path), self._checksum(path), {"generator": "deterministic"}))
+        return self._save_artifact(Artifact(job_id, stage, name, str(path), self._checksum(path), {"generator": "deterministic"}))
 
     def _checkpoint_json(self, job_id: str, stage: JobState, name: str, value: object) -> Artifact:
         return self._checkpoint_generated(job_id, stage, name, f"{name}.json", json.dumps(value, sort_keys=True))
@@ -463,14 +534,76 @@ class PipelineOrchestrator:
     def _replace_json(self, job_id: str, stage: JobState, name: str, value: object) -> Artifact:
         path = self._artifact_path(job_id, f"{name}.json")
         contents = json.dumps(value, sort_keys=True).encode()
+        self._ensure_ownership(force=True)
         if not path.is_file() or path.read_bytes() != contents:
             self._atomic_write(path, contents)
-        return self.artifacts.save(Artifact(job_id, stage, name, str(path), self._checksum(path), {"generator": "deterministic"}))
+        return self._save_artifact(Artifact(job_id, stage, name, str(path), self._checksum(path), {"generator": "deterministic"}))
 
     def _save_file(self, job_id: str, stage: JobState, name: str, path: Path, provenance: dict[str, object]) -> Artifact:
         if not path.is_file() or path.stat().st_size == 0:
             raise ProviderValidationError(f"generated artifact missing or empty: {name}")
-        return self.artifacts.save(Artifact(job_id, stage, name, str(path), self._checksum(path), provenance))
+        self._ensure_ownership(force=True)
+        return self._save_artifact(Artifact(job_id, stage, name, str(path), self._checksum(path), provenance))
+
+    def _save_artifact(self, artifact: Artifact) -> Artifact:
+        self._ensure_ownership(force=True)
+        check = _ownership_check.get()
+        if check is None:
+            return self.artifacts.save(artifact)
+        worker_id, clock = self._ownership_context(check)
+        now = clock()
+        if worker_id is None:
+            raise PipelineOwnershipLost("worker ownership callback does not identify its owner")
+        saved = self.artifacts.save_if_claimed(artifact, worker_id, now=now)
+        if saved is None:
+            raise PipelineOwnershipLost("worker lease ownership was lost before checkpoint promotion")
+        return saved
+
+    @staticmethod
+    def _ownership_context(check: Callable[..., bool]) -> tuple[str | None, Callable[[], datetime]]:
+        """Read ownership metadata from either a callback or its bound object."""
+        owner = getattr(check, "__self__", None)
+        worker_id = getattr(check, "worker_id", None) or getattr(owner, "worker_id", None)
+        clock = getattr(check, "clock", None) or getattr(owner, "clock", None) or (lambda: datetime.now(UTC))
+        return worker_id, clock
+
+    def _effective_content_request(self, job: PipelineJob) -> ContentRequest:
+        """Checkpoint the exact, provenance-bearing request used for generation.
+
+        Offline/fake runs retain operator-supplied metadata without network I/O.
+        When source ingestion is enabled, immutable bounded snapshots replace
+        those references before the content adapter receives the request.
+        """
+        existing = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "effective_content_request")
+        if existing is not None:
+            return ContentRequest.model_validate(existing)
+
+        packet = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "source_packet")
+        if packet is None:
+            if self.source_ingestor is None:
+                packet = {
+                    "schema_version": "1.0",
+                    "retrieval_mode": "operator_supplied",
+                    "sources": [source.model_dump(mode="json") for source in job.request.sources],
+                }
+            else:
+                snapshots = tuple(self.source_ingestor.ingest(source) for source in job.request.sources)
+                packet = {"retrieval_mode": "fetched", **source_packet(snapshots)}
+            self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "source_packet", packet)
+
+        sources = packet.get("sources")
+        if not isinstance(sources, list) or not sources:
+            raise ProviderValidationError("source packet contains no usable sources")
+        allowed = set(SourceReference.model_fields)
+        references = tuple(
+            SourceReference.model_validate({key: value for key, value in item.items() if key in allowed})
+            for item in sources if isinstance(item, dict)
+        )
+        if not references:
+            raise ProviderValidationError("source packet contains no valid source references")
+        request = job.request.model_copy(update={"sources": references})
+        self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "effective_content_request", request.model_dump(mode="json"))
+        return request
 
     def _load_json_artifact(self, job_id: str, stage: JobState, name: str) -> dict[str, object] | None:
         artifact = self._valid_artifact(job_id, stage, name)
@@ -524,6 +657,7 @@ class PipelineOrchestrator:
 
     def _upload_once(self, job: PipelineJob, operation: str, path: str, privacy: PublishPrivacy, approval_id: str | None = None):
         """Use a durable key/receipt so recovery never starts a second upload."""
+        self._ensure_ownership(force=True)
         key = f"{job.id}:{operation}"
         if self.external_operations is not None:
             receipt = self.external_operations.receipt(key)
@@ -532,7 +666,9 @@ class PipelineOrchestrator:
                 return PublishResult.model_validate(receipt)
             if not self.external_operations.reserve(job.id, operation, key):
                 raise ProviderValidationError(f"external operation pending reconciliation: {operation}")
+        self._ensure_ownership(force=True)
         result = self.publisher.upload(PublishRequest(platform="youtube", artifact_path=path, metadata=self._metadata(job), privacy=privacy, idempotency_key=key, public_publish_approval_id=approval_id))
+        self._ensure_ownership(force=True)
         if self.external_operations is not None:
             self.external_operations.complete(key, result.model_dump(mode="json"))
         return result

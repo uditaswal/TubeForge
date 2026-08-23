@@ -1,0 +1,40 @@
+services:
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    environment:
+      TUBEFORGE_CONFIG: /app/config/production.yaml
+    restart: "no"
+
+  web:
+    build: .
+    command: ["uvicorn", "tubeforge.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    environment:
+      TUBEFORGE_CONFIG: /app/config/production.yaml
+    restart: unless-stopped
+    mem_limit: 512m
+
+  worker:
+    build: .
+    command: ["python", "-m", "tubeforge.workers.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    environment:
+      TUBEFORGE_CONFIG: /app/config/production.yaml
+    restart: unless-stopped
+    mem_limit: 3g

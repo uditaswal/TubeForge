@@ -7,7 +7,8 @@ database:
   url: "sqlite:///./data/tubeforge.db"
   busy_timeout_ms: 5000
 pipeline:
-  provider: "fake"
+  content_provider: "fake"
+  voice_provider: "fake"
   fake:
     enabled: true
     artifact_root: "./data/fake-artifacts"
@@ -96,6 +97,31 @@ pipeline:
     enabled: true
     pending_poll_seconds: 300
     maximum_processing_wait_seconds: 86400
+  analytics:
+    enabled: true
+    initial_delay_hours: 24
+    collection_interval_hours: 24
+    collection_horizon_days: 30
+    query_version: "m15-v1"
+  performance:
+    evaluator_version: "m16-v1"
+    proposal_version: "m16-proposal-v1"
+    min_views_for_retention: 100
+    min_impressions_for_ctr: 500
+    baseline_min_videos: 5
+  optimization:
+    candidates:
+      enabled: true
+      max_title_candidates: 3
+      max_thumbnail_candidates: 2
+      template_version: "m17-v1"
+    execution:
+      enabled: false
+      dry_run: true
+      executor_version: "m18-v1"
+    experiment:
+      minimum_observation_hours: 24
+      evaluation_window_days: 7
   media:
     provider: "fake"
     cache_root: "./data/cache/assets"
@@ -113,10 +139,17 @@ pipeline:
     allowed_extensions: [".png", ".mp4", ".webm"]
     retries: 3
     wikimedia_api_url: "https://commons.wikimedia.org/w/api.php"
+  sources:
+    enabled: false
+    allowed_hosts: []
+    timeout_seconds: 20
+    max_bytes: 2000000
+    max_chars: 24000
 
 worker:
   max_active_jobs: 1
   lease_seconds: 300
+  heartbeat_seconds: 60
   max_attempts: 3
   retry_base_seconds: 30
   retry_max_seconds: 900

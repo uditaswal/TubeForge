@@ -90,6 +90,7 @@ class ApprovalGate(StrEnum):
     PUBLICATION_PREPARATION = "publication_preparation"
     PUBLISH = "publish"
     PUBLIC_PUBLISH = "public_publish"
+    OPTIMIZATION = "optimization"
 
 
 class ApprovalStatus(StrEnum):

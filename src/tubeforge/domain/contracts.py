@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
@@ -34,6 +34,8 @@ class SourceReference(DomainModel):
     title: str = Field(min_length=1, max_length=500)
     author: str | None = Field(default=None, max_length=300)
     retrieved_at: datetime | None = None
+    content_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    excerpt: str | None = Field(default=None, max_length=24_000)
 
 
 class ContentRequest(DomainModel):
@@ -280,6 +282,45 @@ class RemotePublicationSnapshot(DomainModel):
     tags: tuple[str, ...] | None = Field(default=None, max_length=100)
     # Data API exposes generated thumbnail URLs, not proof of exact uploaded bytes.
     thumbnail_present: bool | None = None
+
+
+class MetricAvailability(StrEnum):
+    """Meaning of an analytics metric; missing data is never silently zero."""
+
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    NOT_YET_REPORTED = "not_yet_reported"
+    UNSUPPORTED = "unsupported"
+    ERROR = "error"
+
+
+class AnalyticsMetric(DomainModel):
+    """A normalized metric value. Percentage values use 0--100 semantics."""
+
+    value: float | int | None = None
+    availability: MetricAvailability = MetricAvailability.AVAILABLE
+
+    @model_validator(mode="after")
+    def require_value_when_available(self) -> "AnalyticsMetric":
+        if self.availability is MetricAvailability.AVAILABLE and self.value is None:
+            raise ValueError("available metrics require a value")
+        if self.availability is not MetricAvailability.AVAILABLE and self.value is not None:
+            raise ValueError("unavailable metrics must not contain a value")
+        return self
+
+
+class AnalyticsSnapshotData(DomainModel):
+    """Read-only, provider-neutral analytics response for one video/report window."""
+
+    video_id: str = Field(min_length=1, max_length=500)
+    channel_id: str = Field(min_length=1, max_length=200)
+    report_start: date
+    report_end: date
+    observed_at: datetime
+    metrics: dict[str, AnalyticsMetric]
+    completeness: str = Field(default="complete", pattern=r"^(complete|partial|unavailable)$")
+    source: str = Field(default="youtube-analytics", min_length=1, max_length=100)
+    query_version: str = Field(default="1", min_length=1, max_length=100)
 
 
 def _require_unique_ids(items: tuple[object, ...], field_name: str) -> None:
