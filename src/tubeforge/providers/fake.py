@@ -9,6 +9,8 @@ import wave
 import zlib
 from datetime import UTC, datetime
 from pathlib import Path
+import math
+import re
 
 from tubeforge.core.config import FakeProviderConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RetryableProviderError
@@ -26,7 +28,7 @@ class FakeContentProvider:
         self.calls += 1
         if self.failure:
             raise self.failure
-        return ContentPackage(schema_version="1.0", request=request, claims=(CitedClaim(claim_id="claim-1", text=f"{request.topic} is explained using the supplied source.", source_ids=(request.sources[0].source_id,), confidence=ConfidenceLevel.HIGH, review_status=ClaimReviewStatus.VERIFIED, human_review_required=False),), script_sections=(ScriptSection(section_id="section-1", narration=f"{request.topic}: {request.angle}", scene_id="scene-1", claim_ids=("claim-1",), contains_factual_claims=True),), scene_plans=(ScenePlan(scene_id="scene-1", visual_type="illustration", search_queries=(request.topic,), fallback_visual="text_card"),), metadata=VideoMetadata(title_options=(request.topic,), description=request.angle), thumbnail_brief=ThumbnailBrief(text_options=(request.topic[:40],), visual_direction="Simple educational illustration", accessibility_description="Educational illustration"))
+        return ContentPackage(schema_version="1.0", request=request, claims=(CitedClaim(claim_id="claim-1", text=f"{request.topic} is explained using the supplied source.", source_ids=(request.sources[0].source_id,), confidence=ConfidenceLevel.HIGH, review_status=ClaimReviewStatus.VERIFIED, human_review_required=False),), script_sections=(ScriptSection(section_id="section-1", narration=_fake_narration(request), scene_id="scene-1", claim_ids=("claim-1",), contains_factual_claims=True),), scene_plans=(ScenePlan(scene_id="scene-1", visual_type="illustration", search_queries=(request.topic,), fallback_visual="text_card"),), metadata=VideoMetadata(title_options=(request.topic,), description=request.angle), thumbnail_brief=ThumbnailBrief(text_options=(request.topic[:40],), visual_direction="Simple educational illustration", accessibility_description="Educational illustration"))
 
 
 class FakeVoiceProvider:
@@ -39,8 +41,10 @@ class FakeVoiceProvider:
         self.calls += 1
         if self.failure:
             raise self.failure
-        # A tiny valid PCM WAV keeps offline tests realistic without a native TTS.
-        frames = max(800, len(request.text.encode("utf-8")) * 80)
+        # Match a conservative narration rate so fake E2E videos exercise the
+        # requested duration contract rather than rendering a sub-second clip.
+        words = max(1, len(re.findall(r"\b\w+\b", request.text)))
+        frames = max(800, round(words / _FAKE_WORDS_PER_SECOND * 8_000))
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as stream:
             stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(8_000)
@@ -133,6 +137,17 @@ def _atomic_write(destination: Path, payload: bytes) -> None:
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     temporary.write_bytes(payload)
     temporary.replace(destination)
+
+
+_FAKE_WORDS_PER_SECOND = 2.4
+
+
+def _fake_narration(request: ContentRequest) -> str:
+    """Generate bounded deterministic narration at the fake voice's speech rate."""
+    target_words = math.ceil(request.target_duration_seconds * _FAKE_WORDS_PER_SECOND)
+    seed = ["This", "offline", "demonstration", "explains", *request.topic.split(), "for", request.audience, "viewers"]
+    words = (seed + ["context"] * target_words)[:target_words]
+    return " ".join(words) + "."
 
 
 def _checksum(payload: bytes) -> str:

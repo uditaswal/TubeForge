@@ -209,8 +209,11 @@ class PipelineOrchestrator:
             expected_duration = sum(durations) + self.voice_config.pause_seconds * (len(durations) - 1)
             if abs(final_duration - expected_duration) > self.voice_config.duration_tolerance_seconds:
                 raise ProviderValidationError("assembled narration duration exceeds configured tolerance")
+            target_tolerance = max(self.voice_config.duration_tolerance_seconds, job.request.target_duration_seconds * self.voice_config.target_duration_tolerance_ratio)
+            if abs(final_duration - job.request.target_duration_seconds) > target_tolerance:
+                raise ProviderValidationError("narration duration is outside the requested target tolerance")
             cues = timed_phrases(phrases, durations, self.voice_config.pause_seconds)
-            self._replace_json(job.id, JobState.VOICE_GENERATION, "timing_map", {"final_duration_seconds": final_duration, "expected_duration_seconds": expected_duration, "phrases": [{"phrase_id": cue.phrase.phrase_id, "section_id": cue.phrase.section_id, "start_seconds": cue.start_seconds, "end_seconds": cue.end_seconds, "duration_seconds": cue.end_seconds - cue.start_seconds} for cue in cues]})
+            self._replace_json(job.id, JobState.VOICE_GENERATION, "timing_map", {"final_duration_seconds": final_duration, "expected_duration_seconds": expected_duration, "target_duration_seconds": job.request.target_duration_seconds, "target_duration_tolerance_seconds": target_tolerance, "phrases": [{"phrase_id": cue.phrase.phrase_id, "section_id": cue.phrase.section_id, "start_seconds": cue.start_seconds, "end_seconds": cue.end_seconds, "duration_seconds": cue.end_seconds - cue.start_seconds} for cue in cues]})
             self._transition(job, JobState.CAPTION_GENERATION); return
         if job.state is JobState.CAPTION_GENERATION:
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))

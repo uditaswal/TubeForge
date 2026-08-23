@@ -94,8 +94,10 @@ def test_fake_job_creates_a_playable_preview_and_final(tmp_path: Path) -> None:
         timing = runtime.artifacts.get(job.id, JobState.VOICE_GENERATION, "timing_map")
         assert timing is not None
         expected = json.loads(Path(timing.path).read_text(encoding="utf-8"))["final_duration_seconds"]
+        assert abs(expected - request.target_duration_seconds) <= request.target_duration_seconds * 0.20
         metadata = runtime.orchestrator.final_renderer.validate(Path(final.path), expected)
         assert metadata["width"] == 320 and metadata["height"] == 180
         assert metadata["audio_codec"] == "aac"
+        assert abs(metadata["duration_seconds"] - request.target_duration_seconds) <= request.target_duration_seconds * 0.20
     finally:
         runtime.database.dispose()
