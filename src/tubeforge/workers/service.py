@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
+import logging
 from typing import Callable
 
 from tubeforge.core.config import WorkerConfig
 from tubeforge.db.repositories import HeavyWorkLeaseRepository, JobRepository, PipelineJob
 from tubeforge.domain.states import JobState
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
+
+
+logger = logging.getLogger(__name__)
+
+
+def _event(event: str, **fields: object) -> None:
+    """Emit one JSON log line so Docker can consume worker lifecycle events."""
+    logger.info(json.dumps({"event": event, **fields}, sort_keys=True, default=str))
 
 
 class WorkerService:
@@ -25,9 +35,11 @@ class WorkerService:
         job = self.jobs.claim_oldest_eligible(self.worker_id, now=now, lease_seconds=self.config.lease_seconds)
         if job is None:
             return None
+        _event("job_claimed", job_id=job.id, worker_id=self.worker_id, state=job.state.value)
         guard = _ExecutionLease(self.worker_id, job.id, self.jobs, self.heavy_work, self.config, self._now)
         if not guard.acquire():
             self.jobs.release_claim(job.id, self.worker_id)
+            _event("job_claim_released", job_id=job.id, worker_id=self.worker_id, reason="heavy_work_unavailable")
             return None
         try:
             result = self.orchestrator.run(
@@ -41,6 +53,12 @@ class WorkerService:
                 return self._schedule_retry(result)
             if result.state is JobState.PUBLICATION_VERIFICATION_PENDING:
                 return self.jobs.defer_verification(result.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=self.orchestrator.verification_config.pending_poll_seconds))
+            if result.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.PUBLICATION_APPROVAL_REQUIRED}:
+                _event("waiting_for_approval", job_id=result.id, state=result.state.value)
+            elif result.failure_message:
+                _event("job_error", job_id=result.id, state=result.state.value, error=result.failure_message)
+            else:
+                _event("job_finished", job_id=result.id, state=result.state.value)
             return result
         except PipelineInterrupted:
             # Simulates process death: leave the lease so another worker can recover it.
@@ -55,7 +73,9 @@ class WorkerService:
         attempt = job.attempt_count + 1
         exhausted = attempt >= self.config.max_attempts
         delay = min(self.config.retry_base_seconds * (2 ** (attempt - 1)), self.config.retry_max_seconds)
-        return self.jobs.schedule_retry(job.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=delay), exhausted=exhausted)
+        result = self.jobs.schedule_retry(job.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=delay), exhausted=exhausted)
+        _event("job_retry_scheduled", job_id=job.id, attempt=attempt, delay_seconds=delay, exhausted=exhausted)
+        return result
 
     def _now(self) -> datetime:
         value = self._clock()

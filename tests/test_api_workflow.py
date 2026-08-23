@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from tubeforge.api.app import create_app
 from tubeforge.core.config import AppConfig, DatabaseConfig, Settings
+from tubeforge.db.repositories import Artifact
+from tubeforge.domain.states import JobState
 
 
 def _migrate(path: Path) -> None:
@@ -47,4 +49,10 @@ def test_private_job_api_creates_and_records_an_approval(tmp_path: Path) -> None
             json={"status": "approved", "actor": "test-operator"},
         )
         assert approval.status_code == 200
+        preview = tmp_path / "preview.mp4"
+        preview.write_bytes(b"synthetic-preview")
+        runtime = client.app.state.runtime
+        runtime.artifacts.save(Artifact(job_id, JobState.PREVIEW_RENDERING, "preview", str(preview), "a" * 64, {}))
+        assert client.get(f"/api/jobs/{job_id}/artifacts/preview").content == b"synthetic-preview"
+        assert client.get(f"/api/jobs/{job_id}/artifacts/preview.mp4").content == b"synthetic-preview"
         assert client.get("/api/jobs/missing").status_code == 404

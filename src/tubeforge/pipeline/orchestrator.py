@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -41,6 +42,12 @@ class PipelineOwnershipLost(PipelineCancellation):
 
 
 _ownership_check: ContextVar[Callable[..., bool] | None] = ContextVar("tubeforge_ownership_check", default=None)
+logger = logging.getLogger(__name__)
+
+
+def _event(event: str, **fields: object) -> None:
+    """Emit compact structured lifecycle events for the Compose worker logs."""
+    logger.info(json.dumps({"event": event, **fields}, sort_keys=True, default=str))
 
 
 class PipelineOrchestrator:
@@ -439,12 +446,14 @@ class PipelineOrchestrator:
             return existing, str(manifest["render_identity"])
         output = self._artifact_path(job.id, filename)
         self._ensure_ownership(force=True)
+        _event("render_started", job_id=job.id, render=name, output=str(output))
         result = renderer.render(segments, Path(narration.path), Path(captions.path), output, cancellation_requested=cancellation_requested)
         self._ensure_ownership(force=True)
         identity = hashlib.sha256(json.dumps({"source_render_identity": source_render_identity, "artifact_checksum": result["checksum_sha256"], "render_instance": uuid.uuid4().hex}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         provenance = {"render_identity": identity, "source_render_identity": source_render_identity, "renderer_template_version": renderer.template_version, "input_identity": input_identity, "inputs": inputs, "probe": result["metadata"], "validation": result["metadata"], "command": result["command"], "approval_identity": approval_identity, "approval_id": approval_id}
         artifact = self._save_artifact(Artifact(job.id, stage, name, str(output), str(result["checksum_sha256"]), provenance))
         self._replace_json(job.id, stage, f"{name}_manifest", {**provenance, "artifact_checksum": artifact.checksum_sha256})
+        _event("render_completed", job_id=job.id, render=name, output=str(output), checksum_sha256=artifact.checksum_sha256)
         return artifact, identity
 
     def _render_inputs(self, job: PipelineJob, renderer: PreviewRenderer) -> tuple[tuple, Artifact, Artifact, str, dict[str, object]]:
@@ -506,6 +515,7 @@ class PipelineOrchestrator:
         check = _ownership_check.get()
         if check is None:
             self.jobs.update_state(job_id, state, resume_state, failure_message)
+            _event("state_transition", job_id=job_id, state=state.value, resume_state=resume_state.value if resume_state else None)
             return
         worker_id, clock = self._ownership_context(check)
         if worker_id is None:
@@ -514,6 +524,7 @@ class PipelineOrchestrator:
         result = self.jobs.update_state_if_claimed(job_id, worker_id, now=now, state=state, resume_state=resume_state, failure_message=failure_message)
         if result is None:
             raise PipelineOwnershipLost("worker lease ownership was lost before state transition")
+        _event("state_transition", job_id=job_id, state=state.value, resume_state=resume_state.value if resume_state else None)
 
     def _artifact_path(self, job_id: str, filename: str) -> Path:
         return self.artifact_root / job_id / filename

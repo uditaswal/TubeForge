@@ -130,12 +130,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/jobs/{job_id}/artifacts/{name}", tags=["artifacts"])
     def get_artifact(job_id: str, name: str) -> FileResponse:
-        """Serve only a registered artifact, never a caller-supplied path."""
+        """Serve a registered logical artifact name or its exact file name."""
         artifact = next(
             (
                 item
-                for stage in JobState
-                if (item := runtime.artifacts.get(job_id, stage, name)) is not None
+                for item in runtime.artifacts.list_for_job(job_id)
+                if item.name == name or Path(item.path).name == name
             ),
             None,
         )

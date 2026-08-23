@@ -37,4 +37,4 @@ services:
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
     restart: unless-stopped
-    mem_limit: 3g
+    mem_limit: 1g
