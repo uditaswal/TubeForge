@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 COPY pyproject.toml readme.md ./
 COPY src ./src
 COPY migrations ./migrations
+COPY tests ./tests
 COPY alembic.ini ./
-RUN python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir ".[dev]"
 
 USER tubeforge
 EXPOSE 8080

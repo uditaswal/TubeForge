@@ -1,8 +1,0 @@
-app:
-  name: Test TubeForge
-  environment: test
-  bind_host: 127.0.0.1
-  port: 9090
-database:
-  url: sqlite:///./test.db
-  busy_timeout_ms: 1234

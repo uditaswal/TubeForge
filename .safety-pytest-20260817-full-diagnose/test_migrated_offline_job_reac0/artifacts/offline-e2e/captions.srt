@@ -1,3 +1,0 @@
-1
-00:00:00,000 --> 00:00:00,350
-Rain: A 30-second offline explainer

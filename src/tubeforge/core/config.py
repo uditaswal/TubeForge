@@ -321,7 +321,7 @@ class PipelineConfig(BaseModel):
     # ``provider`` is retained only to read older configuration files. New
     # deployments select the independent content and voice adapters below.
     provider: str | None = Field(default=None, pattern=r"^(fake|codex|piper)$")
-    content_provider: str = Field(default="fake", pattern=r"^(fake|codex)$")
+    content_provider: str = Field(default="fake", pattern=r"^(fake|fixed|codex)$")
     voice_provider: str = Field(default="fake", pattern=r"^(fake|piper)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
