@@ -31,6 +31,29 @@ class FakeContentProvider:
         return ContentPackage(schema_version="1.0", request=request, claims=(CitedClaim(claim_id="claim-1", text=f"{request.topic} is explained using the supplied source.", source_ids=(request.sources[0].source_id,), confidence=ConfidenceLevel.HIGH, review_status=ClaimReviewStatus.VERIFIED, human_review_required=False),), script_sections=(ScriptSection(section_id="section-1", narration=_fake_narration(request), scene_id="scene-1", claim_ids=("claim-1",), contains_factual_claims=True),), scene_plans=(ScenePlan(scene_id="scene-1", visual_type="illustration", search_queries=(request.topic,), fallback_visual="text_card"),), metadata=VideoMetadata(title_options=(request.topic,), description=request.angle), thumbnail_brief=ThumbnailBrief(text_options=(request.topic[:40],), visual_direction="Simple educational illustration", accessibility_description="Educational illustration"))
 
 
+class FixedScriptContentProvider:
+    """Deterministic six-scene package for offline and real-media smoke jobs."""
+
+    _SCENES = (
+        ("A question appears: how can one idea become a finished narrated video, entirely on a local machine?", "A glowing question mark above a compact home server at dawn"),
+        ("TubeForge begins with a structured plan, dividing the story into clear scenes with a visual purpose for each one.", "A storyboard wall with six distinct cinematic frames"),
+        ("Next, local speech synthesis turns every line into real narration, without sending the script to a paid voice service.", "Sound waves flowing from a small computer into studio headphones"),
+        ("The measured audio duration becomes the clock, so every image stays on screen for exactly the scene it explains.", "A precise editing timeline aligned with an audio waveform"),
+        ("Each scene receives its own validated visual, while checksums and atomic promotion protect incomplete files from becoming artifacts.", "Six colorful image cards passing through a validation checkpoint"),
+        ("Finally, FFmpeg joins the visuals, captions, and narration into a playable video that can safely resume after interruption.", "A finished video frame emerging from gears labeled audio visuals captions"),
+    )
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate_package(self, request: ContentRequest) -> ContentPackage:
+        self.calls += 1
+        claim = CitedClaim(claim_id="claim-1", text=f"This deterministic demonstration explains {request.topic}.", source_ids=(request.sources[0].source_id,), confidence=ConfidenceLevel.HIGH, review_status=ClaimReviewStatus.VERIFIED, human_review_required=False)
+        sections = tuple(ScriptSection(section_id=f"section-{index}", narration=narration, scene_id=f"scene-{index}", claim_ids=("claim-1",), contains_factual_claims=True) for index, (narration, _) in enumerate(self._SCENES, 1))
+        scenes = tuple(ScenePlan(scene_id=f"scene-{index}", visual_type="illustration", search_queries=(visual,), fallback_visual="synthetic_illustration") for index, (_, visual) in enumerate(self._SCENES, 1))
+        return ContentPackage(schema_version="1.0", request=request, claims=(claim,), script_sections=sections, scene_plans=scenes, metadata=VideoMetadata(title_options=(request.topic,), description="A deterministic local TubeForge pipeline demonstration."), thumbnail_brief=ThumbnailBrief(text_options=("LOCAL VIDEO",), visual_direction="Six-scene local video pipeline", accessibility_description="A local computer producing a narrated video"))
+
+
 class FakeVoiceProvider:
     """Write synthetic audio bytes atomically and return their checksum."""
 
@@ -67,8 +90,11 @@ class FakeMediaProvider:
             raise self.failure
         digest = _checksum("|".join(request.queries).encode())[:12]
         path = self.settings.artifact_root / "media" / f"{digest}.png"
-        _atomic_write(path, _solid_png(64, 64, (49, 130, 189)))
-        return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", download_url=f"https://example.invalid/assets/{digest}.png", local_path=str(path), media_type="image", width=64, height=64, author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic test asset", retrieved_at=datetime.now(UTC))]
+        # Derive a stable, high-contrast colour from the scene query. Different
+        # scene descriptions therefore produce visibly different local assets.
+        rgb = tuple(48 + int(digest[offset : offset + 2], 16) % 176 for offset in (0, 2, 4))
+        _atomic_write(path, _solid_png(640, 360, rgb))
+        return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", download_url=f"https://example.invalid/assets/{digest}.png", local_path=str(path), media_type="image", width=640, height=360, author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic test asset", retrieved_at=datetime.now(UTC))]
 
 
 class FakePublisher:
@@ -165,4 +191,4 @@ def _solid_png(width: int, height: int, color: tuple[int, int, int]) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
-__all__ = ["FakeContentProvider", "FakeMediaProvider", "FakePublisher", "FakeVoiceProvider", "ProviderAuthenticationError", "ProviderValidationError", "RetryableProviderError"]
+__all__ = ["FakeContentProvider", "FixedScriptContentProvider", "FakeMediaProvider", "FakePublisher", "FakeVoiceProvider", "ProviderAuthenticationError", "ProviderValidationError", "RetryableProviderError"]

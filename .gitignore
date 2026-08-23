@@ -12,3 +12,14 @@ data/
 *.db
 *.db-shm
 *.db-wal
+# Pytest / test-generated artifacts
+.pytest_cache/
+.pytest-*
+.m*-pytest-*
+.m*-focused-tmp*
+.m*-full-tmp*
+.review-*
+.safety-pytest-*
+.test-tmp/
+**/__pycache__/
+*.py[cod]
