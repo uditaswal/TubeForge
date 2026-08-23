@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import io
-import base64
+import struct
 import wave
+import zlib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -62,8 +63,8 @@ class FakeMediaProvider:
             raise self.failure
         digest = _checksum("|".join(request.queries).encode())[:12]
         path = self.settings.artifact_root / "media" / f"{digest}.png"
-        _atomic_write(path, base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLAtwAAAABJRU5ErkJggg=="))
-        return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", download_url=f"https://example.invalid/assets/{digest}.png", local_path=str(path), media_type="image", width=1, height=1, author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic test asset", retrieved_at=datetime.now(UTC))]
+        _atomic_write(path, _solid_png(64, 64, (49, 130, 189)))
+        return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", download_url=f"https://example.invalid/assets/{digest}.png", local_path=str(path), media_type="image", width=64, height=64, author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic test asset", retrieved_at=datetime.now(UTC))]
 
 
 class FakePublisher:
@@ -85,7 +86,7 @@ class FakePublisher:
 class FakeYouTubePublisher:
     """Deterministic in-memory M13 fake; it never contacts YouTube."""
     def __init__(self, channel_id: str = "fake-channel", failure: Exception | None = None, *, outcomes: dict[str, list[Exception | None]] | None = None) -> None:
-        self.channel_id, self.failure, self.creates, self.create_calls, self.metadata_calls, self.thumbnail_calls, self.reconcile_calls, self.channel_lookup_calls = channel_id, failure, 0, 0, 0, 0, 0, 0
+        self.channel_id, self.failure, self.creates, self.create_calls, self.metadata_calls, self.thumbnail_calls, self.reconcile_calls, self.channel_lookup_calls, self.analytics_calls = channel_id, failure, 0, 0, 0, 0, 0, 0, 0
         self.outcomes = outcomes or {}; self.videos: dict[str, dict[str, object]] = {}
     def _outcome(self, operation: str) -> None:
         values = self.outcomes.get(operation, [])
@@ -118,6 +119,14 @@ class FakeYouTubePublisher:
         if value is None: return RemotePublicationSnapshot(video_id=remote_video_id, exists=False)
         return RemotePublicationSnapshot(video_id=remote_video_id, exists=True, processing=value.get("processing", "succeeded"), privacy=value.get("privacy"), title=(value.get("metadata") or {}).get("title_options", [value.get("title")])[0], description=(value.get("metadata") or {}).get("description", value.get("description")), tags=tuple((value.get("metadata") or {}).get("tags", value.get("tags", ()))) if value.get("tags") is not None or value.get("metadata") else None, thumbnail_present=bool(value.get("thumbnail")) if "thumbnail" in value else None)
 
+    def fetch_video_analytics(self, remote_video_id, channel_id, report_start, report_end):
+        from datetime import UTC, datetime
+        from tubeforge.domain.contracts import AnalyticsMetric, AnalyticsSnapshotData
+        self.analytics_calls += 1; self._outcome("analytics")
+        scripted = self.videos.get(remote_video_id, {}).get("analytics", {})
+        metrics = {name: AnalyticsMetric.model_validate(value) for name, value in scripted.items()}
+        return AnalyticsSnapshotData(video_id=remote_video_id, channel_id=channel_id, report_start=report_start, report_end=report_end, observed_at=datetime.now(UTC), metrics=metrics, completeness="complete" if metrics else "unavailable")
+
 
 def _atomic_write(destination: Path, payload: bytes) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -128,6 +137,17 @@ def _atomic_write(destination: Path, payload: bytes) -> None:
 
 def _checksum(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _solid_png(width: int, height: int, color: tuple[int, int, int]) -> bytes:
+    """Build a valid, dependency-free RGB PNG for offline media tests."""
+    raw = b"".join(b"\x00" + bytes(color) * width for _ in range(height))
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
 __all__ = ["FakeContentProvider", "FakeMediaProvider", "FakePublisher", "FakeVoiceProvider", "ProviderAuthenticationError", "ProviderValidationError", "RetryableProviderError"]

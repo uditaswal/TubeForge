@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "tubeforge"
 version = "0.1.0"
 description = "Self-hosted, provider-agnostic YouTube production pipeline"
-readme = "README.md"
+readme = "readme.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "alembic>=1.14,<2",

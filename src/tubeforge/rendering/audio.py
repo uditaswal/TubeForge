@@ -58,7 +58,8 @@ class FFmpegAudioAssembler:
         if pause_seconds < 0:
             raise ProviderValidationError("audio pause must not be negative")
         output.parent.mkdir(parents=True, exist_ok=True)
-        temporary = output.with_suffix(output.suffix + ".tmp")
+        # Keep the final extension so FFmpeg can select the output container.
+        temporary = output.with_name(f"{output.stem}.tmp{output.suffix}")
         try:
             result = subprocess.run(self.command(inputs, temporary, pause_seconds), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=self.timeout_seconds, check=False, shell=False)
         except subprocess.TimeoutExpired as error:

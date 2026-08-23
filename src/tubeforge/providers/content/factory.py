@@ -11,6 +11,6 @@ from tubeforge.providers.fake import FakeContentProvider
 
 def create_content_provider(settings: Settings, session_factory: sessionmaker[Session]) -> ContentProvider:
     """Return fake content by default; create Codex only after explicit selection."""
-    if settings.pipeline.provider == "fake":
+    if settings.pipeline.content_provider == "fake":
         return FakeContentProvider()
     return CodexCliContentProvider(settings.pipeline.codex, GenerationCacheRepository(session_factory))

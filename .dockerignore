@@ -1,0 +1,15 @@
+.git
+.venv
+.venv312
+.deps
+.pytest_cache
+.tmp
+.pytest-*
+.m*-pytest-*
+.review-*
+.safety-*
+.test-*
+data
+o
+__pycache__
+*.pyc

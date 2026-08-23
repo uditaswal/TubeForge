@@ -96,3 +96,19 @@ def test_reconciliation_parses_remote_state_and_malformed_responses(tmp_path) ->
     assert publisher.fetch_video("video-1") == {"privacy": "unlisted", "title": "Title", "description": "Description", "processing": "processing"}
     service.videos().list().execute.return_value = {"items": []}
     assert publisher.fetch_video("missing") is None
+
+
+def test_analytics_request_is_read_only_and_normalizes_partial_results(tmp_path) -> None:
+    reports = Mock(); reports.query.return_value.execute.return_value = {
+        "columnHeaders": [{"name": "views"}, {"name": "estimatedMinutesWatched"}, {"name": "impressionsClickThroughRate"}],
+        "rows": [[0, 2.5, 4.2]],
+    }
+    service = Mock(); service.reports.return_value = reports
+    publisher = YouTubeDataApiPublisher(config(tmp_path), build_service=Mock()); publisher._analytics_service = service
+    from datetime import date
+    snapshot = publisher.fetch_video_analytics("video-1", "channel-1", date(2026, 1, 1), date(2026, 1, 2))
+    assert snapshot.metrics["views"].value == 0 and snapshot.metrics["estimatedMinutesWatched"].value == 2.5
+    assert snapshot.metrics["likes"].availability.value == "unavailable" and snapshot.completeness == "partial"
+    assert reports.query.call_args.kwargs["filters"] == "video==video-1"
+    assert reports.query.call_args.kwargs["ids"] == "channel==channel-1"
+    assert service.videos.call_count == service.thumbnails.call_count == 0

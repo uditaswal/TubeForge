@@ -105,7 +105,7 @@ class PreviewRenderer:
         if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview command construction")
         output.parent.mkdir(parents=True,exist_ok=True)
         if shutil.disk_usage(output.parent).free<self.config.minimum_free_bytes: raise RetryableProviderError("insufficient disk space for preview render")
-        temporary=output.with_suffix(output.suffix+".part"); temporary.unlink(missing_ok=True); command=self.command(segments,narration,captions,temporary)
+        temporary=output.with_name(f"{output.stem}.part{output.suffix}"); temporary.unlink(missing_ok=True); command=self.command(segments,narration,captions,temporary)
         try:
             if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before FFmpeg execution")
             # FFmpeg can emit enough diagnostics to fill a PIPE while a long

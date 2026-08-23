@@ -11,10 +11,11 @@ from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthentication
 from tubeforge.db.models import Base
 from tubeforge.db.repositories import ApprovalRepository, ArtifactRepository, JobRepository
 from tubeforge.db.session import create_database
-from tubeforge.domain.contracts import AssetCandidate, ContentRequest, SourceReference
-from tubeforge.domain.states import ApprovalGate, JobState
+from tubeforge.domain.contracts import AssetCandidate, ContentPackage, ContentRequest, SourceReference
+from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
 from tubeforge.pipeline.assets import AssetLimits
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
+from tubeforge.pipeline.sources import SourceSnapshot
 from tubeforge.pipeline.publication import identity as publication_identity
 from tubeforge.rendering.preview import checksum
 from tubeforge.providers.fake import FakeContentProvider, FakeMediaProvider, FakePublisher, FakeVoiceProvider, FakeYouTubePublisher
@@ -86,6 +87,29 @@ def approve(runner: PipelineOrchestrator, job_id: str, gate: ApprovalGate) -> No
     runner.approvals.record(f"{job_id}-{gate.value}", job_id, gate)
 
 
+def test_source_ingestion_checkpoints_snapshot_and_reuses_effective_request(pipeline) -> None:
+    runner, content, *_ = pipeline
+
+    class Ingestor:
+        calls = 0
+
+        def ingest(self, source: SourceReference) -> SourceSnapshot:
+            self.calls += 1
+            return SourceSnapshot(source.source_id, str(source.url), source.title, datetime.now(UTC), "b" * 64, "Verified evidence.", source.author)
+
+    ingestor = Ingestor()
+    runner.source_ingestor = ingestor  # type: ignore[assignment]
+    runner.jobs.create("source-checkpoint", request())
+    assert runner.run("source-checkpoint").state is JobState.SCRIPT_APPROVAL_REQUIRED
+    packet = runner._required_json("source-checkpoint", JobState.CONTENT_GENERATING, "source_packet")
+    effective = runner._required_json("source-checkpoint", JobState.CONTENT_GENERATING, "effective_content_request")
+    assert packet["retrieval_mode"] == "fetched"
+    assert effective["sources"][0]["excerpt"] == "Verified evidence."
+    assert content.calls == ingestor.calls == 1
+    assert runner.run("source-checkpoint").state is JobState.SCRIPT_APPROVAL_REQUIRED
+    assert content.calls == ingestor.calls == 1
+
+
 def test_successful_orchestration_persists_every_checkpoint(pipeline) -> None:
     runner, content, media, voice, publisher = pipeline
     runner.jobs.create("job-success", request())
@@ -108,6 +132,21 @@ def test_interruption_resumes_from_last_checkpoint_without_regeneration(pipeline
     assert runner.jobs.get("job-resume").state is JobState.CONTENT_READY
     assert content.calls == 1
     assert runner.run("job-resume").state is JobState.SCRIPT_APPROVAL_REQUIRED
+    assert content.calls == 1
+
+
+def test_rejected_script_can_be_locally_revised_and_reapproved(pipeline) -> None:
+    runner, content, *_ = pipeline
+    job_id = "script-revision"
+    runner.jobs.create(job_id, request())
+    assert runner.run(job_id).state is JobState.SCRIPT_APPROVAL_REQUIRED
+    runner.approvals.record("script-revision-rejected", job_id, ApprovalGate.SCRIPT, ApprovalStatus.REJECTED)
+    original = runner._required_json(job_id, JobState.CONTENT_GENERATING, "content_package")
+    original["script_sections"][0]["narration"] = "Rain revised by the operator."
+    revised = ContentPackage.model_validate(original)
+    artifact = runner._replace_json(job_id, JobState.CONTENT_GENERATING, "content_package", revised.model_dump(mode="json"))
+    runner.approvals.record("script-revision-approved", job_id, ApprovalGate.SCRIPT, reviewed_identity=artifact.checksum_sha256)
+    assert runner.run(job_id).state is JobState.PREVIEW_READY
     assert content.calls == 1
 
 
@@ -430,3 +469,28 @@ def test_publishing_disabled_needs_no_authentication_or_provider_calls(pipeline)
     _publication_ready_for_youtube(runner, "youtube-disabled")
     assert runner.run("youtube-disabled").state is JobState.PUBLICATION_READY
     assert publisher.create_calls == publisher.metadata_calls == publisher.thumbnail_calls == publisher.channel_lookup_calls == 0
+
+
+def test_ownership_loss_during_content_generation_cannot_promote_checkpoint_or_state(pipeline) -> None:
+    runner, *_ = pipeline
+    job_id = "ownership-loss-content"
+    runner.jobs.create(job_id, request())
+    assert runner.jobs.claim_oldest_eligible("worker-a", now=datetime.now(UTC), lease_seconds=300)
+
+    class LostLease:
+        worker_id = "worker-a"
+        clock = staticmethod(lambda: datetime.now(UTC))
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, *, force: bool = False) -> bool:
+            self.calls += 1
+            if self.calls == 4:
+                runner.jobs.release_claim(job_id, self.worker_id)
+                return False
+            return True
+
+    result = runner.run(job_id, ownership_check=LostLease())
+    assert result.state is JobState.CONTENT_GENERATING
+    assert runner.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_package") is None

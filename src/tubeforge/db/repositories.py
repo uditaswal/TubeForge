@@ -8,13 +8,13 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import secrets
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, exists, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.domain.contracts import ContentRequest
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.db.models import ApprovalRecord, ArtifactRecord, AssetCacheRecord, ExternalOperationRecord, GenerationCacheRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord
+from tubeforge.db.models import AnalyticsSnapshotRecord, ApprovalRecord, ArtifactRecord, AssetCacheRecord, ChannelBaselineRecord, ExperimentOutcomeRecord, ExternalOperationRecord, GenerationCacheRecord, HeavyWorkLeaseRecord, LearningEventRecord, NextVideoBriefRecord, NextVideoRecommendationRecord, OptimizationCandidateRecord, OptimizationCandidateSetRecord, OptimizationExecutionRecord, OptimizationExperimentRecord, OptimizationProposalRecord, PerformanceEvaluationRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,8 +106,21 @@ class JobRepository:
         with self._session_factory.begin() as session:
             # Reclaiming abandoned leases is deliberately part of the brief transaction.
             session.execute(update(PipelineJobRecord).where(PipelineJobRecord.lease_expires_at.is_not(None), PipelineJobRecord.lease_expires_at <= now).values(claim_owner=None, claimed_at=None, lease_expires_at=None, heartbeat_at=None))
+            def approved(gate: ApprovalGate):
+                return exists(
+                    select(ApprovalRecord.id).where(
+                        ApprovalRecord.job_id == PipelineJobRecord.id,
+                        ApprovalRecord.gate == gate.value,
+                        ApprovalRecord.status == ApprovalStatus.APPROVED.value,
+                    )
+                )
+
             eligible = or_(
                 PipelineJobRecord.state.in_(runnable),
+                and_(PipelineJobRecord.state == JobState.SCRIPT_APPROVAL_REQUIRED.value, approved(ApprovalGate.SCRIPT)),
+                and_(PipelineJobRecord.state == JobState.PREVIEW_READY.value, approved(ApprovalGate.PREVIEW)),
+                and_(PipelineJobRecord.state == JobState.PUBLICATION_APPROVAL_REQUIRED.value, approved(ApprovalGate.PUBLICATION_PREPARATION)),
+                and_(PipelineJobRecord.state == JobState.PUBLICATION_READY.value, approved(ApprovalGate.PUBLISH)),
                 and_(PipelineJobRecord.state == JobState.FAILED_RETRYABLE.value, PipelineJobRecord.next_retry_at <= now),
                 and_(PipelineJobRecord.state == JobState.AUTH_REQUIRED.value, PipelineJobRecord.authentication_restored_at.is_not(None)),
                 and_(PipelineJobRecord.state == JobState.PUBLICATION_VERIFICATION_PENDING.value, PipelineJobRecord.next_retry_at <= now),
@@ -124,6 +137,36 @@ class JobRepository:
         with self._session_factory.begin() as session:
             result = session.execute(update(PipelineJobRecord).where(PipelineJobRecord.id == job_id, PipelineJobRecord.claim_owner == worker_id).values(heartbeat_at=now, lease_expires_at=now + __import__("datetime").timedelta(seconds=lease_seconds), updated_at=now))
             return result.rowcount == 1
+
+    def owns_lease(self, job_id: str, worker_id: str, *, now: datetime) -> bool:
+        """Return whether this worker still owns an unexpired job claim."""
+        with self._session_factory() as session:
+            return session.scalar(
+                select(PipelineJobRecord.id).where(
+                    PipelineJobRecord.id == job_id,
+                    PipelineJobRecord.claim_owner == worker_id,
+                    PipelineJobRecord.lease_expires_at.is_not(None),
+                    PipelineJobRecord.lease_expires_at > now,
+                )
+            ) is not None
+
+    def update_state_if_claimed(self, job_id: str, worker_id: str, *, now: datetime, state: JobState, resume_state: JobState | None = None, failure_message: str | None = None) -> PipelineJob | None:
+        """Persist a transition only while the caller still owns the live lease."""
+        with self._session_factory.begin() as session:
+            record = session.scalar(
+                select(PipelineJobRecord).where(
+                    PipelineJobRecord.id == job_id,
+                    PipelineJobRecord.claim_owner == worker_id,
+                    PipelineJobRecord.lease_expires_at.is_not(None),
+                    PipelineJobRecord.lease_expires_at > now,
+                )
+            )
+            if record is None:
+                return None
+            record.state, record.resume_state, record.failure_message = state.value, (resume_state.value if resume_state else None), failure_message
+            record.updated_at = now
+            session.flush()
+            return _job_from_record(record)
 
     def release_claim(self, job_id: str, worker_id: str) -> None:
         with self._session_factory.begin() as session:
@@ -189,6 +232,88 @@ class ArtifactRepository:
                 record.path, record.checksum_sha256, record.provenance_json = artifact.path, artifact.checksum_sha256, json.dumps(artifact.provenance, sort_keys=True)
         return artifact
 
+    def save_if_claimed(self, artifact: Artifact, worker_id: str, *, now: datetime) -> Artifact | None:
+        """Save a checkpoint only if its job lease still belongs to the caller."""
+        with self._session_factory.begin() as session:
+            owned = session.scalar(
+                select(PipelineJobRecord.id).where(
+                    PipelineJobRecord.id == artifact.job_id,
+                    PipelineJobRecord.claim_owner == worker_id,
+                    PipelineJobRecord.lease_expires_at.is_not(None),
+                    PipelineJobRecord.lease_expires_at > now,
+                )
+            )
+            if owned is None:
+                return None
+            record = session.scalar(select(ArtifactRecord).where(ArtifactRecord.job_id == artifact.job_id, ArtifactRecord.stage == artifact.stage.value, ArtifactRecord.name == artifact.name))
+            if record is None:
+                session.add(ArtifactRecord(job_id=artifact.job_id, stage=artifact.stage.value, name=artifact.name, path=artifact.path, checksum_sha256=artifact.checksum_sha256, provenance_json=json.dumps(artifact.provenance, sort_keys=True), created_at=now))
+            else:
+                record.path, record.checksum_sha256, record.provenance_json = artifact.path, artifact.checksum_sha256, json.dumps(artifact.provenance, sort_keys=True)
+        return artifact
+
+
+class HeavyWorkLeaseRepository:
+    """Database-backed singleton admission lease shared by all worker processes."""
+
+    LEASE_NAME = "pipeline-heavy-work"
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def acquire(self, owner: str, *, now: datetime, lease_seconds: int) -> bool:
+        """Claim the global lease if it is absent, expired, or already ours."""
+        now = _as_utc(now)
+        expires_at = now + timedelta(seconds=lease_seconds)
+        try:
+            with self._session_factory.begin() as session:
+                record = session.get(HeavyWorkLeaseRecord, self.LEASE_NAME)
+                if record is None:
+                    session.add(HeavyWorkLeaseRecord(name=self.LEASE_NAME, owner=owner, acquired_at=now, heartbeat_at=now, lease_expires_at=expires_at))
+                    return True
+                if record.owner != owner and record.lease_expires_at is not None and _as_utc(record.lease_expires_at) > now:
+                    return False
+                record.owner, record.acquired_at, record.heartbeat_at, record.lease_expires_at = owner, now, now, expires_at
+                return True
+        except IntegrityError:
+            # A simultaneous first insert won. Re-read under a fresh transaction.
+            return self.acquire(owner, now=now, lease_seconds=lease_seconds)
+
+    def heartbeat(self, owner: str, *, now: datetime, lease_seconds: int) -> bool:
+        now = _as_utc(now)
+        with self._session_factory.begin() as session:
+            result = session.execute(
+                update(HeavyWorkLeaseRecord)
+                .where(
+                    HeavyWorkLeaseRecord.name == self.LEASE_NAME,
+                    HeavyWorkLeaseRecord.owner == owner,
+                    HeavyWorkLeaseRecord.lease_expires_at.is_not(None),
+                    HeavyWorkLeaseRecord.lease_expires_at > now,
+                )
+                .values(heartbeat_at=now, lease_expires_at=now + timedelta(seconds=lease_seconds))
+            )
+            return result.rowcount == 1
+
+    def owns(self, owner: str, *, now: datetime) -> bool:
+        now = _as_utc(now)
+        with self._session_factory() as session:
+            return session.scalar(
+                select(HeavyWorkLeaseRecord.name).where(
+                    HeavyWorkLeaseRecord.name == self.LEASE_NAME,
+                    HeavyWorkLeaseRecord.owner == owner,
+                    HeavyWorkLeaseRecord.lease_expires_at.is_not(None),
+                    HeavyWorkLeaseRecord.lease_expires_at > now,
+                )
+            ) is not None
+
+    def release(self, owner: str) -> None:
+        with self._session_factory.begin() as session:
+            session.execute(
+                update(HeavyWorkLeaseRecord)
+                .where(HeavyWorkLeaseRecord.name == self.LEASE_NAME, HeavyWorkLeaseRecord.owner == owner)
+                .values(owner=None, acquired_at=None, heartbeat_at=None, lease_expires_at=None)
+            )
+
 
 class PublicationRepository:
     """Persist M13 remote progress before each externally visible operation."""
@@ -213,6 +338,108 @@ class PublicationRepository:
     def observations(self, identity: str) -> list[PublicationObservationRecord]:
         with self._session_factory() as session:
             return list(session.scalars(select(PublicationObservationRecord).where(PublicationObservationRecord.publication_identity == identity).order_by(PublicationObservationRecord.id)))
+    def healthy_with_remote_ids(self) -> list[PublicationRecord]:
+        with self._session_factory() as session:
+            return list(session.scalars(select(PublicationRecord).where(PublicationRecord.state == "healthy", PublicationRecord.remote_video_id.is_not(None))))
+
+
+class AnalyticsRepository:
+    """Small durable store for independent M15/M16 observational work."""
+    def __init__(self, session_factory: sessionmaker[Session]) -> None: self._session_factory = session_factory
+    def save_snapshot(self, values: dict[str, object]) -> AnalyticsSnapshotRecord:
+        with self._session_factory.begin() as session:
+            record = session.scalar(select(AnalyticsSnapshotRecord).where(AnalyticsSnapshotRecord.snapshot_identity == values["snapshot_identity"]))
+            if record is None:
+                record = AnalyticsSnapshotRecord(**values); session.add(record)
+            session.flush(); return record
+    def snapshots(self, publication_identity: str) -> list[AnalyticsSnapshotRecord]:
+        with self._session_factory() as session:
+            return list(session.scalars(select(AnalyticsSnapshotRecord).where(AnalyticsSnapshotRecord.publication_identity == publication_identity).order_by(AnalyticsSnapshotRecord.observed_at)))
+    def snapshot(self, identity: str) -> AnalyticsSnapshotRecord | None:
+        with self._session_factory() as session: return session.scalar(select(AnalyticsSnapshotRecord).where(AnalyticsSnapshotRecord.snapshot_identity == identity))
+    def channel_latest_snapshots(self, channel_id: str) -> list[AnalyticsSnapshotRecord]:
+        with self._session_factory() as session:
+            rows = list(session.scalars(select(AnalyticsSnapshotRecord).where(AnalyticsSnapshotRecord.channel_id == channel_id).order_by(AnalyticsSnapshotRecord.publication_identity, AnalyticsSnapshotRecord.observed_at.desc())))
+            seen: set[str] = set(); return [row for row in rows if not (row.publication_identity in seen or seen.add(row.publication_identity))]
+    def latest_snapshots(self) -> list[AnalyticsSnapshotRecord]:
+        with self._session_factory() as session:
+            rows = list(session.scalars(select(AnalyticsSnapshotRecord).order_by(AnalyticsSnapshotRecord.publication_identity, AnalyticsSnapshotRecord.observed_at.desc())))
+            seen: set[str] = set(); latest = []
+            for row in rows:
+                if row.publication_identity not in seen: seen.add(row.publication_identity); latest.append(row)
+            return latest
+    def save_evaluation(self, values: dict[str, object]) -> PerformanceEvaluationRecord:
+        with self._session_factory.begin() as session:
+            record = session.scalar(select(PerformanceEvaluationRecord).where(PerformanceEvaluationRecord.evaluation_identity == values["evaluation_identity"]))
+            if record is None: record = PerformanceEvaluationRecord(**values); session.add(record)
+            session.flush(); return record
+    def save_proposal(self, values: dict[str, object]) -> OptimizationProposalRecord:
+        with self._session_factory.begin() as session:
+            record = session.scalar(select(OptimizationProposalRecord).where(OptimizationProposalRecord.proposal_identity == values["proposal_identity"]))
+            if record is None: record = OptimizationProposalRecord(**values); session.add(record)
+            session.flush(); return record
+    def proposal(self, identity: str) -> OptimizationProposalRecord | None:
+        with self._session_factory() as session: return session.scalar(select(OptimizationProposalRecord).where(OptimizationProposalRecord.proposal_identity == identity))
+    def evaluation(self, identity: str) -> PerformanceEvaluationRecord | None:
+        with self._session_factory() as session: return session.scalar(select(PerformanceEvaluationRecord).where(PerformanceEvaluationRecord.evaluation_identity == identity))
+
+
+class OptimizationRepository:
+    """Durable M17--M19 candidate, execution, and experiment state."""
+    def __init__(self, session_factory: sessionmaker[Session]) -> None: self._session_factory = session_factory
+    def save_set(self, values: dict[str, object]) -> OptimizationCandidateSetRecord:
+        with self._session_factory.begin() as session:
+            row = session.scalar(select(OptimizationCandidateSetRecord).where(OptimizationCandidateSetRecord.generation_identity == values["generation_identity"]))
+            if row is None: row = OptimizationCandidateSetRecord(**values); session.add(row)
+            session.flush(); return row
+    def save_candidate(self, values: dict[str, object]) -> OptimizationCandidateRecord:
+        with self._session_factory.begin() as session:
+            row = session.scalar(select(OptimizationCandidateRecord).where(OptimizationCandidateRecord.candidate_identity == values["candidate_identity"]))
+            if row is None: row = OptimizationCandidateRecord(**values); session.add(row)
+            session.flush(); return row
+    def candidate(self, identity: str) -> OptimizationCandidateRecord | None:
+        with self._session_factory() as session: return session.scalar(select(OptimizationCandidateRecord).where(OptimizationCandidateRecord.candidate_identity == identity))
+    def select(self, identity: str) -> OptimizationCandidateRecord:
+        with self._session_factory.begin() as session:
+            row = session.scalar(select(OptimizationCandidateRecord).where(OptimizationCandidateRecord.candidate_identity == identity))
+            if row is None: raise KeyError(identity)
+            row.state = "SELECTED"; session.flush(); return row
+    def execution(self, identity: str) -> OptimizationExecutionRecord | None:
+        with self._session_factory() as session: return session.scalar(select(OptimizationExecutionRecord).where(OptimizationExecutionRecord.execution_identity == identity))
+    def save_execution(self, values: dict[str, object]) -> OptimizationExecutionRecord:
+        with self._session_factory.begin() as session:
+            row = session.scalar(select(OptimizationExecutionRecord).where(OptimizationExecutionRecord.execution_identity == values["execution_identity"]))
+            if row is None: row = OptimizationExecutionRecord(**values); session.add(row)
+            session.flush(); return row
+    def update_execution(self, identity: str, **values: object) -> OptimizationExecutionRecord:
+        with self._session_factory.begin() as session:
+            row = session.scalar(select(OptimizationExecutionRecord).where(OptimizationExecutionRecord.execution_identity == identity))
+            if row is None: raise KeyError(identity)
+            for key, value in values.items(): setattr(row, key, value)
+            row.updated_at = datetime.now(UTC); session.flush(); return row
+    def save_experiment(self, values: dict[str, object]) -> OptimizationExperimentRecord:
+        with self._session_factory.begin() as session:
+            row = session.scalar(select(OptimizationExperimentRecord).where(OptimizationExperimentRecord.execution_identity == values["execution_identity"]))
+            if row is None: row = OptimizationExperimentRecord(**values); session.add(row)
+            session.flush(); return row
+    def experiments(self) -> list[OptimizationExperimentRecord]:
+        with self._session_factory() as session: return list(session.scalars(select(OptimizationExperimentRecord).order_by(OptimizationExperimentRecord.started_at)))
+
+class LearningRepository:
+    """Durable, idempotent M20--M23 outcomes, channel learning, and briefs."""
+    def __init__(self, session_factory: sessionmaker[Session]) -> None: self._session_factory = session_factory
+    def _save(self, model, key: str, values: dict[str, object]):
+        with self._session_factory.begin() as session:
+            row = session.scalar(select(model).where(getattr(model, key) == values[key]))
+            if row is None: row = model(**values); session.add(row)
+            session.flush(); return row
+    def save_outcome(self, values: dict[str, object]) -> ExperimentOutcomeRecord: return self._save(ExperimentOutcomeRecord, "outcome_identity", values)
+    def save_event(self, values: dict[str, object]) -> LearningEventRecord: return self._save(LearningEventRecord, "event_identity", values)
+    def save_baseline(self, values: dict[str, object]) -> ChannelBaselineRecord: return self._save(ChannelBaselineRecord, "baseline_identity", values)
+    def save_recommendation(self, values: dict[str, object]) -> NextVideoRecommendationRecord: return self._save(NextVideoRecommendationRecord, "recommendation_identity", values)
+    def save_brief(self, values: dict[str, object]) -> NextVideoBriefRecord: return self._save(NextVideoBriefRecord, "brief_identity", values)
+    def active_recommendations(self, channel_id: str) -> list[NextVideoRecommendationRecord]:
+        with self._session_factory() as session: return list(session.scalars(select(NextVideoRecommendationRecord).where(NextVideoRecommendationRecord.channel_id == channel_id, NextVideoRecommendationRecord.status == "ACTIVE").order_by(NextVideoRecommendationRecord.created_at)))
 
 
 class ApprovalRepository:

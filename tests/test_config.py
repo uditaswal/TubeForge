@@ -26,7 +26,8 @@ database:
     assert settings.app.environment == "test"
     assert settings.app.port == 9090
     assert settings.database.busy_timeout_ms == 1234
-    assert settings.pipeline.provider == "fake"
+    assert settings.pipeline.content_provider == "fake"
+    assert settings.pipeline.voice_provider == "fake"
 
 
 def test_configuration_rejects_non_sqlite_database() -> None:
@@ -50,3 +51,13 @@ def test_default_yaml_uses_safe_fake_media_policy() -> None:
     settings = load_settings()
     assert settings.pipeline.media.provider == "fake"
     assert settings.pipeline.media.max_redirects == 0
+    assert not settings.pipeline.sources.enabled
+
+
+def test_source_ingestion_needs_explicit_hosts() -> None:
+    with pytest.raises(ValidationError, match="source ingestion requires"):
+        Settings.model_validate({
+            "app": {"name": "Test", "environment": "test"},
+            "database": {"url": "sqlite:///./test.db"},
+            "pipeline": {"sources": {"enabled": True}},
+        })
