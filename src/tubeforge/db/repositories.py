@@ -222,6 +222,16 @@ class ArtifactRepository:
             record = session.scalar(select(ArtifactRecord).where(ArtifactRecord.job_id == job_id, ArtifactRecord.stage == stage.value, ArtifactRecord.name == name))
             return _artifact_from_record(record) if record else None
 
+    def list_for_job(self, job_id: str) -> list[Artifact]:
+        """Return registered artifacts for a job; paths remain server-controlled."""
+        with self._session_factory() as session:
+            records = session.scalars(
+                select(ArtifactRecord)
+                .where(ArtifactRecord.job_id == job_id)
+                .order_by(ArtifactRecord.created_at, ArtifactRecord.stage, ArtifactRecord.name)
+            )
+            return [_artifact_from_record(record) for record in records]
+
     def save(self, artifact: Artifact) -> Artifact:
         with self._session_factory.begin() as session:
             record = session.scalar(select(ArtifactRecord).where(ArtifactRecord.job_id == artifact.job_id, ArtifactRecord.stage == artifact.stage.value, ArtifactRecord.name == artifact.name))

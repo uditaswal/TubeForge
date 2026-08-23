@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import logging
 from pathlib import Path
 
 from tubeforge.core.config import DatabaseConfig, WorkerConfig
@@ -50,6 +51,22 @@ def test_worker_claims_eligible_job_and_skips_waiting_or_terminal_states(tmp_pat
             jobs.update_state(job_id, state)
         assert worker.run_once() is None
         assert orchestrator.calls == 1
+    finally:
+        database.dispose()
+
+
+def test_worker_emits_structured_claim_and_approval_wait_logs(tmp_path: Path, caplog) -> None:
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'logs.db'}"))
+    Base.metadata.create_all(database.engine)
+    jobs = JobRepository(database.session_factory)
+    worker = WorkerService("worker-logs", jobs, _AdvancingOrchestrator(jobs), WorkerConfig())
+    try:
+        jobs.create("logged", _request())
+        caplog.set_level(logging.INFO, logger="tubeforge.workers.service")
+        assert worker.run_once().state is JobState.SCRIPT_APPROVAL_REQUIRED
+        messages = "\n".join(record.message for record in caplog.records)
+        assert '"event": "job_claimed"' in messages
+        assert '"event": "waiting_for_approval"' in messages
     finally:
         database.dispose()
 
