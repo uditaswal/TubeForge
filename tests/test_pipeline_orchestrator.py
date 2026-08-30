@@ -135,6 +135,22 @@ def test_interruption_resumes_from_last_checkpoint_without_regeneration(pipeline
     assert content.calls == 1
 
 
+@pytest.mark.parametrize("duration", (float("nan"), float("inf"), float("-inf"), 0.0, -1.0))
+def test_voice_checkpoint_rejects_nonfinite_or_nonpositive_duration(
+    pipeline, tmp_path: Path, duration: float
+) -> None:
+    runner, *_ = pipeline
+    phrase = tmp_path / "persisted-phrase.wav"
+    phrase.write_bytes(b"persisted-audio")
+    result = {
+        "artifact_path": str(phrase),
+        "checksum_sha256": runner._checksum(phrase),
+        "duration_seconds": duration,
+    }
+
+    assert not runner._result_is_valid(result)
+
+
 def test_rejected_script_can_be_locally_revised_and_reapproved(pipeline) -> None:
     runner, content, *_ = pipeline
     job_id = "script-revision"
@@ -317,12 +333,25 @@ def test_assets_cancellation_before_checkpoint_preserves_cache(tmp_path: Path) -
     finally: database.dispose()
 
 def test_persisted_assets_revalidate_current_policy_on_resume(pipeline) -> None:
+    import struct
+    import zlib
+    from tubeforge.pipeline.assets import ASSET_VALIDATION_VERSION
+
     runner, *_ = pipeline
-    path = Path(__file__)
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+    header = struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0)
+    raster = (b"\0" + b"\x22\x66\xaa" * 2) * 2
+    path = runner.artifact_root / "persisted.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raster)) + chunk(b"IEND", b""))
     checksum = runner._checksum(path)
     base = AssetCandidate(provider_asset_id="persisted", source_url="https://example.invalid/persisted.png", license_name="CC0-1.0", retrieved_at=datetime.now(UTC)).model_dump(mode="json")
-    value = {"path": str(path), "checksum_sha256": checksum, "validation": {"checksum_sha256": checksum, "validation_version": "m8-v1"}, "candidate": base}
+    value = {"path": str(path), "checksum_sha256": checksum, "validation": {"checksum_sha256": checksum, "validation_version": ASSET_VALIDATION_VERSION, "media_type": "image", "width": 2, "height": 2}, "candidate": base}
     assert runner._accepted_asset_valid(value)
+    value["validation"]["validation_version"] = "m8-v1"
+    assert not runner._accepted_asset_valid(value)
+    value["validation"]["validation_version"] = ASSET_VALIDATION_VERSION
     runner.asset_limits = AssetLimits(frozenset({"example.invalid"}), frozenset({"CC BY 4.0"}))
     assert not runner._accepted_asset_valid(value)
     runner.asset_limits = AssetLimits(frozenset({"example.invalid"}), frozenset({"CC0-1.0"}))
@@ -335,6 +364,11 @@ def test_persisted_assets_revalidate_current_policy_on_resume(pipeline) -> None:
     value["candidate"]["attribution_required"] = False
     value["candidate"]["attribution_text"] = None
     assert runner._accepted_asset_valid(value)
+    original = path.read_bytes()
+    path.write_bytes(original[:-8])
+    value["checksum_sha256"] = runner._checksum(path)
+    value["validation"]["checksum_sha256"] = value["checksum_sha256"]
+    assert not runner._accepted_asset_valid(value)
 
 
 def test_publication_preparation_is_local_resumable_and_requires_exact_approval(pipeline) -> None:

@@ -1,5 +1,7 @@
 """M24/M25 deterministic script and offline visual-provider coverage."""
 
+import re
+
 from pathlib import Path
 
 from tubeforge.core.config import FakeProviderConfig, Settings
@@ -18,6 +20,11 @@ def test_fixed_script_has_six_ordered_complete_scenes() -> None:
     assert [section.scene_id for section in package.script_sections] == [scene.scene_id for scene in package.scene_plans]
     assert all(section.narration.strip() for section in package.script_sections)
     assert all(scene.search_queries[0].strip() for scene in package.scene_plans)
+    # A 60-second Piper smoke needs substantially more than the original
+    # 110-word fixture. Keep the deterministic script near a normal narration
+    # budget while allowing real voices to vary in speaking rate.
+    word_count = sum(len(re.findall(r"\b\w+\b", section.narration)) for section in package.script_sections)
+    assert 145 <= word_count <= 200
 
 
 def test_fixed_provider_is_configuration_selectable(tmp_path: Path) -> None:

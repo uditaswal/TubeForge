@@ -14,6 +14,14 @@ pipeline:
     artifact_root: "/app/data/fake-artifacts"
     voice_id: "fake-voice"
     media_license: "CC0-1.0"
+  piper:
+    executable: "piper"
+    # Download a Piper voice and its matching .onnx.json sidecar into
+    # ./models before selecting voice_provider: piper.
+    model_path: "/app/models/en_US-lessac-medium.onnx"
+    config_path: "/app/models/en_US-lessac-medium.onnx.json"
+    voice_id: "en_US-lessac-medium"
+    cache_root: "/app/data/cache/tts"
   voice:
     artifact_root: "/app/data/artifacts"
     ffmpeg_threads: 1

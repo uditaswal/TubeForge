@@ -23,3 +23,4 @@ data/
 .test-tmp/
 **/__pycache__/
 *.py[cod]
+autonomous_logs/

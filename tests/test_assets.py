@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
+import struct
+import zlib
 
 import pytest
 
 from tubeforge.core.errors import ProviderValidationError
 from tubeforge.domain.contracts import AssetCandidate, MediaSearchRequest, ScenePlan
 from tubeforge.pipeline.assets import AssetLimits, attribution_manifest, scene_request, select_candidate
+
+def _png(width: int = 1, height: int = 1) -> bytes:
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I",len(payload))+kind+payload+struct.pack(">I",zlib.crc32(kind+payload)&0xFFFFFFFF)
+    header=struct.pack(">IIBBBBB",width,height,8,2,0,0,0); raster=b"".join(b"\0"+b"\x22\x66\xaa"*width for _ in range(height))
+    return b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",header)+chunk(b"IDAT",zlib.compress(raster))+chunk(b"IEND",b"")
 
 
 def candidate(identifier: str, *, license_name: str = "CC0-1.0", width: int = 1920, height: int = 1080, review: bool = False) -> AssetCandidate:
@@ -48,10 +57,30 @@ def test_asset_cache_reservation_blocks_stale_acceptance_and_reuses(tmp_path: Pa
     assert repo.reserve_or_get("a" * 64, now=now, reservation_seconds=1) is None
     second = repo.reserve_or_get("a" * 64, now=now + timedelta(seconds=2), reservation_seconds=10)
     assert isinstance(second, AssetCacheReservation)
+    assert repo.abandon(first) is False
     cached = CachedAsset(str(tmp_path / "asset.png"), "b" * 64, {"validation_version": "m8-v1"})
     assert not repo.accept(first, cached, now=now)
     assert repo.accept(second, cached, now=now)
     assert isinstance(repo.reserve_or_get("a" * 64, now=now, reservation_seconds=1), CachedAsset)
+    db.dispose()
+
+
+def test_failed_asset_acquisition_releases_reservation_for_immediate_retry(tmp_path: Path) -> None:
+    from tubeforge.pipeline.assets import AssetAcquisitionService, AssetDownloader
+
+    db = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'retry.db'}"))
+    Base.metadata.create_all(db.engine)
+    repo = AssetCacheRepository(db.session_factory)
+    limits = AssetLimits(frozenset({"media.example.invalid"}), frozenset({"CC0-1.0"}))
+    value = candidate("retry")
+
+    failing = AssetAcquisitionService(repo, AssetDownloader(tmp_path / "cache", limits, _Opener(_Chunks([b"invalid"]))))
+    with pytest.raises(ProviderValidationError):
+        failing.acquire("test", value)
+
+    successful = AssetAcquisitionService(repo, AssetDownloader(tmp_path / "cache", limits, _Opener(_Chunks([_png()]))))
+    path, _, metadata = successful.acquire("test", value)
+    assert path.is_file() and metadata["media_type"] == "image"
     db.dispose()
 
 def test_download_url_rejects_credentials_ports_and_traversal() -> None:
@@ -67,6 +96,40 @@ def test_png_validation_rejects_corrupt_and_excessive_dimensions(tmp_path: Path)
     with pytest.raises(ProviderValidationError): inspect_media(corrupt, "image", limits)
     huge = tmp_path / "huge.png"; huge.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (11).to_bytes(4,"big") + (11).to_bytes(4,"big"))
     with pytest.raises(ProviderValidationError): inspect_media(huge, "image", limits)
+
+
+def test_png_validation_rejects_truncated_or_corrupted_pixel_data(tmp_path: Path) -> None:
+    from tubeforge.pipeline.assets import inspect_media
+    limits = AssetLimits(frozenset(), frozenset())
+    valid = _png(4, 3)
+    truncated = tmp_path / "truncated.png"; truncated.write_bytes(valid[:24])
+    with pytest.raises(ProviderValidationError, match="chunk|image data"):
+        inspect_media(truncated, "image", limits)
+    corrupted = bytearray(valid); corrupted[-16] ^= 0xFF
+    broken = tmp_path / "broken.png"; broken.write_bytes(corrupted)
+    with pytest.raises(ProviderValidationError, match="checksum|decoded"):
+        inspect_media(broken, "image", limits)
+
+
+def test_png_validation_rejects_incomplete_adam7_and_dimensions_before_inflation(tmp_path: Path) -> None:
+    from tubeforge.pipeline.assets import inspect_media
+    limits = AssetLimits(frozenset(), frozenset(), max_width=10, max_height=10, max_pixels=100)
+    interlaced = bytearray(_png(4, 3))
+    # IHDR's final byte selects Adam7, but the existing single-pass raster is
+    # incomplete for that layout. Rebuild its CRC so chunk integrity still passes.
+    interlaced[28] = 1
+    interlaced[29:33] = struct.pack(">I", zlib.crc32(interlaced[12:29]) & 0xFFFFFFFF)
+    path = tmp_path / "incomplete-adam7.png"; path.write_bytes(interlaced)
+    with pytest.raises(ProviderValidationError, match="pixel data"):
+        inspect_media(path, "image", limits)
+
+    huge = bytearray(_png())
+    huge[16:20] = struct.pack(">I", 100_000)
+    huge[20:24] = struct.pack(">I", 100_000)
+    huge[29:33] = struct.pack(">I", zlib.crc32(huge[12:29]) & 0xFFFFFFFF)
+    oversized = tmp_path / "oversized.png"; oversized.write_bytes(huge)
+    with pytest.raises(ProviderValidationError, match="dimensions"):
+        inspect_media(oversized, "image", limits)
 
 class _Chunks:
     def __init__(self, chunks: list[bytes], content_type: str = "image/png", length: str | None = None) -> None:
@@ -84,7 +147,7 @@ class _Opener:
 
 def test_network_download_streams_chunks_and_enforces_limits(tmp_path: Path) -> None:
     from tubeforge.pipeline.assets import AssetDownloader
-    png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1).to_bytes(4,"big") + (1).to_bytes(4,"big")
+    png = _png()
     response = _Chunks([png[:12], png[12:]])
     downloader = AssetDownloader(tmp_path / "cache", AssetLimits(frozenset({"media.example.invalid"}), frozenset({"CC0-1.0"})), _Opener(response))
     path, _, metadata = downloader.download("test", candidate("stream"))
@@ -112,11 +175,45 @@ def test_asset_cache_reuse_rejects_missing_or_checksum_mismatched_file(tmp_path:
         AssetAcquisitionService(repo, downloader).acquire("test", candidate("broken"))
     db.dispose()
 
+
+def test_cache_reuse_decodes_bytes_even_when_records_have_matching_checksum(tmp_path: Path) -> None:
+    """A forged sidecar/database checksum must not make corrupt media reusable."""
+    from tubeforge.pipeline.assets import ASSET_VALIDATION_VERSION, AssetAcquisitionService, AssetDownloader, _checksum
+
+    db = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path/'cachedecode.db'}")); Base.metadata.create_all(db.engine)
+    repo = AssetCacheRepository(db.session_factory)
+    limits = AssetLimits(frozenset({"media.example.invalid"}), frozenset({"CC0-1.0"}))
+    response = _Chunks([_png()])
+    downloader = AssetDownloader(tmp_path / "cache", limits, _Opener(response))
+    value = candidate("forged-cache")
+    key = downloader.cache_key("test", value)
+    path = tmp_path / "cache" / key[:2] / key
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"not an image")
+    forged = {
+        "checksum_sha256": _checksum(path),
+        "validation_version": ASSET_VALIDATION_VERSION,
+        "media_type": "image",
+        "container": "png",
+        "width": 640,
+        "height": 360,
+        "duration_seconds": None,
+    }
+    path.with_suffix(".json").write_text(json.dumps(forged), encoding="utf-8")
+    reservation = repo.reserve_or_get(key, now=datetime.now(UTC), reservation_seconds=30)
+    assert isinstance(reservation, AssetCacheReservation)
+    assert repo.accept(reservation, CachedAsset(str(path), str(forged["checksum_sha256"]), forged), now=datetime.now(UTC))
+
+    accepted, _, metadata = AssetAcquisitionService(repo, downloader).acquire("test", value)
+    assert accepted.read_bytes() == _png()
+    assert metadata["width"] == 1 and response.calls >= 2
+    db.dispose()
+
 def test_download_follows_only_bounded_allowlisted_redirects(tmp_path: Path) -> None:
     from email.message import Message
     from urllib.error import HTTPError
     from tubeforge.pipeline.assets import AssetDownloader
-    png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1).to_bytes(4,"big") + (1).to_bytes(4,"big")
+    png = _png()
     headers = Message(); headers["Location"] = "https://media.example.invalid/final.png"
     redirect = HTTPError("https://media.example.invalid/start.png", 302, "found", headers, None)
     class Redirecting:
@@ -155,6 +252,47 @@ def test_video_inspection_rejects_missing_stream_and_timeout(monkeypatch, tmp_pa
     monkeypatch.setattr("tubeforge.pipeline.assets.subprocess.run", timeout)
     with pytest.raises(RetryableProviderError, match="timed out"): inspect_media(movie, "video", AssetLimits(frozenset(), frozenset()))
 
+
+@pytest.mark.parametrize(
+    "stream,duration",
+    (
+        ({"codec_type": "video", "codec_name": "h264", "width": 0, "height": 9}, "1"),
+        ({"codec_type": "video", "codec_name": "h264", "width": 15, "height": 9}, "1"),
+        ({"codec_type": "video", "codec_name": "", "width": 16, "height": 9}, "1"),
+        ({"codec_type": "video", "codec_name": "h264", "width": 16, "height": 9}, "NaN"),
+    ),
+)
+def test_video_inspection_rejects_invalid_decoded_metadata(
+    monkeypatch, tmp_path: Path, stream: dict[str, object], duration: str
+) -> None:
+    from types import SimpleNamespace
+    from tubeforge.pipeline.assets import inspect_media
+
+    movie = tmp_path / "invalid.mp4"
+    movie.write_bytes(b"fake")
+    payload = {"format": {"duration": duration, "format_name": "mov"}, "streams": [stream]}
+    monkeypatch.setattr(
+        "tubeforge.pipeline.assets.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout=json.dumps(payload).encode(), stderr=b""
+        ),
+    )
+
+    with pytest.raises(ProviderValidationError, match="dimensions, duration, or codec"):
+        inspect_media(
+            movie,
+            "video",
+            AssetLimits(
+                frozenset(),
+                frozenset(),
+                min_width=16,
+                min_height=9,
+                max_width=20,
+                max_height=20,
+                max_pixels=320,
+            ),
+        )
+
 def test_rights_sensitive_candidates_require_manual_review() -> None:
     request = MediaSearchRequest(scene_id="scene-1", queries=("rain",), visual_type="image", required_license="licensed")
     limits = AssetLimits(frozenset(), frozenset({"CC0-1.0"}))
@@ -181,7 +319,7 @@ def test_attribution_manifest_deduplicates_asset_and_retains_scene_ids() -> None
 
 def test_downloader_cancellation_removes_only_partial_file(tmp_path: Path) -> None:
     from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetDownloader
-    png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1).to_bytes(4,"big") + (1).to_bytes(4,"big")
+    png = _png()
     response = _Chunks([png[:12], png[12:]])
     calls = [0]
     def cancelled() -> bool:
@@ -193,7 +331,7 @@ def test_downloader_cancellation_removes_only_partial_file(tmp_path: Path) -> No
 
 def test_png_validation_enforces_minimum_and_pixel_limits(tmp_path: Path) -> None:
     from tubeforge.pipeline.assets import inspect_media
-    png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (2).to_bytes(4,"big") + (2).to_bytes(4,"big")
+    png = _png(2,2)
     path = tmp_path / "tiny.png"; path.write_bytes(png)
     with pytest.raises(ProviderValidationError): inspect_media(path, "image", AssetLimits(frozenset(), frozenset(), min_width=3, min_height=3))
     with pytest.raises(ProviderValidationError): inspect_media(path, "image", AssetLimits(frozenset(), frozenset(), max_pixels=3))
@@ -212,7 +350,7 @@ def test_http_auth_and_transient_failures_are_classified(tmp_path: Path) -> None
 
 def test_shared_asset_cache_reuse_avoids_second_download(tmp_path: Path) -> None:
     from tubeforge.pipeline.assets import AssetAcquisitionService, AssetDownloader
-    png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1).to_bytes(4,"big") + (1).to_bytes(4,"big")
+    png = _png()
     source = tmp_path / "source.png"; source.write_bytes(png)
     asset = AssetCandidate(provider_asset_id="shared", source_url="https://media.example.invalid/shared.png", download_url="https://media.example.invalid/shared.png", local_path=str(source), license_name="CC0-1.0", retrieved_at=datetime.now(UTC))
     db = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path/'shared.db'}")); Base.metadata.create_all(db.engine)
@@ -233,11 +371,19 @@ def _jpeg(width: int, height: int) -> bytes:
     return b"\xff\xd8\xff\xc0\x00\x11\x08" + height.to_bytes(2, "big") + width.to_bytes(2, "big") + b"\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00\xff\xd9"
 
 
-def test_jpeg_validation_requires_real_dimensions_and_applies_limits(tmp_path: Path) -> None:
+def test_jpeg_validation_requires_real_dimensions_and_applies_limits(monkeypatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
     from tubeforge.pipeline.assets import inspect_media
+    calls = []
+    def decode(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stderr=b"")
+    monkeypatch.setattr("tubeforge.pipeline.assets.subprocess.run", decode)
     image = tmp_path / "known.jpg"; image.write_bytes(_jpeg(4, 3))
     limits = AssetLimits(frozenset(), frozenset(), min_width=4, min_height=3, max_width=4, max_height=3, max_pixels=12)
     assert inspect_media(image, "image", limits)["width"] == 4
+    assert calls[0][0][:3] == ["ffmpeg", "-v", "error"]
+    assert calls[0][1]["shell"] is False
     with pytest.raises(ProviderValidationError): inspect_media(image, "image", AssetLimits(frozenset(), frozenset(), min_width=5))
     with pytest.raises(ProviderValidationError): inspect_media(image, "image", AssetLimits(frozenset(), frozenset(), max_width=3))
     with pytest.raises(ProviderValidationError): inspect_media(image, "image", AssetLimits(frozenset(), frozenset(), max_pixels=11))
@@ -246,10 +392,18 @@ def test_jpeg_validation_requires_real_dimensions_and_applies_limits(tmp_path: P
     zero = tmp_path / "zero.jpg"; zero.write_bytes(_jpeg(0, 3))
     with pytest.raises(ProviderValidationError, match="dimensions"): inspect_media(zero, "image", AssetLimits(frozenset(), frozenset()))
 
+def test_jpeg_validation_rejects_pixel_data_that_ffmpeg_cannot_decode(monkeypatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from tubeforge.pipeline.assets import inspect_media
+    image = tmp_path / "truncated.jpg"; image.write_bytes(_jpeg(4, 3))
+    monkeypatch.setattr("tubeforge.pipeline.assets.subprocess.run", lambda *a, **k: SimpleNamespace(returncode=1, stderr=b"invalid scan data"))
+    with pytest.raises(ProviderValidationError, match="pixel data"):
+        inspect_media(image, "image", AssetLimits(frozenset(), frozenset()))
+
 
 def test_download_validates_temp_file_before_atomic_promotion(tmp_path: Path, monkeypatch) -> None:
     from tubeforge.pipeline.assets import AssetDownloader
-    png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + (1).to_bytes(4, "big") + (1).to_bytes(4, "big")
+    png = _png()
     downloader = AssetDownloader(tmp_path / "cache", AssetLimits(frozenset({"media.example.invalid"}), frozenset({"CC0-1.0"})), _Opener(_Chunks([png])))
     value = candidate("promote")
     import tubeforge.pipeline.assets as assets

@@ -24,6 +24,16 @@ pipeline:
     repair_attempt_limit: 0
     prompt_template_version: "m6-content-v1"
     max_prompt_chars: 60000
+  ollama:
+    base_url: "http://127.0.0.1:11434"
+    model: "llama3.2:3b"
+    connection_timeout_seconds: 10
+    inference_timeout_seconds: 300
+    max_response_bytes: 2000000
+    retries: 2
+    reservation_seconds: 600
+    prompt_template_version: "m6-content-v1"
+    max_prompt_chars: 60000
   piper:
     executable: "piper"
     model_path: null

@@ -12,7 +12,7 @@ COPY src ./src
 COPY migrations ./migrations
 COPY tests ./tests
 COPY alembic.ini ./
-RUN python -m pip install --no-cache-dir ".[dev]"
+RUN python -m pip install --no-cache-dir ".[dev,local-media]"
 
 USER tubeforge
 EXPOSE 8080

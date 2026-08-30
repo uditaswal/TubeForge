@@ -23,7 +23,9 @@ def request(*, topic: str = "Rain", prompt_version: str = "test-v1") -> ContentR
 
 
 def package(value: ContentRequest) -> dict[str, object]:
-    return {"schema_version": "1.0", "request": value.model_dump(mode="json"), "claims": [{"claim_id": "claim-1", "text": "Rain falls from clouds.", "source_ids": ["source-1"], "confidence": "high", "review_status": "verified", "human_review_required": False}], "script_sections": [{"section_id": "section-1", "narration": "Rain falls from clouds.", "scene_id": "scene-1", "claim_ids": ["claim-1"], "contains_factual_claims": True}], "scene_plans": [{"scene_id": "scene-1", "visual_type": "illustration", "search_queries": ["rain clouds"], "fallback_visual": "text_card"}], "metadata": {"title_options": ["Rain"], "description": "A cited explanation."}, "thumbnail_brief": {"text_options": ["RAIN"], "visual_direction": "Blue rain clouds", "accessibility_description": "Rain clouds"}, "clip_candidates": []}
+    sections = [{"section_id": f"section-{index}", "narration": f"Rain scene {index} explains how clouds produce weather, using clear sourced details for curious viewers today.", "scene_id": f"scene-{index}", "claim_ids": ["claim-1"], "contains_factual_claims": True} for index in range(1, 7)]
+    scenes = [{"scene_id": f"scene-{index}", "visual_type": "illustration", "search_queries": [f"rain clouds {index}"], "fallback_visual": "text_card"} for index in range(1, 7)]
+    return {"schema_version": "1.0", "request": value.model_dump(mode="json"), "claims": [{"claim_id": "claim-1", "text": "Rain falls from clouds.", "source_ids": ["source-1"], "confidence": "high", "review_status": "verified", "human_review_required": False}], "script_sections": sections, "scene_plans": scenes, "metadata": {"title_options": ["Rain"], "description": "A cited explanation."}, "thumbnail_brief": {"text_options": ["RAIN"], "visual_direction": "Blue rain clouds", "accessibility_description": "Rain clouds"}, "clip_candidates": []}
 
 
 @pytest.fixture
@@ -81,6 +83,7 @@ def test_competing_reservation_blocks_and_expired_reservation_recovers(resources
     assert resources.reserve_or_get(request(), "codex-cli", "model", "v", now=now, reservation_seconds=10) is None
     replacement = resources.reserve_or_get(request(), "codex-cli", "model", "v", now=now + timedelta(seconds=11), reservation_seconds=10)
     assert replacement is not None and replacement != first
+    assert resources.abandon(first) is False
     assert resources.accept(first, package(request()), {}, {}, now=now) is False
     assert resources.accept(replacement, package(request()), {"provider": "codex-cli"}, {}, now=now)
     cached = resources.reserve_or_get(request(), "codex-cli", "model", "v", now=now, reservation_seconds=10)
@@ -94,11 +97,32 @@ def test_process_failure_classification(resources, code: int, stderr: bytes, err
         CodexCliContentProvider(CodexProviderConfig(), resources, process_runner=failed).generate_package(request())
 
 
+def test_failed_generation_releases_cache_reservation_for_immediate_retry(resources) -> None:
+    value = request(prompt_version="retry-after-failure-v1")
+
+    def failed(*_):
+        return ProcessResult(124, b"", b"timeout")
+
+    with pytest.raises(RetryableProviderError):
+        CodexCliContentProvider(CodexProviderConfig(), resources, process_runner=failed).generate_package(value)
+    recovered = CodexCliContentProvider(CodexProviderConfig(), resources, process_runner=runner_with([package(value)], []))
+    assert len(recovered.generate_package(value).scene_plans) == 6
+
+
 def test_invalid_json_and_schema_invalid_output_are_validation_failures(resources) -> None:
     def invalid_json(_a, _p, output, _t, _l):
         output.write_text("not-json", encoding="utf-8"); return ProcessResult(0, b"", b"")
     with pytest.raises(ProviderValidationError, match="valid JSON"):
         CodexCliContentProvider(CodexProviderConfig(), resources, process_runner=invalid_json).generate_package(request())
+
+
+def test_implausibly_short_narration_is_rejected(resources) -> None:
+    value = request(prompt_version="short-duration-v1")
+    short = package(value)
+    for section in short["script_sections"]:  # type: ignore[index]
+        section["narration"] = "Too short."
+    with pytest.raises(ProviderValidationError, match="word count"):
+        CodexCliContentProvider(CodexProviderConfig(), resources, process_runner=runner_with([short], [])).generate_package(value)
 
 
 def test_targeted_repair_replaces_only_invalid_claim(resources) -> None:

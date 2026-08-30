@@ -6,7 +6,7 @@ import pytest
 
 from tubeforge.core.config import PreviewRenderConfig
 from tubeforge.core.errors import ProviderValidationError
-from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, TimelineSegment, parse_frame_rate
+from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, TimelineSegment, build_timeline, parse_frame_rate
 
 
 class StaticProbe:
@@ -68,6 +68,8 @@ def test_frame_rate_and_encoder_validation_are_explicit() -> None:
     assert parse_frame_rate("30000/1001") == pytest.approx(29.97003)
     with pytest.raises(ProviderValidationError):
         parse_frame_rate("0/0")
+    with pytest.raises(ProviderValidationError):
+        parse_frame_rate("NaN/1")
     with pytest.raises(ValueError, match="unsupported video encoder"):
         PreviewRenderConfig(video_codec="vp9")
     with pytest.raises(ValueError, match="unsupported audio encoder"):
@@ -83,6 +85,28 @@ def test_validation_enforces_configured_rational_fps_and_records_probe_values(tm
     assert metadata["audio_codec"] == "aac"
     with pytest.raises(ProviderValidationError, match="stream metadata"):
         PreviewRenderer(PreviewRenderConfig(fps=24), probe=StaticProbe()).validate(output, 1.0)
+
+
+def test_validation_rejects_nonfinite_container_duration(tmp_path: Path) -> None:
+    output = tmp_path / "preview.mp4"; output.write_bytes(b"video")
+
+    class NonfiniteProbe(StaticProbe):
+        def inspect(self, path: Path) -> dict[str, object]:
+            data = super().inspect(path)
+            data["format"] = {"duration": "NaN"}
+            return data
+
+    with pytest.raises(ProviderValidationError, match="stream metadata"):
+        PreviewRenderer(PreviewRenderConfig(), probe=NonfiniteProbe()).validate(output, 1.0)
+
+
+def test_timeline_rejects_nonfinite_persisted_timing() -> None:
+    class Package:
+        script_sections = ()
+
+    timing = {"phrases": [{"section_id": "section", "start_seconds": "NaN", "end_seconds": 1}], "final_duration_seconds": 1}
+    with pytest.raises(ProviderValidationError, match="timing map"):
+        build_timeline(Package(), timing, {}, tolerance=0.01)  # type: ignore[arg-type]
 
 
 def test_cancellation_terminates_reaps_and_removes_partial_output(tmp_path: Path) -> None:

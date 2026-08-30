@@ -18,7 +18,7 @@ from tubeforge.core.config import CodexProviderConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.repositories import CachedGeneration, GenerationCacheRepository
 from tubeforge.domain.contracts import ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest
-from tubeforge.providers.content.prompts import build_content_prompt, build_repair_prompt, normalize_content_request
+from tubeforge.providers.content.prompts import build_content_prompt, build_repair_prompt, normalize_content_request, validate_video_package
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,13 +52,17 @@ class CodexCliContentProvider:
             return package
         if cached is None:
             raise RetryableProviderError("Codex generation is already reserved; retry after the reservation expires")
-        prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
-        raw, usage = self._invoke(prompt)
-        package = self._validate_or_repair(raw, request)
-        package_json = package.model_dump(mode="json")
-        provenance: dict[str, object] = {"cache_key": cached.cache_key, "generated_at": self._now().isoformat(), "model": self.config.model, "prompt_template_version": self.config.prompt_template_version, "prompt_version": request.prompt_version, "provider": self.provider_name}
-        if not self.cache.accept(cached, package_json, provenance, usage, now=self._now()):
-            raise RetryableProviderError("Codex generation reservation expired before validated result could be accepted")
+        try:
+            prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
+            raw, usage = self._invoke(prompt)
+            package = self._validate_or_repair(raw, request)
+            package_json = package.model_dump(mode="json")
+            provenance: dict[str, object] = {"cache_key": cached.cache_key, "generated_at": self._now().isoformat(), "model": self.config.model, "prompt_template_version": self.config.prompt_template_version, "prompt_version": request.prompt_version, "provider": self.provider_name}
+            if not self.cache.accept(cached, package_json, provenance, usage, now=self._now()):
+                raise RetryableProviderError("Codex generation reservation expired before validated result could be accepted")
+        except Exception:
+            self.cache.abandon(cached)
+            raise
         self.last_provenance, self.last_usage = provenance, usage
         return package
 
@@ -108,6 +112,7 @@ class CodexCliContentProvider:
         package = ContentPackage.model_validate(raw)
         if normalize_content_request(package.request) != normalize_content_request(request):
             raise ProviderValidationError("Codex output request or cited source packet differs from the requested source packet")
+        validate_video_package(package, request, provider_name="Codex")
         claims = tuple(claim.model_copy(update={"review_status": ClaimReviewStatus.NEEDS_REVIEW, "human_review_required": True}) if claim.time_sensitive or claim.confidence in {ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM} else claim for claim in package.claims)
         return package.model_copy(update={"claims": claims})
 
