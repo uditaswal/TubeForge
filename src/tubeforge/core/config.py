@@ -133,6 +133,42 @@ class CodexProviderConfig(BaseModel):
         return value
 
 
+class OllamaProviderConfig(BaseModel):
+    """Bounded settings for an opt-in local or LAN Ollama content adapter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str = "http://127.0.0.1:11434"
+    model: str = Field(default="llama3.2:3b", min_length=1, max_length=200)
+    connection_timeout_seconds: int = Field(default=10, ge=1, le=300)
+    inference_timeout_seconds: int = Field(default=300, ge=1, le=7_200)
+    max_response_bytes: int = Field(default=2_000_000, ge=1_024, le=20_000_000)
+    retries: int = Field(default=2, ge=0, le=5)
+    reservation_seconds: int = Field(default=600, ge=10, le=14_400)
+    prompt_template_version: str = Field(default="m6-content-v1", min_length=1, max_length=100)
+    max_prompt_chars: int = Field(default=60_000, ge=1_000, le=200_000)
+
+    @field_validator("base_url")
+    @classmethod
+    def require_safe_http_base_url(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+
+        normalized = value.strip().rstrip("/")
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("must be an absolute HTTP(S) URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("must not contain credentials, query parameters, or a fragment")
+        return normalized
+
+    @field_validator("model", "prompt_template_version")
+    @classmethod
+    def require_nonblank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("must not be blank")
+        return normalized
+
 class PiperProviderConfig(BaseModel):
     """Opt-in local Piper settings; paths are resolved from the repository root."""
 
@@ -321,10 +357,11 @@ class PipelineConfig(BaseModel):
     # ``provider`` is retained only to read older configuration files. New
     # deployments select the independent content and voice adapters below.
     provider: str | None = Field(default=None, pattern=r"^(fake|codex|piper)$")
-    content_provider: str = Field(default="fake", pattern=r"^(fake|fixed|codex)$")
+    content_provider: str = Field(default="fake", pattern=r"^(fake|fixed|codex|ollama)$")
     voice_provider: str = Field(default="fake", pattern=r"^(fake|piper)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
+    ollama: OllamaProviderConfig = Field(default_factory=OllamaProviderConfig)
     piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
     preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
@@ -407,7 +444,11 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
 
 def validate_selected_provider(settings: Settings) -> None:
-    """Fail early for every explicitly selected external executable."""
+    """Fail early for every explicitly selected external executable.
+
+    Content and voice providers are independent. In particular, validating
+    Piper must not skip Codex validation for the real LLM-to-video topology.
+    """
     if settings.pipeline.voice_provider == "piper":
         piper = settings.pipeline.piper
         if piper.model_path is None:
@@ -418,11 +459,9 @@ def validate_selected_provider(settings: Settings) -> None:
         if piper.config_path is not None and not _resolve_path(piper.config_path).is_file():
             raise RuntimeError("pipeline.piper.config_path does not exist or is not a file")
         _validate_executable(piper.executable, "pipeline.piper.executable")
-        return
-    if settings.pipeline.content_provider != "codex":
-        return
-    codex = settings.pipeline.codex
-    _validate_executable(codex.executable, "pipeline.codex.executable")
+    if settings.pipeline.content_provider == "codex":
+        codex = settings.pipeline.codex
+        _validate_executable(codex.executable, "pipeline.codex.executable")
 
 
 def _resolve_path(value: Path) -> Path:

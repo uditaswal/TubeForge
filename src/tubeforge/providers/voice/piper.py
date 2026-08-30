@@ -86,13 +86,31 @@ class PiperVoiceProvider:
             raise ProviderValidationError("Piper model file is unavailable")
         return path
 
-    @staticmethod
-    def _valid_wave(path: Path) -> bool:
+    def _valid_wave(self, path: Path) -> bool:
         try:
-            if not path.is_file() or path.stat().st_size <= 44:
+            if (
+                not path.is_file()
+                or path.stat().st_size <= 44
+                or path.stat().st_size > self.settings.max_output_bytes
+            ):
                 return False
             with wave.open(str(path), "rb") as stream:
-                return stream.getnframes() > 0
+                frames = stream.getnframes()
+                channels = stream.getnchannels()
+                sample_width = stream.getsampwidth()
+                sample_rate = stream.getframerate()
+                if (
+                    frames <= 0
+                    or channels <= 0
+                    or sample_width <= 0
+                    or sample_rate <= 0
+                    or stream.getcomptype() != "NONE"
+                    or (self.settings.sample_rate is not None and sample_rate != self.settings.sample_rate)
+                ):
+                    return False
+                # wave.getnframes() trusts the header. Read the declared payload
+                # so a truncated cache entry cannot report a plausible duration.
+                return len(stream.readframes(frames)) == frames * channels * sample_width
         except (wave.Error, OSError, EOFError):
             return False
 

@@ -34,6 +34,8 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data
+      # Operator-supplied Piper ONNX voices and adjacent .onnx.json files.
+      - ./models:/app/models:ro
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
     restart: unless-stopped

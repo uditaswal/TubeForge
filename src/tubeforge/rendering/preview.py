@@ -1,6 +1,6 @@
 """Deterministic FFmpeg preview rendering with validated argument arrays."""
 from __future__ import annotations
-import hashlib, json, shutil, subprocess, time
+import hashlib, json, math, shutil, subprocess, time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +19,7 @@ def parse_frame_rate(value: str) -> float:
         rate = float(numerator) / float(denominator)
     except (AttributeError, ValueError, ZeroDivisionError) as error:
         raise ProviderValidationError("ffprobe returned an invalid frame rate") from error
-    if rate <= 0:
+    if not math.isfinite(rate) or rate <= 0:
         raise ProviderValidationError("ffprobe returned a nonpositive frame rate")
     return rate
 
@@ -43,10 +43,10 @@ def build_timeline(package: ContentPackage, timing_map: dict[str,object], assets
         if not isinstance(value,dict): raise ProviderValidationError("timing map phrase is invalid")
         try: start,end,section=float(value["start_seconds"]),float(value["end_seconds"]),str(value["section_id"])
         except (KeyError,TypeError,ValueError) as error: raise ProviderValidationError("timing map phrase lacks valid timing") from error
-        if start<0 or end<=start or abs(start-previous)>tolerance: raise ProviderValidationError("timing map has a gap, overlap, or invalid duration")
+        if not math.isfinite(start) or not math.isfinite(end) or start<0 or end<=start or abs(start-previous)>tolerance: raise ProviderValidationError("timing map has a gap, overlap, or invalid duration")
         previous=end; by_section.setdefault(section,[]).append(value)
     expected=float(timing_map.get("final_duration_seconds",0))
-    if expected<=0 or abs(previous-expected)>tolerance: raise ProviderValidationError("timing map does not end with narration")
+    if not math.isfinite(expected) or expected<=0 or abs(previous-expected)>tolerance: raise ProviderValidationError("timing map does not end with narration")
     if len({section.scene_id for section in package.script_sections}) != len(package.script_sections): raise ProviderValidationError("preview rejects duplicate scene IDs")
     if set(by_section) != {section.section_id for section in package.script_sections}: raise ProviderValidationError("timing map does not match approved script sections")
     output=[]
@@ -98,7 +98,7 @@ class PreviewRenderer:
         try: duration=float(data["format"]["duration"]); width,height=int(video["width"]),int(video["height"]); rate=str(video["avg_frame_rate"]); sample_rate,channels=int(audio["sample_rate"]),int(audio["channels"])
         except (KeyError,TypeError,ValueError) as error: raise ProviderValidationError("preview requires complete video and audio streams") from error
         fps=parse_frame_rate(rate); expected_video=SUPPORTED_VIDEO_ENCODERS[self.config.video_codec]; expected_audio=SUPPORTED_AUDIO_ENCODERS[self.config.audio_codec]
-        if duration<=0 or abs(duration-expected)>self.config.sync_tolerance_seconds or (width,height)!=(self.config.width,self.config.height) or abs(fps-self.config.fps)>self.config.fps_tolerance or video.get("codec_name")!=expected_video or audio.get("codec_name")!=expected_audio or sample_rate<=0 or channels<=0: raise ProviderValidationError("preview stream metadata is invalid")
+        if not math.isfinite(expected) or not math.isfinite(duration) or duration<=0 or abs(duration-expected)>self.config.sync_tolerance_seconds or (width,height)!=(self.config.width,self.config.height) or abs(fps-self.config.fps)>self.config.fps_tolerance or video.get("codec_name")!=expected_video or audio.get("codec_name")!=expected_audio or sample_rate<=0 or channels<=0: raise ProviderValidationError("preview stream metadata is invalid")
         return {"duration_seconds":duration,"width":width,"height":height,"frame_rate":rate,"fps":fps,"video_codec":str(video["codec_name"]),"audio_codec":str(audio["codec_name"]),"sample_rate":sample_rate,"channels":channels}
     def render(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path,*,cancellation_requested:Callable[[],bool]|None=None)->dict[str,Any]:
         if not narration.is_file() or not captions.is_file() or narration.stat().st_size==0 or captions.stat().st_size==0: raise ProviderValidationError("preview narration or captions are missing")

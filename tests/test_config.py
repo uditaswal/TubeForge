@@ -61,3 +61,34 @@ def test_source_ingestion_needs_explicit_hosts() -> None:
             "database": {"url": "sqlite:///./test.db"},
             "pipeline": {"sources": {"enabled": True}},
         })
+
+
+def test_codex_and_piper_selection_validates_both_executables(tmp_path: Path) -> None:
+    model = tmp_path / "voice.onnx"
+    model.write_bytes(b"model")
+    piper = tmp_path / "piper"
+    piper.write_text("#!/bin/sh\n", encoding="utf-8")
+    config = tmp_path / "combined.yaml"
+    config.write_text(
+        "\n".join(
+            (
+                "app:",
+                "  name: TubeForge",
+                "  environment: test",
+                "database:",
+                "  url: sqlite:///test.db",
+                "pipeline:",
+                "  content_provider: codex",
+                "  voice_provider: piper",
+                "  codex:",
+                f"    executable: {tmp_path / 'missing-codex'}",
+                "  piper:",
+                f"    executable: {piper}",
+                f"    model_path: {model}",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="pipeline.codex.executable"):
+        load_settings(config)

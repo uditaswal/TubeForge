@@ -6,6 +6,7 @@ from tubeforge.core.config import Settings
 from tubeforge.db.repositories import GenerationCacheRepository
 from tubeforge.domain.providers import ContentProvider
 from tubeforge.providers.content.codex_cli import CodexCliContentProvider
+from tubeforge.providers.content.ollama import OllamaContentProvider
 from tubeforge.providers.fake import FakeContentProvider, FixedScriptContentProvider
 
 
@@ -15,4 +16,7 @@ def create_content_provider(settings: Settings, session_factory: sessionmaker[Se
         return FakeContentProvider()
     if settings.pipeline.content_provider == "fixed":
         return FixedScriptContentProvider()
-    return CodexCliContentProvider(settings.pipeline.codex, GenerationCacheRepository(session_factory))
+    cache = GenerationCacheRepository(session_factory)
+    if settings.pipeline.content_provider == "ollama":
+        return OllamaContentProvider(settings.pipeline.ollama, cache)
+    return CodexCliContentProvider(settings.pipeline.codex, cache)

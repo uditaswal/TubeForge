@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import secrets
 
-from sqlalchemy import and_, exists, or_, select, update
+from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -620,6 +620,18 @@ class GenerationCacheRepository:
             )
             return result.rowcount == 1
 
+    def abandon(self, reservation: GenerationCacheReservation) -> bool:
+        """Release a failed generation reservation without disturbing a newer owner."""
+        with self._session_factory.begin() as session:
+            result = session.execute(
+                delete(GenerationCacheRecord).where(
+                    GenerationCacheRecord.cache_key == reservation.cache_key,
+                    GenerationCacheRecord.state == "reserved",
+                    GenerationCacheRecord.reservation_token == reservation.token,
+                )
+            )
+            return result.rowcount == 1
+
 
 def _as_utc(value: datetime) -> datetime:
     """Treat SQLite's timezone-naive storage values as UTC, as do PostgreSQL values."""
@@ -657,6 +669,18 @@ class AssetCacheRepository:
         """Release a corrupt accepted entry; the binary is deliberately retained."""
         with self._session_factory.begin() as session:
             session.execute(update(AssetCacheRecord).where(AssetCacheRecord.cache_key == key, AssetCacheRecord.state == "accepted").values(state="invalid", reservation_token=None, reservation_expires_at=None, failure_message="cached file failed revalidation", updated_at=_as_utc(now)))
+
+    def abandon(self, reservation: AssetCacheReservation) -> bool:
+        """Release a failed reservation without disturbing a replacement owner."""
+        with self._session_factory.begin() as session:
+            result = session.execute(
+                delete(AssetCacheRecord).where(
+                    AssetCacheRecord.cache_key == reservation.cache_key,
+                    AssetCacheRecord.state == "reserved",
+                    AssetCacheRecord.reservation_token == reservation.token,
+                )
+            )
+            return result.rowcount == 1
 
     def accept(self, reservation: AssetCacheReservation, asset: CachedAsset, *, now: datetime) -> bool:
         with self._session_factory.begin() as session:

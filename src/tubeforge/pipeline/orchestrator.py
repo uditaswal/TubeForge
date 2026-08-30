@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import uuid
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -20,7 +21,7 @@ from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepo
 from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, ContentRequest, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, SourceReference, VideoMetadata, VoiceRequest
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
-from tubeforge.pipeline.assets import AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, scene_request, select_candidate
+from tubeforge.pipeline.assets import ASSET_VALIDATION_VERSION, AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, inspect_media, scene_request, select_candidate
 from tubeforge.pipeline.captions import render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
@@ -646,14 +647,33 @@ class PipelineOrchestrator:
             candidate_data = value["candidate"]
             if not isinstance(candidate_data, dict) or not {"license_name", "editorial_only", "review_required", "attribution_required"}.issubset(candidate_data): return False
             candidate = AssetCandidate.model_validate(candidate_data)
-            return path.is_file() and path.stat().st_size > 0 and self._checksum(path)==value["checksum_sha256"] and validation["checksum_sha256"]==value["checksum_sha256"] and validation["validation_version"]=="m8-v1" and asset_policy_valid(candidate, self.asset_limits)
-        except (KeyError, OSError, TypeError, ValueError): return False
+            if not (
+                path.is_file()
+                and path.stat().st_size > 0
+                and self._checksum(path) == value["checksum_sha256"]
+                and validation["checksum_sha256"] == value["checksum_sha256"]
+                and validation["validation_version"] == ASSET_VALIDATION_VERSION
+                and asset_policy_valid(candidate, self.asset_limits)
+            ):
+                return False
+            # A checkpoint is only a hint. Decode the current bytes again so a
+            # forged or stale validation record cannot promote corrupt media.
+            inspected = inspect_media(path, candidate.media_type, self.asset_limits)
+            return all(validation.get(field) == inspected.get(field) for field in ("media_type", "width", "height"))
+        except (KeyError, OSError, ProviderValidationError, TypeError, ValueError): return False
     def _result_is_valid(self, result: object) -> bool:
         if not isinstance(result, dict):
             return False
         try:
             path = Path(str(result["artifact_path"]))
-            return path.is_file() and path.stat().st_size > 0 and self._checksum(path) == result["checksum_sha256"] and float(result["duration_seconds"]) > 0
+            duration = float(result["duration_seconds"])
+            return (
+                path.is_file()
+                and path.stat().st_size > 0
+                and self._checksum(path) == result["checksum_sha256"]
+                and math.isfinite(duration)
+                and duration > 0
+            )
         except (KeyError, OSError, ValueError, TypeError):
             return False
 

@@ -35,12 +35,12 @@ class FixedScriptContentProvider:
     """Deterministic six-scene package for offline and real-media smoke jobs."""
 
     _SCENES = (
-        ("A question appears: how can one idea become a finished narrated video, entirely on a local machine?", "A glowing question mark above a compact home server at dawn"),
-        ("TubeForge begins with a structured plan, dividing the story into clear scenes with a visual purpose for each one.", "A storyboard wall with six distinct cinematic frames"),
-        ("Next, local speech synthesis turns every line into real narration, without sending the script to a paid voice service.", "Sound waves flowing from a small computer into studio headphones"),
-        ("The measured audio duration becomes the clock, so every image stays on screen for exactly the scene it explains.", "A precise editing timeline aligned with an audio waveform"),
-        ("Each scene receives its own validated visual, while checksums and atomic promotion protect incomplete files from becoming artifacts.", "Six colorful image cards passing through a validation checkpoint"),
-        ("Finally, FFmpeg joins the visuals, captions, and narration into a playable video that can safely resume after interruption.", "A finished video frame emerging from gears labeled audio visuals captions"),
+        ("A question appears: how can one idea become a finished narrated video, entirely on a local machine? This demonstration follows every practical step from the opening prompt to the final file.", "A glowing question mark above a compact home server at dawn"),
+        ("TubeForge begins with a structured plan, dividing the story into clear scenes with a visual purpose for each one. The ordered plan keeps narration, evidence, and pictures connected while the job moves forward.", "A storyboard wall with six distinct cinematic frames"),
+        ("Next, local speech synthesis turns every line into real narration, without sending the script to a paid voice service. Piper writes ordinary wave audio that the pipeline can measure and validate directly.", "Sound waves flowing from a small computer into studio headphones"),
+        ("The measured audio duration becomes the clock, so every image stays on screen for exactly the scene it explains. Timing comes from the produced sound itself, rather than from a hopeful estimate.", "A precise editing timeline aligned with an audio waveform"),
+        ("Each scene receives its own validated visual, while checksums and atomic promotion protect incomplete files from becoming artifacts. Distinct colors and compositions make every transition visible, even when the system is offline.", "Six colorful image cards passing through a validation checkpoint"),
+        ("Finally, FFmpeg joins the visuals, captions, and narration into a playable video that can safely resume after interruption. The completed file contains real audio and video streams, ready for inspection before publication.", "A finished video frame emerging from gears labeled audio visuals captions"),
     )
 
     def __init__(self) -> None:
