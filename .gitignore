@@ -24,3 +24,5 @@ data/
 **/__pycache__/
 *.py[cod]
 autonomous_logs/
+models/*.onnx
+
