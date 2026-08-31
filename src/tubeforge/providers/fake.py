@@ -28,7 +28,35 @@ class FakeContentProvider:
         self.calls += 1
         if self.failure:
             raise self.failure
-        return ContentPackage(schema_version="1.0", request=request, claims=(CitedClaim(claim_id="claim-1", text=f"{request.topic} is explained using the supplied source.", source_ids=(request.sources[0].source_id,), confidence=ConfidenceLevel.HIGH, review_status=ClaimReviewStatus.VERIFIED, human_review_required=False),), script_sections=(ScriptSection(section_id="section-1", narration=_fake_narration(request), scene_id="scene-1", claim_ids=("claim-1",), contains_factual_claims=True),), scene_plans=(ScenePlan(scene_id="scene-1", visual_type="illustration", search_queries=(request.topic,), fallback_visual="text_card"),), metadata=VideoMetadata(title_options=(request.topic,), description=request.angle), thumbnail_brief=ThumbnailBrief(text_options=(request.topic[:40],), visual_direction="Simple educational illustration", accessibility_description="Educational illustration"))
+        points = request.notes or tuple(item.strip() for item in request.angle.splitlines() if item.strip()) or (request.angle,)
+        # The offline/local provider must still produce a useful storyboard.
+        # Its former single repeated "context" sentence was only a test fixture
+        # and made every deployed video look broken.
+        scene_count = min(6, max(3, len(points) + 2))
+        scene_topics = ("Why this matters", *points, "What to do next")[:scene_count]
+        target_words = max(18, round(request.target_duration_seconds * 2.15 / scene_count))
+        sections = tuple(
+            ScriptSection(
+                section_id=f"section-{index}",
+                scene_id=f"scene-{index}",
+                narration=_local_scene_narration(request.topic, point, index, scene_count, target_words),
+                claim_ids=(),
+                contains_factual_claims=False,
+            )
+            for index, point in enumerate(scene_topics, 1)
+        )
+        scenes = tuple(
+            ScenePlan(
+                scene_id=f"scene-{index}",
+                visual_type="illustration",
+                search_queries=(f"{request.visual_style} {request.topic} {point}",),
+                on_screen_text=point[:120],
+                fallback_visual="local_scene_illustration",
+            )
+            for index, point in enumerate(scene_topics, 1)
+        )
+        claim = CitedClaim(claim_id="operator-brief", text=f"Operator-provided brief for {request.topic}.", source_ids=(request.sources[0].source_id,), confidence=ConfidenceLevel.HIGH, review_status=ClaimReviewStatus.VERIFIED, human_review_required=False)
+        return ContentPackage(schema_version="1.0", request=request, claims=(claim,), script_sections=sections, scene_plans=scenes, metadata=VideoMetadata(title_options=(request.topic,), description=request.angle), thumbnail_brief=ThumbnailBrief(text_options=(request.topic[:40],), visual_direction=f"Cinematic local illustration for {request.topic}", accessibility_description=f"Scene-specific illustration for {request.topic}"))
 
 
 class FixedScriptContentProvider:
@@ -42,16 +70,27 @@ class FixedScriptContentProvider:
         ("Each scene receives its own validated visual, while checksums and atomic promotion protect incomplete files from becoming artifacts. Distinct colors and compositions make every transition visible, even when the system is offline.", "Six colorful image cards passing through a validation checkpoint"),
         ("Finally, FFmpeg joins the visuals, captions, and narration into a playable video that can safely resume after interruption. The completed file contains real audio and video streams, ready for inspection before publication.", "A finished video frame emerging from gears labeled audio visuals captions"),
     )
+    _MINIMUM_ENGINEER_SCENES = (
+        ("Want to become useful as a software engineer now? Ignore the endless tool list. Build a compact foundation you can use to ship, debug, and explain a real project.", "A focused software engineer at a desk, surrounded by only five clear skill cards"),
+        ("First, choose one language and go deep. Python, JavaScript, Java, or Go can work. Learn functions, testing, debugging, packages, and clean interfaces before chasing another language.", "One programming language card becoming a working application with tests and a debugger"),
+        ("Second, learn Linux well enough to live in the terminal. Navigate files, manage processes, read logs, use permissions, environment variables, SSH, and simple shell pipelines.", "A dark Linux terminal showing files, process logs, permissions, and an SSH connection"),
+        ("Third, learn Git and Docker together. Git protects your changes. Docker makes your application run consistently on your laptop, a teammate's machine, and a server.", "A Git branch merging into a Docker container that runs identically on laptop and cloud server"),
+        ("Fourth, understand practical AWS basics: IAM, compute, storage, networking, logs, and costs. Deploy one small service, then trace a request from browser to logs and back.", "A simple AWS cloud diagram with IAM, compute, storage, networking, and CloudWatch-style logs"),
+        ("Finally, use data structures and algorithms as problem-solving practice, not a memorization contest. Arrays, hash maps, stacks, queues, trees, sorting, and Big O are enough to start. Build projects, explain tradeoffs, and repeat.", "A roadmap ending in a deployed project, with DSA building blocks feeding into a confident engineer"),
+    )
 
     def __init__(self) -> None:
         self.calls = 0
 
     def generate_package(self, request: ContentRequest) -> ContentPackage:
         self.calls += 1
+        scenes_source = self._MINIMUM_ENGINEER_SCENES if request.prompt_version == "minimum-engineer-v1" else self._SCENES
         claim = CitedClaim(claim_id="claim-1", text=f"This deterministic demonstration explains {request.topic}.", source_ids=(request.sources[0].source_id,), confidence=ConfidenceLevel.HIGH, review_status=ClaimReviewStatus.VERIFIED, human_review_required=False)
-        sections = tuple(ScriptSection(section_id=f"section-{index}", narration=narration, scene_id=f"scene-{index}", claim_ids=("claim-1",), contains_factual_claims=True) for index, (narration, _) in enumerate(self._SCENES, 1))
-        scenes = tuple(ScenePlan(scene_id=f"scene-{index}", visual_type="illustration", search_queries=(visual,), fallback_visual="synthetic_illustration") for index, (_, visual) in enumerate(self._SCENES, 1))
-        return ContentPackage(schema_version="1.0", request=request, claims=(claim,), script_sections=sections, scene_plans=scenes, metadata=VideoMetadata(title_options=(request.topic,), description="A deterministic local TubeForge pipeline demonstration."), thumbnail_brief=ThumbnailBrief(text_options=("LOCAL VIDEO",), visual_direction="Six-scene local video pipeline", accessibility_description="A local computer producing a narrated video"))
+        sections = tuple(ScriptSection(section_id=f"section-{index}", narration=narration, scene_id=f"scene-{index}", claim_ids=("claim-1",), contains_factual_claims=True) for index, (narration, _) in enumerate(scenes_source, 1))
+        scenes = tuple(ScenePlan(scene_id=f"scene-{index}", visual_type="illustration", search_queries=(visual,), fallback_visual="synthetic_illustration") for index, (_, visual) in enumerate(scenes_source, 1))
+        description = "A focused one-minute roadmap for the practical modern software-engineering baseline." if scenes_source is self._MINIMUM_ENGINEER_SCENES else "A deterministic local TubeForge pipeline demonstration."
+        thumbnail = ("ENGINEER MINIMUM", "A focused software engineering toolkit") if scenes_source is self._MINIMUM_ENGINEER_SCENES else ("LOCAL VIDEO", "Six-scene local video pipeline")
+        return ContentPackage(schema_version="1.0", request=request, claims=(claim,), script_sections=sections, scene_plans=scenes, metadata=VideoMetadata(title_options=(request.topic,), description=description, tags=("software engineering", "AWS", "Linux", "Docker", "DSA")), thumbnail_brief=ThumbnailBrief(text_options=(thumbnail[0],), visual_direction=thumbnail[1], accessibility_description=thumbnail[1]))
 
 
 class FakeVoiceProvider:
@@ -93,7 +132,7 @@ class FakeMediaProvider:
         # Derive a stable, high-contrast colour from the scene query. Different
         # scene descriptions therefore produce visibly different local assets.
         rgb = tuple(48 + int(digest[offset : offset + 2], 16) % 176 for offset in (0, 2, 4))
-        _atomic_write(path, _solid_png(640, 360, rgb))
+        _atomic_write(path, _scene_png(640, 360, rgb, digest))
         return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", download_url=f"https://example.invalid/assets/{digest}.png", local_path=str(path), media_type="image", width=640, height=360, author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic test asset", retrieved_at=datetime.now(UTC))]
 
 
@@ -168,12 +207,18 @@ def _atomic_write(destination: Path, payload: bytes) -> None:
 _FAKE_WORDS_PER_SECOND = 2.4
 
 
-def _fake_narration(request: ContentRequest) -> str:
-    """Generate bounded deterministic narration at the fake voice's speech rate."""
-    target_words = math.ceil(request.target_duration_seconds * _FAKE_WORDS_PER_SECOND)
-    seed = ["This", "offline", "demonstration", "explains", *request.topic.split(), "for", request.audience, "viewers"]
-    words = (seed + ["context"] * target_words)[:target_words]
-    return " ".join(words) + "."
+def _local_scene_narration(topic: str, point: str, index: int, total: int, target_words: int) -> str:
+    """Create concise readable local narration from the operator's own brief."""
+    lead = (
+        f"{topic}. " if index == 1 else ""
+    )
+    core = f"{lead}{point}. Focus on the practical meaning, then connect it to one decision you can make in a real project. "
+    closing = "Keep the explanation concrete, test the result, and move to the next step with confidence."
+    words = (core + closing).split()
+    filler = ["Use", "small", "examples", "and", "clear", "tradeoffs", "so", "the", "idea", "remains", "useful", "when", "you", "build", "and", "debug", "software."]
+    while len(words) < target_words:
+        words.extend(filler)
+    return " ".join(words[:target_words])
 
 
 def _checksum(payload: bytes) -> str:
@@ -189,6 +234,46 @@ def _solid_png(width: int, height: int, color: tuple[int, int, int]) -> bytes:
 
     header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def _scene_png(width: int, height: int, color: tuple[int, int, int], seed: str) -> bytes:
+    """Build a scene-specific abstract tech illustration without text overlays."""
+    value = int(seed, 16)
+    raw = bytearray()
+    accent = tuple(min(255, component + 58) for component in color)
+    for y in range(height):
+        for x in range(width):
+            wave = ((x * (value % 7 + 2) + y * (value % 11 + 3)) // 36) % 26
+            vignette = int(44 * (((x - width / 2) / width) ** 2 + ((y - height / 2) / height) ** 2))
+            raw.extend((
+                max(0, min(255, color[0] - vignette + wave // 3)),
+                max(0, min(255, color[1] - vignette + wave)),
+                max(0, min(255, color[2] - vignette + wave * 2)),
+            ))
+    # Add stable circuit-like paths and nodes; each scene has a distinct seed.
+    pixels = bytearray()
+    for y in range(height):
+        pixels.append(0)
+        row = y * width * 3
+        pixels.extend(raw[row:row + width * 3])
+    for index in range(10):
+        x = 38 + (value >> (index * 3)) % (width - 76)
+        y = 32 + (value >> (index * 5)) % (height - 64)
+        for dx in range(-5, 6):
+            for dy in range(-5, 6):
+                px, py = x + dx, y + dy
+                if 0 <= px < width and 0 <= py < height and dx * dx + dy * dy <= 25:
+                    offset = py * (width * 3 + 1) + 1 + px * 3
+                    pixels[offset:offset + 3] = bytes(accent)
+        for step in range(48):
+            px = min(width - 1, x + step)
+            py = min(height - 1, y + (step if index % 2 else 0))
+            offset = py * (width * 3 + 1) + 1 + px * 3
+            pixels[offset:offset + 3] = bytes(accent)
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(bytes(pixels), level=6)) + chunk(b"IEND", b"")
 
 
 __all__ = ["FakeContentProvider", "FixedScriptContentProvider", "FakeMediaProvider", "FakePublisher", "FakeVoiceProvider", "ProviderAuthenticationError", "ProviderValidationError", "RetryableProviderError"]

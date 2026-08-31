@@ -6,7 +6,7 @@ import wave
 
 import pytest
 
-from tubeforge.core.config import AppConfig, DatabaseConfig, FakeProviderConfig, PreviewRenderConfig, PublicationPreparationConfig, Settings, VoicePipelineConfig, YouTubePublishingConfig
+from tubeforge.core.config import AppConfig, DatabaseConfig, FakeProviderConfig, PreviewRenderConfig, PublicationPreparationConfig, Settings, SourceClipConfig, VoicePipelineConfig, YouTubePublishingConfig
 from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.models import Base
 from tubeforge.db.repositories import ApprovalRepository, ArtifactRepository, JobRepository
@@ -110,6 +110,45 @@ def test_source_ingestion_checkpoints_snapshot_and_reuses_effective_request(pipe
     assert content.calls == ingestor.calls == 1
 
 
+def test_source_clip_pipeline_reuses_source_checkpoint_and_prepares_publication(pipeline, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner, *_ = pipeline
+
+    class Source:
+        inspect_calls = 0
+        acquire_calls = 0
+        def can_handle(self, url: str) -> bool: return True
+        def inspect(self, url: str) -> dict[str, object]:
+            self.inspect_calls += 1
+            return {"url": url, "id": "video-1", "uploader": "creator", "title": "A source", "duration_seconds": None, "webpage_url": url}
+        def acquire(self, url: str, destination: Path, *, captions: bool = False) -> Path:
+            self.acquire_calls += 1; destination.mkdir(parents=True, exist_ok=True)
+            output = destination / "source.mp4"; output.write_bytes(b"source-media"); return output
+
+    source = Source()
+    runner.source_clips = SourceClipConfig(enabled=True, min_clip_seconds=5, max_clip_seconds=10)
+    runner.source_provider = source  # type: ignore[assignment]
+    def fake_audio(_ffmpeg: str, _source: Path, output: Path) -> None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(output), "wb") as stream:
+            stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(100); stream.writeframes(b"\xff\x7f" * 3000)
+    def fake_render(_ffmpeg: str, _ffprobe: str, _source: Path, output: Path, _start: float, _end: float, captions: Path | None = None) -> dict[str, object]:
+        output.parent.mkdir(parents=True, exist_ok=True); output.write_bytes(b"clip-media")
+        return {"width": 1080, "height": 1920, "has_audio": True, "duration_seconds": 10.0}
+    monkeypatch.setattr("tubeforge.pipeline.orchestrator.extract_audio", fake_audio)
+    monkeypatch.setattr("tubeforge.pipeline.orchestrator.probe_clip", lambda *_args: {"duration_seconds": 30.0})
+    monkeypatch.setattr("tubeforge.pipeline.orchestrator.render_vertical", fake_render)
+    source_request = ContentRequest(topic="A source", angle="clips", target_duration_seconds=30, language="en", audience="general", prompt_version="source-clip-v1", sources=(SourceReference(source_id="source-video", url="https://example.com/video", title="A source"),), review_mode="auto", captions_enabled=False, production_mode="source_clip", source_url="https://example.com/video", clip_count=1)
+    runner.jobs.create("source-clip", source_request)
+    assert runner.run("source-clip").state is JobState.FINAL_READY
+    assert source.inspect_calls == source.acquire_calls == 1
+    assert runner.artifacts.get("source-clip", JobState.CLIP_RENDERING, "clip_001")
+    assert runner.run("source-clip").state is JobState.PUBLICATION_APPROVAL_REQUIRED
+    saved_source = runner.source_media.get("source-clip")
+    assert saved_source and saved_source.external_id == "video-1" and saved_source.duration_seconds == 30.0
+    assert runner.run("source-clip").state is JobState.PUBLICATION_APPROVAL_REQUIRED
+    assert source.inspect_calls == source.acquire_calls == 1
+
+
 def test_successful_orchestration_persists_every_checkpoint(pipeline) -> None:
     runner, content, media, voice, publisher = pipeline
     runner.jobs.create("job-success", request())
@@ -119,7 +158,13 @@ def test_successful_orchestration_persists_every_checkpoint(pipeline) -> None:
     preview = runner._required_json("job-success", JobState.PREVIEW_RENDERING, "preview_manifest")
     runner.approvals.record("job-success-preview", "job-success", ApprovalGate.PREVIEW, reviewed_identity=preview["render_identity"])
     assert runner.run("job-success").state is JobState.FINAL_READY
-    assert content.calls == media.calls == voice.calls == 1
+    # Content is generated once and narration is assembled once.  Media is
+    # selected once per scene, preserving distinct scene visuals and the
+    # asset-checkpoint contract.
+    assert content.calls == 1
+    # Voice synthesis is intentionally per timed phrase, not per job.
+    assert voice.calls > 0
+    assert media.calls == 3
     assert publisher.calls == 0
     assert runner.artifacts.get("job-success", JobState.FINAL_RENDERING, "final")
 
@@ -173,8 +218,10 @@ def test_duplicate_execution_reuses_checkpoint_and_upload_receipt(pipeline) -> N
     runner.run("job-duplicate"); preview = runner._required_json("job-duplicate", JobState.PREVIEW_RENDERING, "preview_manifest"); runner.approvals.record("job-duplicate-preview", "job-duplicate", ApprovalGate.PREVIEW, reviewed_identity=preview["render_identity"])
     runner.run("job-duplicate")
     assert publisher.calls == 0
+    voice_calls = voice.calls
     runner.run("job-duplicate")
-    assert content.calls == voice.calls == 1
+    assert content.calls == 1
+    assert voice.calls == voice_calls
     assert publisher.calls == 0
 
 
@@ -269,7 +316,13 @@ def test_stale_preview_inputs_require_a_new_preview_approval(pipeline, change: s
         if change == "deleted_preview": path.unlink()
         else: path.write_bytes(b"tampered-preview")
 
-    assert runner.run(job_id).state is JobState.PREVIEW_READY
+    state = runner.run(job_id).state
+    if change == "asset":
+        # A byte-level asset mutation cannot be rendered into a fresh preview:
+        # the acquisition provenance must remain safe and decodable.
+        assert state is JobState.FAILED_VALIDATION
+        return
+    assert state is JobState.PREVIEW_READY
     refreshed = runner._required_json(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
     assert refreshed["render_identity"] != old_manifest["render_identity"]
     assert runner.run(job_id).state is JobState.PREVIEW_READY

@@ -78,6 +78,55 @@ class ArtifactRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class JobEventRecord(Base):
+    """Immutable operator-facing lifecycle history for one generation."""
+
+    __tablename__ = "job_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class SourceMediaRecord(Base):
+    """Normalized, non-binary provenance for a source-video job."""
+
+    __tablename__ = "source_media"
+    __table_args__ = (UniqueConstraint("job_id", name="uq_source_media_job"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String(300), index=True)
+    creator_id: Mapped[str | None] = mapped_column(String(300), index=True)
+    title: Mapped[str | None] = mapped_column(String(500))
+    duration_seconds: Mapped[float | None] = mapped_column()
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CreatorSourceRecord(Base):
+    """Future scheduler input; no polling worker is enabled by this milestone."""
+
+    __tablename__ = "creator_sources"
+    __table_args__ = (UniqueConstraint("provider", "creator_url", name="uq_creator_sources_provider_url"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    creator_url: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    check_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=3600)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_content_id: Mapped[str | None] = mapped_column(String(300))
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PublicationRecord(Base):
     """Non-secret durable progress for one external publication intent."""
     __tablename__ = "publications"

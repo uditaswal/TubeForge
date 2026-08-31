@@ -61,6 +61,10 @@ def test_preview_command_uses_argument_array_and_profile(tmp_path: Path) -> None
     assert "-filter_complex" in command
     assert "shell=True" not in command
     assert "scale=1280:720" in command[command.index("-filter_complex") + 1]
+    assert "tpad=stop_mode=clone:stop_duration=10" in command[command.index("-filter_complex") + 1]
+    assert "apad=pad_dur=10[outa]" in command[command.index("-filter_complex") + 1]
+    assert "-shortest" not in command
+    assert command[command.index("-t") + 1] == "1.000000"
     assert command[-1].endswith("preview.mp4.part")
 
 

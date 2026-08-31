@@ -10,6 +10,7 @@ from tubeforge.db.repositories import (
     AssetCacheRepository,
     ArtifactRepository,
     ExternalOperationRepository,
+    JobEventRepository,
     JobRepository,
 )
 from tubeforge.db.session import Database, create_database
@@ -31,6 +32,7 @@ class Runtime:
     jobs: JobRepository
     artifacts: ArtifactRepository
     approvals: ApprovalRepository
+    events: JobEventRepository
     orchestrator: PipelineOrchestrator
 
 
@@ -78,4 +80,4 @@ def create_runtime(settings: Settings) -> Runtime:
             max_chars=source_policy.max_chars,
             timeout_seconds=source_policy.timeout_seconds,
         )
-    return Runtime(database, jobs, artifacts, approvals, orchestrator)
+    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, orchestrator)

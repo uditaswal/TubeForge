@@ -7,7 +7,7 @@ from pathlib import Path
 from tubeforge.core.config import FakeProviderConfig, Settings
 from tubeforge.domain.contracts import ContentRequest, MediaSearchRequest, SourceReference
 from tubeforge.providers.content.factory import create_content_provider
-from tubeforge.providers.fake import FakeMediaProvider, FixedScriptContentProvider
+from tubeforge.providers.fake import FakeContentProvider, FakeMediaProvider, FixedScriptContentProvider
 
 
 def _request() -> ContentRequest:
@@ -43,3 +43,13 @@ def test_local_visuals_are_scene_specific_and_decodable(tmp_path: Path) -> None:
         payloads.append(path.read_bytes())
         assert path.stat().st_size > 0 and candidate.width == 640 and candidate.height == 360
     assert len(set(paths)) == len(set(payloads)) == 6
+
+
+def test_local_content_uses_operator_notes_for_multiple_readable_scenes() -> None:
+    request = _request().model_copy(update={"notes": ("Learn Linux fundamentals", "Deploy a small Docker service", "Practice AWS troubleshooting")})
+    package = FakeContentProvider().generate_package(request)
+    narration = " ".join(section.narration for section in package.script_sections).casefold()
+    assert len(package.script_sections) == len(package.scene_plans) == 5
+    assert "context" not in narration
+    assert "learn linux fundamentals" in narration
+    assert len({scene.search_queries[0] for scene in package.scene_plans}) == 5

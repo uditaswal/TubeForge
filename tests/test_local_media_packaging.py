@@ -28,7 +28,9 @@ def test_production_piper_paths_match_model_mount() -> None:
     production = yaml.safe_load((REPOSITORY_ROOT / "config" / "production.yaml").read_text(encoding="utf-8"))
     piper = production["pipeline"]["piper"]
 
-    assert piper["executable"] == "piper"
+    # The image installs the Python Piper package; production invokes it as
+    # ``python -m piper`` so no separate console-script shim is required.
+    assert piper["executable"] == "python"
     assert piper["model_path"].startswith("/app/models/")
     assert piper["config_path"] == f'{piper["model_path"]}.json'
     assert piper["cache_root"].startswith("/app/data/")

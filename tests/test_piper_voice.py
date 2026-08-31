@@ -110,3 +110,12 @@ def test_piper_rejects_output_with_unexpected_configured_sample_rate(tmp_path: P
 
     assert not output.exists()
     assert not list(tmp_path.glob("piper-*.wav"))
+
+
+def test_packaged_python_module_mode_uses_piper_short_flags(tmp_path: Path) -> None:
+    model = tmp_path / "voice.onnx"
+    model.write_bytes(b"model")
+    provider = PiperVoiceProvider(PiperProviderConfig(executable="python", model_path=model))
+    command = provider.command(_request(tmp_path / "voice.wav"), tmp_path / "voice.wav")
+    assert command[:3] == ["python", "-m", "piper"]
+    assert "-m" in command and "-f" in command

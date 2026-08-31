@@ -35,12 +35,18 @@ class PiperVoiceProvider:
 
     def command(self, request: VoiceRequest, output_path: Path) -> list[str]:
         model = self._required_model()
-        command = [self._executable(), "--model", str(model), "--output_file", str(output_path)]
+        executable = self._executable()
+        # The packaged local Piper distribution exposes ``python -m piper``
+        # rather than a separate console script. Keep the conventional binary
+        # path working while making that supported local mode explicit.
+        module_mode = Path(executable).name.startswith("python")
+        command = [executable, "-m", "piper"] if module_mode else [executable]
+        command.extend(("-m" if module_mode else "--model", str(model), "-f" if module_mode else "--output_file", str(output_path)))
         if self.settings.config_path is not None:
-            command.extend(("--config", str(self._path(self.settings.config_path))))
+            command.extend(("-c" if module_mode else "--config", str(self._path(self.settings.config_path))))
         if self.settings.speaker is not None:
-            command.extend(("--speaker", str(self.settings.speaker)))
-        if self.settings.threads != 1:
+            command.extend(("-s" if module_mode else "--speaker", str(self.settings.speaker)))
+        if self.settings.threads != 1 and not module_mode:
             command.extend(("--threads", str(self.settings.threads)))
         return command
 

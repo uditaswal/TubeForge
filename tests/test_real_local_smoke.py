@@ -37,6 +37,8 @@ from tubeforge.workers.service import WorkerService
 
 
 MODEL_ENV = "TUBEFORGE_SMOKE_PIPER_MODEL"
+TOPIC_ENV = "TUBEFORGE_SMOKE_TOPIC"
+PROMPT_VERSION_ENV = "TUBEFORGE_SMOKE_PROMPT_VERSION"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -188,12 +190,12 @@ def test_piper_job_creates_real_six_scene_smoke_video(
     runtime = create_runtime(settings)
     try:
         request = ContentRequest(
-            topic="How TubeForge builds a local narrated video",
-            angle="A deterministic end-to-end demonstration",
-            target_duration_seconds=75,
+            topic=os.environ.get(TOPIC_ENV, "How TubeForge builds a local narrated video"),
+            angle="A practical one-minute engineering roadmap",
+            target_duration_seconds=60,
             language="en",
             audience="general",
-            prompt_version="m24-real-smoke-v1",
+            prompt_version=os.environ.get(PROMPT_VERSION_ENV, "m24-real-smoke-v1"),
             sources=(SourceReference(source_id="local-design", url="https://example.invalid/tubeforge", title="TubeForge local pipeline"),),
         )
         job = runtime.jobs.create("m24-real-local-smoke", request)
