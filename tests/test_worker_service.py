@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tubeforge.core.config import DatabaseConfig, WorkerConfig
 from tubeforge.db.models import Base
-from tubeforge.db.repositories import Artifact, ArtifactRepository, HeavyWorkLeaseRepository, JobRepository, PipelineJob
+from tubeforge.db.repositories import Artifact, ArtifactRepository, HeavyWorkLeaseRepository, JobEventRepository, JobRepository, PipelineJob
 from tubeforge.db.session import create_database
 from tubeforge.domain.contracts import ContentRequest, SourceReference
 from tubeforge.domain.states import JobState
@@ -24,6 +24,7 @@ def _request() -> ContentRequest:
 class _AdvancingOrchestrator:
     def __init__(self, jobs: JobRepository) -> None:
         self.jobs = jobs
+        self.events = JobEventRepository(jobs._session_factory)
         self.calls = 0
 
     def run(self, job_id: str, **_: object) -> PipelineJob:
@@ -67,6 +68,7 @@ def test_worker_emits_structured_claim_and_approval_wait_logs(tmp_path: Path, ca
         messages = "\n".join(record.message for record in caplog.records)
         assert '"event": "job_claimed"' in messages
         assert '"event": "waiting_for_approval"' in messages
+        assert [event.event_type for event in worker.orchestrator.events.list_for_job("logged")] == ["job_claimed", "waiting_for_approval"]
     finally:
         database.dispose()
 

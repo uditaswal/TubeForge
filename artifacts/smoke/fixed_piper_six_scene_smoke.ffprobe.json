@@ -1,0 +1,45 @@
+{
+  "narration": {
+    "decoded_rms": 4609.089921952371,
+    "format": {
+      "duration": "71.074104",
+      "size": "6823192"
+    },
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "avg_frame_rate": "0/0",
+        "channels": 1,
+        "codec_name": "pcm_s16le",
+        "codec_type": "audio",
+        "sample_rate": "48000"
+      }
+    ]
+  },
+  "video": {
+    "decoded_audio_rms": 4590.593371112189,
+    "format": {
+      "duration": "71.074000",
+      "size": "1818192"
+    },
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "avg_frame_rate": "30/1",
+        "codec_name": "h264",
+        "codec_type": "video",
+        "height": 360,
+        "width": 640
+      },
+      {
+        "avg_frame_rate": "0/0",
+        "channels": 1,
+        "codec_name": "aac",
+        "codec_type": "audio",
+        "sample_rate": "48000"
+      }
+    ]
+  }
+}

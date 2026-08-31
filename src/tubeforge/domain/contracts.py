@@ -48,10 +48,30 @@ class ContentRequest(DomainModel):
     audience: str = Field(min_length=1, max_length=200)
     sources: tuple[SourceReference, ...] = Field(min_length=1, max_length=100)
     prompt_version: str = Field(min_length=1, max_length=100)
+    notes: tuple[str, ...] = Field(default=(), max_length=30)
+    review_mode: str = Field(default="manual", pattern=r"^(manual|auto)$")
+    captions_enabled: bool = True
+    music_track: str | None = Field(default=None, max_length=200)
+    visual_style: str = Field(default="cinematic-tech", min_length=1, max_length=100)
+    mcp_servers: tuple[str, ...] = Field(default=(), max_length=50)
+    # A source-clip job is intentionally still a ContentRequest: it uses the
+    # same job, lease, approval, and artifact records as generated videos.
+    # The source URL is also retained in a normal SourceReference for audit.
+    production_mode: str = Field(default="generated", pattern=r"^(generated|source_clip)$")
+    source_url: HttpUrl | None = None
+    clip_count: int = Field(default=1, ge=1, le=12)
 
     @model_validator(mode="after")
     def require_unique_source_ids(self) -> ContentRequest:
         _require_unique_ids(self.sources, "source_id")
+        if any(not note.strip() for note in self.notes):
+            raise ValueError("notes must not contain blank values")
+        if len(set(self.mcp_servers)) != len(self.mcp_servers) or any(not name.strip() for name in self.mcp_servers):
+            raise ValueError("mcp_servers must be unique and nonblank")
+        if self.production_mode == "source_clip" and self.source_url is None:
+            raise ValueError("source_clip requests require source_url")
+        if self.production_mode == "generated" and self.source_url is not None:
+            raise ValueError("generated requests must not include source_url")
         return self
 
 

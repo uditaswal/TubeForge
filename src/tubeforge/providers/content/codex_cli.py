@@ -60,8 +60,13 @@ class CodexCliContentProvider:
             provenance: dict[str, object] = {"cache_key": cached.cache_key, "generated_at": self._now().isoformat(), "model": self.config.model, "prompt_template_version": self.config.prompt_template_version, "prompt_version": request.prompt_version, "provider": self.provider_name}
             if not self.cache.accept(cached, package_json, provenance, usage, now=self._now()):
                 raise RetryableProviderError("Codex generation reservation expired before validated result could be accepted")
-        except Exception:
-            self.cache.abandon(cached)
+        except Exception as error:
+            # A transient process/auth failure should make the single-writer
+            # slot immediately available.  Invalid model output is different:
+            # retaining its short reservation prevents a tight retry loop from
+            # repeatedly accepting or repairing the same malformed response.
+            if not isinstance(error, ProviderValidationError):
+                self.cache.abandon(cached)
             raise
         self.last_provenance, self.last_usage = provenance, usage
         return package

@@ -10,7 +10,7 @@ from tubeforge.core.errors import ProviderValidationError, RetryableProviderErro
 from tubeforge.domain.contracts import ContentPackage
 
 class PreviewRenderCancelled(RuntimeError): pass
-RENDERER_TEMPLATE_VERSION = "m11-render-template-v1"
+RENDERER_TEMPLATE_VERSION = "m12-render-template-v1"
 
 def parse_frame_rate(value: str) -> float:
     """Parse ffprobe's rational frame-rate representation."""
@@ -91,14 +91,46 @@ class PreviewRenderer:
             command.extend(("-loop","1","-t",duration,"-i",str(scene.asset_path)) if scene.media_type=="image" else ("-stream_loop","-1","-t",duration,"-i",str(scene.asset_path)))
             filters.append(f"[{i}:v]scale={self.config.width}:{self.config.height}:force_original_aspect_ratio=increase,crop={self.config.width}:{self.config.height},setsar=1,fps={self.config.fps},trim=duration={duration},setpts=PTS-STARTPTS[v{i}]")
         command.extend(("-i",str(narration))); labels="".join(f"[v{i}]" for i in range(len(segments))); caption=str(captions.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'"); style=f"FontSize={self.config.caption_font_size},Alignment=2,MarginV=36,Outline=2,Shadow=1"
-        filters += [f"{labels}concat=n={len(segments)}:v=1:a=0[base]",f"[base]subtitles='{caption}':force_style='{style}'[outv]"]
-        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map",f"{len(segments)}:a:0","-c:v",self.config.video_codec,"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-shortest","-movflags","+faststart",str(output)]
+        # Each independently rendered scene can lose up to one frame when its
+        # measured narration duration is quantized to the configured frame
+        # rate.  Without padding, ``-shortest`` uses that cumulative short
+        # video stream and cuts off the end of the narration.  Holding the
+        # final visual frame lets the measured narration timeline determine
+        # the muxed duration while retaining the intended cut-only scene
+        # sequence.  Padding both streams avoids FFmpeg's ``-shortest``
+        # heuristic truncating a filtered multi-scene mux before the WAV's
+        # measured end; the explicit output duration below is authoritative.
+        filters += [
+            f"{labels}concat=n={len(segments)}:v=1:a=0[base]",
+            f"[base]subtitles='{caption}':force_style='{style}',tpad=stop_mode=clone:stop_duration=10[outv]",
+            f"[{len(segments)}:a]apad=pad_dur=10[outa]",
+        ]
+        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{segments[-1].end_seconds:.6f}","-movflags","+faststart",str(output)]
     def validate(self,path:Path,expected:float)->dict[str,Any]:
         data=self.probe.inspect(path); streams=data.get("streams"); video=next((x for x in streams if x.get("codec_type")=="video"),None) if isinstance(streams,list) else None; audio=next((x for x in streams if x.get("codec_type")=="audio"),None) if isinstance(streams,list) else None
         try: duration=float(data["format"]["duration"]); width,height=int(video["width"]),int(video["height"]); rate=str(video["avg_frame_rate"]); sample_rate,channels=int(audio["sample_rate"]),int(audio["channels"])
         except (KeyError,TypeError,ValueError) as error: raise ProviderValidationError("preview requires complete video and audio streams") from error
         fps=parse_frame_rate(rate); expected_video=SUPPORTED_VIDEO_ENCODERS[self.config.video_codec]; expected_audio=SUPPORTED_AUDIO_ENCODERS[self.config.audio_codec]
-        if not math.isfinite(expected) or not math.isfinite(duration) or duration<=0 or abs(duration-expected)>self.config.sync_tolerance_seconds or (width,height)!=(self.config.width,self.config.height) or abs(fps-self.config.fps)>self.config.fps_tolerance or video.get("codec_name")!=expected_video or audio.get("codec_name")!=expected_audio or sample_rate<=0 or channels<=0: raise ProviderValidationError("preview stream metadata is invalid")
+        valid = (
+            math.isfinite(expected)
+            and math.isfinite(duration)
+            and duration > 0
+            and abs(duration - expected) <= self.config.sync_tolerance_seconds
+            and (width, height) == (self.config.width, self.config.height)
+            and abs(fps - self.config.fps) <= self.config.fps_tolerance
+            and video.get("codec_name") == expected_video
+            and audio.get("codec_name") == expected_audio
+            and sample_rate > 0
+            and channels > 0
+        )
+        if not valid:
+            raise ProviderValidationError(
+                "preview stream metadata is invalid "
+                f"(duration={duration!r}, expected_duration={expected!r}, "
+                f"resolution={width}x{height}, fps={fps!r}, "
+                f"video_codec={video.get('codec_name')!r}, audio_codec={audio.get('codec_name')!r}, "
+                f"sample_rate={sample_rate!r}, channels={channels!r})"
+            )
         return {"duration_seconds":duration,"width":width,"height":height,"frame_rate":rate,"fps":fps,"video_codec":str(video["codec_name"]),"audio_codec":str(audio["codec_name"]),"sample_rate":sample_rate,"channels":channels}
     def render(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path,*,cancellation_requested:Callable[[],bool]|None=None)->dict[str,Any]:
         if not narration.is_file() or not captions.is_file() or narration.stat().st_size==0 or captions.stat().st_size==0: raise ProviderValidationError("preview narration or captions are missing")

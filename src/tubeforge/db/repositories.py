@@ -8,13 +8,13 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import secrets
 
-from sqlalchemy import and_, delete, exists, or_, select, update
+from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.domain.contracts import ContentRequest
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.db.models import AnalyticsSnapshotRecord, ApprovalRecord, ArtifactRecord, AssetCacheRecord, ChannelBaselineRecord, ExperimentOutcomeRecord, ExternalOperationRecord, GenerationCacheRecord, HeavyWorkLeaseRecord, LearningEventRecord, NextVideoBriefRecord, NextVideoRecommendationRecord, OptimizationCandidateRecord, OptimizationCandidateSetRecord, OptimizationExecutionRecord, OptimizationExperimentRecord, OptimizationProposalRecord, PerformanceEvaluationRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord
+from tubeforge.db.models import AnalyticsSnapshotRecord, ApprovalRecord, ArtifactRecord, AssetCacheRecord, ChannelBaselineRecord, CreatorSourceRecord, ExperimentOutcomeRecord, ExternalOperationRecord, GenerationCacheRecord, HeavyWorkLeaseRecord, JobEventRecord, LearningEventRecord, NextVideoBriefRecord, NextVideoRecommendationRecord, OptimizationCandidateRecord, OptimizationCandidateSetRecord, OptimizationExecutionRecord, OptimizationExperimentRecord, OptimizationProposalRecord, PerformanceEvaluationRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord, SourceMediaRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +39,27 @@ class Artifact:
     path: str
     checksum_sha256: str
     provenance: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class JobEvent:
+    id: int
+    job_id: str
+    event_type: str
+    details: dict[str, object]
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SourceMedia:
+    job_id: str
+    provider: str
+    source_url: str
+    external_id: str | None
+    creator_id: str | None
+    title: str | None
+    duration_seconds: float | None
+    metadata: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +104,45 @@ class JobRepository:
                 raise KeyError(f"job not found: {job_id}")
             return _job_from_record(record)
 
+    def list_recent(self, *, limit: int = 50) -> list[PipelineJob]:
+        """Return a bounded newest-first view for the private local dashboard."""
+        with self._session_factory() as session:
+            rows = session.scalars(select(PipelineJobRecord).order_by(PipelineJobRecord.updated_at.desc(), PipelineJobRecord.id.desc()).limit(limit))
+            return [_job_from_record(row) for row in rows]
+
+    def delete_completed_or_paused(self, job_id: str) -> list[Artifact]:
+        """Remove a non-running local generation and return its registered files.
+
+        A claimed or actively processing job is deliberately never deletable: this
+        keeps a worker from writing a checkpoint after its database row vanished.
+        Publication states are also excluded because they can represent a remote
+        side effect that must remain auditable.
+        """
+        deletable = {
+            JobState.SCRIPT_APPROVAL_REQUIRED,
+            JobState.PREVIEW_READY,
+            JobState.FINAL_READY,
+            JobState.FAILED_RETRYABLE,
+            JobState.FAILED_VALIDATION,
+            JobState.FAILED_EXHAUSTED,
+            JobState.CANCELLED,
+        }
+        with self._session_factory.begin() as session:
+            record = session.get(PipelineJobRecord, job_id)
+            if record is None:
+                raise KeyError(f"job not found: {job_id}")
+            if record.claim_owner is not None or JobState(record.state) not in deletable:
+                raise ValueError("only paused, completed, cancelled, or failed local generations can be deleted")
+            artifacts = [_artifact_from_record(row) for row in session.scalars(
+                select(ArtifactRecord).where(ArtifactRecord.job_id == job_id)
+            )]
+            session.execute(delete(ApprovalRecord).where(ApprovalRecord.job_id == job_id))
+            session.execute(delete(ArtifactRecord).where(ArtifactRecord.job_id == job_id))
+            session.execute(delete(ExternalOperationRecord).where(ExternalOperationRecord.job_id == job_id))
+            session.execute(delete(SourceMediaRecord).where(SourceMediaRecord.job_id == job_id))
+            session.execute(delete(PipelineJobRecord).where(PipelineJobRecord.id == job_id))
+            return artifacts
+
     def claim_oldest_eligible(self, worker_id: str, *, now: datetime, lease_seconds: int) -> PipelineJob | None:
         """Atomically lease the oldest runnable job; provider work occurs after commit.
 
@@ -117,6 +177,13 @@ class JobRepository:
 
             eligible = or_(
                 PipelineJobRecord.state.in_(runnable),
+                # Only explicit auto-review jobs may re-enter an approval
+                # state without a recorded human decision. Manual jobs remain
+                # paused and cannot starve automatic work in FIFO order.
+                and_(
+                    PipelineJobRecord.state.in_([JobState.SCRIPT_APPROVAL_REQUIRED.value, JobState.PREVIEW_READY.value]),
+                    func.json_extract(PipelineJobRecord.request_json, "$.review_mode") == "auto",
+                ),
                 and_(PipelineJobRecord.state == JobState.SCRIPT_APPROVAL_REQUIRED.value, approved(ApprovalGate.SCRIPT)),
                 and_(PipelineJobRecord.state == JobState.PREVIEW_READY.value, approved(ApprovalGate.PREVIEW)),
                 and_(PipelineJobRecord.state == JobState.PUBLICATION_APPROVAL_REQUIRED.value, approved(ApprovalGate.PUBLICATION_PREPARATION)),
@@ -261,6 +328,67 @@ class ArtifactRepository:
             else:
                 record.path, record.checksum_sha256, record.provenance_json = artifact.path, artifact.checksum_sha256, json.dumps(artifact.provenance, sort_keys=True)
         return artifact
+
+
+class JobEventRepository:
+    """Durable append-only dashboard activity, independent of Docker logs."""
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def append(self, job_id: str, event_type: str, **details: object) -> JobEvent:
+        with self._session_factory.begin() as session:
+            record = JobEventRecord(
+                job_id=job_id,
+                event_type=event_type,
+                details_json=json.dumps(details, sort_keys=True, default=str),
+                created_at=datetime.now(UTC),
+            )
+            session.add(record)
+            session.flush()
+            return _job_event_from_record(record)
+
+    def list_for_job(self, job_id: str, *, limit: int = 100) -> list[JobEvent]:
+        with self._session_factory() as session:
+            rows = session.scalars(
+                select(JobEventRecord)
+                .where(JobEventRecord.job_id == job_id)
+                .order_by(JobEventRecord.created_at.desc(), JobEventRecord.id.desc())
+                .limit(limit)
+            )
+            return list(reversed([_job_event_from_record(row) for row in rows]))
+
+
+class SourceMediaRepository:
+    """Persist source identity separately from mutable job request JSON."""
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def save(self, media: SourceMedia) -> SourceMedia:
+        now = datetime.now(UTC)
+        with self._session_factory.begin() as session:
+            record = session.scalar(select(SourceMediaRecord).where(SourceMediaRecord.job_id == media.job_id))
+            values = {
+                "provider": media.provider, "source_url": media.source_url,
+                "external_id": media.external_id, "creator_id": media.creator_id,
+                "title": media.title, "duration_seconds": media.duration_seconds,
+                "metadata_json": json.dumps(media.metadata, sort_keys=True),
+            }
+            if record is None:
+                record = SourceMediaRecord(job_id=media.job_id, created_at=now, updated_at=now, **values)
+                session.add(record)
+            else:
+                for key, value in values.items(): setattr(record, key, value)
+                record.updated_at = now
+            session.flush()
+        return media
+
+    def get(self, job_id: str) -> SourceMedia | None:
+        with self._session_factory() as session:
+            record = session.scalar(select(SourceMediaRecord).where(SourceMediaRecord.job_id == job_id))
+            if record is None: return None
+            return SourceMedia(record.job_id, record.provider, record.source_url, record.external_id, record.creator_id, record.title, record.duration_seconds, json.loads(record.metadata_json))
 
 
 class HeavyWorkLeaseRepository:
@@ -504,6 +632,10 @@ class ApprovalRepository:
 
 def _job_from_record(record: PipelineJobRecord) -> PipelineJob:
     return PipelineJob(record.id, ContentRequest.model_validate_json(record.request_json), JobState(record.state), JobState(record.resume_state) if record.resume_state else None, record.failure_message, record.claim_owner, record.attempt_count, record.next_retry_at, record.cancellation_requested_at, record.authentication_restored_at)
+
+
+def _job_event_from_record(record: JobEventRecord) -> JobEvent:
+    return JobEvent(record.id, record.job_id, record.event_type, json.loads(record.details_json), record.created_at)
 
 
 class ExternalOperationRepository:

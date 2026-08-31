@@ -3,10 +3,13 @@ services:
     build: .
     command: ["alembic", "upgrade", "head"]
     volumes:
+      - ./src:/app/src:ro
       - ./config:/app/config:ro
       - ./data:/app/data
+      - ./models:/app/models:ro
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
+      PYTHONPATH: /app/src
     restart: "no"
 
   web:
@@ -16,12 +19,15 @@ services:
       migrate:
         condition: service_completed_successfully
     ports:
-      - "127.0.0.1:8081:8080"
+      - "0.0.0.0:62065:8080"
     volumes:
+      - ./src:/app/src:ro
       - ./config:/app/config:ro
       - ./data:/app/data
+      - ./models:/app/models:ro
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
+      PYTHONPATH: /app/src
     restart: unless-stopped
     mem_limit: 512m
 
@@ -32,11 +38,13 @@ services:
       migrate:
         condition: service_completed_successfully
     volumes:
+      - ./src:/app/src:ro
       - ./config:/app/config:ro
       - ./data:/app/data
       # Operator-supplied Piper ONNX voices and adjacent .onnx.json files.
       - ./models:/app/models:ro
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
+      PYTHONPATH: /app/src
     restart: unless-stopped
     mem_limit: 1g

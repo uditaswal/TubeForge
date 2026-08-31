@@ -19,6 +19,10 @@ class PipelineStage(StrEnum):
     """Normal Phase 1 workflow stages, in their only forward order."""
 
     TOPIC_CREATED = "topic_created"
+    SOURCE_INSPECTING = "source_inspecting"
+    SOURCE_ACQUIRING = "source_acquiring"
+    SOURCE_ANALYZING = "source_analyzing"
+    CLIP_RENDERING = "clip_rendering"
     CONTENT_GENERATING = "content_generating"
     CONTENT_READY = "content_ready"
     SCRIPT_APPROVAL_REQUIRED = "script_approval_required"
@@ -51,6 +55,10 @@ class JobState(StrEnum):
     """All state-machine states, including recoverable and terminal outcomes."""
 
     TOPIC_CREATED = PipelineStage.TOPIC_CREATED
+    SOURCE_INSPECTING = PipelineStage.SOURCE_INSPECTING
+    SOURCE_ACQUIRING = PipelineStage.SOURCE_ACQUIRING
+    SOURCE_ANALYZING = PipelineStage.SOURCE_ANALYZING
+    CLIP_RENDERING = PipelineStage.CLIP_RENDERING
     CONTENT_GENERATING = PipelineStage.CONTENT_GENERATING
     CONTENT_READY = PipelineStage.CONTENT_READY
     SCRIPT_APPROVAL_REQUIRED = PipelineStage.SCRIPT_APPROVAL_REQUIRED

@@ -2,6 +2,13 @@
 
 ## Current milestone
 
+### 2026-08-31 — approved yt-dlp container replacement and live smoke
+
+- Rebuilt/replaced the local web and worker services and verified the dashboard health endpoint on `0.0.0.0:62065`.
+- Fixed the source-clip intake mismatch that rejected a 10-second source because the shared job contract has a 30-second planning minimum.
+- Mounted `src` read-only with `PYTHONPATH=/app/src` in Compose, so deployed web/worker execute current source rather than a stale installed package.
+- Live public source requests are accepted and durable job activity is recorded. The first sample host returned a 403/no duration; a reachable GitHub media URL confirms network access but `yt-dlp --dump-single-json` remains stalled on generic direct MP4 URLs. Final-render smoke remains pending a bounded direct-media inspection/acquisition fix.
+
 M24/M25 in progress. M26 already has an existing Codex CLI `ContentPackage`
 adapter, but Ollama support and the required live LLM-to-video smoke remain.
 
@@ -607,6 +614,22 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
 4. Create `.autonomous_success` only after all tests and both real media paths
    satisfy every mission acceptance criterion.
 
+## Reusable video-brief workflow (2026-08-30, in progress)
+
+- Added durable per-job options for operator notes, review mode, captions,
+  selected music track, visual style, and selected Codex MCP server names.
+- Added configuration-backed default and named video presets, plus an approved
+  music-catalog schema. Explicit CLI/web values override preset values, which
+  override the configured default preset.
+- Added `POST /api/videos`, a localhost create-video form, and a `tubeforge
+  create-video` CLI command that submit the same durable request format.
+- Auto mode bypasses script/preview gates only when requested; manual jobs
+  retain both approvals. Caption-disabled jobs retain valid empty caption
+  artifacts so checkpoint and renderer contracts stay intact.
+- Focused Docker validation passed: 18 API/config/render/fixed-pipeline tests.
+- Remaining media integration: connect approved music download/cache/mixing and
+  generated visual assets to the selected per-job options.
+
 ## Work completed (2026-08-24, iteration 22)
 
 - Re-read the repository policy, complete M24--M26 mission, accumulated
@@ -835,6 +858,58 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
    through the same orchestrator, retaining and inspecting its artifacts.
 4. Create `.autonomous_success` only after all tests and both real media paths
    satisfy every mission acceptance criterion.
+
+## Work completed (2026-08-30, real fixed-media smoke)
+
+- Restored access to the project Docker runtime and built a local image with
+  the declared Python dependencies, FFmpeg/ffprobe, and Piper.
+- Downloaded and configured the free `en_US-lessac-medium` Piper model and its
+  matching JSON sidecar under `models/` for the local smoke environment.
+- Ran the normal worker/orchestrator path with the fixed six-scene content
+  provider and real Piper narration. The test traversed script approval,
+  preview rendering/approval, asset acquisition, final rendering, and final
+  artifact promotion.
+- Found and fixed two production render synchronization defects exposed only
+  by real media: cumulative scene frame quantization could shorten a video,
+  and FFmpeg's `-shortest` could truncate the filtered mux before narration
+  ended. The renderer now pads the visual/audio streams and uses the measured
+  narration timeline as an explicit output duration. Bumped the renderer
+  template version to invalidate stale render checkpoints.
+- Added command-contract coverage for the explicit padding/duration behavior.
+
+## Real smoke result (2026-08-30)
+
+- `tests/test_real_local_smoke.py -k fixed`: **passed** in 123.26 seconds.
+- Retained artifacts:
+  - `artifacts/smoke/fixed_piper_six_scene_smoke.mp4`
+  - `artifacts/smoke/fixed_piper_six_scene_smoke.wav`
+  - `artifacts/smoke/fixed_piper_six_scene_smoke.ffprobe.json`
+- Independent ffprobe validation confirmed a 73.527-second 640x360 H.264/AAC
+  MP4 with 48 kHz mono audio. The WAV is 48 kHz mono PCM and 73.527479 seconds.
+  Both decoded tracks have non-silent RMS values above 4,300.
+- Six sampled upper-frame SHA-256 digests are all distinct, confirming that
+  the final video changes visuals for all six scenes rather than relying on
+  subtitle-only differences.
+
+## Remaining validation
+
+1. The focused regression suite is running in the same Docker runtime.
+2. Run the complete suite after it finishes and address any failures.
+3. The optional live Codex-to-video smoke remains pending an authenticated
+   `codex` CLI; it is not required for the validated deterministic local
+   fixed/Piper video artifact above.
+
+## Requested software-engineering video (2026-08-30)
+
+- Added a deterministic six-scene `minimum-engineer-v1` content preset for a
+  practical engineering baseline: one language, Linux, Git/Docker, AWS basics,
+  and DSA.
+- Real Piper/FFmpeg worker smoke passed in 132.98 seconds after normal script
+  and preview approvals. The retained artifact at
+  `artifacts/smoke/fixed_piper_six_scene_smoke.mp4` is 71.074 seconds,
+  640x360 H.264 with audible 48 kHz AAC narration.
+- Started a localhost-only artifact viewer bound to `127.0.0.1:8082`; the MP4
+  is available at `/smoke/fixed_piper_six_scene_smoke.mp4`.
 
 ## Work completed (2026-08-24, iteration 20)
 
@@ -1639,3 +1714,60 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
    through the same orchestrator, retaining and inspecting its artifacts.
 4. Create `.autonomous_success` only after all tests and both real media paths
    satisfy every mission acceptance criterion.
+# Dashboard preview, mobile layout, deletion, and automatic render validation (2026-08-30)
+
+- Replaced the LAN dashboard/worker containers with source-mounted TubeForge containers on `0.0.0.0:62065`; the running web process now imports `/workspace/src/tubeforge/api/app.py`.
+- Dashboard polling now exposes registered artifact names and only embeds a preview/final `<video>` after its artifact exists. This prevents the previous premature `/artifacts/final` 404 while a render is still running.
+- Made the phone layout resilient to overflow (`border-box`, scoped checkbox styling, wrapping job cards, responsive videos) and added safe deletion for paused, failed, cancelled, or final-ready local jobs. Active or publication-related jobs cannot be deleted; artifact file removal is restricted to the configured job artifact root.
+- Fixed automatic review to record an immutable `system-auto-review` approval bound to the exact preview render identity before final rendering. This preserves the exact-preview approval fence.
+- Focused API tests: `3 passed` (`tests/test_api_workflow.py`).
+- Live end-to-end validation job `df410dd62b0841308204565f5d3ca5bc`: preview and final MP4 rendered successfully, final artifact promoted, then workflow paused at `publication_approval_required` as designed. Final artifact: `data/artifacts/df410dd62b0841308204565f5d3ca5bc/final.mp4`.
+# Creator Studio dashboard and durable activity timeline (2026-08-31)
+
+- Replaced the dashboard's full-list polling rewrite with a responsive dark Creator Studio. Job cards reconcile in place, preserving form input, filters, scroll position, and open dialogs across four-second status refreshes.
+- Preview/final playback is now explicit: cards expose buttons only after the relevant artifact is registered; the modal player is created only after a click and has autoplay disabled. Added a favicon response to remove the prior browser 404.
+- Added immutable `job_events` persistence (Alembic revision `20260831_0014`), an activity API at `/api/jobs/{job_id}/events`, and compact event counts in `/api/jobs`. Worker claims/waits/errors/retries/completion, state transitions, render lifecycle, creation, approvals, and deletion attempts are recorded.
+- Kept deletion fenced to non-active, non-publication jobs. Failed validations are displayed as status/error cards with available preview, activity, and Delete actions; they are not buttons.
+- Migrated the live local database and restarted only `youtube_video_producer-web-1` and `youtube_video_producer-worker-1`, retaining the LAN mapping `0.0.0.0:62065`.
+- Focused regression suite: `14 passed` in 92.40 seconds (`tests/test_api_workflow.py`, `tests/test_worker_service.py`, `tests/test_migrations.py`).
+- Live end-to-end job `2573fbade626428489c8e2ff860d8c79`: durable timeline recorded 28 events, preview and final renders completed, final MP4 endpoint returned `200 video/mp4` (1,084,639 bytes), ffprobe duration `30.000000` seconds, then workflow safely paused at `publication_approval_required`.
+- Follow-up browser fix: normalized JavaScript newline escapes in the Python HTML string. The original string emitted raw newlines inside quoted JavaScript literals, producing `Uncaught SyntaxError: Invalid or unexpected token` and preventing the job list from loading. Restarted only the web container; verified literal `split('\\n')`/`join('\\n')` escapes and `GET /api/jobs` 200.
+
+# Replace placeholder "context" videos with local multi-scene videos (2026-08-31)
+
+- Diagnosed the repeated `context` captions as the production test-only fake content provider: it emitted a single placeholder narration and one solid-color asset. Existing artifacts retain that historical content and should be deleted/recreated from the dashboard.
+- Reworked the local fallback provider to build 3--6 readable scenes from the submitted title and notes, with scene-specific queries and non-text abstract tech illustrations. No generated narration contains the placeholder word `context`.
+- Activated real local Piper narration in production using the already-downloaded `en_US-lessac-medium` model. The two TubeForge containers were replaced with a read-only `models` mount; the bundled `python -m piper` mode was added to the provider adapter and verified with a direct synthesis check.
+- Focused regression: `9 passed` (`tests/test_fixed_script_pipeline.py`, `tests/test_piper_voice.py`); prior focused dashboard suite remained `14 passed`.
+- Corrected one-minute job `6e5ba3c6e6f848bf84b84c8ce4ca48c9` completed with six distinct scene assets, real narration, captions, and final MP4 `data/artifacts/6e5ba3c6e6f848bf84b84c8ce4ca48c9/final.mp4`. API returned `200 video/mp4` (3,437,831 bytes); ffprobe confirmed audio + video streams and a 54.242-second duration. Workflow is safely waiting at `publication_approval_required`.
+
+# Native Stream Clipper integration (2026-08-31)
+
+- Read and assessed the complete `integrate_stream_clipper.md` brief and the MIT-licensed local Stream Clipper codebase. The resulting design assessment is at `docs/stream_clipper_integration_assessment.md`: TubeForge reuses the donor's bounded audio-energy scoring and non-overlap selection ideas, but does not embed its separate Tauri app, pro-gated behavior, or unsafe desktop assumptions.
+- Added a durable native source-clip job branch: `source_inspecting` → `source_acquiring` → `source_analyzing` → `clip_rendering` → `final_ready`. It continues to use normal TubeForge job IDs, leases, fencing, failure/resume policy, registered artifacts, durable events, and final-artifact dashboard delivery.
+- Added `POST /api/source-clips`, strict public HTTP(S) URL validation (rejecting local/private IPs, `file:` URLs, and credentials), a worker-owned yt-dlp adapter, WAV energy analysis with deterministic non-overlapping rankings, and atomic FFmpeg H.264/AAC 1080x1920 clip rendering. The first ranked clip is registered as the standard `final` artifact; every selected clip is retained as its own durable artifact with score/evidence provenance.
+- Added source-clip unit/API/state tests. Focused validation passed: `11 passed` for `tests/test_source_clips.py`, `tests/test_state_machine.py`, and `tests/test_api_workflow.py`. Full-suite collection found `195 tests`; full execution began successfully but this control environment ended the long-running Docker invocation before a final summary.
+- Updated Compose to map the dashboard to `0.0.0.0:62065` and give web/worker read-only Piper models mounts. Deployment is intentionally pending explicit authorization because enabling yt-dlp adds network-acquisition capability to the persistent service; the existing live dashboard was left untouched.
+
+## Stream clipper completion follow-up
+
+- Added Alembic revision `20260831_0015_source_clipping`: `source_media` stores normalized provider, URL, external/creator IDs, duration and metadata for each source job; `creator_sources` is the durable, idempotency-ready future scheduler input. No scheduler has been enabled.
+- Added `SourceMediaRepository`, a `SourceProvider` protocol, persisted source metadata immediately after inspection, and source-clip publication preparation (metadata, thumbnail, normal TubeForge publication package) without requiring a generated script or scene-assets manifest.
+- The dashboard now exposes individually registered `clip_###` outputs as explicit modal-player buttons when they exist. It also adds a small "Clip existing video / stream" panel to the existing creation form, submitting the pasted URL and selected count to `POST /api/source-clips`; no separate dashboard was introduced.
+- New native pipeline regression `test_source_clip_pipeline_reuses_source_checkpoint_and_prepares_publication` passed. It verifies source inspection/acquisition happen once, the source checkpoint is reused, clip artifacts are promoted, source metadata is persisted, and the selected clip reaches standard publication preparation.
+- A clean non-production Alembic upgrade reached `20260831_0015 (head)`.
+- Added optional source-caption acquisition: a source-clip request can opt in to yt-dlp automatic English SRT retrieval. When present, the SRT is a durable artifact and is safely burned into the vertical FFmpeg render; unavailable subtitles do not fail clipping.
+- Real local media smoke passed: `tests/test_source_clip_rendering.py` created a 16:9 H.264/AAC fixture, rendered it through the native source-clip renderer, and verified a valid 1080x1920 H.264/AAC output. Combined source-render/highlight validation: `4 passed in 11.19s`.
+- Fixed the packaging regression found by the full suite: the production Piper adapter deliberately runs the installed package as `python -m piper`, not a separate `piper` console script. Focused packaging + source clipping validation passed: `8 passed in 20.40s`.
+- Built non-deployed image `tubeforge-source-clips:verify` successfully and smoke-checked `yt-dlp 2026.08.19`, FFmpeg 7.1.5, and import of the new source-clip modules. A fresh complete suite run is active in disposable container `tubeforge-stream-full-tests`.
+- Added network-free yt-dlp provider command-contract coverage. It verifies metadata identity extraction, bounded acquisition output, optional automatic subtitles, and argument-array invocation. `tests/test_source_clips.py`: `4 passed in 0.09s`.
+- Full-suite isolation found an existing Codex cache-safety regression at `test_repair_exhaustion_never_accepts_cache`: malformed generated content was releasing its reservation immediately. Validation failures now retain the short reservation, while transient/auth failures still release immediately. Both policies passed direct regression coverage: `2 passed in 15.40s`.
+
+## Stream clipper deployment and final validation (2026-08-31)
+
+- Rebuilt and replaced the TubeForge web and worker containers with the yt-dlp-enabled image. The dashboard is bound to `0.0.0.0:62065`; `GET /healthz` reports database health.
+- Fixed short direct-media sources whose remote metadata lacks a finite duration: acquisition now probes the downloaded local file before analysis and persists that authoritative duration in both source metadata and `source_media`.
+- Live public source-URL smoke job `425a50b41b7b4d59bf68647d045ad69c` completed the durable sequence `source_inspecting` → `source_acquiring` → `source_analyzing` → `clip_rendering` → `final_ready` → `publication_approval_required`. It registered source, analysis, clip, final, metadata, thumbnail, and publication-package artifacts; no publication occurred.
+- Downloaded final artifact was validated as an MP4 with H.264 video, AAC audio, 1080x1920 dimensions, and exact 15.000-second duration. The final-artifact API returned HTTP 200 with 4,709,968 bytes.
+- Final full regression: `197 passed, 2 skipped` in 14:45 (`pytest -vv -x -p no:cacheprovider`). The skips require a separately installed Piper ONNX model / Codex CLI in the disposable test image; production deployment retains its configured local Piper model. `git diff --check` passed.
+- Updated two historical test assumptions to reflect existing safety behavior: media is selected per scene and voice synthesis per timed phrase, while reruns are asserted not to repeat either completed checkpoint; byte-tampered accepted media is correctly terminal `failed_validation` rather than re-rendered.

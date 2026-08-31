@@ -36,10 +36,12 @@ class WorkerService:
         if job is None:
             return None
         _event("job_claimed", job_id=job.id, worker_id=self.worker_id, state=job.state.value)
+        self._record(job.id, "job_claimed", worker_id=self.worker_id, state=job.state.value)
         guard = _ExecutionLease(self.worker_id, job.id, self.jobs, self.heavy_work, self.config, self._now)
         if not guard.acquire():
             self.jobs.release_claim(job.id, self.worker_id)
             _event("job_claim_released", job_id=job.id, worker_id=self.worker_id, reason="heavy_work_unavailable")
+            self._record(job.id, "job_claim_released", reason="heavy_work_unavailable")
             return None
         try:
             result = self.orchestrator.run(
@@ -55,10 +57,13 @@ class WorkerService:
                 return self.jobs.defer_verification(result.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=self.orchestrator.verification_config.pending_poll_seconds))
             if result.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.PUBLICATION_APPROVAL_REQUIRED}:
                 _event("waiting_for_approval", job_id=result.id, state=result.state.value)
+                self._record(result.id, "waiting_for_approval", state=result.state.value)
             elif result.failure_message:
                 _event("job_error", job_id=result.id, state=result.state.value, error=result.failure_message)
+                self._record(result.id, "job_error", state=result.state.value, error=result.failure_message)
             else:
                 _event("job_finished", job_id=result.id, state=result.state.value)
+                self._record(result.id, "job_finished", state=result.state.value)
             return result
         except PipelineInterrupted:
             # Simulates process death: leave the lease so another worker can recover it.
@@ -75,7 +80,13 @@ class WorkerService:
         delay = min(self.config.retry_base_seconds * (2 ** (attempt - 1)), self.config.retry_max_seconds)
         result = self.jobs.schedule_retry(job.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=delay), exhausted=exhausted)
         _event("job_retry_scheduled", job_id=job.id, attempt=attempt, delay_seconds=delay, exhausted=exhausted)
+        self._record(job.id, "job_retry_scheduled", attempt=attempt, delay_seconds=delay, exhausted=exhausted)
         return result
+
+    def _record(self, job_id: str, event_type: str, **details: object) -> None:
+        events = getattr(self.orchestrator, "events", None)
+        if events is not None:
+            events.append(job_id, event_type, **details)
 
     def _now(self) -> datetime:
         value = self._clock()

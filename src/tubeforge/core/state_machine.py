@@ -24,6 +24,10 @@ class PipelineStateMachine:
 
     _NORMAL_TRANSITIONS: dict[JobState, JobState] = {
         JobState.TOPIC_CREATED: JobState.CONTENT_GENERATING,
+        JobState.SOURCE_INSPECTING: JobState.SOURCE_ACQUIRING,
+        JobState.SOURCE_ACQUIRING: JobState.SOURCE_ANALYZING,
+        JobState.SOURCE_ANALYZING: JobState.CLIP_RENDERING,
+        JobState.CLIP_RENDERING: JobState.FINAL_READY,
         JobState.CONTENT_GENERATING: JobState.CONTENT_READY,
         JobState.CONTENT_READY: JobState.SCRIPT_APPROVAL_REQUIRED,
         JobState.SCRIPT_APPROVAL_REQUIRED: JobState.ASSET_ACQUISITION,
@@ -89,7 +93,10 @@ class PipelineStateMachine:
         if target is JobState.PREVIEW_RENDERING and current in self._PREVIEW_INVALIDATION_STATES:
             return PipelineSnapshot(state=target)
         expected = self._NORMAL_TRANSITIONS.get(current)
-        if target is not expected:
+        # Topic creation is the only intentional fork.  The durable request
+        # selects the path in the orchestrator; transition validation remains
+        # strict for every later state.
+        if not (current is JobState.TOPIC_CREATED and target is JobState.SOURCE_INSPECTING) and target is not expected:
             raise InvalidTransitionError(f"cannot transition from {current.value} to {target.value}")
         required_approval = self._APPROVAL_REQUIREMENTS.get(target)
         if required_approval is not None and required_approval not in approvals:

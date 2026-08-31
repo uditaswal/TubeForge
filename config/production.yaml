@@ -7,15 +7,40 @@ database:
   url: "sqlite:////app/data/tubeforge.db"
   busy_timeout_ms: 5000
 pipeline:
-  content_provider: "fake" # Test offline first. Production supports codex + piper together.
-  voice_provider: "fake"
+  content_provider: "fake" # Structured local fallback derived from each title and notes.
+  voice_provider: "piper"
+  video_generation:
+    default_preset: "default"
+    presets:
+      default:
+        duration_seconds: 60
+        captions_enabled: true
+        music_track: null
+        visual_style: "cinematic-tech"
+        review_mode: "manual"
+        mcp_servers: []
+      short-explainer:
+        duration_seconds: 60
+        captions_enabled: true
+        music_track: null
+        visual_style: "cinematic-tech"
+        review_mode: "auto"
+        mcp_servers: []
+      silent:
+        duration_seconds: 60
+        captions_enabled: false
+        music_track: null
+        visual_style: "cinematic-tech"
+        review_mode: "manual"
+        mcp_servers: []
+    music_catalog: [] # Add approved free tracks with source/license URLs here.
   fake:
     enabled: true
     artifact_root: "/app/data/fake-artifacts"
     voice_id: "fake-voice"
     media_license: "CC0-1.0"
   piper:
-    executable: "piper"
+    executable: "python" # Uses the Piper package bundled in the local media image.
     # Download a Piper voice and its matching .onnx.json sidecar into
     # ./models before selecting voice_provider: piper.
     model_path: "/app/models/en_US-lessac-medium.onnx"
@@ -33,6 +58,13 @@ pipeline:
   sources:
     enabled: false # Enable only with a tight HTTPS host allowlist.
     allowed_hosts: []
+  source_clips:
+    enabled: true
+    ytdlp_executable: "yt-dlp"
+    timeout_seconds: 45
+    min_clip_seconds: 15
+    max_clip_seconds: 60
+    padding_seconds: 3
   youtube:
     enabled: false
     dry_run: true

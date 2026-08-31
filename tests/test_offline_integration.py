@@ -38,7 +38,9 @@ class _Assembler:
         output.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(output), "wb") as target:
             target.setparams(parameters)
-            for path in inputs:
+            for index, path in enumerate(inputs):
+                if index and pause_seconds:
+                    target.writeframes(b"\x00" * round(parameters.framerate * pause_seconds) * parameters.nchannels * parameters.sampwidth)
                 with wave.open(str(path), "rb") as source:
                     target.writeframes(source.readframes(source.getnframes()))
 

@@ -110,6 +110,29 @@ class SourceIngestionConfig(BaseModel):
             raise ValueError("source ingestion requires at least one allowed host when enabled")
         return self
 
+
+class SourceClipConfig(BaseModel):
+    """Local, opt-in acquisition and vertical clip rendering policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    ytdlp_executable: str = Field(default="yt-dlp", min_length=1, max_length=4096)
+    timeout_seconds: int = Field(default=120, ge=5, le=1_800)
+    ffmpeg_executable: str = Field(default="ffmpeg", min_length=1, max_length=4096)
+    ffprobe_executable: str = Field(default="ffprobe", min_length=1, max_length=4096)
+    max_source_duration_seconds: int = Field(default=14_400, ge=30, le=86_400)
+    min_clip_seconds: float = Field(default=15, ge=5, le=600)
+    max_clip_seconds: float = Field(default=60, ge=10, le=900)
+    padding_seconds: float = Field(default=3, ge=0, le=30)
+    analysis_window_seconds: float = Field(default=0.5, ge=0.1, le=5)
+
+    @model_validator(mode="after")
+    def clip_bounds_are_ordered(self) -> "SourceClipConfig":
+        if self.min_clip_seconds > self.max_clip_seconds:
+            raise ValueError("source_clips.min_clip_seconds must not exceed max_clip_seconds")
+        return self
+
 class CodexProviderConfig(BaseModel):
     """Non-secret limits for the opt-in Codex CLI content adapter."""
 
@@ -349,6 +372,37 @@ class LearningConfig(BaseModel):
     minimum_history_videos: int = Field(default=3, ge=1, le=1000)
     max_active_recommendations: int = Field(default=5, ge=1, le=20)
 
+class MusicTrackConfig(BaseModel):
+    """An operator-approved background track; arbitrary URLs are never accepted per job."""
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=200)
+    source_url: str = Field(min_length=1, max_length=2_000)
+    license_url: str = Field(min_length=1, max_length=2_000)
+    attribution: str = Field(default="", max_length=1_000)
+
+class VideoPresetConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    duration_seconds: int = Field(default=60, ge=30, le=7_200)
+    captions_enabled: bool = True
+    music_track: str | None = Field(default=None, max_length=200)
+    visual_style: str = Field(default="cinematic-tech", min_length=1, max_length=100)
+    review_mode: str = Field(default="manual", pattern=r"^(manual|auto)$")
+    mcp_servers: tuple[str, ...] = ()
+
+class VideoGenerationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    default_preset: str = Field(default="default", min_length=1, max_length=100)
+    presets: dict[str, VideoPresetConfig] = Field(default_factory=lambda: {"default": VideoPresetConfig()})
+    music_catalog: tuple[MusicTrackConfig, ...] = ()
+
+    @model_validator(mode="after")
+    def require_default_preset(self) -> "VideoGenerationConfig":
+        if self.default_preset not in self.presets:
+            raise ValueError("video_generation.default_preset must name a configured preset")
+        if len({track.name for track in self.music_catalog}) != len(self.music_catalog):
+            raise ValueError("video_generation.music_catalog track names must be unique")
+        return self
+
 class PipelineConfig(BaseModel):
     """Safe provider selection and deterministic M7 voice settings."""
 
@@ -375,6 +429,8 @@ class PipelineConfig(BaseModel):
     learning: LearningConfig = Field(default_factory=LearningConfig)
     media: MediaPipelineConfig = Field(default_factory=MediaPipelineConfig)
     sources: SourceIngestionConfig = Field(default_factory=SourceIngestionConfig)
+    source_clips: SourceClipConfig = Field(default_factory=SourceClipConfig)
+    video_generation: VideoGenerationConfig = Field(default_factory=VideoGenerationConfig)
 
     @model_validator(mode="after")
     def normalize_legacy_provider(self) -> "PipelineConfig":
