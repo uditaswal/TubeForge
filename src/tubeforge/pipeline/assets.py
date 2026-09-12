@@ -47,10 +47,10 @@ class AssetLimits:
 def asset_limits_from_config(config: MediaPipelineConfig) -> AssetLimits:
     """Translate validated configuration without leaking it into providers."""
     return AssetLimits(frozenset(config.allowed_hosts), frozenset(config.allowed_licenses), config.max_bytes, config.timeout_seconds, config.max_redirects, config.max_width, config.max_height, config.min_width, config.min_height, config.max_width * config.max_height, config.max_duration_seconds, frozenset(config.allowed_media_types))
-def scene_request(scene: ScenePlan) -> MediaSearchRequest:
+def scene_request(scene: ScenePlan, *, visual_source: str = "generated") -> MediaSearchRequest:
     """Turn approved scene-plan fields into a deterministic search request."""
     orientation = "portrait" if scene.visual_type in {"portrait", "vertical"} else "landscape"
-    return MediaSearchRequest(scene_id=scene.scene_id, queries=tuple(" ".join(query.split()) for query in scene.search_queries), visual_type=scene.visual_type, required_license="licensed", orientation=orientation)
+    return MediaSearchRequest(scene_id=scene.scene_id, queries=tuple(" ".join(query.split()) for query in scene.search_queries), visual_type=scene.visual_type, required_license="licensed", orientation=orientation, visual_source=visual_source)
 
 def select_candidate(candidates: list[AssetCandidate], request: MediaSearchRequest, limits: AssetLimits) -> AssetCandidate:
     eligible = [candidate for candidate in candidates if asset_policy_valid(candidate, limits)]

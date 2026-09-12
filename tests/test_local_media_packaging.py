@@ -25,6 +25,12 @@ def test_compose_mounts_operator_supplied_voice_models_read_only() -> None:
     assert "./models:/app/models:ro" in worker_volumes
 
 
+def test_compose_exposes_only_the_documented_loopback_dashboard_port() -> None:
+    compose = yaml.safe_load((REPOSITORY_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+
+    assert compose["services"]["web"]["ports"] == ["127.0.0.1:62065:8080"]
+
+
 def test_production_piper_paths_match_model_mount() -> None:
     production = yaml.safe_load((REPOSITORY_ROOT / "config" / "production.yaml").read_text(encoding="utf-8"))
     piper = production["pipeline"]["piper"]

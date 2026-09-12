@@ -69,7 +69,7 @@ def create_runtime(settings: Settings) -> Runtime:
     limits = asset_limits_from_config(settings.pipeline.media)
     # The fake adapter uses an inert example.invalid provenance URL while
     # copying its provider-created local fixture; do not widen real policies.
-    if settings.pipeline.media.provider == "fake":
+    if settings.pipeline.media.provider in {"fake", "hybrid"}:
         limits = replace(limits, allowed_hosts=limits.allowed_hosts | frozenset({"example.invalid"}))
     acquirer = AssetAcquisitionService(
         AssetCacheRepository(database.session_factory),

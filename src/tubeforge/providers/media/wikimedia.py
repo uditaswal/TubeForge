@@ -27,6 +27,16 @@ class WikimediaCommonsProvider:
             author=(metadata.get("Artist") or {}).get("value")
             url=info.get("url")
             if not (license_name and license_url and url): continue
+            normalized_license = str(license_name).casefold()
+            # The main renderer has no visible attribution slate. Retain only
+            # no-attribution licences rather than treating a Google-like image
+            # search as permission to reuse someone else's work.
+            if "cc0" in normalized_license:
+                license_name = "CC0-1.0"
+            elif "public domain" in normalized_license:
+                license_name = "Public Domain"
+            else:
+                continue
             mime=str(info.get("mime", "")); media_type="video" if mime.startswith("video/") else "image"
-            candidates.append(AssetCandidate(provider_asset_id=str(page["pageid"]), source_url=page.get("canonicalurl", url), download_url=url, source_version=str(info.get("sha1") or "" ) or None, media_type=media_type, width=info.get("width"), height=info.get("height"), author=author, license_name=license_name, license_url=license_url, attribution_text=author or None, attribution_required=True, review_required=True, retrieved_at=datetime.now(UTC)))
+            candidates.append(AssetCandidate(provider_asset_id=str(page["pageid"]), source_url=page.get("canonicalurl", url), download_url=url, source_version=str(info.get("sha1") or "" ) or None, media_type=media_type, width=info.get("width"), height=info.get("height"), author=author, license_name=license_name, license_url=license_url, attribution_text=author or None, attribution_required=False, review_required=False, retrieved_at=datetime.now(UTC)))
         return candidates

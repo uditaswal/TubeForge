@@ -258,11 +258,12 @@ class PipelineOrchestrator:
                 if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before asset search")
                 current = accepted.get(scene.scene_id)
                 if current and self._accepted_asset_valid(current): continue
-                route = self.visual_router.route(scene)
-                request = scene_request(scene)
+                route = self.visual_router.route(scene, visual_source=job.request.visual_source)
+                request = scene_request(scene, visual_source=job.request.visual_source)
                 candidate = select_candidate(self.media.search(request), request, self.asset_limits)
                 if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before asset acquisition")
-                path, cache_key, metadata = self.asset_acquirer.acquire(type(self.media).__name__, candidate, cancellation_requested)
+                provider_name = self.media.provider_name(request) if hasattr(self.media, "provider_name") else type(self.media).__name__
+                path, cache_key, metadata = self.asset_acquirer.acquire(provider_name, candidate, cancellation_requested)
                 accepted[scene.scene_id] = {"scene_id": scene.scene_id, "visual_route": route.model_dump(mode="json"), "request": request.model_dump(mode="json"), "candidate": candidate.model_dump(mode="json"), "cache_key": cache_key, "path": str(path), "checksum_sha256": metadata["checksum_sha256"], "validation": metadata}
                 self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", manifest)
             if any(not self._accepted_asset_valid(accepted.get(scene.scene_id)) for scene in package.scene_plans): raise ProviderValidationError("not every scene has a validated accepted asset")
