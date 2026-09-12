@@ -51,6 +51,7 @@ class VideoBriefRequest(BaseModel):
     review_mode: str | None = Field(default=None, pattern=r"^(manual|auto)$")
     mcp_servers: tuple[str, ...] | None = None
     audience: str = Field(default="general", min_length=1, max_length=200)
+    voice_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class SourceClipRequest(BaseModel):
@@ -125,7 +126,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings) -> ContentReque
         sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title="Operator-provided notes", excerpt="\n".join(notes)),),
         notes=notes, review_mode=value.review_mode or preset.review_mode,
         captions_enabled=preset.captions_enabled if value.captions_enabled is None else value.captions_enabled,
-        music_track=music, visual_style=value.visual_style or preset.visual_style, mcp_servers=tuple(mcp),
+        music_track=music, visual_style=value.visual_style or preset.visual_style, mcp_servers=tuple(mcp), voice_id=value.voice_id,
     )
 
 
@@ -321,6 +322,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           panel.style.marginTop = '18px'; panel.style.border = '1px solid #31415f'; panel.style.borderRadius = '9px';
           panel.innerHTML = '<legend>Clip existing video / stream</legend><label>Source URL<input id="sourceClipUrl" type="url" placeholder="https://…"></label><label>Number of clips<input id="sourceClipCount" type="number" value="1" min="1" max="12"></label><label class="checkbox"><input id="sourceClipCaptions" type="checkbox"> Burn available captions</label><button id="sourceClipCreate" type="button" class="secondary">Create clip job</button>';
           form.append(panel);
+          const voiceLabel=document.createElement('label'); voiceLabel.textContent='Narrator voice';
+          const voiceSelect=document.createElement('select'); voiceSelect.name='voice_id'; voiceSelect.id='voiceSelect';
+          voiceSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Default local voice'})); voiceLabel.append(voiceSelect);
+          form.querySelector('button[type="submit"]').before(voiceLabel);
+          fetch('/api/voices').then(response=>response.ok?response.json():[]).then(voices=>voices.forEach(voice=>voiceSelect.append(Object.assign(document.createElement('option'),{value:voice.id,textContent:voice.label+(voice.provider==='kokoro'?' — natural':'')}))));
           document.querySelector('#sourceClipCreate').addEventListener('click', async () => {
             const notice = document.querySelector('#notice');
             const sourceUrl = document.querySelector('#sourceClipUrl').value.trim();
@@ -368,7 +374,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const originalRefresh=window.setInterval; decorate(); originalRefresh(decorate,1000);
         })();
         </script>"""
-        return DASHBOARD_HTML.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("</body>", source_controls + operations_controls + reviewer_controls + "</body>")
+        return DASHBOARD_HTML.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("captions_enabled:d.has('captions_enabled')};let r", "captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null};let r").replace("</body>", source_controls + operations_controls + reviewer_controls + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -386,6 +392,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
             for job in runtime.jobs.list_recent()
         ]
+
+    @app.get("/api/voices", tags=["voices"])
+    def list_voices() -> list[dict[str, str]]:
+        """Expose only configured local voices; no remote voice service is used."""
+        pipeline = application_settings.pipeline
+        options = [
+            {"id": voice, "label": voice.replace("_", " ").title(), "provider": "kokoro"}
+            for voice in pipeline.kokoro.voices
+            if pipeline.kokoro.enabled and pipeline.voice_provider in {"kokoro", "hybrid"}
+        ]
+        if pipeline.voice_provider in {"piper", "hybrid"}:
+            options.append({"id": "piper", "label": "Piper reliable fallback", "provider": "piper"})
+        return options
 
     @app.get("/api/jobs/{job_id}/events", tags=["jobs"])
     def get_job_events(job_id: str) -> list[dict[str, object]]:

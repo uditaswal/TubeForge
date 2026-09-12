@@ -36,6 +36,21 @@ For requested implementation work:
   - atomic artifact promotion
   - cancellation handling
 
+## Repository hygiene
+
+Before every commit (including autonomous commits), review `git status --short`
+and whether the change introduced generated, machine-local, or sensitive files.
+Update `.gitignore` in the same change whenever a new ignorable path is
+introduced. This includes generated media/artifacts, model weights and caches,
+local databases, logs, virtual environments, build/test output, credentials,
+and editor/OS files.
+
+- Use `git check-ignore -v <path>` to verify a new ignore rule when practical.
+- Do not use broad ignore rules that hide source, migrations, fixtures, or
+  intentionally versioned configuration.
+- Never remove already tracked files merely to make an ignore rule take effect;
+  flag that decision for the operator.
+
 ## Allowed autonomous actions
 
 You may without asking:
@@ -77,5 +92,7 @@ Completion requires:
    next action
 7. `readme.md` and the relevant operator documentation are updated when the
    externally visible setup or workflow changed
+8. `.gitignore` has been reviewed and updated when the change introduced
+   generated, local, or sensitive paths
 
 When validation fails, continue debugging.

@@ -53,6 +53,7 @@ class ContentRequest(DomainModel):
     captions_enabled: bool = True
     music_track: str | None = Field(default=None, max_length=200)
     visual_style: str = Field(default="cinematic-tech", min_length=1, max_length=100)
+    voice_id: str | None = Field(default=None, min_length=1, max_length=200)
     mcp_servers: tuple[str, ...] = Field(default=(), max_length=50)
     # A source-clip job is intentionally still a ContentRequest: it uses the
     # same job, lease, approval, and artifact records as generated videos.

@@ -24,7 +24,8 @@ validation evidence, blockers, and next tasks. See
 - Content-provider, media-provider, voice-provider, and publishing boundaries;
   deterministic/fake adapters support offline testing.
 - Local FFmpeg rendering with subtle cinematic still-image motion, HD
-  deterministic fallback art, Piper narration, captions, final-artifact quality
+  deterministic fallback art, selectable Kokoro narration with a reliable Piper
+  fallback, captions, final-artifact quality
   checks, publication metadata/thumbnail preparation, and source clips.
 - Dashboard authentication, audited approvals/activity, topic queue, schedules,
   encrypted social-account credential envelopes, and durable dispatch receipts.
@@ -70,9 +71,32 @@ tubeforge create-admin --username <name>
 Use a production-only `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY` for any OAuth account
 credential envelopes. Never commit credentials, OAuth tokens, or Piper models.
 
+## Local narrator voices
+
+Creator Studio offers three natural, free local Kokoro voices (`af_bella`,
+`af_sarah`, and `am_michael`) plus **Piper reliable fallback**. The selected
+voice is stored with the generation job. If a selected Kokoro synthesis cannot
+run, TubeForge automatically produces that phrase with Piper rather than
+failing the job.
+
+Kokoro uses an ONNX model and a voice pack mounted from `./models/`; they are
+intentionally ignored by Git. Production expects
+`kokoro-v1.0.int8.onnx` and `voices-v1.0.bin` in that directory. The Docker
+image installs the lightweight `kokoro-onnx` runtime; download model assets
+only from the configured trusted release and verify a local synthesis before
+using them for production jobs.
+
 ## Validation expectations
 
 Run the relevant unit tests after every change. Before declaring a release
 ready, run the full test suite, migrations, Compose configuration check, and an
 appropriate FFmpeg/Piper smoke test; inspect the produced artifact with
 `ffprobe`. The complete rules are in `AGENTS.md`.
+
+## Repository hygiene
+
+Before committing, review `git status --short` and update `.gitignore` if the
+work created new generated artifacts, local data, caches, model files, logs,
+credentials, or editor/OS files. Verify a new rule with
+`git check-ignore -v <path>` where practical. Do not add broad rules that hide
+source code, migrations, fixtures, or intentionally versioned configuration.

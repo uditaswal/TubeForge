@@ -1931,3 +1931,28 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
   `{"status":"ok","database":"ok"}`. `git diff --check` passes. Focused
   browser/API regression execution remains to be completed in the dependency
   container.
+
+## 2026-09-12 — commit-time ignore review policy
+
+- Added a durable `AGENTS.md` and README requirement to review `.gitignore`
+  before every commit and update it whenever a change introduces generated,
+  local, or sensitive paths. The rule requires verification where practical,
+  prevents over-broad ignores, and explicitly preserves already tracked files
+  unless an operator authorizes their removal.
+
+## 2026-09-13 — local Kokoro voices with Piper fallback
+
+- Added a CPU-friendly `kokoro-onnx` voice adapter, configured three selectable
+  voices (`af_bella`, `af_sarah`, `am_michael`), and persisted the chosen voice
+  on each generation request. Creator Studio now exposes those choices plus an
+  explicit Piper fallback option.
+- The hybrid provider attempts the requested Kokoro voice and automatically
+  switches to the installed Piper voice on any model/runtime/synthesis failure;
+  durable jobs therefore retain the existing reliable narration path.
+- Downloaded and validated the trusted INT8 ONNX model (92,361,271 bytes) and
+  voice pack locally. A real `af_bella` synthesis produced a valid 24 kHz WAV,
+  duration 3.776 seconds. Both model types are ignored by Git.
+- Focused validation: `10 passed` for hybrid fallback, configuration, and
+  dashboard voice-selection coverage. `git diff --check` and dashboard health
+  checks pass. A durable selected-Kokoro job smoke remains required after the
+  Compose image is rebuilt.

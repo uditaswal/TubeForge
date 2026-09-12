@@ -279,7 +279,7 @@ class PipelineOrchestrator:
             self._replace_json(job.id, JobState.VOICE_GENERATION, "segmentation_manifest", {"phrases": [phrase.model_dump(mode="json") for phrase in phrases]})
             existing = self._load_json_artifact(job.id, JobState.VOICE_GENERATION, "voice_manifest") or {"voices": []}
             accepted = {item["phrase_id"]: item for item in existing.get("voices", [])}
-            voice_id = getattr(getattr(self.voice, "settings", None), "voice_id", "fake-voice")
+            voice_id = job.request.voice_id or getattr(getattr(self.voice, "settings", None), "voice_id", "fake-voice")
             for phrase in phrases:
                 if cancellation_requested is not None and cancellation_requested():
                     raise PipelineCancellation("cancelled before phrase synthesis")

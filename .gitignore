@@ -25,4 +25,4 @@ data/
 *.py[cod]
 autonomous_logs/
 models/*.onnx
-
+models/*.bin

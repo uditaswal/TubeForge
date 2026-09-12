@@ -212,6 +212,29 @@ class PiperProviderConfig(BaseModel):
     adapter_version: str = Field(default="m7-piper-v1", min_length=1, max_length=100)
 
 
+class KokoroProviderConfig(BaseModel):
+    """Optional higher-naturalness local Kokoro voices with Piper fallback."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    voices: tuple[str, ...] = ("af_bella", "af_sarah", "am_michael")
+    model_path: Path | None = None
+    voices_path: Path | None = None
+    cache_root: Path = Path("./data/cache/kokoro")
+    sample_rate: int = Field(default=24_000, ge=8_000, le=96_000)
+    max_output_bytes: int = Field(default=100_000_000, ge=1_024, le=2_000_000_000)
+    adapter_version: str = Field(default="m24-kokoro-v1", min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def require_distinct_voices(self) -> "KokoroProviderConfig":
+        if not self.voices or len(set(self.voices)) != len(self.voices):
+            raise ValueError("pipeline.kokoro.voices must be nonempty and unique")
+        if any(not voice.strip() for voice in self.voices):
+            raise ValueError("pipeline.kokoro.voices must be nonblank")
+        return self
+
+
 class VoicePipelineConfig(BaseModel):
     """Deterministic narration, assembly, and phrase-caption limits."""
 
@@ -417,11 +440,12 @@ class PipelineConfig(BaseModel):
     # deployments select the independent content and voice adapters below.
     provider: str | None = Field(default=None, pattern=r"^(fake|codex|piper)$")
     content_provider: str = Field(default="fake", pattern=r"^(fake|fixed|codex|ollama)$")
-    voice_provider: str = Field(default="fake", pattern=r"^(fake|piper)$")
+    voice_provider: str = Field(default="fake", pattern=r"^(fake|piper|kokoro|hybrid)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
     ollama: OllamaProviderConfig = Field(default_factory=OllamaProviderConfig)
     piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
+    kokoro: KokoroProviderConfig = Field(default_factory=KokoroProviderConfig)
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
     preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
     final: FinalRenderConfig = Field(default_factory=FinalRenderConfig)
@@ -530,7 +554,7 @@ def validate_selected_provider(settings: Settings) -> None:
     Content and voice providers are independent. In particular, validating
     Piper must not skip Codex validation for the real LLM-to-video topology.
     """
-    if settings.pipeline.voice_provider == "piper":
+    if settings.pipeline.voice_provider in {"piper", "hybrid"}:
         piper = settings.pipeline.piper
         if piper.model_path is None:
             raise RuntimeError("pipeline.piper.model_path is required when pipeline.provider is piper")
@@ -540,6 +564,12 @@ def validate_selected_provider(settings: Settings) -> None:
         if piper.config_path is not None and not _resolve_path(piper.config_path).is_file():
             raise RuntimeError("pipeline.piper.config_path does not exist or is not a file")
         _validate_executable(piper.executable, "pipeline.piper.executable")
+    if settings.pipeline.voice_provider == "kokoro":
+        kokoro = settings.pipeline.kokoro
+        if kokoro.model_path is None or not _resolve_path(kokoro.model_path).is_file():
+            raise RuntimeError("pipeline.kokoro.model_path must name an installed Kokoro ONNX model")
+        if kokoro.voices_path is None or not _resolve_path(kokoro.voices_path).is_file():
+            raise RuntimeError("pipeline.kokoro.voices_path must name an installed Kokoro voice pack")
     if settings.pipeline.content_provider == "codex":
         codex = settings.pipeline.codex
         _validate_executable(codex.executable, "pipeline.codex.executable")
