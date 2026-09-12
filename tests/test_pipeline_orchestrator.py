@@ -167,6 +167,7 @@ def test_successful_orchestration_persists_every_checkpoint(pipeline) -> None:
     assert media.calls == 3
     assert publisher.calls == 0
     assert runner.artifacts.get("job-success", JobState.FINAL_RENDERING, "final")
+    assert runner._required_json("job-success", JobState.FINAL_READY, "quality_report")["passed"] is True
 
 
 def test_interruption_resumes_from_last_checkpoint_without_regeneration(pipeline) -> None:

@@ -41,7 +41,7 @@ def test_local_visuals_are_scene_specific_and_decodable(tmp_path: Path) -> None:
         path = Path(candidate.local_path or "")
         paths.append(path)
         payloads.append(path.read_bytes())
-        assert path.stat().st_size > 0 and candidate.width == 640 and candidate.height == 360
+        assert path.stat().st_size > 0 and candidate.width == 1280 and candidate.height == 720
     assert len(set(paths)) == len(set(payloads)) == 6
 
 

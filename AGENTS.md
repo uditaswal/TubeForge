@@ -2,6 +2,24 @@
 
 You are developing TubeForge, an automated YouTube-video generation system.
 
+## Project records
+
+These files have distinct purposes. Keep them consistent rather than copying
+the same status into each one:
+
+- `AGENTS.md` is the durable working contract: safety rules, required checks,
+  and documentation-update rules. Do not put milestone history here.
+- `docs/STATUS.md` is the single source of truth for the *current* release,
+  milestone state, blockers, and next five tasks.
+- `AUTONOMOUS_PROGRESS.md` is an append-only evidence log. Each meaningful
+  autonomous work session records its scope, validation commands/results,
+  artifacts inspected, blocker (if any), and next action.
+- `readme.md` is the operator-facing product, setup, and local-operation guide.
+  Update it whenever supported setup, configuration, or workflow changes.
+
+Do not claim a milestone is complete in `AUTONOMOUS_PROGRESS.md` unless its
+corresponding row is `DONE` in `docs/STATUS.md` with validation evidence.
+
 ## Working policy
 
 For requested implementation work:
@@ -54,6 +72,10 @@ Completion requires:
 2. existing tests remain passing
 3. the requested end-to-end smoke test passes
 4. produced artifacts are inspected/validated
-5. important findings are written to `AUTONOMOUS_PROGRESS.md`
+5. important findings are appended to `AUTONOMOUS_PROGRESS.md`
+6. `docs/STATUS.md` is updated with the current state, evidence, blocker, and
+   next action
+7. `readme.md` and the relevant operator documentation are updated when the
+   externally visible setup or workflow changed
 
 When validation fails, continue debugging.

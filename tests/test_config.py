@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from tubeforge.core.config import Settings, load_settings
+from tubeforge.core.config import Settings, VoicePipelineConfig, load_settings
 
 
 def test_loads_fake_yaml_configuration(tmp_path: Path) -> None:
@@ -52,6 +52,12 @@ def test_default_yaml_uses_safe_fake_media_policy() -> None:
     assert settings.pipeline.media.provider == "fake"
     assert settings.pipeline.media.max_redirects == 0
     assert not settings.pipeline.sources.enabled
+
+
+def test_default_voice_duration_tolerance_accepts_real_local_pacing() -> None:
+    config = VoicePipelineConfig()
+    assert config.target_duration_tolerance_ratio == 0.30
+    assert 60 * (1 + config.target_duration_tolerance_ratio) >= 78
 
 
 def test_source_ingestion_needs_explicit_hosts() -> None:

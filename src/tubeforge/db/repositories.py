@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.domain.contracts import ContentRequest
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.db.models import AnalyticsSnapshotRecord, ApprovalRecord, ArtifactRecord, AssetCacheRecord, ChannelBaselineRecord, CreatorSourceRecord, ExperimentOutcomeRecord, ExternalOperationRecord, GenerationCacheRecord, HeavyWorkLeaseRecord, JobEventRecord, LearningEventRecord, NextVideoBriefRecord, NextVideoRecommendationRecord, OptimizationCandidateRecord, OptimizationCandidateSetRecord, OptimizationExecutionRecord, OptimizationExperimentRecord, OptimizationProposalRecord, PerformanceEvaluationRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord, SourceMediaRecord
+from tubeforge.db.models import AnalyticsSnapshotRecord, ApprovalRecord, ArtifactRecord, AssetCacheRecord, ChannelBaselineRecord, CreatorSourceRecord, ExperimentOutcomeRecord, ExternalOperationRecord, GenerationCacheRecord, HeavyWorkLeaseRecord, JobEventRecord, LearningEventRecord, NextVideoBriefRecord, NextVideoRecommendationRecord, OptimizationCandidateRecord, OptimizationCandidateSetRecord, OptimizationExecutionRecord, OptimizationExperimentRecord, OptimizationProposalRecord, PerformanceEvaluationRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord, SourceMediaRecord, TopicRecord, ScheduleRecord, ScheduleRunRecord, SocialAccountRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,36 @@ class PipelineJob:
     next_retry_at: datetime | None = None
     cancellation_requested_at: datetime | None = None
     authentication_restored_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Topic:
+    id: str
+    title: str
+    notes: str
+    priority: int
+    status: str
+    options: dict[str, object]
+    generation_job_id: str | None
+    attempts: int
+
+
+@dataclass(frozen=True, slots=True)
+class Schedule:
+    id: str
+    name: str
+    cron: str
+    timezone: str
+    enabled: bool
+    options: dict[str, object]
+    last_run_at: datetime | None
+    next_run_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class SocialAccount:
+    id: str; platform: str; display_name: str; external_account_id: str | None; auth_type: str; scopes: tuple[str, ...]; status: str; capabilities: tuple[str, ...]; is_default: bool; disabled: bool; token_expires_at: datetime | None; last_validated_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +306,125 @@ class JobRepository:
             record.updated_at = datetime.now(UTC)
             session.flush()
             return _job_from_record(record)
+
+
+class TopicRepository:
+    """Queue operations with short transactions and a scheduler reservation fence."""
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def create(self, topic_id: str, *, title: str, notes: str = "", priority: int = 0, options: dict[str, object] | None = None) -> Topic:
+        now = datetime.now(UTC)
+        record = TopicRecord(id=topic_id, title=title.strip(), notes=notes.strip(), priority=priority, status="ready", options_json=json.dumps(options or {}, sort_keys=True), generation_job_id=None, reserved_by=None, reserved_at=None, lease_expires_at=None, failure_message=None, attempts=0, created_at=now, updated_at=now)
+        if not record.title:
+            raise ValueError("topic title must not be blank")
+        with self._session_factory.begin() as session:
+            session.add(record)
+        return _topic_from_record(record)
+
+    def create_many(self, entries: tuple[tuple[str, str], ...], *, priority: int = 0) -> list[Topic]:
+        """Bulk backlog entry in one short transaction, rejecting blank lines."""
+        now = datetime.now(UTC); records: list[TopicRecord] = []
+        for topic_id, title in entries:
+            normalized = title.strip()
+            if not normalized: raise ValueError("topic title must not be blank")
+            records.append(TopicRecord(id=topic_id, title=normalized, notes="", priority=priority, status="ready", options_json="{}", generation_job_id=None, reserved_by=None, reserved_at=None, lease_expires_at=None, failure_message=None, attempts=0, created_at=now, updated_at=now))
+        with self._session_factory.begin() as session: session.add_all(records)
+        return [_topic_from_record(item) for item in records]
+
+    def list(self, *, status: str | None = None, limit: int = 200) -> list[Topic]:
+        with self._session_factory() as session:
+            query = select(TopicRecord)
+            if status:
+                query = query.where(TopicRecord.status == status)
+            rows = session.scalars(query.order_by(TopicRecord.priority.desc(), TopicRecord.created_at, TopicRecord.id).limit(limit))
+            return [_topic_from_record(row) for row in rows]
+
+    def get(self, topic_id: str) -> Topic:
+        with self._session_factory() as session:
+            record = session.get(TopicRecord, topic_id)
+            if record is None: raise KeyError("topic not found")
+            return _topic_from_record(record)
+
+    def reserve_and_create_job(self, *, topic_id: str, scheduler_id: str, job_id: str, request: ContentRequest, lease_seconds: int) -> PipelineJob | None:
+        """Atomically convert one READY topic into exactly one ordinary job."""
+        now = datetime.now(UTC)
+        with self._session_factory.begin() as session:
+            result = session.execute(update(TopicRecord).where(TopicRecord.id == topic_id, TopicRecord.status == "ready").values(status="generating", generation_job_id=job_id, reserved_by=scheduler_id, reserved_at=now, lease_expires_at=now + timedelta(seconds=lease_seconds), attempts=TopicRecord.attempts + 1, updated_at=now))
+            if result.rowcount != 1:
+                return None
+            record = PipelineJobRecord(id=job_id, request_json=request.model_dump_json(), state=JobState.TOPIC_CREATED.value, resume_state=None, failure_message=None, created_at=now, updated_at=now, claim_owner=None, claimed_at=None, lease_expires_at=None, heartbeat_at=None, attempt_count=0, next_retry_at=None, cancellation_requested_at=None, authentication_restored_at=None)
+            session.add(record)
+            session.flush()
+            return _job_from_record(record)
+
+
+class ScheduleRepository:
+    """Cron configuration and exactly-once schedule-run registration."""
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def create(self, schedule_id: str, *, name: str, cron: str, timezone: str, next_run_at: datetime, options: dict[str, object] | None = None) -> Schedule:
+        now = datetime.now(UTC)
+        record = ScheduleRecord(id=schedule_id, name=name.strip(), cron=cron.strip(), timezone=timezone, enabled=True, options_json=json.dumps(options or {}, sort_keys=True), last_run_at=None, next_run_at=next_run_at, created_at=now, updated_at=now)
+        if not record.name: raise ValueError("schedule name must not be blank")
+        with self._session_factory.begin() as session: session.add(record)
+        return _schedule_from_record(record)
+
+    def list(self) -> list[Schedule]:
+        with self._session_factory() as session:
+            return [_schedule_from_record(row) for row in session.scalars(select(ScheduleRecord).order_by(ScheduleRecord.name))]
+
+    def due(self, now: datetime) -> list[Schedule]:
+        with self._session_factory() as session:
+            rows = session.scalars(select(ScheduleRecord).where(ScheduleRecord.enabled.is_(True), ScheduleRecord.next_run_at <= now).order_by(ScheduleRecord.next_run_at))
+            return [_schedule_from_record(row) for row in rows]
+
+    def begin_run(self, *, run_id: str, schedule_id: str, run_key: str, now: datetime) -> bool:
+        try:
+            with self._session_factory.begin() as session:
+                session.add(ScheduleRunRecord(id=run_id, schedule_id=schedule_id, run_key=run_key, state="running", topic_id=None, job_id=None, details_json="{}", started_at=now, finished_at=None))
+            return True
+        except IntegrityError:
+            return False
+
+    def finish_run(self, *, run_id: str, state: str, now: datetime, topic_id: str | None = None, job_id: str | None = None, details: dict[str, object] | None = None) -> None:
+        with self._session_factory.begin() as session:
+            record = session.get(ScheduleRunRecord, run_id)
+            if record is None: raise KeyError("schedule run not found")
+            record.state, record.topic_id, record.job_id, record.details_json, record.finished_at = state, topic_id, job_id, json.dumps(details or {}, sort_keys=True), now
+
+    def advance(self, schedule_id: str, *, now: datetime, next_run_at: datetime) -> None:
+        with self._session_factory.begin() as session:
+            record = session.get(ScheduleRecord, schedule_id)
+            if record is None: raise KeyError("schedule not found")
+            record.last_run_at, record.next_run_at, record.updated_at = now, next_run_at, now
+
+
+class SocialAccountRepository:
+    """Account metadata is safe to list; encrypted credentials are never returned."""
+    def __init__(self, session_factory: sessionmaker[Session]) -> None: self._session_factory = session_factory
+    def create(self, account_id: str, *, platform: str, display_name: str, external_account_id: str | None, auth_type: str, credential_ciphertext: str | None, scopes: tuple[str, ...], capabilities: tuple[str, ...], token_expires_at: datetime | None = None) -> SocialAccount:
+        if platform not in {"youtube", "instagram", "facebook", "snapchat"}: raise ValueError("unsupported platform")
+        now = datetime.now(UTC)
+        record = SocialAccountRecord(id=account_id, platform=platform, display_name=display_name.strip(), external_account_id=external_account_id, auth_type=auth_type, credential_ciphertext=credential_ciphertext, scopes_json=json.dumps(scopes), token_expires_at=token_expires_at, status="connected" if credential_ciphertext else "manual_handoff_required", capabilities_json=json.dumps(capabilities), is_default=False, disabled=False, last_validated_at=None, created_at=now, updated_at=now)
+        if not record.display_name: raise ValueError("display name must not be blank")
+        with self._session_factory.begin() as session: session.add(record)
+        return _social_account_from_record(record)
+    def list(self) -> list[SocialAccount]:
+        with self._session_factory() as session: return [_social_account_from_record(row) for row in session.scalars(select(SocialAccountRecord).order_by(SocialAccountRecord.platform, SocialAccountRecord.display_name))]
+    def credential_ciphertext(self, account_id: str) -> str | None:
+        with self._session_factory() as session:
+            row = session.get(SocialAccountRecord, account_id)
+            if row is None: raise KeyError("account not found")
+            return row.credential_ciphertext
+    def disable(self, account_id: str) -> None:
+        with self._session_factory.begin() as session:
+            row = session.get(SocialAccountRecord, account_id)
+            if row is None: raise KeyError("account not found")
+            row.disabled, row.status, row.updated_at = True, "disabled", datetime.now(UTC)
 
 
 class ArtifactRepository:
@@ -631,7 +780,19 @@ class ApprovalRepository:
 
 
 def _job_from_record(record: PipelineJobRecord) -> PipelineJob:
-    return PipelineJob(record.id, ContentRequest.model_validate_json(record.request_json), JobState(record.state), JobState(record.resume_state) if record.resume_state else None, record.failure_message, record.claim_owner, record.attempt_count, record.next_retry_at, record.cancellation_requested_at, record.authentication_restored_at)
+    return PipelineJob(record.id, ContentRequest.model_validate_json(record.request_json), JobState(record.state), JobState(record.resume_state) if record.resume_state else None, record.failure_message, record.claim_owner, record.attempt_count, record.next_retry_at, record.cancellation_requested_at, record.authentication_restored_at, record.created_at)
+
+
+def _topic_from_record(record: TopicRecord) -> Topic:
+    return Topic(record.id, record.title, record.notes, record.priority, record.status, json.loads(record.options_json), record.generation_job_id, record.attempts)
+
+
+def _schedule_from_record(record: ScheduleRecord) -> Schedule:
+    return Schedule(record.id, record.name, record.cron, record.timezone, record.enabled, json.loads(record.options_json), record.last_run_at, record.next_run_at)
+
+
+def _social_account_from_record(record: SocialAccountRecord) -> SocialAccount:
+    return SocialAccount(record.id, record.platform, record.display_name, record.external_account_id, record.auth_type, tuple(json.loads(record.scopes_json)), record.status, tuple(json.loads(record.capabilities_json)), record.is_default, record.disabled, record.token_expires_at, record.last_validated_at)
 
 
 def _job_event_from_record(record: JobEventRecord) -> JobEvent:

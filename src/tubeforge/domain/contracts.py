@@ -184,6 +184,50 @@ class ContentPackage(DomainModel):
         return self
 
 
+class VideoPlanScene(DomainModel):
+    """Renderer-facing scene projection with explicit local fallback intent."""
+
+    scene_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    duration_seconds: float = Field(gt=0, le=7_200)
+    narration: str = Field(min_length=1, max_length=12_000)
+    visual_intent: str = Field(min_length=1, max_length=1_000)
+    preferred_strategy: str = Field(min_length=1, max_length=100)
+    fallback_strategy: str = Field(min_length=1, max_length=100)
+    camera_direction: str = Field(default="gentle pan", min_length=1, max_length=200)
+    asset_references: tuple[str, ...] = Field(default=(), max_length=20)
+
+
+class VideoPlan(DomainModel):
+    """Durable provider-neutral storyboard consumed by rendering and variants."""
+
+    schema_version: str = Field(default="1.0", pattern=r"^1\.0$")
+    topic: str = Field(min_length=1, max_length=500)
+    notes: tuple[str, ...] = Field(default=(), max_length=30)
+    target_platform: str = Field(default="youtube", min_length=1, max_length=100)
+    duration_seconds: int = Field(ge=30, le=7_200)
+    aspect_ratio: str = Field(default="16:9", pattern=r"^(16:9|9:16|1:1)$")
+    audience: str = Field(min_length=1, max_length=200)
+    language: str = Field(min_length=2, max_length=35)
+    tone: str = Field(default="informative", min_length=1, max_length=100)
+    hook: str = Field(min_length=1, max_length=1_000)
+    cta: str = Field(default="", max_length=500)
+    narration: str = Field(min_length=1, max_length=100_000)
+    style: str = Field(min_length=1, max_length=100)
+    caption_style: str = Field(default="readable", min_length=1, max_length=100)
+    music_intent: str | None = Field(default=None, max_length=200)
+    continuity_identity: str = Field(min_length=1, max_length=200)
+    scenes: tuple[VideoPlanScene, ...] = Field(min_length=1, max_length=500)
+
+
+def video_plan_from_package(package: ContentPackage, *, target_platform: str = "youtube", aspect_ratio: str = "16:9") -> VideoPlan:
+    """Create a deterministic storyboard projection without changing old providers."""
+    scenes = {scene.scene_id: scene for scene in package.scene_plans}
+    duration = package.request.target_duration_seconds / len(package.script_sections)
+    projected = tuple(VideoPlanScene(scene_id=section.scene_id, duration_seconds=duration, narration=section.narration, visual_intent=scenes[section.scene_id].visual_type, preferred_strategy="licensed_asset", fallback_strategy=scenes[section.scene_id].fallback_visual, asset_references=()) for section in package.script_sections)
+    narration = "\n\n".join(section.narration for section in package.script_sections)
+    return VideoPlan(topic=package.request.topic, notes=package.request.notes, target_platform=target_platform, duration_seconds=package.request.target_duration_seconds, aspect_ratio=aspect_ratio, audience=package.request.audience, language=package.request.language, hook=package.script_sections[0].narration[:500], narration=narration, style=package.request.visual_style, music_intent=package.request.music_track, continuity_identity=f"{package.request.visual_style}:{package.request.language}", scenes=projected)
+
+
 class VoiceRequest(DomainModel):
     """Provider-neutral request for a single stable narration phrase."""
 

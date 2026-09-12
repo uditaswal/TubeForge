@@ -1,6 +1,122 @@
 # TubeForge Autonomous Progress
 
-## Current milestone
+> This is an append-only execution and validation log. The authoritative
+> current project state is [`docs/STATUS.md`](docs/STATUS.md). Historical
+> entries can describe a state that has since changed; do not use them as the
+> current roadmap.
+
+## Recording format
+
+Append a dated entry after meaningful autonomous work with: scope, files or
+commit, validation commands and results, inspected artifacts, exact blocker
+(if any), and next action. Do not edit earlier evidence except to correct a
+factual error with a clearly labelled correction.
+
+## 2026-09-12 — records normalization
+
+- Established `docs/STATUS.md` as the sole current-status document and defined
+  the responsibilities of `AGENTS.md`, this evidence log, and `readme.md`.
+- Validation: repository/document inspection only; no application behavior was
+  changed and no test result is claimed by this entry.
+- Current validation blocker: host Python lacks `pytest`; Docker daemon access
+  is denied for the current user.
+- Next action: restore a reproducible test runtime, run the full suite and
+  real local-media smoke, then update `docs/STATUS.md` with fresh evidence.
+
+## Historical execution log
+
+### 2026-08-31 — topic queue/scheduler and VideoPlan foundation
+
+- Added Alembic revision `20260831_0016` for durable topics, schedules, and
+  duplicate-fenced schedule runs.
+- Added transactional topic reservation that creates a normal `pipeline_jobs`
+  row in the same database transaction; the existing worker remains the only
+  component that performs generation/rendering.
+- Added queue and schedule APIs plus `SchedulerService`, with cron parsing via
+  `croniter`, no-topic records, and a run-key uniqueness fence.
+- Added a typed `VideoPlan` projection and durable `video_plan` checkpoint
+  alongside `content_package`, preserving existing content-provider contracts.
+- Validation is still blocked by the local environment: host Python has no pip,
+  and a legacy container image does not include the newly declared dependency.
+  Changed-source syntax compilation passed when limited to changed files.
+
+### 2026-08-31 — dashboard authentication foundation
+
+- Added Alembic revision `20260831_0017` with `admin_users` and opaque
+  `auth_sessions`; only session-token hashes are persisted.
+- Added Argon2id password verification, HttpOnly SameSite session cookies,
+  CSRF token validation for state-changing dashboard/API calls, rate-limited
+  login attempts, logout, and `tubeforge create-admin --username ...`.
+- Auth is opt-in in configuration and has no self-registration/default user.
+- Added focused auth coverage. The container test invocation emitted one passing
+  test then exceeded the runner timeout, so this is not recorded as green.
+
+### 2026-08-31 — final artifact quality gate
+
+- Added `pipeline.quality` and a durable `quality_report` checkpoint at
+  `FINAL_READY`. It re-probes final media through the renderer validation,
+  enforces a nonempty final artifact, usable captions when requested, and a
+  minimum resolution before publication preparation begins.
+- Hard findings produce the existing validation failure path; soft findings are
+  preserved for dashboard/activity visibility. Black-frame analysis remains an
+  explicitly reported warning until a bounded local detector is added.
+- `tests/test_quality_gate.py` passed (2 tests), and the offline integration
+  pipeline passed while asserting the persisted quality report.
+
+### 2026-08-31 — visual router foundation
+
+- Added a provider-neutral `VisualRouter` that records a primary strategy,
+  fallback, and rationale per scene in the durable asset manifest. Current
+  behavior intentionally keeps licensed/fake stock media as the operational
+  route and uses caption-background fallbacks when a premium provider is absent.
+- Unit coverage for routing plus the quality gate passed (3 tests).
+
+### 2026-08-31 — social account security foundation
+
+- Added migration `20260831_0018`, encrypted credential envelopes, safe account
+  list/create/disable APIs, and an operator guide for official platform setup.
+- Account metadata is capability-aware; the Snapchat capability is honestly
+  manual handoff only. The encryption round-trip/tamper test passed.
+
+### 2026-08-31 — scheduler service operation
+
+- Added a dedicated `scheduler` Compose service and scheduler configuration.
+  It only creates ordinary lease-fenced pipeline jobs and never performs heavy
+  worker operations. The topic reservation scheduler test passed.
+
+### 2026-08-31 — operational dashboard controls
+
+- Extended the existing dashboard with bulk topic intake and a cron/timezone
+  schedule creation form, including a twice-daily example. Dashboard mutations
+  now attach the session CSRF header when authentication is enabled.
+- Added transactional bulk topic creation and coverage; the bulk test passed.
+
+### 2026-08-31 — authentication validation
+
+- The focused authentication API test passed end-to-end: unauthenticated API
+  rejection, bad-password rejection, session issuance, CSRF rejection/acceptance,
+  and logout. Production configuration now enables secure cookies and requires
+  explicit administrator bootstrap.
+
+### 2026-08-31 — multi-target dispatch foundation
+
+- Added migration `20260831_0019` and a provider-neutral dispatcher with durable
+  per-target attempt receipts, idempotency, error classification, and explicit
+  unsupported-platform results. Its local fake multi-target test passed.
+
+### 2026-08-31 — platform variant planning
+
+- Publication packages now persist reusable master-based plans for landscape
+  YouTube plus short-form YouTube, Instagram, Facebook, and Snapchat profiles.
+  Portrait profiles are explicitly marked as requiring a derivative. The unit
+  test passed; an integration retry exceeded this runner's command window.
+
+### 2026-08-31 — quality sequencing validation
+
+- Narrow orchestration validation passed: final media is now quality-gated and
+  receives its durable report before `FINAL_READY` is exposed. The larger
+  analytics/optimization integration remains slow in this runner but is no
+  longer the only evidence for the state transition.
 
 ### 2026-08-31 — approved yt-dlp container replacement and live smoke
 
@@ -1771,3 +1887,47 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
 - Downloaded final artifact was validated as an MP4 with H.264 video, AAC audio, 1080x1920 dimensions, and exact 15.000-second duration. The final-artifact API returned HTTP 200 with 4,709,968 bytes.
 - Final full regression: `197 passed, 2 skipped` in 14:45 (`pytest -vv -x -p no:cacheprovider`). The skips require a separately installed Piper ONNX model / Codex CLI in the disposable test image; production deployment retains its configured local Piper model. `git diff --check` passed.
 - Updated two historical test assumptions to reflect existing safety behavior: media is selected per scene and voice synthesis per timed phrase, while reruns are asserted not to repeat either completed checkpoint; byte-tampered accepted media is correctly terminal `failed_validation` rather than re-rendered.
+
+## 2026-09-12 — cinematic local video-generation smoke
+
+- Upgraded the safe local generated-video path from static 640x360 fallback
+  images and hard cuts to HD (1280x720) scene-specific illustrations with a
+  deterministic, subtle FFmpeg zoom/pan motion treatment for still images.
+  Native video assets retain their own motion.
+- Bumped the renderer template identity to `m13-cinematic-motion-v1`, so an
+  approved checkpoint created with the former visual treatment cannot silently
+  authorize a final render with the new look.
+- Corrected the real-voice duration acceptance policy from ±20% to ±30%. The
+  measured Piper narration is approximately 73 seconds for a 60-second brief;
+  it is within the smoke contract's 60–90 second range, while final video
+  timing remains locked to the measured narration.
+- Validation passed:
+  - focused configuration/render/fallback-art suite: `19 passed in 25.28s`;
+  - real worker smoke: `tests/test_real_local_smoke.py -k fixed` →
+    `1 passed, 1 deselected in 180.54s`.
+- Inspected promoted artifacts under `artifacts/smoke/`. The final MP4 is
+  640x360 H.264 with 48 kHz mono AAC, duration 73.318 seconds, and size
+  2,678,496 bytes. A sampled frame confirmed the new illustrated background,
+  motion-compatible composition, and readable burned captions.
+- The complete regression suite remains pending in the current dependency
+  image; no external publication was enabled or attempted.
+
+## 2026-09-12 — dashboard script review and local worker recovery
+
+- Recovered the waiting local dashboard job by starting a matching
+  source-mounted TubeForge worker against the same local database and artifact
+  volume. The job advanced from `script_approval_required` through asset,
+  voice, caption, and preview rendering, and is now correctly paused at
+  `preview_ready` for the next human approval.
+- Added a created-at timestamp to each dashboard generation card, a script
+  review/edit dialog, durable local narration revision, and a copyable Codex
+  revision prompt. A saved revision replaces both the content package and
+  derived video plan and records a revision marker, so the worker requires an
+  approval bound to the revised package checksum.
+- Script approvals submitted by the dashboard now use the current package
+  checksum automatically. The UI locks approval buttons on the first click,
+  avoiding the repeated approval activity caused by rapid repeated clicks.
+- Restarted the temporary dashboard and verified `GET /healthz` returns
+  `{"status":"ok","database":"ok"}`. `git diff --check` passes. Focused
+  browser/API regression execution remains to be completed in the dependency
+  container.

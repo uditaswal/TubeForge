@@ -1,0 +1,2 @@
+2026-08-31T05:29:40.712813Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/uditaswal/docker/tubeforge/Youtube_Video_Producer/docs/overnight/BLOCKERS.md:
+  connected live platform without those prerequisites.

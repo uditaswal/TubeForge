@@ -10,7 +10,7 @@ from tubeforge.core.errors import ProviderValidationError, RetryableProviderErro
 from tubeforge.domain.contracts import ContentPackage
 
 class PreviewRenderCancelled(RuntimeError): pass
-RENDERER_TEMPLATE_VERSION = "m12-render-template-v1"
+RENDERER_TEMPLATE_VERSION = "m13-cinematic-motion-v1"
 
 def parse_frame_rate(value: str) -> float:
     """Parse ffprobe's rational frame-rate representation."""
@@ -89,7 +89,7 @@ class PreviewRenderer:
         for i,scene in enumerate(segments):
             duration=f"{scene.duration_seconds:.6f}"
             command.extend(("-loop","1","-t",duration,"-i",str(scene.asset_path)) if scene.media_type=="image" else ("-stream_loop","-1","-t",duration,"-i",str(scene.asset_path)))
-            filters.append(f"[{i}:v]scale={self.config.width}:{self.config.height}:force_original_aspect_ratio=increase,crop={self.config.width}:{self.config.height},setsar=1,fps={self.config.fps},trim=duration={duration},setpts=PTS-STARTPTS[v{i}]")
+            filters.append(self._scene_filter(i, scene, duration))
         command.extend(("-i",str(narration))); labels="".join(f"[v{i}]" for i in range(len(segments))); caption=str(captions.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'"); style=f"FontSize={self.config.caption_font_size},Alignment=2,MarginV=36,Outline=2,Shadow=1"
         # Each independently rendered scene can lose up to one frame when its
         # measured narration duration is quantized to the configured frame
@@ -106,6 +106,35 @@ class PreviewRenderer:
             f"[{len(segments)}:a]apad=pad_dur=10[outa]",
         ]
         return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{segments[-1].end_seconds:.6f}","-movflags","+faststart",str(output)]
+
+    def _scene_filter(self, index: int, scene: TimelineSegment, duration: str) -> str:
+        """Create a stable, subtle camera move for stills without affecting timing.
+
+        Generated/local stills otherwise look like a slideshow.  ``zoompan``
+        produces exactly one frame per output frame, so the existing measured
+        narration timeline remains authoritative.  Video assets retain their
+        native motion and only receive the normal fit/crop treatment.
+        """
+        common = (
+            f"scale={self.config.width}:{self.config.height}:force_original_aspect_ratio=increase,"
+            f"crop={self.config.width}:{self.config.height},setsar=1,fps={self.config.fps},"
+            f"trim=duration={duration},setpts=PTS-STARTPTS"
+        )
+        if scene.media_type != "image" or not self.config.image_motion_enabled:
+            return f"[{index}:v]{common}[v{index}]"
+        frames = max(1, math.ceil(scene.duration_seconds * self.config.fps))
+        # Alternate the pan direction by stable scene order.  The zoom grows
+        # gently from 1.0 to the configured ceiling and is independent of the
+        # source asset's dimensions or filename.
+        direction = "iw-iw/zoom" if index % 2 else "0"
+        zoom = f"min(zoom+({self.config.image_motion_zoom:.4f}-1)/{frames},{self.config.image_motion_zoom:.4f})"
+        return (
+            f"[{index}:v]scale={self.config.width * 2}:{self.config.height * 2}:"
+            f"force_original_aspect_ratio=increase,crop={self.config.width * 2}:{self.config.height * 2},"
+            f"zoompan=z='{zoom}':x='{direction}':y='ih/2-ih/zoom/2':d={frames}:"
+            f"s={self.config.width}x{self.config.height}:fps={self.config.fps},"
+            f"trim=duration={duration},setpts=PTS-STARTPTS[v{index}]"
+        )
     def validate(self,path:Path,expected:float)->dict[str,Any]:
         data=self.probe.inspect(path); streams=data.get("streams"); video=next((x for x in streams if x.get("codec_type")=="video"),None) if isinstance(streams,list) else None; audio=next((x for x in streams if x.get("codec_type")=="audio"),None) if isinstance(streams,list) else None
         try: duration=float(data["format"]["duration"]); width,height=int(video["width"]),int(video["height"]); rate=str(video["avg_frame_rate"]); sample_rate,channels=int(audio["sample_rate"]),int(audio["channels"])

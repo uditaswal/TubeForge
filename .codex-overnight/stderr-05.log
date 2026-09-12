@@ -1,0 +1,4 @@
+2026-08-31T05:25:49.318974Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/uditaswal/docker/tubeforge/Youtube_Video_Producer/src/tubeforge/api/app.py:
+    def list_topics(status_filter: str | None = None) -> list[dict[str, object]]:
+        return [{"id": item.id, "title": item.title, "notes": item.notes, "priority": item.priority, "status": item.status, "generation_job_id": item.generation_job_id, "attempts": item.attempts} for item in runtime.topics.list(status=status_filter)]
+        return [{"id": item.id, "title": item.title, "notes": item.notes, "priority": item.priority, "status": item.status, "generation_job_id": item.generation_job_id, "attempts": item.attempts} for item in runtime.topics.list(status=status_filter)]

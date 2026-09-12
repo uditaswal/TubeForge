@@ -98,8 +98,11 @@ def test_migrated_offline_job_reaches_m23_brief_and_resumes(tmp_path: Path) -> N
         preview = runner._required_json(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
         approvals.record("preview", job_id, ApprovalGate.PREVIEW, reviewed_identity=preview["render_identity"], actor="integration")
         assert runner.run(job_id).state is JobState.FINAL_READY
+        quality = runner._required_json(job_id, JobState.FINAL_READY, "quality_report")
+        assert quality["passed"] is True
         assert runner.run(job_id).state is JobState.PUBLICATION_APPROVAL_REQUIRED
         package = runner._required_json(job_id, JobState.PUBLICATION_PREPARING, "publication_package")
+        assert {item["profile"] for item in package["variants"]} >= {"youtube_landscape", "instagram_reels", "snapchat_handoff"}
         thumbnail = runner._required_artifact(job_id, JobState.PUBLICATION_PREPARING, "thumbnail")
         assert Path(thumbnail.path).is_file() and Path(thumbnail.path).stat().st_size > 0
         approvals.record("publication", job_id, ApprovalGate.PUBLICATION_PREPARATION, reviewed_identity=package["publication_identity"], actor="integration")

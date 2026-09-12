@@ -48,3 +48,19 @@ services:
       PYTHONPATH: /app/src
     restart: unless-stopped
     mem_limit: 1g
+
+  scheduler:
+    build: .
+    command: ["python", "-m", "tubeforge.scheduling.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    environment:
+      TUBEFORGE_CONFIG: /app/config/production.yaml
+      PYTHONPATH: /app/src
+    restart: unless-stopped
+    mem_limit: 256m
