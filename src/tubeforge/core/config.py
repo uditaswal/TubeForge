@@ -224,7 +224,10 @@ class VoicePipelineConfig(BaseModel):
     pause_seconds: float = Field(default=0.15, ge=0, le=5)
     caption_line_length: int = Field(default=42, ge=10, le=120)
     duration_tolerance_seconds: float = Field(default=0.15, ge=0.01, le=2)
-    target_duration_tolerance_ratio: float = Field(default=0.20, ge=0.01, le=0.50)
+    # Real local voices have model- and punctuation-dependent pacing. A
+    # one-minute editorial request therefore accepts 42--78 seconds by
+    # default; the final timing map still remains exact to the produced audio.
+    target_duration_tolerance_ratio: float = Field(default=0.30, ge=0.01, le=0.50)
 
 class RenderProfile(BaseModel):
     """Bounded deterministic profile for the low-resolution review render."""
@@ -244,6 +247,8 @@ class RenderProfile(BaseModel):
     minimum_free_bytes: int = Field(default=250_000_000, ge=1)
     sync_tolerance_seconds: float = Field(default=0.25, ge=0.01, le=2)
     caption_font_size: int = Field(default=26, ge=12, le=96)
+    image_motion_enabled: bool = True
+    image_motion_zoom: float = Field(default=1.08, ge=1.0, le=1.25)
     renderer_version: str = Field(default="m9-preview-v1", min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -471,6 +476,24 @@ class WorkerConfig(BaseModel):
         return self
 
 
+class SchedulerConfig(BaseModel):
+    """Dedicated scheduler poller; it only creates normal durable jobs."""
+    model_config = ConfigDict(extra="forbid")
+    poll_seconds: int = Field(default=15, ge=1, le=300)
+    topic_reservation_seconds: int = Field(default=600, ge=30, le=3600)
+
+
+class AuthConfig(BaseModel):
+    """Local dashboard authentication; no credentials belong in YAML."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    session_hours: int = Field(default=12, ge=1, le=720)
+    secure_cookies: bool = False
+    login_attempt_limit: int = Field(default=5, ge=1, le=20)
+    login_window_seconds: int = Field(default=300, ge=30, le=3600)
+
+
 class Settings(BaseModel):
     """Complete non-secret TubeForge configuration."""
 
@@ -480,6 +503,8 @@ class Settings(BaseModel):
     database: DatabaseConfig
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
 
 
 def load_settings(config_path: Path | None = None) -> Settings:

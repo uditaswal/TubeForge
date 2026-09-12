@@ -19,13 +19,16 @@ from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, Public
 from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RemoteResourceMissingError, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
 from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobEventRepository, JobRepository, PipelineJob, PublicationRepository, SourceMedia, SourceMediaRepository
-from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, ContentRequest, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, SourceReference, VideoMetadata, VoiceRequest
+from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, ContentRequest, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, SourceReference, VideoMetadata, VoiceRequest, video_plan_from_package
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import ASSET_VALIDATION_VERSION, AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, inspect_media, scene_request, select_candidate
 from tubeforge.pipeline.captions import render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
+from tubeforge.pipeline.quality import validate_final_artifact
+from tubeforge.pipeline.visual_router import VisualRouter
+from tubeforge.pipeline.variants import plan_variants
 from tubeforge.pipeline.sources import SourceIngestor, source_packet
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
 from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline
@@ -79,6 +82,7 @@ class PipelineOrchestrator:
         self.source_clips = source_clips or SourceClipConfig()
         self.source_provider = source_provider or YtDlpSourceProvider(self.source_clips.ytdlp_executable, self.source_clips.timeout_seconds)
         self.source_media = source_media or SourceMediaRepository(artifacts._session_factory)
+        self.visual_router = VisualRouter()
 
     @classmethod
     def from_settings(cls, settings: Settings, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, external_operations: ExternalOperationRepository | None = None) -> "PipelineOrchestrator":
@@ -222,12 +226,15 @@ class PipelineOrchestrator:
                 final_path.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(str(first["path"]), final_path)
             final = self._save_file(job.id, JobState.FINAL_RENDERING, "final", final_path, {"source_clip": True, "primary_clip": first["name"], "candidate": first["candidate"]})
             self._replace_json(job.id, JobState.FINAL_RENDERING, "final_manifest", {"render_identity": final.checksum_sha256, "source_clip": True, "primary_clip": first["name"]})
+            self._quality_gate(job)
             self._transition(job, JobState.FINAL_READY); return
         if job.state is JobState.CONTENT_GENERATING:
             package = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
             if package is None:
                 package = self.content.generate_package(self._effective_content_request(job)).model_dump(mode="json")
                 self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "content_package", package)
+            if self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "video_plan") is None:
+                self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "video_plan", video_plan_from_package(ContentPackage.model_validate(package)).model_dump(mode="json"))
             self._transition(job, JobState.CONTENT_READY); return
         if job.state is JobState.CONTENT_READY:
             self._transition(job, JobState.SCRIPT_APPROVAL_REQUIRED); return
@@ -238,7 +245,8 @@ class PipelineOrchestrator:
             # New revisions require approval of these exact bytes.  The fallback
             # preserves pre-revision jobs created before identities were added.
             approval = self.approvals.approved(job.id, ApprovalGate.SCRIPT, reviewed_identity=package.checksum_sha256)
-            if approval is None:
+            revision = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "script_revision")
+            if approval is None and revision is None:
                 approval = self.approvals.approved(job.id, ApprovalGate.SCRIPT)
             if approval is None: return
             self._transition(job, JobState.ASSET_ACQUISITION, approvals=frozenset({ApprovalGate.SCRIPT})); return
@@ -250,11 +258,12 @@ class PipelineOrchestrator:
                 if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before asset search")
                 current = accepted.get(scene.scene_id)
                 if current and self._accepted_asset_valid(current): continue
+                route = self.visual_router.route(scene)
                 request = scene_request(scene)
                 candidate = select_candidate(self.media.search(request), request, self.asset_limits)
                 if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before asset acquisition")
                 path, cache_key, metadata = self.asset_acquirer.acquire(type(self.media).__name__, candidate, cancellation_requested)
-                accepted[scene.scene_id] = {"scene_id": scene.scene_id, "request": request.model_dump(mode="json"), "candidate": candidate.model_dump(mode="json"), "cache_key": cache_key, "path": str(path), "checksum_sha256": metadata["checksum_sha256"], "validation": metadata}
+                accepted[scene.scene_id] = {"scene_id": scene.scene_id, "visual_route": route.model_dump(mode="json"), "request": request.model_dump(mode="json"), "candidate": candidate.model_dump(mode="json"), "cache_key": cache_key, "path": str(path), "checksum_sha256": metadata["checksum_sha256"], "validation": metadata}
                 self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", manifest)
             if any(not self._accepted_asset_valid(accepted.get(scene.scene_id)) for scene in package.scene_plans): raise ProviderValidationError("not every scene has a validated accepted asset")
             selected = {scene_id: AssetCandidate.model_validate(item["candidate"]) for scene_id, item in accepted.items()}
@@ -365,9 +374,10 @@ class PipelineOrchestrator:
             if approval is None or approval.status != "approved":
                 raise ProviderValidationError("final render requires approval of this exact preview")
             self._render_checkpoint(job, self.final_renderer, JobState.FINAL_RENDERING, "final", "final.mp4", cancellation_requested, approval_identity=identity, approval_id=approval.id)
+            self._quality_gate(job)
             self._transition(job, JobState.FINAL_READY); return
         if job.state is JobState.FINAL_READY:
-            self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
+            self._quality_gate(job)
             self._transition(job, JobState.PUBLICATION_PREPARING); return
         if job.state is JobState.PUBLICATION_PREPARING:
             self._publication_checkpoints(job, cancellation_requested)
@@ -498,6 +508,29 @@ class PipelineOrchestrator:
         if drift: return "drift_detected", drift, "remote publication differs from approved package"
         return "healthy", {"thumbnail": "verification_limited" if snapshot.thumbnail_present is None else "present"}, None
 
+    def _quality_gate(self, job: PipelineJob) -> None:
+        """Persist an independent final-media validation before publication work."""
+        existing = self._load_json_artifact(job.id, JobState.FINAL_READY, "quality_report")
+        final = self._required_artifact(job.id, JobState.FINAL_RENDERING, "final")
+        if existing is not None and existing.get("final_checksum_sha256") == final.checksum_sha256:
+            if not existing.get("passed"):
+                raise ProviderValidationError("final quality gate has unresolved hard failures")
+            return
+        if job.request.production_mode == "source_clip":
+            # `render_vertical` independently ffprobes the source-derived output.
+            report = {"passed": Path(final.path).is_file() and Path(final.path).stat().st_size > 0, "findings": [{"code": "source_clip_probe", "severity": "warning", "message": "source clip render was validated during clip rendering"}], "media": {}}
+        else:
+            timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
+            phrases = timing.get("phrases", [])
+            expected = float(phrases[-1]["end_seconds"]) if isinstance(phrases, list) and phrases else 0.0
+            captions = self._valid_artifact(job.id, JobState.CAPTION_GENERATION, "captions")
+            report = validate_final_artifact(path=Path(final.path), expected_duration=expected, renderer=self.final_renderer, captions_path=Path(captions.path) if captions else None, captions_required=job.request.captions_enabled).model_dump(mode="json")
+        report["final_checksum_sha256"] = final.checksum_sha256
+        self._checkpoint_json(job.id, JobState.FINAL_READY, "quality_report", report)
+        self.events.append(job.id, "quality_gate_completed", passed=report["passed"], findings=report["findings"])
+        if not report["passed"]:
+            raise ProviderValidationError("final quality gate failed")
+
     def _publication_checkpoints(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None) -> None:
         """Build independent, locally validated M12 metadata and thumbnail checkpoints."""
         if job.request.production_mode == "source_clip":
@@ -578,7 +611,8 @@ class PipelineOrchestrator:
         metadata = metadata or self._required_json(job.id, JobState.PUBLICATION_PREPARING, "metadata")
         thumbnail = self._required_artifact(job.id, JobState.PUBLICATION_PREPARING, "thumbnail")
         thumbnail_provenance = self._required_json(job.id, JobState.PUBLICATION_PREPARING, "thumbnail_provenance")
-        value = {"final_video": {"path": final.path, "checksum_sha256": final.checksum_sha256, "render_identity": final_manifest.get("render_identity")}, "metadata": {key: metadata[key] for key in ("title", "description", "tags", "chapters", "metadata_identity")}, "thumbnail": {"path": thumbnail.path, "checksum_sha256": thumbnail.checksum_sha256, "thumbnail_identity": thumbnail_provenance["thumbnail_identity"]}, "provenance": {"metadata": metadata["provenance"], "thumbnail": thumbnail_provenance}}
+        variants = plan_variants(master_path=final.path, title=str(metadata["title"]), description=str(metadata["description"]), tags=tuple(str(tag) for tag in metadata["tags"]))
+        value = {"final_video": {"path": final.path, "checksum_sha256": final.checksum_sha256, "render_identity": final_manifest.get("render_identity")}, "metadata": {key: metadata[key] for key in ("title", "description", "tags", "chapters", "metadata_identity")}, "variants": [item.model_dump(mode="json") for item in variants], "thumbnail": {"path": thumbnail.path, "checksum_sha256": thumbnail.checksum_sha256, "thumbnail_identity": thumbnail_provenance["thumbnail_identity"]}, "provenance": {"metadata": metadata["provenance"], "thumbnail": thumbnail_provenance}}
         return {**value, "publication_identity": publication_identity(value), "effective_approval_id": None}
 
     def _render_checkpoint(self, job: PipelineJob, renderer: PreviewRenderer, stage: JobState, name: str, filename: str, cancellation_requested: Callable[[], bool] | None, *, approval_identity: str | None = None, approval_id: str | None = None) -> tuple[Artifact, str]:

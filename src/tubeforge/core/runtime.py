@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import os
 
 from tubeforge.core.config import Settings
 from tubeforge.db.repositories import (
@@ -12,7 +13,13 @@ from tubeforge.db.repositories import (
     ExternalOperationRepository,
     JobEventRepository,
     JobRepository,
+    ScheduleRepository,
+    SocialAccountRepository,
+    TopicRepository,
 )
+from tubeforge.scheduling.service import SchedulerService
+from tubeforge.security.auth import AuthService
+from tubeforge.security.secrets import TokenCipher
 from tubeforge.db.session import Database, create_database
 from tubeforge.pipeline.assets import AssetAcquisitionService, AssetDownloader, asset_limits_from_config
 from tubeforge.pipeline.orchestrator import PipelineOrchestrator
@@ -33,6 +40,12 @@ class Runtime:
     artifacts: ArtifactRepository
     approvals: ApprovalRepository
     events: JobEventRepository
+    topics: TopicRepository
+    schedules: ScheduleRepository
+    scheduler: SchedulerService
+    auth: AuthService
+    accounts: SocialAccountRepository
+    token_cipher: TokenCipher | None
     orchestrator: PipelineOrchestrator
 
 
@@ -42,6 +55,11 @@ def create_runtime(settings: Settings) -> Runtime:
     jobs = JobRepository(database.session_factory)
     artifacts = ArtifactRepository(database.session_factory)
     approvals = ApprovalRepository(database.session_factory)
+    topics = TopicRepository(database.session_factory)
+    schedules = ScheduleRepository(database.session_factory)
+    accounts = SocialAccountRepository(database.session_factory)
+    key = os.environ.get("TUBEFORGE_ACCOUNT_ENCRYPTION_KEY")
+    token_cipher = TokenCipher(key) if key else None
     media = create_media_provider(settings.pipeline.media, settings.pipeline.fake)
     publisher = (
         YouTubeDataApiPublisher(settings.pipeline.youtube)
@@ -80,4 +98,4 @@ def create_runtime(settings: Settings) -> Runtime:
             max_chars=source_policy.max_chars,
             timeout_seconds=source_policy.timeout_seconds,
         )
-    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, orchestrator)
+    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, SchedulerService(schedules, topics, scheduler_id="api-scheduler", reservation_seconds=settings.scheduler.topic_reservation_seconds), AuthService(database.session_factory), accounts, token_cipher, orchestrator)

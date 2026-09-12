@@ -60,7 +60,9 @@ def test_preview_command_uses_argument_array_and_profile(tmp_path: Path) -> None
     assert command[0] == "ffmpeg"
     assert "-filter_complex" in command
     assert "shell=True" not in command
-    assert "scale=1280:720" in command[command.index("-filter_complex") + 1]
+    graph = command[command.index("-filter_complex") + 1]
+    assert "scale=2560:1440" in graph
+    assert "zoompan=" in graph and "s=1280x720" in graph
     assert "tpad=stop_mode=clone:stop_duration=10" in command[command.index("-filter_complex") + 1]
     assert "apad=pad_dur=10[outa]" in command[command.index("-filter_complex") + 1]
     assert "-shortest" not in command
@@ -143,3 +145,17 @@ def test_renderer_template_version_changes_identity(tmp_path: Path) -> None:
     segments = (TimelineSegment("scene", "section", 0, 1, asset, "a" * 64, "image"),)
     config = PreviewRenderConfig()
     assert PreviewRenderer(config, template_version="one").identity(segments, narration, captions) != PreviewRenderer(config, template_version="two").identity(segments, narration, captions)
+
+
+def test_image_motion_can_be_disabled_without_changing_video_asset_handling(tmp_path: Path) -> None:
+    asset = tmp_path / "asset.png"; asset.write_bytes(b"asset")
+    narration = tmp_path / "narration.wav"; narration.write_bytes(b"narration")
+    captions = tmp_path / "captions.vtt"; captions.write_text("WEBVTT\n", encoding="utf-8")
+    renderer = PreviewRenderer(PreviewRenderConfig(image_motion_enabled=False))
+    command = renderer.command(
+        (TimelineSegment("scene", "section", 0, 1, asset, "a" * 64, "image"),),
+        narration,
+        captions,
+        tmp_path / "preview.mp4.part",
+    )
+    assert "zoompan=" not in command[command.index("-filter_complex") + 1]

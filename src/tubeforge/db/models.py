@@ -14,6 +14,119 @@ class Base(DeclarativeBase):
     """Base class for future persisted domain models."""
 
 
+class TopicRecord(Base):
+    """Operator backlog item, reserved atomically before a generation is made."""
+
+    __tablename__ = "topics"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ready", index=True)
+    options_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    generation_job_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    reserved_by: Mapped[str | None] = mapped_column(String(128))
+    reserved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AdminUserRecord(Base):
+    __tablename__ = "admin_users"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    disabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AuthSessionRecord(Base):
+    __tablename__ = "auth_sessions"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    csrf_token: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SocialAccountRecord(Base):
+    """Non-secret destination identity; credential payload is encrypted separately."""
+    __tablename__ = "social_accounts"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    external_account_id: Mapped[str | None] = mapped_column(String(300), index=True)
+    auth_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    credential_ciphertext: Mapped[str | None] = mapped_column(Text)
+    scopes_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="unconfigured")
+    capabilities_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    is_default: Mapped[bool] = mapped_column(nullable=False, default=False)
+    disabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PublicationAttemptRecord(Base):
+    __tablename__ = "publication_attempts"
+    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_publication_attempts_key"),)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    remote_id: Mapped[str | None] = mapped_column(String(500))
+    remote_url: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    retry_eligible: Mapped[bool] = mapped_column(nullable=False, default=False)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ScheduleRecord(Base):
+    """Durable cron trigger; scheduling work is separate from worker execution."""
+
+    __tablename__ = "schedules"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    cron: Mapped[str] = mapped_column(String(120), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(100), nullable=False, default="UTC")
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    options_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ScheduleRunRecord(Base):
+    """Immutable schedule history and duplicate-fire fence."""
+
+    __tablename__ = "schedule_runs"
+    __table_args__ = (UniqueConstraint("schedule_id", "run_key", name="uq_schedule_runs_schedule_key"),)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    schedule_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    run_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    topic_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    job_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class PipelineJobRecord(Base):
     """Durable state and request data for one deterministic pipeline run."""
 

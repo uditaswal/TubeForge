@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import getpass
 from urllib.request import Request, urlopen
 
 
@@ -20,7 +21,21 @@ def main() -> None:
     create.add_argument("--review", choices=("manual", "auto"))
     create.add_argument("--mcp", action="append")
     create.add_argument("--url", default="http://127.0.0.1:8081")
+    admin = commands.add_parser("create-admin", help="create the first local dashboard administrator")
+    admin.add_argument("--username", required=True)
+    admin.add_argument("--password", help="omit to enter it without echoing")
     args = parser.parse_args()
+    if args.command == "create-admin":
+        from tubeforge.core.config import load_settings
+        from tubeforge.core.runtime import create_runtime
+        password = args.password or getpass.getpass("Password: ")
+        runtime = create_runtime(load_settings())
+        try:
+            runtime.auth.create_admin(args.username, password)
+        finally:
+            runtime.database.dispose()
+        print("Administrator created.")
+        return
     body = {"title": args.title, "notes": args.note}
     for key in ("preset", "duration_seconds", "music", "visual_style"):
         value = getattr(args, key, None)
@@ -35,3 +50,7 @@ def main() -> None:
     request = Request(args.url.rstrip("/") + "/api/videos", data=json.dumps(body).encode(), headers={"content-type": "application/json"}, method="POST")
     with urlopen(request, timeout=30) as response:  # noqa: S310 - explicit operator localhost URL
         print(response.read().decode())
+
+
+if __name__ == "__main__":
+    main()

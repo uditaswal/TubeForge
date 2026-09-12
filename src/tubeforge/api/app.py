@@ -4,19 +4,21 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from pathlib import Path
+from datetime import UTC, datetime
 import shutil
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.core.runtime import Runtime, create_runtime
-from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference
+from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, video_plan_from_package
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
+from tubeforge.scheduling.service import next_run
 
 
 class ApprovalRequest(BaseModel):
@@ -27,6 +29,14 @@ class ApprovalRequest(BaseModel):
     status: ApprovalStatus
     actor: str = Field(min_length=1, max_length=200)
     reviewed_identity: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ScriptRevisionRequest(BaseModel):
+    """Operator-authored narration changes for a script awaiting review."""
+
+    model_config = ConfigDict(extra="forbid")
+    narrations: tuple[str, ...] = Field(min_length=1, max_length=500)
+    actor: str = Field(default="local-dashboard", min_length=1, max_length=200)
 
 class VideoBriefRequest(BaseModel):
     """User-facing shorthand expanded into the durable provider-neutral request."""
@@ -51,6 +61,44 @@ class SourceClipRequest(BaseModel):
     clip_count: int = Field(default=1, ge=1, le=12)
     max_duration_seconds: int = Field(default=60, ge=10, le=900)
     captions_enabled: bool = False
+
+
+class TopicCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=500)
+    notes: str = Field(default="", max_length=24_000)
+    priority: int = Field(default=0, ge=-1000, le=1000)
+    options: dict[str, object] = Field(default_factory=dict)
+
+
+class TopicBulkCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    titles: tuple[str, ...] = Field(min_length=1, max_length=200)
+    priority: int = Field(default=0, ge=-1000, le=1000)
+
+
+class ScheduleCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=200)
+    cron: str = Field(min_length=1, max_length=120)
+    timezone: str = Field(default="UTC", min_length=1, max_length=100)
+    options: dict[str, object] = Field(default_factory=dict)
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class SocialAccountCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    platform: str = Field(pattern=r"^(youtube|instagram|facebook|snapchat)$")
+    display_name: str = Field(min_length=1, max_length=200)
+    external_account_id: str | None = Field(default=None, max_length=300)
+    auth_type: str = Field(default="oauth", pattern=r"^(oauth|manual_handoff)$")
+    scopes: tuple[str, ...] = Field(default=(), max_length=50)
+    credential: dict[str, object] | None = None
 
 def _video_request(value: VideoBriefRequest, settings: Settings) -> ContentRequest:
     generation = settings.pipeline.video_generation
@@ -100,7 +148,7 @@ def _source_clip_request(value: SourceClipRequest) -> ContentRequest:
 
 
 def _job_payload(job: object) -> dict[str, object]:
-    return {"id": job.id, "state": job.state, "failure_message": job.failure_message}
+    return {"id": job.id, "state": job.state, "failure_message": job.failure_message, "created_at": job.created_at}
 
 
 DASHBOARD_HTML = """<!doctype html>
@@ -129,6 +177,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = runtime.database
     app.state.runtime = runtime
 
+    attempts: dict[str, list[datetime]] = {}
+
+    @app.middleware("http")
+    async def require_dashboard_auth(request: Request, call_next):
+        if not application_settings.auth.enabled or request.url.path in {"/healthz", "/login", "/logout", "/favicon.ico", "/docs", "/openapi.json"}:
+            return await call_next(request)
+        session = runtime.auth.session(request.cookies.get("tubeforge_session"))
+        if session is None:
+            if request.url.path.startswith("/api/"):
+                return JSONResponse({"detail": "authentication required"}, status_code=status.HTTP_401_UNAUTHORIZED)
+            return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("x-csrf-token") != session.csrf_token:
+            return JSONResponse({"detail": "CSRF validation failed"}, status_code=status.HTTP_403_FORBIDDEN)
+        return await call_next(request)
+
+    @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+    def login_form() -> str:
+        return """<!doctype html><title>TubeForge login</title><form id=f><h1>TubeForge</h1><input name=username autocomplete=username placeholder=Username required><input name=password type=password autocomplete=current-password placeholder=Password required><button>Log in</button><p id=e></p></form><script>f.onsubmit=async e=>{e.preventDefault();let d=new FormData(f),r=await fetch('/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:d.get('username'),password:d.get('password')})});if(r.ok)location='/';else document.querySelector('#e').textContent='Login failed.'}</script>"""
+
+    @app.post("/login", include_in_schema=False)
+    def login(value: LoginRequest, request: Request) -> Response:
+        now = datetime.now(UTC); key = request.client.host if request.client else "unknown"
+        recent = [at for at in attempts.get(key, []) if (now - at).total_seconds() < application_settings.auth.login_window_seconds]
+        attempts[key] = recent
+        if len(recent) >= application_settings.auth.login_attempt_limit:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="too many login attempts")
+        issued = runtime.auth.authenticate(value.username, value.password, session_hours=application_settings.auth.session_hours)
+        if issued is None:
+            attempts[key].append(now)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+        attempts.pop(key, None)
+        token, csrf = issued; response = JSONResponse({"status": "ok"})
+        response.set_cookie("tubeforge_session", token, httponly=True, samesite="lax", secure=application_settings.auth.secure_cookies, max_age=application_settings.auth.session_hours * 3600)
+        response.set_cookie("tubeforge_csrf", csrf, httponly=False, samesite="lax", secure=application_settings.auth.secure_cookies, max_age=application_settings.auth.session_hours * 3600)
+        return response
+
+    @app.post("/logout", include_in_schema=False)
+    def logout(request: Request) -> Response:
+        runtime.auth.logout(request.cookies.get("tubeforge_session")); response = JSONResponse({"status": "ok"})
+        response.delete_cookie("tubeforge_session"); response.delete_cookie("tubeforge_csrf"); return response
+
     @app.get("/healthz", tags=["operations"])
     def healthz() -> dict[str, str]:
         """Report process and database reachability without exposing settings."""
@@ -141,6 +230,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail="database unavailable",
             ) from error
         return {"status": "ok", "database": "ok"}
+
+    @app.post("/api/topics", status_code=status.HTTP_201_CREATED, tags=["topics"])
+    def create_topic(value: TopicCreateRequest) -> dict[str, object]:
+        topic = runtime.topics.create(uuid4().hex, title=value.title, notes=value.notes, priority=value.priority, options=value.options)
+        return {"id": topic.id, "title": topic.title, "status": topic.status, "priority": topic.priority}
+
+    @app.post("/api/topics/bulk", status_code=status.HTTP_201_CREATED, tags=["topics"])
+    def create_topics_bulk(value: TopicBulkCreateRequest) -> list[dict[str, object]]:
+        try:
+            topics = runtime.topics.create_many(tuple((uuid4().hex, title) for title in value.titles), priority=value.priority)
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+        return [{"id": item.id, "title": item.title, "status": item.status, "priority": item.priority} for item in topics]
+
+    @app.get("/api/social-accounts", tags=["social accounts"])
+    def list_social_accounts() -> list[dict[str, object]]:
+        return [{"id": item.id, "platform": item.platform, "display_name": item.display_name, "external_account_id": item.external_account_id, "auth_type": item.auth_type, "scopes": item.scopes, "status": item.status, "capabilities": item.capabilities, "is_default": item.is_default, "disabled": item.disabled, "token_expires_at": item.token_expires_at, "last_validated_at": item.last_validated_at} for item in runtime.accounts.list()]
+
+    @app.post("/api/social-accounts", status_code=status.HTTP_201_CREATED, tags=["social accounts"])
+    def create_social_account(value: SocialAccountCreateRequest) -> dict[str, object]:
+        if value.credential is not None and runtime.token_cipher is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="TUBEFORGE_ACCOUNT_ENCRYPTION_KEY is required before storing OAuth credentials")
+        capabilities = {"youtube": ("upload_video",), "instagram": ("official_api_eligibility_required",), "facebook": ("official_page_api_eligibility_required",), "snapchat": ("manual_handoff_required",)}[value.platform]
+        account = runtime.accounts.create(uuid4().hex, platform=value.platform, display_name=value.display_name, external_account_id=value.external_account_id, auth_type=value.auth_type, credential_ciphertext=runtime.token_cipher.encrypt(value.credential) if value.credential is not None and runtime.token_cipher else None, scopes=value.scopes, capabilities=capabilities)
+        return {"id": account.id, "platform": account.platform, "display_name": account.display_name, "status": account.status, "capabilities": account.capabilities}
+
+    @app.post("/api/social-accounts/{account_id}/disable", tags=["social accounts"])
+    def disable_social_account(account_id: str) -> Response:
+        try: runtime.accounts.disable(account_id)
+        except KeyError as error: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found") from error
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.get("/api/topics", tags=["topics"])
+    def list_topics(status_filter: str | None = None) -> list[dict[str, object]]:
+        return [{"id": item.id, "title": item.title, "notes": item.notes, "priority": item.priority, "status": item.status, "generation_job_id": item.generation_job_id, "attempts": item.attempts} for item in runtime.topics.list(status=status_filter)]
+
+    @app.post("/api/schedules", status_code=status.HTTP_201_CREATED, tags=["schedules"])
+    def create_schedule(value: ScheduleCreateRequest) -> dict[str, object]:
+        try:
+            schedule = runtime.schedules.create(uuid4().hex, name=value.name, cron=value.cron, timezone=value.timezone, next_run_at=next_run(value.cron, value.timezone, datetime.now(UTC)), options=value.options)
+        except (ValueError, KeyError) as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid cron schedule: {error}") from error
+        return {"id": schedule.id, "name": schedule.name, "next_run_at": schedule.next_run_at}
+
+    @app.get("/api/schedules", tags=["schedules"])
+    def list_schedules() -> list[dict[str, object]]:
+        return [{"id": item.id, "name": item.name, "cron": item.cron, "timezone": item.timezone, "enabled": item.enabled, "next_run_at": item.next_run_at, "last_run_at": item.last_run_at} for item in runtime.schedules.list()]
+
+    @app.post("/api/schedules/{schedule_id}/run", tags=["schedules"])
+    def run_schedule(schedule_id: str) -> dict[str, object]:
+        schedule = next((item for item in runtime.schedules.list() if item.id == schedule_id), None)
+        if schedule is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found")
+        return runtime.scheduler.run(schedule, run_key=f"manual-{uuid4().hex}")
 
     @app.post("/api/jobs", status_code=status.HTTP_201_CREATED, tags=["jobs"])
     def create_job(request: ContentRequest) -> dict[str, object]:
@@ -189,7 +331,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           });
         })();
         </script>"""
-        return DASHBOARD_HTML.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("</body>", source_controls + "</body>")
+        operations_controls = """<script>
+        (() => {
+          const csrf=(document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1];
+          if (csrf) { const original=window.fetch; window.fetch=(url, init={}) => { const method=(init.method||'GET').toUpperCase(); if (!['GET','HEAD','OPTIONS'].includes(method)) init.headers={...(init.headers||{}),'x-csrf-token':decodeURIComponent(csrf)}; return original(url,init); }; }
+          const shell=document.querySelector('.shell'); if (!shell) return;
+          const panel=document.createElement('section'); panel.className='panel'; panel.style.marginTop='18px';
+          panel.innerHTML='<h2>Topic queue</h2><p class=sub>Paste one topic per line. Notes can be added from the API today.</p><textarea id=bulkTopics placeholder="Topic one&#10;Topic two"></textarea><button id=bulkTopicsButton type=button>Add topics</button><div id=topicStatus class=notice></div><h2 style="margin-top:22px">Schedule</h2><label>Name<input id=scheduleName value="Twice daily"></label><label>Cron<input id=scheduleCron value="0 9,18 * * *"></label><label>Timezone<input id=scheduleTimezone value="UTC"></label><button id=scheduleButton type=button>Create schedule</button><div id=scheduleStatus class=notice></div><div id=operationsList class=muted style="margin-top:12px"></div>';
+          shell.append(panel);
+          async function listOps(){ const [topics,schedules]=await Promise.all([fetch('/api/topics').then(r=>r.json()),fetch('/api/schedules').then(r=>r.json())]); document.querySelector('#operationsList').textContent=`${topics.length} topics · ${schedules.length} schedules`; }
+          document.querySelector('#bulkTopicsButton').onclick=async()=>{const titles=document.querySelector('#bulkTopics').value.split('\\n').map(v=>v.trim()).filter(Boolean);const r=await fetch('/api/topics/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({titles})});document.querySelector('#topicStatus').textContent=r.ok?`Added ${(await r.json()).length} topics.`:'Could not add topics: '+await r.text();if(r.ok){document.querySelector('#bulkTopics').value='';listOps();}};
+          document.querySelector('#scheduleButton').onclick=async()=>{const body={name:document.querySelector('#scheduleName').value,cron:document.querySelector('#scheduleCron').value,timezone:document.querySelector('#scheduleTimezone').value};const r=await fetch('/api/schedules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});document.querySelector('#scheduleStatus').textContent=r.ok?'Schedule created.':'Could not create schedule: '+await r.text();if(r.ok)listOps();}; listOps();
+        })();
+        </script>"""
+        reviewer_controls = """<dialog id="scriptDialog" aria-labelledby="scriptTitle"><div class="modal-head"><h2 id="scriptTitle">Review script</h2><button class="close" type="button" id="scriptClose" aria-label="Close script">×</button></div><form id="scriptForm"><div class="modal-body"><p class="sub">Edit narration, then save. Saving creates a new exact script revision and requires a fresh approval.</p><div id="scriptSections"></div><label>Codex revision instruction<textarea id="codexInstruction" placeholder="e.g. Make the hook sharper, use a practical senior-engineer tone, and keep all claims accurate."></textarea></label><button id="copyCodexPrompt" class="secondary" type="button">Copy Codex prompt</button><div id="scriptNotice" class="notice"></div><div class="actions"><button class="small secondary" type="button" id="scriptCancel">Cancel</button><button class="small" type="submit">Save revision</button></div></div></form></dialog><script>
+        (() => {
+          let currentJob=null, currentPackage=null;
+          const dialog=document.querySelector('#scriptDialog'), sections=document.querySelector('#scriptSections'), scriptNotice=document.querySelector('#scriptNotice');
+          document.addEventListener('click', event=>{const button=event.target.closest('button');if(button&&(button.textContent==='Approve script'||button.textContent==='Approve preview')&&!button.disabled){button.disabled=true;button.textContent='Saving approval…';}},true);
+          const makeButton=(label, cls, handler)=>{const b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=handler;return b;};
+          async function review(jobId){
+            currentJob=jobId; scriptNotice.textContent='Loading script…'; sections.replaceChildren(); dialog.showModal();
+            const response=await fetch(`/api/jobs/${jobId}/script`);
+            if(!response.ok){scriptNotice.textContent='Could not load script: '+await response.text();return;}
+            currentPackage=(await response.json()).package; scriptNotice.textContent='Review the narration, then save or approve it.';
+            currentPackage.script_sections.forEach((section,index)=>{const label=document.createElement('label');label.textContent=`Section ${index+1}`;const area=document.createElement('textarea');area.className='script-narration';area.value=section.narration;area.dataset.index=index;area.style.minHeight='130px';label.append(area);sections.append(label);});
+          }
+          async function decorate(){
+            let response; try{response=await fetch('/api/jobs');if(!response.ok)return;}catch(_){return;}
+            const jobs=new Map((await response.json()).map(job=>[job.id,job]));
+            document.querySelectorAll('.job[data-job-id]').forEach(card=>{const job=jobs.get(card.dataset.jobId);if(!job)return;const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}if(job.state==='script_approval_required'&&!card.querySelector('.script-review')){const actions=card.querySelector('.actions');if(actions){const button=makeButton('View / edit script','secondary',()=>review(job.id));button.classList.add('script-review');actions.prepend(button);}}});
+          }
+          document.querySelector('#scriptClose').onclick=()=>dialog.close(); document.querySelector('#scriptCancel').onclick=()=>dialog.close();
+          document.querySelector('#scriptForm').onsubmit=async event=>{event.preventDefault();if(!currentJob||!currentPackage)return;const narrations=[...document.querySelectorAll('.script-narration')].map(area=>area.value.trim());if(narrations.some(value=>!value)){scriptNotice.textContent='Every script section needs narration.';return;}scriptNotice.textContent='Saving revision…';const response=await fetch(`/api/jobs/${currentJob}/script-revision`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({narrations,actor:'local-dashboard'})});scriptNotice.textContent=response.ok?'Revision saved. Approve the updated script to continue.':'Could not save: '+await response.text();if(response.ok){currentPackage.script_sections.forEach((section,index)=>section.narration=narrations[index]);setTimeout(()=>dialog.close(),700);}};
+          document.querySelector('#copyCodexPrompt').onclick=async()=>{if(!currentPackage){scriptNotice.textContent='Load a script first.';return;}const instruction=document.querySelector('#codexInstruction').value.trim()||'Improve clarity, pacing, and the hook while preserving factual accuracy.';const text=currentPackage.script_sections.map((section,index)=>`SECTION ${index+1}: ${section.narration}`).join('\n\n');const prompt=`Revise this TubeForge video script. ${instruction}\n\nKeep the same number and order of sections, return only the revised narration for each section, and do not add unsupported factual claims.\n\n${text}`;try{await navigator.clipboard.writeText(prompt);scriptNotice.textContent='Codex prompt copied to your clipboard.';}catch(_){scriptNotice.textContent='Clipboard access was blocked; copy the text from the sections manually.';}};
+          const originalRefresh=window.setInterval; decorate(); originalRefresh(decorate,1000);
+        })();
+        </script>"""
+        return DASHBOARD_HTML.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("</body>", source_controls + operations_controls + reviewer_controls + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -256,6 +435,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             runtime.jobs.get(job_id)
             reviewed_identity = decision.reviewed_identity
+            if gate is ApprovalGate.SCRIPT and reviewed_identity is None:
+                package = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_package")
+                if package is None:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="script is unavailable")
+                reviewed_identity = package.checksum_sha256
             if gate is ApprovalGate.PREVIEW and reviewed_identity is None:
                 manifest = runtime.artifacts.get(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
                 if manifest is None:
@@ -270,30 +454,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 actor=decision.actor,
                 reviewed_identity=reviewed_identity,
             )
-            runtime.events.append(job_id, "approval_recorded", gate=gate.value, status=decision.status.value, actor=decision.actor)
+            runtime.events.append(job_id, "approval_recorded", gate=gate.value, status=decision.status.value, actor=decision.actor, reviewed_identity=reviewed_identity)
         except KeyError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
         return {"job_id": job_id, "gate": gate, "status": decision.status}
 
-    @app.post("/api/jobs/{job_id}/script-revision", tags=["jobs"])
-    def revise_script(job_id: str, package: ContentPackage, actor: str = "operator") -> dict[str, object]:
-        """Replace only a rejected script package before costly stages begin.
+    @app.get("/api/jobs/{job_id}/script", tags=["jobs"])
+    def get_script(job_id: str) -> dict[str, object]:
+        """Return the current immutable content package for human review."""
+        try:
+            runtime.jobs.get(job_id)
+            artifact = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_package")
+            if artifact is None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="script is unavailable")
+            package = ContentPackage.model_validate_json(Path(artifact.path).read_text(encoding="utf-8"))
+            return {"package": package.model_dump(mode="json"), "reviewed_identity": artifact.checksum_sha256}
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
 
-        Revision is intentionally local: the submitted package must use the
-        already checkpointed effective request, so this endpoint never calls a
-        model or silently changes source evidence.
-        """
+    @app.post("/api/jobs/{job_id}/script-revision", tags=["jobs"])
+    def revise_script(job_id: str, revision: ScriptRevisionRequest) -> dict[str, object]:
+        """Save a local narration revision and require approval of its exact bytes."""
         try:
             job = runtime.jobs.get(job_id)
-            if job.state is not JobState.SCRIPT_APPROVAL_REQUIRED:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="script revisions are allowed only while script approval is pending")
-            if runtime.approvals.rejected(job_id, ApprovalGate.SCRIPT) is None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="script revision requires a recorded script rejection")
-            effective = runtime.orchestrator._required_json(job_id, JobState.CONTENT_GENERATING, "effective_content_request")
-            if package.request != ContentRequest.model_validate(effective):
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="revision must retain the checkpointed content request and sources")
+            if job.state is not JobState.SCRIPT_APPROVAL_REQUIRED or job.claim_owner is not None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="script revisions are allowed only while an unclaimed script approval is pending")
+            current = runtime.orchestrator._required_json(job_id, JobState.CONTENT_GENERATING, "content_package")
+            package = ContentPackage.model_validate(current)
+            if len(revision.narrations) != len(package.script_sections):
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="revision must include one narration for every script section")
+            sections = tuple(section.model_copy(update={"narration": narration.strip()}) for section, narration in zip(package.script_sections, revision.narrations, strict=True))
+            package = ContentPackage.model_validate({**package.model_dump(mode="json"), "script_sections": [section.model_dump(mode="json") for section in sections]})
             artifact = runtime.orchestrator._replace_json(
                 job_id,
                 JobState.CONTENT_GENERATING,
@@ -303,11 +496,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             runtime.orchestrator._replace_json(
                 job_id,
                 JobState.CONTENT_GENERATING,
-                "script_revision",
-                {"actor": actor, "content_package_checksum": artifact.checksum_sha256},
+                "video_plan",
+                video_plan_from_package(package).model_dump(mode="json"),
             )
+            runtime.orchestrator._replace_json(
+                job_id,
+                JobState.CONTENT_GENERATING,
+                "script_revision",
+                {"actor": revision.actor, "content_package_checksum": artifact.checksum_sha256},
+            )
+            runtime.events.append(job_id, "script_revised", actor=revision.actor, content_package_checksum=artifact.checksum_sha256)
         except KeyError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
         return {"job_id": job_id, "reviewed_identity": artifact.checksum_sha256}
 
     @app.get("/api/jobs/{job_id}/artifacts/{name}", tags=["artifacts"])

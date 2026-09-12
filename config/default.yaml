@@ -3,6 +3,10 @@ app:
   environment: "development"
   bind_host: "127.0.0.1"
   port: 8080
+auth:
+  enabled: false
+  session_hours: 12
+  secure_cookies: false
 database:
   url: "sqlite:///./data/tubeforge.db"
   busy_timeout_ms: 5000
@@ -66,6 +70,8 @@ pipeline:
     sync_tolerance_seconds: 0.25
     fps_tolerance: 0.05
     caption_font_size: 26
+    image_motion_enabled: true
+    image_motion_zoom: 1.08
   final:
     width: 1920
     height: 1080
@@ -81,6 +87,8 @@ pipeline:
     sync_tolerance_seconds: 0.25
     fps_tolerance: 0.05
     caption_font_size: 34
+    image_motion_enabled: true
+    image_motion_zoom: 1.08
     renderer_version: "m10-final-v1"
   publication:
     title_max_length: 100
@@ -163,3 +171,6 @@ worker:
   max_attempts: 3
   retry_base_seconds: 30
   retry_max_seconds: 900
+scheduler:
+  poll_seconds: 15
+  topic_reservation_seconds: 600

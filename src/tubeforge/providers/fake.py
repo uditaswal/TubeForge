@@ -132,8 +132,11 @@ class FakeMediaProvider:
         # Derive a stable, high-contrast colour from the scene query. Different
         # scene descriptions therefore produce visibly different local assets.
         rgb = tuple(48 + int(digest[offset : offset + 2], 16) % 176 for offset in (0, 2, 4))
-        _atomic_write(path, _scene_png(640, 360, rgb, digest))
-        return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", download_url=f"https://example.invalid/assets/{digest}.png", local_path=str(path), media_type="image", width=640, height=360, author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic test asset", retrieved_at=datetime.now(UTC))]
+        # These are production-safe local fallbacks, not one-pixel test
+        # fixtures.  Render at HD so the final profile does not have to enlarge
+        # a 640px source into a noticeably soft 1080p frame.
+        _atomic_write(path, _scene_png(1280, 720, rgb, digest))
+        return [AssetCandidate(provider_asset_id=f"fake-{digest}", source_url=f"https://example.invalid/assets/{digest}", download_url=f"https://example.invalid/assets/{digest}.png", local_path=str(path), media_type="image", width=1280, height=720, author="TubeForge fake", license_name=self.settings.media_license, attribution_text="Synthetic local illustration", retrieved_at=datetime.now(UTC))]
 
 
 class FakePublisher:
@@ -237,7 +240,7 @@ def _solid_png(width: int, height: int, color: tuple[int, int, int]) -> bytes:
 
 
 def _scene_png(width: int, height: int, color: tuple[int, int, int], seed: str) -> bytes:
-    """Build a scene-specific abstract tech illustration without text overlays."""
+    """Build a scene-specific HD illustration without embedded unreadable text."""
     value = int(seed, 16)
     raw = bytearray()
     accent = tuple(min(255, component + 58) for component in color)
@@ -250,7 +253,9 @@ def _scene_png(width: int, height: int, color: tuple[int, int, int], seed: str) 
                 max(0, min(255, color[1] - vignette + wave)),
                 max(0, min(255, color[2] - vignette + wave * 2)),
             ))
-    # Add stable circuit-like paths and nodes; each scene has a distinct seed.
+    # Add stable circuit-like paths, nodes, and an asymmetric focal glow; each
+    # scene has a distinct seed. Captions remain the only rendered text, which
+    # avoids low-quality synthetic text baked into source art.
     pixels = bytearray()
     for y in range(height):
         pixels.append(0)
@@ -270,6 +275,18 @@ def _scene_png(width: int, height: int, color: tuple[int, int, int], seed: str) 
             py = min(height - 1, y + (step if index % 2 else 0))
             offset = py * (width * 3 + 1) + 1 + px * 3
             pixels[offset:offset + 3] = bytes(accent)
+    focus_x = width // 3 + value % (width // 3)
+    focus_y = height // 3 + (value >> 7) % (height // 3)
+    for y in range(max(0, focus_y - 110), min(height, focus_y + 110)):
+        for x in range(max(0, focus_x - 110), min(width, focus_x + 110)):
+            distance = ((x - focus_x) ** 2 + (y - focus_y) ** 2) ** 0.5
+            if distance > 110:
+                continue
+            strength = int((1 - distance / 110) * 72)
+            offset = y * (width * 3 + 1) + 1 + x * 3
+            pixels[offset] = min(255, pixels[offset] + strength)
+            pixels[offset + 1] = min(255, pixels[offset + 1] + strength)
+            pixels[offset + 2] = min(255, pixels[offset + 2] + strength)
     def chunk(kind: bytes, payload: bytes) -> bytes:
         return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
     header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)

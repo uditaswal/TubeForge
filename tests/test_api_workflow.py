@@ -57,6 +57,7 @@ def test_private_job_api_creates_and_records_an_approval(tmp_path: Path) -> None
         assert client.get(f"/api/jobs/{job_id}/artifacts/preview.mp4").content == b"synthetic-preview"
         listed = client.get("/api/jobs").json()
         assert listed[0]["artifacts"] == ["preview"]
+        assert listed[0]["created_at"] is not None
         assert not listed[0]["deletable"]
         assert listed[0]["event_count"] == 2
         events = client.get(f"/api/jobs/{job_id}/events")
@@ -85,6 +86,9 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert "jobsRoot.innerHTML=j.map" not in dashboard.text
         assert "sourceClipCreate" in dashboard.text
         assert "/api/source-clips" in dashboard.text
+        assert "View / edit script" in dashboard.text
+        assert "Copy Codex prompt" in dashboard.text
+        assert "Created " in dashboard.text
         assert client.get("/favicon.ico").status_code == 204
 
 
