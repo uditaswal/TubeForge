@@ -1888,6 +1888,24 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
 - Final full regression: `197 passed, 2 skipped` in 14:45 (`pytest -vv -x -p no:cacheprovider`). The skips require a separately installed Piper ONNX model / Codex CLI in the disposable test image; production deployment retains its configured local Piper model. `git diff --check` passed.
 - Updated two historical test assumptions to reflect existing safety behavior: media is selected per scene and voice synthesis per timed phrase, while reruns are asserted not to repeat either completed checkpoint; byte-tampered accepted media is correctly terminal `failed_validation` rather than re-rendered.
 
+## Per-generation visual source selection (2026-09-13)
+
+- Scope: added a real Creator Studio visual choice for each generated job. **Generate local scene art** uses TubeForge's durable, scene-specific local image generator. **Rights-safe stock** routes only to Wikimedia Commons and accepts only Public Domain/CC0 assets that satisfy the existing no-attribution render policy.
+- Google Image scraping was deliberately not implemented: search results do not carry the licence/provenance evidence required by `AssetCandidate`, cache validation, resume safety, or the publication pipeline.
+- Added `ContentRequest.visual_source`, durable API persistence, visual-router provenance, per-request hybrid media routing, and a Studio selector with explicit explanatory copy. Existing lease, checkpoint, checksum, atomic asset cache, cancellation, and render-approval behavior remains unchanged.
+- Focused validation in `tubeforge-local-media:smoke`: `8 passed, 45 deselected` in 110.10s across media routing, rights filtering, Creator Studio/API payload persistence, configuration, and asset checkpoint routing.
+- Real local end-to-end smoke: `tests/test_real_local_smoke.py -k fixed` passed in 171.74s using Piper and FFmpeg. Inspected `artifacts/smoke/fixed_piper_six_scene_smoke.mp4`: H.264 video + AAC audio, 640x360, 73.736 seconds, 2,682,166 bytes. The test verified six distinct generated scene assets.
+- Live read-only Wikimedia search returned a CC0 candidate for `solar panels`; isolated temporary acquisition decoded and validated a 2312x1160 image with SHA-256 `6cffd832388ffe270eb3e54444dcd9b817ee98d30bc7e6bc3ad7f2c223574d9b`.
+- `docker compose config --quiet` and `git diff --check` passed. Host Python is absent, so all Python tests were run in the project Docker image.
+- Note for operator: the real smoke refreshed the already tracked `artifacts/smoke/fixed_piper_six_scene_smoke.{mp4,wav,ffprobe.json}` test artifacts. They remain modified for review; they were not removed or hidden by `.gitignore`.
+- Next action: run the full suite, then rebuild the durable Compose web/worker services and exercise a stock-selected dashboard job end to end.
+
+### Follow-up validation
+
+- Complete regression in `tubeforge-local-media:smoke`: `215 passed, 2 skipped, 2 warnings` in 1245.16 seconds. Skips are the intentionally unconfigured Codex CLI and Piper model in the disposable full-suite container; the explicit Piper smoke above supplied the local model and passed.
+- The first full run exposed an existing stale API fixture that tried to approve a just-created job before the worker had checkpointed its script. The fixture now supplies a durable content-package artifact, asserting the existing exact-script approval contract rather than weakening it. Its job-list expectation was updated to include that legitimate artifact.
+- The visual-source milestone remains **READY FOR REVIEW**, not DONE: the next required evidence is a stock-selected job rendered through the complete durable pipeline, followed by the Compose Studio check.
+
 ## 2026-09-12 — cinematic local video-generation smoke
 
 - Upgraded the safe local generated-video path from static 640x360 fallback
@@ -1988,3 +2006,18 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
   isolated full dependency install was started, but its managed-runner output
   did not provide a pytest summary. The focused dashboard/auth run remains
   required after a durable image rebuild.
+
+## 2026-09-13 — rebuilt local visual-generation runtime
+
+- Built fresh `youtube_video_producer-web` and `youtube_video_producer-worker`
+  images, then replaced the corresponding Compose services. Removed only the
+  stale, unstarted TubeForge replacement containers and the temporary
+  `tubeforge-dashboard-test` smoke container that held port 62065.
+- The migrated Compose web and worker services are running. Verified the
+  loopback-only dashboard binding `127.0.0.1:62065 -> 8080` and received
+  `200 {"status":"ok","database":"ok"}` from `/healthz`; `/` correctly
+  redirects unauthenticated users to `/login`.
+- The prior full regression and generated-scene FFmpeg/Piper smoke remain the
+  render evidence. The visual-source milestone remains **READY FOR REVIEW**:
+  the next required end-to-end evidence is one authenticated, stock-selected
+  Studio generation with its final artifact and provenance manifest inspected.

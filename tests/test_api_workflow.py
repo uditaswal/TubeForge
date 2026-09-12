@@ -44,6 +44,13 @@ def test_private_job_api_creates_and_records_an_approval(tmp_path: Path) -> None
         assert created.status_code == 201
         job_id = created.json()["id"]
         assert client.get(f"/api/jobs/{job_id}").json()["state"] == "topic_created"
+        # Script approvals are bound to durable content bytes; a newly created
+        # job has no script to review until the worker has checkpointed one.
+        package = tmp_path / "content-package.json"
+        package.write_text("{}", encoding="utf-8")
+        client.app.state.runtime.artifacts.save(
+            Artifact(job_id, JobState.CONTENT_GENERATING, "content_package", str(package), "c" * 64, {})
+        )
         approval = client.post(
             f"/api/jobs/{job_id}/approvals/script",
             json={"status": "approved", "actor": "test-operator"},
@@ -56,7 +63,7 @@ def test_private_job_api_creates_and_records_an_approval(tmp_path: Path) -> None
         assert client.get(f"/api/jobs/{job_id}/artifacts/preview").content == b"synthetic-preview"
         assert client.get(f"/api/jobs/{job_id}/artifacts/preview.mp4").content == b"synthetic-preview"
         listed = client.get("/api/jobs").json()
-        assert listed[0]["artifacts"] == ["preview"]
+        assert listed[0]["artifacts"] == ["content_package", "preview"]
         assert listed[0]["created_at"] is not None
         assert not listed[0]["deletable"]
         assert listed[0]["event_count"] == 2

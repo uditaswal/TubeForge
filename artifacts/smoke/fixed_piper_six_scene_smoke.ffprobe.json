@@ -1,9 +1,9 @@
 {
   "narration": {
-    "decoded_rms": 4421.246272243046,
+    "decoded_rms": 4447.997551853692,
     "format": {
-      "duration": "73.318521",
-      "size": "7038656"
+      "duration": "73.736458",
+      "size": "7078778"
     },
     "programs": [],
     "stream_groups": [],
@@ -18,10 +18,10 @@
     ]
   },
   "video": {
-    "decoded_audio_rms": 4404.980592753962,
+    "decoded_audio_rms": 4431.133087609434,
     "format": {
-      "duration": "73.318000",
-      "size": "2678496"
+      "duration": "73.736000",
+      "size": "2682166"
     },
     "programs": [],
     "stream_groups": [],

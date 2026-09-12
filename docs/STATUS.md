@@ -11,11 +11,11 @@ retained under `docs/overnight/`.
 
 | Gate | Status | Evidence | Blocker / next action |
 | --- | --- | --- | --- |
-| Automated regression suite | NEEDS REVALIDATION | Focused video-generation coverage: `19 passed` on 2026-09-12. A prior full run recorded `197 passed, 2 skipped`. | Run the complete suite in the current dependency image. |
+| Automated regression suite | PASS | `215 passed, 2 skipped` in 20:45 on 2026-09-13 in `tubeforge-local-media:smoke`; includes visual-source routing, asset safety, worker, renderer, migration, and publishing-safety coverage. | Re-run after the next product change. |
 | Database migrations | NEEDS REVALIDATION | Prior fresh SQLite migration reached revision `20260831_0019`. | Run fresh-install and upgrade-path tests from the current tree. |
-| Local FFmpeg/Piper smoke | PASS | `tests/test_real_local_smoke.py -k fixed`: `1 passed` in 180.54s on 2026-09-12; inspected H.264/AAC 640x360 MP4, 73.318s. | Re-run after any renderer, narration, or asset-pipeline change. |
+| Local FFmpeg/Piper smoke | PASS | `tests/test_real_local_smoke.py -k fixed`: `1 passed` in 171.74s on 2026-09-13; inspected H.264/AAC 640x360 MP4, 73.736s, with six generated image scenes. | Re-run after any renderer, narration, or asset-pipeline change. |
 | Local Kokoro voice smoke | PASS | `af_bella` generated a valid 24 kHz local WAV (3.776 seconds) using the INT8 ONNX model on 2026-09-13. | Run a selected-voice job smoke after rebuilding the durable Compose image. |
-| Docker/Compose runtime | READY FOR REVIEW | Local dashboard health check returns `{"status":"ok","database":"ok"}` and the matching local worker is rendering jobs. | Rebuild the durable Compose services from the current tree; the temporary source-mounted pair is for local validation. |
+| Docker/Compose runtime | READY FOR REVIEW | Rebuilt web and worker images on 2026-09-13; Compose migration completed, both services are running, and `GET http://127.0.0.1:62065/healthz` returned `{"status":"ok","database":"ok"}`. | Sign in and exercise the Visuals selector with a stock-selected job. |
 | Production dashboard auth | IN PROGRESS | Auth implementation, redesigned local sign-in flow, and focused API/UI coverage exist. | Rebuild the current dependency image and run the focused dashboard/auth suite plus a browser check. |
 | Publishing safety | IN PROGRESS | Approval gates, private/dry-run defaults, and durable dispatch records exist. | Validate reconciliation paths; live OAuth smoke needs operator credentials. |
 
@@ -31,7 +31,7 @@ cannot establish the reuse rights required by the asset policy.
 
 | Capability | Status | Remaining work |
 | --- | --- | --- |
-| Local generation/rendering | IN PROGRESS | Per-job visual-source selection now routes generated scene art or rights-safe Wikimedia stock through the same asset manifest; focused regression and an FFmpeg smoke remain required. |
+| Local generation/rendering | READY FOR REVIEW | Per-job visual-source selection routes generated scene art or rights-safe Wikimedia stock through the same asset manifest. Focused and full regression, live stock acquisition, and a generated-art FFmpeg/Piper smoke passed on 2026-09-13. A stock-selected full-video smoke is still required before marking this milestone DONE. |
 | VideoPlan and visual routing | IN PROGRESS | Move render consumers from legacy `ContentPackage`; implement any required motion-graphics/derivative renderer. |
 | Source clipping | NEEDS REVALIDATION | Re-run source acquisition/render smoke and validate deployment behavior. |
 | Topic queue and scheduling | IN PROGRESS | Add schedule editing/history and validate concurrent scheduler/recovery behavior. |
@@ -50,11 +50,12 @@ cannot establish the reuse rights required by the asset policy.
 
 ## Next five tasks
 
-1. Run focused API, visual-routing, asset, and renderer tests; fix all failures.
-2. Generate and inspect a local-art video smoke after the visual-source change.
-3. Exercise the stock selection with a public-domain/CC0 Wikimedia source in a
-   controlled environment and inspect its asset manifest.
-4. Run the complete suite and Compose configuration check in the current image.
+1. Exercise an end-to-end stock-selected job, retaining its asset manifest and
+   final MP4 for inspection.
+2. Sign in to the rebuilt Studio and validate the Visuals selector at
+   `http://127.0.0.1:62065`.
+3. Re-run fresh-install and upgrade-path migration tests in the current image.
+4. Re-run and inspect the source-clip smoke after the current renderer changes.
 5. Commit the validated batch and update this release record with evidence.
 
 ## Update protocol
