@@ -52,6 +52,13 @@ pipeline:
     threads: 1
     cache_root: "./data/cache/tts"
     adapter_version: "m7-piper-v1"
+  kokoro:
+    enabled: true
+    voices: ["af_bella", "af_sarah", "am_michael"]
+    model_path: "./models/kokoro-v1.0.int8.onnx"
+    voices_path: "./models/voices-v1.0.bin"
+    cache_root: "./data/cache/kokoro"
+    sample_rate: 24000
   voice:
     artifact_root: "./data/artifacts"
     ffmpeg_executable: "ffmpeg"

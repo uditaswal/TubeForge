@@ -14,7 +14,7 @@ database:
   busy_timeout_ms: 5000
 pipeline:
   content_provider: "fake" # Structured local fallback derived from each title and notes.
-  voice_provider: "piper"
+  voice_provider: "hybrid"
   video_generation:
     default_preset: "default"
     presets:
@@ -53,6 +53,15 @@ pipeline:
     config_path: "/app/models/en_US-lessac-medium.onnx.json"
     voice_id: "en_US-lessac-medium"
     cache_root: "/app/data/cache/tts"
+  kokoro:
+    enabled: true
+    # These natural local English voices are selectable in Creator Studio.
+    # The model is downloaded by the Kokoro runtime on its first use.
+    voices: ["af_bella", "af_sarah", "am_michael"]
+    model_path: "/app/models/kokoro-v1.0.int8.onnx"
+    voices_path: "/app/models/voices-v1.0.bin"
+    cache_root: "/app/data/cache/kokoro"
+    sample_rate: 24000
   voice:
     artifact_root: "/app/data/artifacts"
     ffmpeg_threads: 1

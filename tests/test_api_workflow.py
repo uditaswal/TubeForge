@@ -71,12 +71,13 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
     _migrate(database_path)
     settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"))
     with TestClient(create_app(settings)) as client:
-        response = client.post("/api/videos", json={"title": "Linux basics", "notes": ["Explain files", "Explain logs"], "captions_enabled": False, "review_mode": "auto", "mcp_servers": ["web"]})
+        response = client.post("/api/videos", json={"title": "Linux basics", "notes": ["Explain files", "Explain logs"], "captions_enabled": False, "review_mode": "auto", "mcp_servers": ["web"], "voice_id": "af_bella"})
         assert response.status_code == 201
         job = client.app.state.runtime.jobs.get(response.json()["id"])
         assert job.request.notes == ("Explain files", "Explain logs")
         assert not job.request.captions_enabled and job.request.review_mode == "auto"
         assert job.request.mcp_servers == ("web",)
+        assert job.request.voice_id == "af_bella"
         dashboard = client.get("/")
         assert dashboard.status_code == 200
         assert "id=\"videoDialog\"" in dashboard.text
@@ -86,6 +87,7 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert "jobsRoot.innerHTML=j.map" not in dashboard.text
         assert "sourceClipCreate" in dashboard.text
         assert "/api/source-clips" in dashboard.text
+        assert "/api/voices" in dashboard.text
         assert "View / edit script" in dashboard.text
         assert "Copy Codex prompt" in dashboard.text
         assert "Created " in dashboard.text

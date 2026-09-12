@@ -14,6 +14,7 @@ retained under `docs/overnight/`.
 | Automated regression suite | NEEDS REVALIDATION | Focused video-generation coverage: `19 passed` on 2026-09-12. A prior full run recorded `197 passed, 2 skipped`. | Run the complete suite in the current dependency image. |
 | Database migrations | NEEDS REVALIDATION | Prior fresh SQLite migration reached revision `20260831_0019`. | Run fresh-install and upgrade-path tests from the current tree. |
 | Local FFmpeg/Piper smoke | PASS | `tests/test_real_local_smoke.py -k fixed`: `1 passed` in 180.54s on 2026-09-12; inspected H.264/AAC 640x360 MP4, 73.318s. | Re-run after any renderer, narration, or asset-pipeline change. |
+| Local Kokoro voice smoke | PASS | `af_bella` generated a valid 24 kHz local WAV (3.776 seconds) using the INT8 ONNX model on 2026-09-13. | Run a selected-voice job smoke after rebuilding the durable Compose image. |
 | Docker/Compose runtime | READY FOR REVIEW | Local dashboard health check returns `{"status":"ok","database":"ok"}` and the matching local worker is rendering jobs. | Rebuild the durable Compose services from the current tree; the temporary source-mounted pair is for local validation. |
 | Production dashboard auth | IN PROGRESS | Auth implementation and focused historical test evidence exist. | Validate the current API/UI behavior and document administrator bootstrap. |
 | Publishing safety | IN PROGRESS | Approval gates, private/dry-run defaults, and durable dispatch records exist. | Validate reconciliation paths; live OAuth smoke needs operator credentials. |
@@ -30,7 +31,7 @@ and committed coherently.
 
 | Capability | Status | Remaining work |
 | --- | --- | --- |
-| Local generation/rendering | READY FOR REVIEW | Topic-to-final local flow is smoke-tested with Piper, HD deterministic scene art, captions, cinematic camera motion, and the final quality gate. Full regression is still required. |
+| Local generation/rendering | READY FOR REVIEW | Topic-to-final local flow is smoke-tested with Piper, HD deterministic scene art, captions, cinematic camera motion, the final quality gate, and selectable Kokoro narration with Piper fallback. Full regression is still required. |
 | VideoPlan and visual routing | IN PROGRESS | Move render consumers from legacy `ContentPackage`; implement any required motion-graphics/derivative renderer. |
 | Source clipping | NEEDS REVALIDATION | Re-run source acquisition/render smoke and validate deployment behavior. |
 | Topic queue and scheduling | IN PROGRESS | Add schedule editing/history and validate concurrent scheduler/recovery behavior. |
