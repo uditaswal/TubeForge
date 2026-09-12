@@ -39,17 +39,19 @@ def test_configuration_rejects_non_sqlite_database() -> None:
             }
         )
 
-def test_media_provider_defaults_to_fake_and_wikimedia_is_explicit() -> None:
+def test_media_provider_supports_local_generated_stock_and_hybrid_routing() -> None:
     from tubeforge.core.config import FakeProviderConfig, MediaPipelineConfig
     from tubeforge.providers.fake import FakeMediaProvider
     from tubeforge.providers.media.factory import create_media_provider
+    from tubeforge.providers.media.router import VisualMediaProvider
     from tubeforge.providers.media.wikimedia import WikimediaCommonsProvider
     assert isinstance(create_media_provider(MediaPipelineConfig(), FakeProviderConfig()), FakeMediaProvider)
     assert isinstance(create_media_provider(MediaPipelineConfig(provider="wikimedia"), FakeProviderConfig()), WikimediaCommonsProvider)
+    assert isinstance(create_media_provider(MediaPipelineConfig(provider="hybrid"), FakeProviderConfig()), VisualMediaProvider)
 
-def test_default_yaml_uses_safe_fake_media_policy() -> None:
+def test_default_yaml_uses_safe_per_job_visual_media_policy() -> None:
     settings = load_settings()
-    assert settings.pipeline.media.provider == "fake"
+    assert settings.pipeline.media.provider == "hybrid"
     assert settings.pipeline.media.max_redirects == 0
     assert not settings.pipeline.sources.enabled
 

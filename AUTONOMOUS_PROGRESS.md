@@ -1956,3 +1956,35 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
   dashboard voice-selection coverage. `git diff --check` and dashboard health
   checks pass. A durable selected-Kokoro job smoke remains required after the
   Compose image is rebuilt.
+
+## 2026-09-13 — Creator Studio UI and development-port contract
+
+- Added a durable UI contract in `AGENTS.md` and operator summary in the README:
+  dashboard and API changes must ship together, controls need real backend
+  behavior and truthful feedback, refreshes must not flicker, reviews retain
+  exact approval fencing, and visible workflows require responsive/accessibility
+  and focused-test review.
+- Standardized the only documented developer dashboard URL to
+  `http://127.0.0.1:62065`. Compose now binds that one host port to loopback,
+  while transient IDE/app-preview proxy URLs are explicitly excluded from the
+  product configuration.
+
+## 2026-09-13 — dashboard login and local voice-preview workflow
+
+- Reworked the private sign-in page into the Studio’s responsive dark-navy UI
+  with password visibility, client-side validation, disabled loading state,
+  and accessible error feedback. Authentication, CSRF protection, and rate
+  limiting remain backend-enforced.
+- Added a real `GET /api/voices/{voice_id}/preview` endpoint. It synthesizes a
+  short WAV through the configured local Kokoro/Piper provider and refuses an
+  unavailable voice or model rather than simulating success. The dashboard
+  exposes it as **Preview voice** beside voice selection.
+- Simplified final-media actions to **Watch video** (preview remains visible
+  only when a final render is unavailable) and moved creation time into normal
+  card rendering, avoiding polling-time duplicate metadata.
+- Validation: `python3 -m py_compile src/tubeforge/api/app.py` and
+  `git diff --check` passed. The prior local media test image failed collection
+  because it lacked declared dependencies (`croniter`, then `argon2`); an
+  isolated full dependency install was started, but its managed-runner output
+  did not provide a pytest summary. The focused dashboard/auth run remains
+  required after a durable image rebuild.

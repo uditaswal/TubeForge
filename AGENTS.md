@@ -51,6 +51,36 @@ and editor/OS files.
 - Never remove already tracked files merely to make an ignore rule take effect;
   flag that decision for the operator.
 
+## Dashboard UI contract
+
+Treat the Creator Studio dashboard, login page, and their HTTP APIs as one
+operator workflow. When a change affects an operator-visible capability,
+update the UI in the same change whenever it is exposed through the dashboard.
+
+- Do not add a dashboard control unless it invokes a real, tested API action
+  and reports success, pending, disabled, and failure states truthfully.
+- Do not add or change a dashboard API workflow without considering its
+  corresponding UI state, labels, permissions, loading/empty/error treatment,
+  mobile layout, and activity/audit visibility.
+- Keep background refresh silent after initial load: preserve visible data and
+  open dialogs instead of replacing them with a loading screen or flickering.
+- Keep reviews explicit and safe: edits/revisions require a new approval of
+  the exact reviewed artifact; never imply that an approval, deletion, render,
+  publication, or AI revision completed before the durable backend confirms it.
+- Preserve the Studio’s dark navy visual system, readable hierarchy, keyboard
+  accessibility, and responsive desktop/tablet/mobile behavior. Reuse existing
+  components and styles where practical.
+- Add or update focused API/UI tests for changed workflows, and update
+  `readme.md` when an operator-visible flow, login behavior, or dashboard URL
+  changes.
+
+### Development dashboard URL
+
+`http://127.0.0.1:62065` is the sole documented developer dashboard URL.
+Compose must bind it to loopback only. Do not document or reserve additional
+host ports for the dashboard; application-preview proxy ports are transient
+tooling URLs and are not part of TubeForge configuration.
+
 ## Allowed autonomous actions
 
 You may without asking:
@@ -94,5 +124,7 @@ Completion requires:
    externally visible setup or workflow changed
 8. `.gitignore` has been reviewed and updated when the change introduced
    generated, local, or sensitive paths
+9. the Dashboard UI contract has been applied and its focused workflow tests
+   pass whenever an operator-visible capability changed
 
 When validation fails, continue debugging.

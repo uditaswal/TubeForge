@@ -30,10 +30,12 @@ class VisualRouter:
     def __init__(self, *, generated_stills_enabled: bool = False, generated_video_enabled: bool = False) -> None:
         self.generated_stills_enabled, self.generated_video_enabled = generated_stills_enabled, generated_video_enabled
 
-    def route(self, scene: ScenePlan) -> VisualRoute:
+    def route(self, scene: ScenePlan, *, visual_source: str = "generated") -> VisualRoute:
         kind = scene.visual_type.casefold()
         if any(word in kind for word in ("text", "chart", "graphic", "diagram")):
             return VisualRoute(scene_id=scene.scene_id, strategy=VisualStrategy.MOTION_GRAPHICS, fallback=VisualStrategy.CAPTION_BACKGROUND, rationale="structured explanatory scene is clearer as local graphics")
+        if visual_source == "generated":
+            return VisualRoute(scene_id=scene.scene_id, strategy=VisualStrategy.GENERATED_STILL, fallback=VisualStrategy.STOCK_ASSET, rationale="operator selected locally generated scene art")
         if self.generated_video_enabled and "generated-video" in kind:
             return VisualRoute(scene_id=scene.scene_id, strategy=VisualStrategy.GENERATED_VIDEO, fallback=VisualStrategy.STOCK_ASSET, rationale="configured video generation requested for this scene")
         if self.generated_stills_enabled and "generated" in kind:

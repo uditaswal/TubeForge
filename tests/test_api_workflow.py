@@ -70,14 +70,16 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
     database_path = tmp_path / "brief.db"
     _migrate(database_path)
     settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"))
+    settings.pipeline.media.provider = "hybrid"
     with TestClient(create_app(settings)) as client:
-        response = client.post("/api/videos", json={"title": "Linux basics", "notes": ["Explain files", "Explain logs"], "captions_enabled": False, "review_mode": "auto", "mcp_servers": ["web"], "voice_id": "af_bella"})
+        response = client.post("/api/videos", json={"title": "Linux basics", "notes": ["Explain files", "Explain logs"], "captions_enabled": False, "review_mode": "auto", "mcp_servers": ["web"], "voice_id": "af_bella", "visual_source": "stock"})
         assert response.status_code == 201
         job = client.app.state.runtime.jobs.get(response.json()["id"])
         assert job.request.notes == ("Explain files", "Explain logs")
         assert not job.request.captions_enabled and job.request.review_mode == "auto"
         assert job.request.mcp_servers == ("web",)
         assert job.request.voice_id == "af_bella"
+        assert job.request.visual_source == "stock"
         dashboard = client.get("/")
         assert dashboard.status_code == 200
         assert "id=\"videoDialog\"" in dashboard.text
@@ -88,10 +90,18 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert "sourceClipCreate" in dashboard.text
         assert "/api/source-clips" in dashboard.text
         assert "/api/voices" in dashboard.text
+        assert "Preview voice" in dashboard.text
+        assert "Watch video" in dashboard.text
         assert "View / edit script" in dashboard.text
         assert "Copy Codex prompt" in dashboard.text
+        assert "Generate local scene art" in dashboard.text
+        assert "Rights-safe stock (Wikimedia Commons)" in dashboard.text
+        assert "Google Image results are not used" in dashboard.text
         assert "Created " in dashboard.text
         assert client.get("/favicon.ico").status_code == 204
+        # The dashboard must reject a preview request for a voice which is not
+        # enabled in this runtime instead of pretending to play one.
+        assert client.get("/api/voices/not-configured/preview").status_code == 404
 
 
 def test_source_clip_api_records_a_durable_source_job(tmp_path: Path) -> None:

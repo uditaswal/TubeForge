@@ -16,7 +16,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.core.runtime import Runtime, create_runtime
-from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, video_plan_from_package
+from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, VoiceRequest, video_plan_from_package
+from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
 from tubeforge.scheduling.service import next_run
 
@@ -48,6 +49,7 @@ class VideoBriefRequest(BaseModel):
     captions_enabled: bool | None = None
     music_track: str | None = Field(default=None, max_length=200)
     visual_style: str | None = Field(default=None, max_length=100)
+    visual_source: str = Field(default="generated", pattern=r"^(generated|stock)$")
     review_mode: str | None = Field(default=None, pattern=r"^(manual|auto)$")
     mcp_servers: tuple[str, ...] | None = None
     audience: str = Field(default="general", min_length=1, max_length=200)
@@ -120,13 +122,17 @@ def _video_request(value: VideoBriefRequest, settings: Settings) -> ContentReque
     notes = tuple(note.strip() for note in value.notes if note.strip())
     if not notes:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="at least one nonblank note is required")
+    if value.visual_source == "stock" and settings.pipeline.media.provider not in {"wikimedia", "hybrid"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="rights-safe stock is not enabled in this TubeForge configuration")
+    if value.visual_source == "generated" and settings.pipeline.media.provider == "wikimedia":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="local generated scene art is not enabled in this TubeForge configuration")
     return ContentRequest(
         topic=value.title, angle="\n".join(notes), target_duration_seconds=value.duration_seconds or preset.duration_seconds,
         language="en", audience=value.audience, prompt_version="video-brief-v1",
         sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title="Operator-provided notes", excerpt="\n".join(notes)),),
         notes=notes, review_mode=value.review_mode or preset.review_mode,
         captions_enabled=preset.captions_enabled if value.captions_enabled is None else value.captions_enabled,
-        music_track=music, visual_style=value.visual_style or preset.visual_style, mcp_servers=tuple(mcp), voice_id=value.voice_id,
+        music_track=music, visual_style=value.visual_style or preset.visual_style, visual_source=value.visual_source, mcp_servers=tuple(mcp), voice_id=value.voice_id,
     )
 
 
@@ -195,7 +201,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
     def login_form() -> str:
-        return """<!doctype html><title>TubeForge login</title><form id=f><h1>TubeForge</h1><input name=username autocomplete=username placeholder=Username required><input name=password type=password autocomplete=current-password placeholder=Password required><button>Log in</button><p id=e></p></form><script>f.onsubmit=async e=>{e.preventDefault();let d=new FormData(f),r=await fetch('/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:d.get('username'),password:d.get('password')})});if(r.ok)location='/';else document.querySelector('#e').textContent='Login failed.'}</script>"""
+        return """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in — TubeForge Studio</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{min-height:100vh;margin:0;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 25% 0,#1b3157,#080d1a 55%);color:#f4f7ff;font:15px/1.5 Inter,ui-sans-serif,system-ui,sans-serif}.card{width:min(100%,410px);padding:30px;border:1px solid #2c4167;border-radius:18px;background:linear-gradient(145deg,#15213a,#0e1729);box-shadow:0 24px 80px #0008}.eyebrow{color:#67dff5;font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.brand{margin:5px 0;font-size:29px;letter-spacing:-1px}.brand b{color:#5ee8ff}.sub{margin:0;color:#a9b9d3}label{display:block;margin-top:18px;color:#d5e0f2;font-size:13px}input,button{width:100%;font:inherit;border-radius:9px;padding:11px}input{margin-top:6px;background:#091221;color:#f4f7ff;border:1px solid #344767}button{margin-top:22px;border:0;background:linear-gradient(100deg,#53d6f1,#8099ff);color:#07111e;font-weight:800;cursor:pointer}button:disabled{opacity:.65;cursor:wait}.password{position:relative}.password input{padding-right:80px}.toggle{position:absolute;right:6px;bottom:6px;width:auto;margin:0;padding:5px 8px;background:#243755;color:#e8f1ff;border:1px solid #405779;font-size:12px}.error{min-height:22px;margin:14px 0 0;color:#ffb8c2;font-size:13px}</style><main class="card"><div class="eyebrow">Private workspace</div><h1 class="brand">Tube<b>Forge</b> Studio</h1><p class="sub">Sign in to create, review, and publish your local video work.</p><form id="loginForm"><label>Username<input name="username" autocomplete="username" required autofocus></label><label>Password<span class="password"><input id="password" name="password" type="password" autocomplete="current-password" required><button id="toggle" class="toggle" type="button" aria-controls="password">Show</button></span></label><div id="error" class="error" role="alert" aria-live="polite"></div><button id="submit" type="submit">Sign in</button></form></main><script>const form=document.querySelector('#loginForm'),submit=document.querySelector('#submit'),error=document.querySelector('#error'),password=document.querySelector('#password');document.querySelector('#toggle').onclick=()=>{const visible=password.type==='text';password.type=visible?'password':'text';document.querySelector('#toggle').textContent=visible?'Show':'Hide'};form.onsubmit=async event=>{event.preventDefault();error.textContent='';submit.disabled=true;submit.textContent='Signing in…';try{const data=new FormData(form),response=await fetch('/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:data.get('username'),password:data.get('password')})});if(response.ok){location.assign('/');return}error.textContent=response.status===429?'Too many attempts. Please wait and try again.':'The username or password is incorrect.'}catch(_){error.textContent='Could not reach the local dashboard. Please retry.'}finally{submit.disabled=false;submit.textContent='Sign in'}}</script></html>"""
 
     @app.post("/login", include_in_schema=False)
     def login(value: LoginRequest, request: Request) -> Response:
@@ -318,15 +324,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         (() => {
           const form = document.querySelector('#createForm');
           if (!form) return;
+          const visualLabel=document.createElement('label'); visualLabel.textContent='Visuals';
+          const visualSelect=document.createElement('select'); visualSelect.name='visual_source'; visualSelect.id='visualSource';
+          visualSelect.append(Object.assign(document.createElement('option'),{value:'generated',textContent:'Generate local scene art'}),Object.assign(document.createElement('option'),{value:'stock',textContent:'Rights-safe stock (Wikimedia Commons)'}));
+          const visualHelp=document.createElement('span'); visualHelp.className='sub'; visualHelp.textContent='Google Image results are not used: a search result does not prove reuse rights.'; visualLabel.append(visualSelect,visualHelp);
+          form.insertBefore(visualLabel, form.querySelector('[name=duration_seconds]').closest('label'));
+          const originalFetch=window.fetch;
+          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.visual_source=visualSelect.value;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
           const panel = document.createElement('fieldset');
           panel.style.marginTop = '18px'; panel.style.border = '1px solid #31415f'; panel.style.borderRadius = '9px';
           panel.innerHTML = '<legend>Clip existing video / stream</legend><label>Source URL<input id="sourceClipUrl" type="url" placeholder="https://…"></label><label>Number of clips<input id="sourceClipCount" type="number" value="1" min="1" max="12"></label><label class="checkbox"><input id="sourceClipCaptions" type="checkbox"> Burn available captions</label><button id="sourceClipCreate" type="button" class="secondary">Create clip job</button>';
           form.append(panel);
           const voiceLabel=document.createElement('label'); voiceLabel.textContent='Narrator voice';
           const voiceSelect=document.createElement('select'); voiceSelect.name='voice_id'; voiceSelect.id='voiceSelect';
-          voiceSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Default local voice'})); voiceLabel.append(voiceSelect);
+          const voicePreview=document.createElement('button'); voicePreview.type='button'; voicePreview.className='small secondary'; voicePreview.textContent='Preview voice'; voicePreview.style.marginTop='8px';
+          const previewStatus=document.createElement('span'); previewStatus.className='sub'; previewStatus.style.marginLeft='8px'; previewStatus.setAttribute('aria-live','polite');
+          voiceSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Default local voice'})); voiceLabel.append(voiceSelect,voicePreview,previewStatus);
           form.querySelector('button[type="submit"]').before(voiceLabel);
           fetch('/api/voices').then(response=>response.ok?response.json():[]).then(voices=>voices.forEach(voice=>voiceSelect.append(Object.assign(document.createElement('option'),{value:voice.id,textContent:voice.label+(voice.provider==='kokoro'?' — natural':'')}))));
+          voicePreview.onclick=async()=>{const voice=voiceSelect.value;if(!voice){previewStatus.textContent='Choose a voice first.';return;}voicePreview.disabled=true;voicePreview.textContent='Loading preview…';previewStatus.textContent='';try{const audio=new Audio(`/api/voices/${encodeURIComponent(voice)}/preview`);await audio.play();previewStatus.textContent='Playing local sample.';audio.onended=()=>previewStatus.textContent='';audio.onerror=()=>previewStatus.textContent='Voice preview could not be played.';}catch(_){previewStatus.textContent='Voice preview could not be loaded.';}finally{voicePreview.disabled=false;voicePreview.textContent='Preview voice';}};
           document.querySelector('#sourceClipCreate').addEventListener('click', async () => {
             const notice = document.querySelector('#notice');
             const sourceUrl = document.querySelector('#sourceClipUrl').value.trim();
@@ -374,7 +390,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const originalRefresh=window.setInterval; decorate(); originalRefresh(decorate,1000);
         })();
         </script>"""
-        return DASHBOARD_HTML.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("captions_enabled:d.has('captions_enabled')};let r", "captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null};let r").replace("</body>", source_controls + operations_controls + reviewer_controls + "</body>")
+        return DASHBOARD_HTML.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("captions_enabled:d.has('captions_enabled')};let r", "captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null};let r").replace("if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')))", "if(j.artifacts.includes('final'))actions.append(button('Watch video','',()=>openVideo(j,'final','Final video')));else if(j.artifacts.includes('preview'))actions.append(button('Watch preview','secondary',()=>openVideo(j,'preview','Preview')))").replace("${j.artifacts.length} saved artifacts · ${j.event_count} activity events", "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}").replace("const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}", "").replace("</body>", source_controls + operations_controls + reviewer_controls + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -405,6 +421,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if pipeline.voice_provider in {"piper", "hybrid"}:
             options.append({"id": "piper", "label": "Piper reliable fallback", "provider": "piper"})
         return options
+
+    @app.get("/api/voices/{voice_id}/preview", tags=["voices"])
+    def preview_voice(voice_id: str) -> FileResponse:
+        """Synthesize a short local sample using the same provider as a job."""
+        available = {item["id"] for item in list_voices()}
+        if voice_id not in available:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="voice is not available")
+        try:
+            result = runtime.orchestrator.voice.synthesize(
+                VoiceRequest(
+                    text="Welcome to TubeForge Studio. This is a local voice preview.",
+                    language="en",
+                    voice_id=voice_id,
+                    section_id="dashboard-preview",
+                    phrase_id="dashboard-preview-v1",
+                )
+            )
+        except (ProviderValidationError, RetryableProviderError) as error:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"voice preview is unavailable: {error}") from error
+        path = Path(result.artifact_path)
+        if not path.is_file():
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="voice preview was not created")
+        return FileResponse(path, media_type="audio/wav", filename=f"{voice_id}-preview.wav")
 
     @app.get("/api/jobs/{job_id}/events", tags=["jobs"])
     def get_job_events(job_id: str) -> list[dict[str, object]]:

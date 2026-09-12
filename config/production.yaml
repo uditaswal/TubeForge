@@ -68,7 +68,9 @@ pipeline:
     ffmpeg_executable: "ffmpeg"
     ffprobe_executable: "ffprobe"
   media:
-    provider: "fake"
+    # Each job can select local generated art or rights-safe Wikimedia stock.
+    # Google Image results are never used because they have no reuse proof.
+    provider: "hybrid"
     cache_root: "/app/data/cache/assets"
   sources:
     enabled: false # Enable only with a tight HTTPS host allowlist.

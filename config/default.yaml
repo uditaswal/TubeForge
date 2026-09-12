@@ -148,7 +148,9 @@ pipeline:
       minimum_observation_hours: 24
       evaluation_window_days: 7
   media:
-    provider: "fake"
+    # "hybrid" lets each dashboard job choose local generated art or
+    # rights-safe public-domain/CC0 Wikimedia stock; no Google image scraping.
+    provider: "hybrid"
     cache_root: "./data/cache/assets"
     allowed_hosts: ["upload.wikimedia.org", "commons.wikimedia.org"]
     allowed_licenses: ["CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain"]

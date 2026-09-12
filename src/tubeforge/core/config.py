@@ -59,7 +59,7 @@ class MediaPipelineConfig(BaseModel):
     """Safe, provider-neutral M8 asset acquisition policy."""
 
     model_config = ConfigDict(extra="forbid")
-    provider: str = Field(default="fake", pattern=r"^(fake|wikimedia)$")
+    provider: str = Field(default="fake", pattern=r"^(fake|wikimedia|hybrid)$")
     cache_root: Path = Path("./data/cache/assets")
     allowed_hosts: tuple[str, ...] = ("upload.wikimedia.org", "commons.wikimedia.org")
     allowed_licenses: tuple[str, ...] = ("CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain")

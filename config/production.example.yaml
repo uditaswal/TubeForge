@@ -20,7 +20,8 @@ pipeline:
     ffmpeg_executable: "ffmpeg"
     ffprobe_executable: "ffprobe"
   media:
-    provider: "fake"
+    # Per-job selection between local generated art and rights-safe stock.
+    provider: "hybrid"
     cache_root: "/app/data/cache/assets"
   sources:
     enabled: false # Enable only with a tight HTTPS host allowlist.

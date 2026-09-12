@@ -363,6 +363,8 @@ def test_assets_stage_acquires_validated_fake_asset_and_reuses_checkpoint(tmp_pa
         manifest = runner._required_json("job-assets", JobState.ASSET_ACQUISITION, "asset_manifest")
         accepted = manifest["scenes"]["scene-1"]
         assert Path(accepted["path"]).is_file() and accepted["validation"]["media_type"] == "image"
+        assert accepted["request"]["visual_source"] == "generated"
+        assert accepted["visual_route"]["strategy"] == "generated_still"
         assert runner._required_json("job-assets", JobState.ASSET_ACQUISITION, "license_manifest")["assets"][0]["provider_asset_id"].startswith("fake-")
         calls = media.calls
         runner.run("job-assets")

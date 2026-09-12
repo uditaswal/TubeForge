@@ -24,7 +24,8 @@ validation evidence, blockers, and next tasks. See
 - Content-provider, media-provider, voice-provider, and publishing boundaries;
   deterministic/fake adapters support offline testing.
 - Local FFmpeg rendering with subtle cinematic still-image motion, HD
-  deterministic fallback art, selectable Kokoro narration with a reliable Piper
+  locally generated scene art or rights-safe public-domain/CC0 Wikimedia stock,
+  selectable Kokoro narration with a reliable Piper
   fallback, captions, final-artifact quality
   checks, publication metadata/thumbnail preparation, and source clips.
 - Dashboard authentication, audited approvals/activity, topic queue, schedules,
@@ -60,9 +61,11 @@ Compose starts migration, web, worker, and scheduler services:
 docker compose up --build
 ```
 
-The dashboard is mapped to port `62065` by the production Compose file. Before
-enabling production authentication, migrate the database and create the first
-administrator:
+The sole documented developer dashboard URL is
+[`http://127.0.0.1:62065`](http://127.0.0.1:62065). Compose binds it to
+loopback only; do not use transient IDE/app-preview URLs or introduce another
+host dashboard port. Before enabling production authentication, migrate the
+database and create the first administrator:
 
 ```bash
 tubeforge create-admin --username <name>
@@ -79,12 +82,41 @@ voice is stored with the generation job. If a selected Kokoro synthesis cannot
 run, TubeForge automatically produces that phrase with Piper rather than
 failing the job.
 
+Choose a voice in **New generation** and use **Preview voice** to hear the
+same local provider before creating a job. The preview is generated on demand,
+cached by the provider, and reports an error when its model/runtime is not
+available; it does not contact a hosted text-to-speech service.
+
 Kokoro uses an ONNX model and a voice pack mounted from `./models/`; they are
 intentionally ignored by Git. Production expects
 `kokoro-v1.0.int8.onnx` and `voices-v1.0.bin` in that directory. The Docker
 image installs the lightweight `kokoro-onnx` runtime; download model assets
 only from the configured trusted release and verify a local synthesis before
 using them for production jobs.
+
+## Visual sources
+
+Each video in Creator Studio has a **Visuals** choice:
+
+- **Generate local scene art** creates one durable, scene-specific image for
+  each approved scene and stitches those images to the measured narration with
+  FFmpeg motion and captions.
+- **Rights-safe stock (Wikimedia Commons)** searches only Wikimedia Commons and
+  accepts only public-domain or CC0 candidates that satisfy the asset policy.
+
+TubeForge does not scrape or reuse Google Image results. Google is a search
+engine, not a licence/provenance provider, so its results cannot safely pass
+the pipeline's reuse checks. Every selected visual is checksummed, retained in
+the job's asset manifest, and revalidated before rendering or resuming.
+
+## Creator Studio UI contract
+
+Dashboard/API changes ship together. Any operator-visible workflow must have a
+working control, accurate pending/success/failure feedback, silent background
+refresh after initial load, and responsive dark-theme behavior. Reviews,
+revisions, deletion, rendering, and publishing must show durable backend state
+rather than optimistic completion. The complete contributor requirements are
+in `AGENTS.md`.
 
 ## Validation expectations
 

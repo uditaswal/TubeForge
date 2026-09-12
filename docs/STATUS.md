@@ -1,6 +1,6 @@
 # TubeForge Status
 
-Last reviewed: 2026-09-12  
+Last reviewed: 2026-09-13
 Release target: R1 — Reliable Local Studio
 
 `docs/STATUS.md` is the authoritative current-status record. Historical work
@@ -16,26 +16,26 @@ retained under `docs/overnight/`.
 | Local FFmpeg/Piper smoke | PASS | `tests/test_real_local_smoke.py -k fixed`: `1 passed` in 180.54s on 2026-09-12; inspected H.264/AAC 640x360 MP4, 73.318s. | Re-run after any renderer, narration, or asset-pipeline change. |
 | Local Kokoro voice smoke | PASS | `af_bella` generated a valid 24 kHz local WAV (3.776 seconds) using the INT8 ONNX model on 2026-09-13. | Run a selected-voice job smoke after rebuilding the durable Compose image. |
 | Docker/Compose runtime | READY FOR REVIEW | Local dashboard health check returns `{"status":"ok","database":"ok"}` and the matching local worker is rendering jobs. | Rebuild the durable Compose services from the current tree; the temporary source-mounted pair is for local validation. |
-| Production dashboard auth | IN PROGRESS | Auth implementation and focused historical test evidence exist. | Validate the current API/UI behavior and document administrator bootstrap. |
+| Production dashboard auth | IN PROGRESS | Auth implementation, redesigned local sign-in flow, and focused API/UI coverage exist. | Rebuild the current dependency image and run the focused dashboard/auth suite plus a browser check. |
 | Publishing safety | IN PROGRESS | Approval gates, private/dry-run defaults, and durable dispatch records exist. | Validate reconciliation paths; live OAuth smoke needs operator credentials. |
 
 ## Active milestone
 
-Validate and integrate the current uncommitted batch covering topic scheduling,
-dashboard authentication, social accounts, publication dispatch, visual routing,
-quality gates, platform-variant plans, and the local cinematic-render upgrade.
-Do not begin additional product scope until this batch is tested, documented,
-and committed coherently.
+Implement and validate per-generation visual-source selection: local generated
+scene art or rights-safe public-domain/CC0 stock. The feature must preserve
+asset provenance, checkpoint recovery, renderer validation, and the Creator
+Studio workflow. Google Image scraping is deliberately out of scope because it
+cannot establish the reuse rights required by the asset policy.
 
 ## Capability status
 
 | Capability | Status | Remaining work |
 | --- | --- | --- |
-| Local generation/rendering | READY FOR REVIEW | Topic-to-final local flow is smoke-tested with Piper, HD deterministic scene art, captions, cinematic camera motion, the final quality gate, and selectable Kokoro narration with Piper fallback. Full regression is still required. |
+| Local generation/rendering | IN PROGRESS | Per-job visual-source selection now routes generated scene art or rights-safe Wikimedia stock through the same asset manifest; focused regression and an FFmpeg smoke remain required. |
 | VideoPlan and visual routing | IN PROGRESS | Move render consumers from legacy `ContentPackage`; implement any required motion-graphics/derivative renderer. |
 | Source clipping | NEEDS REVALIDATION | Re-run source acquisition/render smoke and validate deployment behavior. |
 | Topic queue and scheduling | IN PROGRESS | Add schedule editing/history and validate concurrent scheduler/recovery behavior. |
-| Dashboard and authentication | READY FOR REVIEW | Dashboard now shows creation times, activity, safe exact-script approval, manual narration revision, and a copyable Codex revision prompt. | Run full dashboard/browser regression; split embedded dashboard assets before further UI expansion. |
+| Dashboard and authentication | READY FOR REVIEW | Dashboard now shows creation times, activity, safe exact-script approval, manual narration revision, a copyable Codex revision prompt, local voice previews, and a responsive sign-in flow. `127.0.0.1:62065` is the single documented local dashboard URL. | Run full dashboard/browser regression; split embedded dashboard assets before further UI expansion. |
 | YouTube publishing | BLOCKED | Operator OAuth credentials and private upload/reconciliation smoke required. |
 | Instagram/Facebook publishing | TODO | Implement official Graph API adapters, then credentialed contract/sandbox tests. |
 | Snapchat and other platforms | TODO | Retain manual handoff unless an approved official publishing API is available. |
@@ -50,14 +50,12 @@ and committed coherently.
 
 ## Next five tasks
 
-1. Run the complete suite, migration tests, and Compose check in the current
-   dependency image; fix all failures.
-2. Re-run and inspect the source-clip smoke after the current renderer changes.
-3. Review the new local video look in the dashboard and tune caption/motion
-   defaults only with an accompanying smoke artifact.
-4. Commit the validated batch, recording commit IDs and evidence here.
-5. Add CI and update the operator/deployment documentation before enabling live
-   platform integrations.
+1. Run focused API, visual-routing, asset, and renderer tests; fix all failures.
+2. Generate and inspect a local-art video smoke after the visual-source change.
+3. Exercise the stock selection with a public-domain/CC0 Wikimedia source in a
+   controlled environment and inspect its asset manifest.
+4. Run the complete suite and Compose configuration check in the current image.
+5. Commit the validated batch and update this release record with evidence.
 
 ## Update protocol
 

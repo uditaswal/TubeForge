@@ -53,6 +53,10 @@ class ContentRequest(DomainModel):
     captions_enabled: bool = True
     music_track: str | None = Field(default=None, max_length=200)
     visual_style: str = Field(default="cinematic-tech", min_length=1, max_length=100)
+    # Generated stills are local deterministic scene art.  Stock is limited
+    # to the configured rights-safe provider; arbitrary search-engine images
+    # never enter a production job because their reuse rights are unknown.
+    visual_source: str = Field(default="generated", pattern=r"^(generated|stock)$")
     voice_id: str | None = Field(default=None, min_length=1, max_length=200)
     mcp_servers: tuple[str, ...] = Field(default=(), max_length=50)
     # A source-clip job is intentionally still a ContentRequest: it uses the
@@ -256,6 +260,7 @@ class MediaSearchRequest(DomainModel):
     visual_type: str = Field(min_length=1, max_length=100)
     required_license: str = Field(min_length=1, max_length=200)
     orientation: str = Field(default="landscape", pattern=r"^(landscape|portrait|square|any)$")
+    visual_source: str = Field(default="generated", pattern=r"^(generated|stock)$")
 
     @model_validator(mode="after")
     def require_safe_queries(self) -> MediaSearchRequest:
