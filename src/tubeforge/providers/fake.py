@@ -34,12 +34,16 @@ class FakeContentProvider:
         # and made every deployed video look broken.
         scene_count = min(6, max(3, len(points) + 2))
         scene_topics = ("Why this matters", *points, "What to do next")[:scene_count]
-        target_words = max(18, round(request.target_duration_seconds * 2.15 / scene_count))
+        # Piper's measured local pace is roughly 3.3 words/second for these
+        # concise lines. Shorts use complete sentences and a slightly lower
+        # planning rate so the final narration remains inside 30–55 seconds.
+        words_per_second = 3.1 if request.aspect_ratio == "9:16" else 2.15
+        target_words = max(18, round(request.target_duration_seconds * words_per_second / scene_count))
         sections = tuple(
             ScriptSection(
                 section_id=f"section-{index}",
                 scene_id=f"scene-{index}",
-                narration=_local_scene_narration(request.topic, point, index, scene_count, target_words),
+                narration=_local_scene_narration(request.topic, point, index, scene_count, target_words, shorts=request.aspect_ratio == "9:16"),
                 claim_ids=(),
                 contains_factual_claims=False,
             )
@@ -210,13 +214,17 @@ def _atomic_write(destination: Path, payload: bytes) -> None:
 _FAKE_WORDS_PER_SECOND = 2.4
 
 
-def _local_scene_narration(topic: str, point: str, index: int, total: int, target_words: int) -> str:
+def _local_scene_narration(topic: str, point: str, index: int, total: int, target_words: int, *, shorts: bool = False) -> str:
     """Create concise readable local narration from the operator's own brief."""
-    lead = (
-        f"{topic}. " if index == 1 else ""
-    )
+    lead = (f"Stop scrolling. {topic} has one practical lesson you can use now. " if shorts and index == 1 else f"{topic}. " if index == 1 else "")
     core = f"{lead}{point}. Focus on the practical meaning, then connect it to one decision you can make in a real project. "
     closing = "Keep the explanation concrete, test the result, and move to the next step with confidence."
+    if shorts:
+        sentences = [core.strip(), closing]
+        filler = "Use one clear example, show the result, and keep the pace moving."
+        while len(" ".join(sentences).split()) < target_words:
+            sentences.append(filler)
+        return " ".join(sentences)
     words = (core + closing).split()
     filler = ["Use", "small", "examples", "and", "clear", "tradeoffs", "so", "the", "idea", "remains", "useful", "when", "you", "build", "and", "debug", "software."]
     while len(words) < target_words:

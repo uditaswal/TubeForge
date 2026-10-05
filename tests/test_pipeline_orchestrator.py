@@ -19,6 +19,7 @@ from tubeforge.pipeline.sources import SourceSnapshot
 from tubeforge.pipeline.publication import identity as publication_identity
 from tubeforge.rendering.preview import checksum
 from tubeforge.providers.fake import FakeContentProvider, FakeMediaProvider, FakePublisher, FakeVoiceProvider, FakeYouTubePublisher
+from tubeforge.providers.media.router import VisualMediaProvider
 
 
 class OfflineProbe:
@@ -348,6 +349,35 @@ def test_explicit_render_profiles_reach_default_renderers(tmp_path: Path) -> Non
     finally:
         database.dispose()
 
+
+def test_shorts_pipeline_checkpoints_word_alignment_and_highlighted_captions(pipeline) -> None:
+    runner, *_ = pipeline
+    portrait_preview = OfflineRenderer()
+    runner.shorts_preview_renderer = portrait_preview  # type: ignore[assignment]
+    # The silent fake voice intentionally uses a slower synthetic pace than
+    # the measured Piper model used by the real Shorts acceptance test.
+    runner.voice_config = runner.voice_config.model_copy(update={"target_duration_tolerance_ratio": 0.5})
+    job_id = "shorts-alignment"
+    short_request = request().model_copy(update={"target_duration_seconds": 45, "preset_name": "shorts", "aspect_ratio": "9:16"})
+    runner.jobs.create(job_id, short_request)
+
+    assert runner.run(job_id).state is JobState.SCRIPT_APPROVAL_REQUIRED
+    approve(runner, job_id, ApprovalGate.SCRIPT)
+    result = runner.run(job_id)
+    assert result.state is JobState.PREVIEW_READY, result.failure_message
+
+    timing = runner._required_json(job_id, JobState.VOICE_GENERATION, "timing_map")
+    captions = runner._required_artifact(job_id, JobState.CAPTION_GENERATION, "captions")
+    plan = runner._required_json(job_id, JobState.CONTENT_GENERATING, "video_plan")
+    assert timing["alignment"]["provider"] == "local-waveform-v1"
+    assert timing["alignment"]["verified"] and timing["alignment"]["first_word_seconds"] <= 3
+    assert timing["words"] and timing["words"][-1]["end_seconds"] == pytest.approx(timing["final_duration_seconds"])
+    assert Path(captions.path).suffix == ".ass"
+    caption_text = Path(captions.path).read_text(encoding="utf-8")
+    assert "PlayResX: 1080" in caption_text and "Dialogue:" in caption_text
+    assert plan["aspect_ratio"] == "9:16"
+    assert portrait_preview.calls == 1
+
 def test_assets_stage_acquires_validated_fake_asset_and_reuses_checkpoint(tmp_path: Path) -> None:
     from tubeforge.db.repositories import AssetCacheRepository
     from tubeforge.pipeline.assets import AssetAcquisitionService, AssetDownloader, AssetLimits
@@ -369,6 +399,60 @@ def test_assets_stage_acquires_validated_fake_asset_and_reuses_checkpoint(tmp_pa
         calls = media.calls
         runner.run("job-assets")
         assert media.calls == calls
+    finally:
+        database.dispose()
+
+
+def test_stock_asset_shortage_falls_back_to_local_cc0_art_with_provenance(tmp_path: Path) -> None:
+    from tubeforge.db.repositories import AssetCacheRepository
+    from tubeforge.pipeline.assets import AssetAcquisitionService, AssetDownloader
+
+    class EmptyStock:
+        def search(self, _request):
+            return []
+
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'stock-fallback.db'}")); Base.metadata.create_all(database.engine)
+    settings = FakeProviderConfig(artifact_root=tmp_path / "provider")
+    media = VisualMediaProvider(FakeMediaProvider(settings), EmptyStock())
+    limits = AssetLimits(frozenset({"example.invalid"}), frozenset({"CC0-1.0"}))
+    runner = PipelineOrchestrator(JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory), FakeContentProvider(), media, FakeVoiceProvider(settings), FakePublisher(), tmp_path / "artifacts", audio_assembler=OfflineAssembler(), ffprobe=OfflineProbe(), preview_renderer=OfflineRenderer(), final_renderer=OfflineRenderer(), asset_limits=limits, asset_acquirer=AssetAcquisitionService(AssetCacheRepository(database.session_factory), AssetDownloader(tmp_path / "cache", limits)))
+    try:
+        runner.jobs.create("stock-fallback", request().model_copy(update={"visual_source": "stock"}))
+        assert runner.run("stock-fallback").state is JobState.SCRIPT_APPROVAL_REQUIRED
+        approve(runner, "stock-fallback", ApprovalGate.SCRIPT)
+        assert runner.run("stock-fallback").state is JobState.PREVIEW_READY
+        accepted = runner._required_json("stock-fallback", JobState.ASSET_ACQUISITION, "asset_manifest")["scenes"]["scene-1"]
+        assert accepted["request"]["visual_source"] == "stock"
+        assert accepted["resolved_request"]["visual_source"] == "generated"
+        assert accepted["visual_route"]["strategy"] == "generated_still"
+        assert accepted["fallback"]["to"] == "local generated CC0 scene art"
+        assert accepted["candidate"]["license_name"] == "CC0-1.0"
+    finally:
+        database.dispose()
+
+
+def test_stock_search_outage_falls_back_to_local_cc0_art_with_provenance(tmp_path: Path) -> None:
+    from tubeforge.db.repositories import AssetCacheRepository
+    from tubeforge.pipeline.assets import AssetAcquisitionService, AssetDownloader
+
+    class UnavailableStock:
+        def search(self, _request):
+            raise RetryableProviderError("Wikimedia search unavailable")
+
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'stock-outage-fallback.db'}")); Base.metadata.create_all(database.engine)
+    settings = FakeProviderConfig(artifact_root=tmp_path / "provider")
+    media = VisualMediaProvider(FakeMediaProvider(settings), UnavailableStock())
+    limits = AssetLimits(frozenset({"example.invalid"}), frozenset({"CC0-1.0"}))
+    runner = PipelineOrchestrator(JobRepository(database.session_factory), ArtifactRepository(database.session_factory), ApprovalRepository(database.session_factory), FakeContentProvider(), media, FakeVoiceProvider(settings), FakePublisher(), tmp_path / "artifacts", audio_assembler=OfflineAssembler(), ffprobe=OfflineProbe(), preview_renderer=OfflineRenderer(), final_renderer=OfflineRenderer(), asset_limits=limits, asset_acquirer=AssetAcquisitionService(AssetCacheRepository(database.session_factory), AssetDownloader(tmp_path / "cache", limits)))
+    try:
+        runner.jobs.create("stock-outage-fallback", request().model_copy(update={"visual_source": "stock"}))
+        assert runner.run("stock-outage-fallback").state is JobState.SCRIPT_APPROVAL_REQUIRED
+        approve(runner, "stock-outage-fallback", ApprovalGate.SCRIPT)
+        assert runner.run("stock-outage-fallback").state is JobState.PREVIEW_READY
+        accepted = runner._required_json("stock-outage-fallback", JobState.ASSET_ACQUISITION, "asset_manifest")["scenes"]["scene-1"]
+        assert accepted["fallback"]["reason"] == "Wikimedia search unavailable"
+        assert accepted["resolved_request"]["visual_source"] == "generated"
+        assert accepted["candidate"]["license_name"] == "CC0-1.0"
     finally:
         database.dispose()
 

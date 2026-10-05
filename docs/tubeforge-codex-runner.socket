@@ -1,0 +1,12 @@
+[Unit]
+Description=TubeForge restricted Codex runner socket
+
+[Socket]
+ListenStream=/run/tubeforge-codex/codex.sock
+SocketUser=tubeforge-codex
+SocketGroup=1000
+SocketMode=0660
+DirectoryMode=0750
+
+[Install]
+WantedBy=sockets.target

@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import shutil
 import uuid
 from contextvars import ContextVar
@@ -15,23 +16,25 @@ from typing import Callable
 
 from pydantic import ValidationError
 
-from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, PublicationPreparationConfig, PublicationVerificationConfig, Settings, SourceClipConfig, VoicePipelineConfig, YouTubePublishingConfig
+from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, PublicationPreparationConfig, PublicationVerificationConfig, Settings, ShortsFinalRenderConfig, ShortsPreviewRenderConfig, SourceClipConfig, VoicePipelineConfig, YouTubePublishingConfig
 from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RemoteResourceMissingError, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
 from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobEventRepository, JobRepository, PipelineJob, PublicationRepository, SourceMedia, SourceMediaRepository
 from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, ContentRequest, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, SourceReference, VideoMetadata, VoiceRequest, video_plan_from_package
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
-from tubeforge.pipeline.assets import ASSET_VALIDATION_VERSION, AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, inspect_media, scene_request, select_candidate
-from tubeforge.pipeline.captions import render_srt, render_vtt, timed_phrases
+from tubeforge.pipeline.assets import ASSET_VALIDATION_VERSION, AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, inspect_media, scene_request, select_candidate, validate_shorts_visual_manifest
+from tubeforge.pipeline.alignment import LocalWordAligner, WordTiming, verify_word_alignment
+from tubeforge.pipeline.captions import render_highlighted_ass, render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
+from tubeforge.pipeline.music import MusicCatalog
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
 from tubeforge.pipeline.quality import validate_final_artifact
 from tubeforge.pipeline.visual_router import VisualRouter
 from tubeforge.pipeline.variants import plan_variants
 from tubeforge.pipeline.sources import SourceIngestor, source_packet
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
-from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline
+from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline, pace_segments
 from tubeforge.clipping.analysis import Highlight, analyze_wav
 from tubeforge.clipping.render import extract_audio, probe as probe_clip, render_vertical
 from tubeforge.clipping.source import YtDlpSourceProvider
@@ -61,7 +64,7 @@ def _event(event: str, **fields: object) -> None:
 class PipelineOrchestrator:
     """Run one job synchronously, committing only short persistence operations."""
 
-    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None, youtube_config: YouTubePublishingConfig | None = None, verification_config: PublicationVerificationConfig | None = None, source_ingestor: SourceIngestor | None = None, source_clips: SourceClipConfig | None = None, source_provider: YtDlpSourceProvider | None = None, source_media: SourceMediaRepository | None = None) -> None:
+    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None, youtube_config: YouTubePublishingConfig | None = None, verification_config: PublicationVerificationConfig | None = None, source_ingestor: SourceIngestor | None = None, source_clips: SourceClipConfig | None = None, source_provider: YtDlpSourceProvider | None = None, source_media: SourceMediaRepository | None = None, shorts_preview_config: ShortsPreviewRenderConfig | None = None, shorts_final_config: ShortsFinalRenderConfig | None = None, word_aligner: LocalWordAligner | None = None, shorts_preview_renderer: PreviewRenderer | None = None, shorts_final_renderer: PreviewRenderer | None = None, music_catalog: MusicCatalog | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.events = JobEventRepository(artifacts._session_factory)
         self.content, self.media, self.voice, self.publisher = content, media, voice, publisher
@@ -72,6 +75,9 @@ class PipelineOrchestrator:
         self.ffprobe = ffprobe or FFprobe(str(self.voice_config.ffprobe_executable))
         self.preview_renderer = preview_renderer or PreviewRenderer(preview_config or PreviewRenderConfig())
         self.final_renderer = final_renderer or PreviewRenderer(final_config or FinalRenderConfig())
+        self.shorts_preview_renderer = shorts_preview_renderer or PreviewRenderer(shorts_preview_config or ShortsPreviewRenderConfig())
+        self.shorts_final_renderer = shorts_final_renderer or PreviewRenderer(shorts_final_config or ShortsFinalRenderConfig())
+        self.word_aligner = word_aligner or LocalWordAligner()
         self.publication_config = publication_config or PublicationPreparationConfig()
         self.youtube_config = youtube_config or YouTubePublishingConfig()
         self.verification_config = verification_config or PublicationVerificationConfig()
@@ -83,6 +89,7 @@ class PipelineOrchestrator:
         self.source_provider = source_provider or YtDlpSourceProvider(self.source_clips.ytdlp_executable, self.source_clips.timeout_seconds)
         self.source_media = source_media or SourceMediaRepository(artifacts._session_factory)
         self.visual_router = VisualRouter()
+        self.music_catalog = music_catalog
 
     @classmethod
     def from_settings(cls, settings: Settings, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, external_operations: ExternalOperationRepository | None = None) -> "PipelineOrchestrator":
@@ -91,7 +98,10 @@ class PipelineOrchestrator:
             jobs, artifacts, approvals, content, media, voice, publisher,
             settings.pipeline.voice.artifact_root, external_operations,
             voice_config=settings.pipeline.voice, preview_config=settings.pipeline.preview,
-            final_config=settings.pipeline.final, publication_config=settings.pipeline.publication, youtube_config=settings.pipeline.youtube, verification_config=settings.pipeline.verification, source_clips=settings.pipeline.source_clips,
+            final_config=settings.pipeline.final, shorts_preview_config=settings.pipeline.shorts_preview,
+            shorts_final_config=settings.pipeline.shorts_final, publication_config=settings.pipeline.publication,
+            youtube_config=settings.pipeline.youtube, verification_config=settings.pipeline.verification, source_clips=settings.pipeline.source_clips,
+            music_catalog=MusicCatalog(settings.pipeline.voice.artifact_root.parent / "music", settings.pipeline.video_generation.music_catalog, ffprobe=str(settings.pipeline.voice.ffprobe_executable)),
         )
 
     def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None, ownership_check: Callable[..., bool] | None = None) -> PipelineJob:
@@ -234,7 +244,8 @@ class PipelineOrchestrator:
                 package = self.content.generate_package(self._effective_content_request(job)).model_dump(mode="json")
                 self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "content_package", package)
             if self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "video_plan") is None:
-                self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "video_plan", video_plan_from_package(ContentPackage.model_validate(package)).model_dump(mode="json"))
+                value = ContentPackage.model_validate(package)
+                self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "video_plan", video_plan_from_package(value, aspect_ratio=value.request.aspect_ratio).model_dump(mode="json"))
             self._transition(job, JobState.CONTENT_READY); return
         if job.state is JobState.CONTENT_READY:
             self._transition(job, JobState.SCRIPT_APPROVAL_REQUIRED); return
@@ -259,14 +270,32 @@ class PipelineOrchestrator:
                 current = accepted.get(scene.scene_id)
                 if current and self._accepted_asset_valid(current): continue
                 route = self.visual_router.route(scene, visual_source=job.request.visual_source)
-                request = scene_request(scene, visual_source=job.request.visual_source)
-                candidate = select_candidate(self.media.search(request), request, self.asset_limits)
+                request = scene_request(scene, visual_source=job.request.visual_source, aspect_ratio=job.request.aspect_ratio)
+                resolved_request = request
+                fallback: dict[str, str] | None = None
+                try:
+                    candidate = select_candidate(self.media.search(request), request, self.asset_limits)
+                except (ProviderValidationError, RetryableProviderError) as error:
+                    fallback_search = getattr(self.media, "search_local_fallback", None)
+                    if job.request.visual_source != "stock" or not callable(fallback_search):
+                        raise
+                    resolved_request = request.model_copy(update={"visual_source": "generated"})
+                    candidate = select_candidate(fallback_search(request), resolved_request, self.asset_limits)
+                    route = self.visual_router.route(scene, visual_source="generated")
+                    fallback = {
+                        "from": "rights-safe stock (Wikimedia Commons)",
+                        "to": "local generated CC0 scene art",
+                        "reason": str(error),
+                    }
                 if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before asset acquisition")
-                provider_name = self.media.provider_name(request) if hasattr(self.media, "provider_name") else type(self.media).__name__
+                provider_name = "local-generated-fallback" if fallback else (self.media.provider_name(resolved_request) if hasattr(self.media, "provider_name") else type(self.media).__name__)
                 path, cache_key, metadata = self.asset_acquirer.acquire(provider_name, candidate, cancellation_requested)
-                accepted[scene.scene_id] = {"scene_id": scene.scene_id, "visual_route": route.model_dump(mode="json"), "request": request.model_dump(mode="json"), "candidate": candidate.model_dump(mode="json"), "cache_key": cache_key, "path": str(path), "checksum_sha256": metadata["checksum_sha256"], "validation": metadata}
+                accepted[scene.scene_id] = {"scene_id": scene.scene_id, "visual_route": route.model_dump(mode="json"), "request": request.model_dump(mode="json"), "resolved_request": resolved_request.model_dump(mode="json"), "candidate": candidate.model_dump(mode="json"), "cache_key": cache_key, "path": str(path), "checksum_sha256": metadata["checksum_sha256"], "validation": metadata, **({"fallback": fallback} if fallback else {})}
                 self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", manifest)
             if any(not self._accepted_asset_valid(accepted.get(scene.scene_id)) for scene in package.scene_plans): raise ProviderValidationError("not every scene has a validated accepted asset")
+            if job.request.aspect_ratio == "9:16":
+                manifest["quality"] = validate_shorts_visual_manifest(manifest)
+                self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", manifest)
             selected = {scene_id: AssetCandidate.model_validate(item["candidate"]) for scene_id, item in accepted.items()}
             self._replace_json(job.id, JobState.ASSET_ACQUISITION, "license_manifest", attribution_manifest(selected))
             self._transition(job, JobState.ASSETS_READY); return
@@ -312,7 +341,15 @@ class PipelineOrchestrator:
             if abs(final_duration - job.request.target_duration_seconds) > target_tolerance:
                 raise ProviderValidationError("narration duration is outside the requested target tolerance")
             cues = timed_phrases(phrases, durations, self.voice_config.pause_seconds)
-            self._replace_json(job.id, JobState.VOICE_GENERATION, "timing_map", {"final_duration_seconds": final_duration, "expected_duration_seconds": expected_duration, "target_duration_seconds": job.request.target_duration_seconds, "target_duration_tolerance_seconds": target_tolerance, "phrases": [{"phrase_id": cue.phrase.phrase_id, "section_id": cue.phrase.section_id, "start_seconds": cue.start_seconds, "end_seconds": cue.end_seconds, "duration_seconds": cue.end_seconds - cue.start_seconds} for cue in cues]})
+            timing_map: dict[str, object] = {"final_duration_seconds": final_duration, "expected_duration_seconds": expected_duration, "target_duration_seconds": job.request.target_duration_seconds, "target_duration_tolerance_seconds": target_tolerance, "phrases": [{"phrase_id": cue.phrase.phrase_id, "section_id": cue.phrase.section_id, "start_seconds": cue.start_seconds, "end_seconds": cue.end_seconds, "duration_seconds": cue.end_seconds - cue.start_seconds} for cue in cues]}
+            if job.request.aspect_ratio == "9:16":
+                aligned: list[WordTiming] = []
+                for cue, item in zip(cues, measured, strict=True):
+                    aligned.extend(self.word_aligner.align(audio_path=Path(str(item["artifact_path"])), text=cue.phrase.text, phrase_id=cue.phrase.phrase_id, section_id=cue.phrase.section_id, phrase_start_seconds=cue.start_seconds, phrase_end_seconds=cue.end_seconds, ordinal_start=len(aligned)))
+                words = tuple(aligned)
+                timing_map["words"] = [{"word": word.word, "phrase_id": word.phrase_id, "section_id": word.section_id, "ordinal": word.ordinal, "start_seconds": word.start_seconds, "end_seconds": word.end_seconds} for word in words]
+                timing_map["alignment"] = {"provider": "local-waveform-v1", **verify_word_alignment(words, final_duration=final_duration, tolerance=self.voice_config.duration_tolerance_seconds)}
+            self._replace_json(job.id, JobState.VOICE_GENERATION, "timing_map", timing_map)
             self._transition(job, JobState.CAPTION_GENERATION); return
         if job.state is JobState.CAPTION_GENERATION:
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
@@ -321,13 +358,20 @@ class PipelineOrchestrator:
             durations = tuple(float(item["duration_seconds"]) for item in voices)
             cues = timed_phrases(phrases, durations, self.voice_config.pause_seconds)
             if job.request.captions_enabled:
-                srt, vtt = render_srt(cues, self.voice_config.caption_line_length), render_vtt(cues, self.voice_config.caption_line_length)
+                srt = render_srt(cues, self.voice_config.caption_line_length)
+                if job.request.aspect_ratio == "9:16":
+                    timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
+                    words = tuple(WordTiming(**value) for value in timing.get("words", []))
+                    profile = self.shorts_final_renderer.config
+                    vtt = render_highlighted_ass(words, width=profile.width, height=profile.height, font_size=profile.caption_font_size, margin_vertical=profile.caption_margin_vertical, margin_horizontal=profile.caption_margin_horizontal)
+                else:
+                    vtt = render_vtt(cues, self.voice_config.caption_line_length)
             else:
                 # Retain both typed artifacts so downstream render/checkpoint
                 # contracts remain stable; an empty WebVTT document burns no text.
                 srt, vtt = "", "WEBVTT\n\n"
             self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions_srt", "captions.srt", srt)
-            self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions", "captions.vtt", vtt)
+            self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions", "captions.ass" if job.request.aspect_ratio == "9:16" and job.request.captions_enabled else "captions.vtt", vtt)
             self._required_artifact(job.id, JobState.VOICE_GENERATION, "narration")
             self._required_artifact(job.id, JobState.CAPTION_GENERATION, "captions_srt")
             self._required_artifact(job.id, JobState.CAPTION_GENERATION, "captions")
@@ -335,7 +379,7 @@ class PipelineOrchestrator:
         if job.state is JobState.VOICE_READY:
             self._transition(job, JobState.PREVIEW_RENDERING); return
         if job.state is JobState.PREVIEW_RENDERING:
-            preview, identity = self._render_checkpoint(job, self.preview_renderer, JobState.PREVIEW_RENDERING, "preview", "preview.mp4", cancellation_requested)
+            preview, identity = self._render_checkpoint(job, self._preview_renderer_for(job), JobState.PREVIEW_RENDERING, "preview", "preview.mp4", cancellation_requested)
             self._transition(job, JobState.PREVIEW_READY); return
         if job.state is JobState.PREVIEW_READY:
             if not self._preview_is_current(job):
@@ -374,7 +418,7 @@ class PipelineOrchestrator:
             approval = self.approvals.decision(job.id, ApprovalGate.PREVIEW, reviewed_identity=identity)
             if approval is None or approval.status != "approved":
                 raise ProviderValidationError("final render requires approval of this exact preview")
-            self._render_checkpoint(job, self.final_renderer, JobState.FINAL_RENDERING, "final", "final.mp4", cancellation_requested, approval_identity=identity, approval_id=approval.id)
+            self._render_checkpoint(job, self._final_renderer_for(job), JobState.FINAL_RENDERING, "final", "final.mp4", cancellation_requested, approval_identity=identity, approval_id=approval.id)
             self._quality_gate(job)
             self._transition(job, JobState.FINAL_READY); return
         if job.state is JobState.FINAL_READY:
@@ -525,7 +569,45 @@ class PipelineOrchestrator:
             phrases = timing.get("phrases", [])
             expected = float(phrases[-1]["end_seconds"]) if isinstance(phrases, list) and phrases else 0.0
             captions = self._valid_artifact(job.id, JobState.CAPTION_GENERATION, "captions")
-            report = validate_final_artifact(path=Path(final.path), expected_duration=expected, renderer=self.final_renderer, captions_path=Path(captions.path) if captions else None, captions_required=job.request.captions_enabled).model_dump(mode="json")
+            renderer = self._final_renderer_for(job)
+            report = validate_final_artifact(path=Path(final.path), expected_duration=expected, renderer=renderer, captions_path=Path(captions.path) if captions else None, captions_required=job.request.captions_enabled).model_dump(mode="json")
+            if job.request.aspect_ratio == "9:16":
+                findings = list(report["findings"])
+                media = report.get("media", {})
+                actual_duration = float(media.get("duration_seconds", 0)) if isinstance(media, dict) else 0.0
+                alignment = timing.get("alignment")
+                segments, *_ = self._render_inputs(job, renderer)
+                paced = pace_segments(segments, renderer.config.scene_max_duration_seconds)
+                maximum_hold = max((segment.duration_seconds for segment in paced), default=0.0)
+                motion_variants = tuple(renderer.motion_variant(index) for index, segment in enumerate(paced) if segment.media_type == "image")
+                if not 30 <= actual_duration <= 55:
+                    findings.append({"code": "shorts_duration", "severity": "error", "message": f"Shorts duration {actual_duration:.3f}s is outside 30–55 seconds"})
+                if not isinstance(alignment, dict) or not alignment.get("verified") or float(alignment.get("first_word_seconds", 99)) > 3:
+                    findings.append({"code": "shorts_word_alignment", "severity": "error", "message": "word alignment is missing, unverified, or starts after the three-second hook window"})
+                if maximum_hold > renderer.config.scene_max_duration_seconds + 0.001:
+                    findings.append({"code": "shorts_pacing", "severity": "error", "message": "a visual hold exceeds the Shorts pacing limit"})
+                if len(motion_variants) >= 4 and len(set(motion_variants)) < 3:
+                    findings.append({"code": "shorts_repetitive_motion", "severity": "error", "message": "Shorts camera motion repeats without enough direction or speed variation"})
+                asset_quality = self._required_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest").get("quality")
+                if not isinstance(asset_quality, dict) or not asset_quality.get("passed"):
+                    findings.append({"code": "shorts_visual_style", "severity": "error", "message": "Shorts visual aspect ratio and style gate is missing or failed"})
+                if captions and job.request.captions_enabled:
+                    text = Path(captions.path).read_text(encoding="utf-8")
+                    safe = f"PlayResX: {renderer.config.width}" in text and f"PlayResY: {renderer.config.height}" in text and f",{renderer.config.caption_margin_horizontal},{renderer.config.caption_margin_horizontal},{renderer.config.caption_margin_vertical},1" in text
+                    if not safe:
+                        findings.append({"code": "shorts_caption_safe_area", "severity": "error", "message": "highlighted captions do not match the configured portrait safe area"})
+                    for row in (line for line in text.splitlines() if line.startswith("Dialogue:")):
+                        # ASS dialogue rows contain nine metadata fields before Text.
+                        # Split by field count so margins are not mistaken for caption
+                        # text, while preserving any commas that belong to the cue.
+                        cue_text = _ass_dialogue_text(row)
+                        visible = re.sub(r"\{[^}]*\}", "", cue_text)
+                        if any(len(line.strip()) > 18 for line in visible.split(r"\N")):
+                            findings.append({"code": "shorts_caption_line_width", "severity": "error", "message": "a highlighted caption line is too wide for the portrait safe area"})
+                            break
+                report["findings"] = findings
+                report["passed"] = not any(item["severity"] == "error" for item in findings)
+                report["shorts"] = {"aspect_ratio": "9:16", "maximum_visual_hold_seconds": maximum_hold, "motion_variants": list(motion_variants), "visual_quality": asset_quality, "word_alignment": alignment, "caption_safe_area": {"margin_horizontal": renderer.config.caption_margin_horizontal, "margin_vertical": renderer.config.caption_margin_vertical}}
         report["final_checksum_sha256"] = final.checksum_sha256
         self._checkpoint_json(job.id, JobState.FINAL_READY, "quality_report", report)
         self.events.append(job.id, "quality_gate_completed", passed=report["passed"], findings=report["findings"])
@@ -543,10 +625,22 @@ class PipelineOrchestrator:
         package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
         timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
         metadata_inputs = {"content_identity": content.checksum_sha256, "final_render_identity": final_manifest.get("render_identity"), "generator": {"provider": "deterministic-local", "model": None}, "template_version": self.publication_config.metadata_template_version, "config": self.publication_config.model_dump(mode="json", include={"title_max_length", "description_max_length", "tag_max_count", "tag_max_length", "tag_payload_max_length", "metadata_template_version"}), "timing_identity": self._required_artifact(job.id, JobState.VOICE_GENERATION, "timing_map").checksum_sha256}
+        music = None
+        if job.request.music_track:
+            if self.music_catalog is None:
+                raise ProviderValidationError("music was selected but no approved catalog is configured")
+            music = self.music_catalog.resolve(job.request.music_track)
+            metadata_inputs["music"] = music.model_dump(mode="json")
         metadata_identity = publication_identity(metadata_inputs)
         current = self._load_json_artifact(job.id, JobState.PUBLICATION_PREPARING, "metadata")
         if current is None or current.get("metadata_identity") != metadata_identity:
             data = metadata_from_package(package, timing, self.publication_config)
+            if music is not None and music.attribution_required:
+                description = str(data["description"]).rstrip() + "\n\nMusic: " + music.attribution
+                if len(description) > self.publication_config.description_max_length:
+                    raise ProviderValidationError("music attribution would exceed the publication description limit")
+                data["description"] = description
+                data["validation"]["music_attribution"] = "included"
             self._replace_json(job.id, JobState.PUBLICATION_PREPARING, "metadata", {**data, "metadata_identity": metadata_identity, "provenance": {**metadata_inputs, "validation": data["validation"]}})
         metadata = self._required_json(job.id, JobState.PUBLICATION_PREPARING, "metadata")
         assets = self._required_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest").get("scenes", {})
@@ -631,7 +725,12 @@ class PipelineOrchestrator:
         self._ensure_ownership(force=True)
         _event("render_started", job_id=job.id, render=name, output=str(output))
         self.events.append(job.id, "render_started", render=name)
-        result = renderer.render(segments, Path(narration.path), Path(captions.path), output, cancellation_requested=cancellation_requested)
+        music_data = inputs.get("music")
+        music_path = Path(str(music_data["path"])) if isinstance(music_data, dict) else None
+        if music_path is None:
+            result = renderer.render(segments, Path(narration.path), Path(captions.path), output, cancellation_requested=cancellation_requested)
+        else:
+            result = renderer.render(segments, Path(narration.path), Path(captions.path), output, music=music_path, cancellation_requested=cancellation_requested)
         self._ensure_ownership(force=True)
         identity = hashlib.sha256(json.dumps({"source_render_identity": source_render_identity, "artifact_checksum": result["checksum_sha256"], "render_instance": uuid.uuid4().hex}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         provenance = {"render_identity": identity, "source_render_identity": source_render_identity, "renderer_template_version": renderer.template_version, "input_identity": input_identity, "inputs": inputs, "probe": result["metadata"], "validation": result["metadata"], "command": result["command"], "approval_identity": approval_identity, "approval_id": approval_id}
@@ -654,28 +753,40 @@ class PipelineOrchestrator:
         if any(not self._accepted_asset_valid(value) for value in assets.values()): raise ProviderValidationError("accepted asset was modified or is unsafe")
         segments = build_timeline(package, timing, assets, tolerance=renderer.config.sync_tolerance_seconds)
         inputs = {"content": content.checksum_sha256, "timing_map": timing_artifact.checksum_sha256, "narration": narration.checksum_sha256, "captions": captions.checksum_sha256, "assets": [{"scene_id": segment.scene_id, "checksum_sha256": segment.asset_checksum} for segment in segments]}
+        if job.request.music_track:
+            if self.music_catalog is None:
+                raise ProviderValidationError("music was selected but no approved catalog is configured")
+            track = self.music_catalog.resolve(job.request.music_track)
+            inputs["music"] = track.model_dump(mode="json")
         input_identity = hashlib.sha256(json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return segments, narration, captions, input_identity, inputs
 
     def _preview_is_current(self, job: PipelineJob) -> bool:
         """Fail closed when the approved preview or any of its inputs changed."""
         try:
+            renderer = self._preview_renderer_for(job)
             preview = self._required_artifact(job.id, JobState.PREVIEW_RENDERING, "preview")
             manifest = self._required_json(job.id, JobState.PREVIEW_RENDERING, "preview_manifest")
-            segments, narration, captions, input_identity, inputs = self._render_inputs(job, self.preview_renderer)
+            segments, narration, captions, input_identity, inputs = self._render_inputs(job, renderer)
             expected_source_identity = self._render_identity(
-                self.preview_renderer, segments, narration, captions, input_identity,
+                renderer, segments, narration, captions, input_identity,
             )
             if manifest.get("artifact_checksum") != preview.checksum_sha256:
                 return False
             if manifest.get("input_identity") != input_identity or manifest.get("inputs") != inputs:
                 return False
-            if manifest.get("source_render_identity") != expected_source_identity or manifest.get("renderer_template_version") != self.preview_renderer.template_version:
+            if manifest.get("source_render_identity") != expected_source_identity or manifest.get("renderer_template_version") != renderer.template_version:
                 return False
-            self.preview_renderer.validate(Path(preview.path), segments[-1].end_seconds)
+            renderer.validate(Path(preview.path), segments[-1].end_seconds)
             return True
         except ProviderValidationError:
             return False
+
+    def _preview_renderer_for(self, job: PipelineJob) -> PreviewRenderer:
+        return self.shorts_preview_renderer if job.request.aspect_ratio == "9:16" else self.preview_renderer
+
+    def _final_renderer_for(self, job: PipelineJob) -> PreviewRenderer:
+        return self.shorts_final_renderer if job.request.aspect_ratio == "9:16" else self.final_renderer
 
     @staticmethod
     def _render_identity(renderer: PreviewRenderer, segments: tuple, narration: Artifact, captions: Artifact, input_identity: str, approval_identity: str | None = None) -> str:
@@ -889,3 +1000,9 @@ class PipelineOrchestrator:
         if self.external_operations is not None:
             self.external_operations.complete(key, result.model_dump(mode="json"))
         return result
+
+
+def _ass_dialogue_text(row: str) -> str:
+    """Return the ASS Text field without swallowing commas in the caption."""
+    fields = row.split(",", 9)
+    return fields[-1] if len(fields) == 10 else ""

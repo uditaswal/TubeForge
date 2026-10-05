@@ -134,19 +134,22 @@ class SourceClipConfig(BaseModel):
         return self
 
 class CodexProviderConfig(BaseModel):
-    """Non-secret limits for the opt-in Codex CLI content adapter."""
+    """Non-secret limits for the worker-to-host Codex runner client."""
 
     model_config = ConfigDict(extra="forbid")
 
     executable: str = Field(default="codex", min_length=1, max_length=4_096)
-    model: str = Field(default="gpt-5.2-codex", min_length=1, max_length=200)
+    model: str = Field(default="gpt-5.6-sol", min_length=1, max_length=200)
     timeout_seconds: int = Field(default=900, ge=1, le=7_200)
     max_output_bytes: int = Field(default=2_000_000, ge=1_024, le=20_000_000)
     max_diagnostic_bytes: int = Field(default=8_192, ge=256, le=65_536)
     reservation_seconds: int = Field(default=1_200, ge=10, le=14_400)
     repair_attempt_limit: int = Field(default=0, ge=0, le=5)
-    prompt_template_version: str = Field(default="m6-content-v1", min_length=1, max_length=100)
+    prompt_template_version: str = Field(default="m6-content-v2", min_length=1, max_length=100)
     max_prompt_chars: int = Field(default=60_000, ge=1_000, le=200_000)
+    socket_path: Path = Path("/run/tubeforge-codex/codex.sock")
+    socket_timeout_seconds: int = Field(default=490, ge=1, le=600)
+    invocation_limit: int = Field(default=2, ge=1, le=2)
 
     @field_validator("executable", "model", "prompt_template_version")
     @classmethod
@@ -167,8 +170,9 @@ class OllamaProviderConfig(BaseModel):
     inference_timeout_seconds: int = Field(default=300, ge=1, le=7_200)
     max_response_bytes: int = Field(default=2_000_000, ge=1_024, le=20_000_000)
     retries: int = Field(default=2, ge=0, le=5)
+    validation_retries: int = Field(default=0, ge=0, le=3)
     reservation_seconds: int = Field(default=600, ge=10, le=14_400)
-    prompt_template_version: str = Field(default="m6-content-v1", min_length=1, max_length=100)
+    prompt_template_version: str = Field(default="m6-content-v2", min_length=1, max_length=100)
     max_prompt_chars: int = Field(default=60_000, ge=1_000, le=200_000)
 
     @field_validator("base_url")
@@ -270,14 +274,20 @@ class RenderProfile(BaseModel):
     minimum_free_bytes: int = Field(default=250_000_000, ge=1)
     sync_tolerance_seconds: float = Field(default=0.25, ge=0.01, le=2)
     caption_font_size: int = Field(default=26, ge=12, le=96)
+    caption_margin_vertical: int = Field(default=36, ge=0, le=800)
+    caption_margin_horizontal: int = Field(default=40, ge=0, le=800)
+    word_highlight_captions: bool = False
+    scene_max_duration_seconds: float = Field(default=7_200, ge=0.5, le=7_200)
     image_motion_enabled: bool = True
     image_motion_zoom: float = Field(default=1.08, ge=1.0, le=1.25)
+    image_motion_overscan: float = Field(default=2.0, ge=1.0, le=2.0)
     renderer_version: str = Field(default="m9-preview-v1", min_length=1, max_length=100)
 
     @model_validator(mode="after")
-    def require_16_by_9(self) -> "RenderProfile":
-        if abs(self.width / self.height - 16 / 9) > 0.02:
-            raise ValueError("preview resolution must be 16:9")
+    def require_supported_aspect_ratio(self) -> "RenderProfile":
+        ratio = self.width / self.height
+        if min(abs(ratio - 16 / 9), abs(ratio - 9 / 16)) > 0.02:
+            raise ValueError("render resolution must be 16:9 or 9:16")
         if self.video_codec not in SUPPORTED_VIDEO_ENCODERS:
             raise ValueError(f"unsupported video encoder: {self.video_codec}")
         if self.audio_codec not in SUPPORTED_AUDIO_ENCODERS:
@@ -297,6 +307,37 @@ class FinalRenderConfig(RenderProfile):
     height: int = Field(default=1080, ge=90, le=2160)
     audio_bitrate: str = "160k"
     renderer_version: str = "m10-final-v1"
+
+
+class ShortsPreviewRenderConfig(RenderProfile):
+    """Fast portrait review render using the same timing as the final Short."""
+
+    width: int = 540
+    height: int = 960
+    caption_font_size: int = 46
+    caption_margin_vertical: int = 180
+    caption_margin_horizontal: int = 48
+    word_highlight_captions: bool = True
+    scene_max_duration_seconds: float = 3.0
+    image_motion_overscan: float = 1.25
+    renderer_version: str = "shorts-preview-v1"
+
+
+class ShortsFinalRenderConfig(RenderProfile):
+    """YouTube Shorts export profile."""
+
+    width: int = 1080
+    height: int = 1920
+    fps: int = 30
+    audio_bitrate: str = "160k"
+    caption_font_size: int = 80
+    caption_margin_vertical: int = 360
+    caption_margin_horizontal: int = 96
+    word_highlight_captions: bool = True
+    scene_max_duration_seconds: float = 3.0
+    image_motion_overscan: float = 1.25
+    minimum_free_bytes: int = 500_000_000
+    renderer_version: str = "shorts-final-v1"
 
 
 class PublicationPreparationConfig(BaseModel):
@@ -404,9 +445,23 @@ class MusicTrackConfig(BaseModel):
     """An operator-approved background track; arbitrary URLs are never accepted per job."""
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
+    path: Path | None = None
     source_url: str = Field(min_length=1, max_length=2_000)
+    license_name: str = Field(min_length=1, max_length=300)
     license_url: str = Field(min_length=1, max_length=2_000)
+    attribution_required: bool = False
     attribution: str = Field(default="", max_length=1_000)
+    publishing_allowed: bool = True
+
+    @model_validator(mode="after")
+    def require_publishable_rights_record(self) -> "MusicTrackConfig":
+        if self.license_name.strip().casefold() in {"free", "royalty free", "royalty-free", "unknown", "n/a"}:
+            raise ValueError("music must record the actual licence name")
+        if not self.publishing_allowed:
+            raise ValueError("configured music must permit publishing")
+        if self.attribution_required and not self.attribution.strip():
+            raise ValueError("attribution-required music needs attribution text")
+        return self
 
 class VideoPresetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -416,6 +471,17 @@ class VideoPresetConfig(BaseModel):
     visual_style: str = Field(default="cinematic-tech", min_length=1, max_length=100)
     review_mode: str = Field(default="manual", pattern=r"^(manual|auto)$")
     mcp_servers: tuple[str, ...] = ()
+    aspect_ratio: str = Field(default="16:9", pattern=r"^(16:9|9:16)$")
+    minimum_duration_seconds: int = Field(default=30, ge=30, le=7_200)
+    maximum_duration_seconds: int = Field(default=7_200, ge=30, le=7_200)
+
+    @model_validator(mode="after")
+    def require_duration_within_preset_bounds(self) -> "VideoPresetConfig":
+        if self.minimum_duration_seconds > self.maximum_duration_seconds:
+            raise ValueError("preset minimum duration cannot exceed maximum duration")
+        if not self.minimum_duration_seconds <= self.duration_seconds <= self.maximum_duration_seconds:
+            raise ValueError("preset duration must be within its configured bounds")
+        return self
 
 class VideoGenerationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -439,16 +505,17 @@ class PipelineConfig(BaseModel):
     # ``provider`` is retained only to read older configuration files. New
     # deployments select the independent content and voice adapters below.
     provider: str | None = Field(default=None, pattern=r"^(fake|codex|piper)$")
-    content_provider: str = Field(default="fake", pattern=r"^(fake|fixed|codex|ollama)$")
+    content_provider: str = Field(default="fake", pattern=r"^(fake|fixed|codex)$")
     voice_provider: str = Field(default="fake", pattern=r"^(fake|piper|kokoro|hybrid)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
-    ollama: OllamaProviderConfig = Field(default_factory=OllamaProviderConfig)
     piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
     kokoro: KokoroProviderConfig = Field(default_factory=KokoroProviderConfig)
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
     preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
     final: FinalRenderConfig = Field(default_factory=FinalRenderConfig)
+    shorts_preview: ShortsPreviewRenderConfig = Field(default_factory=ShortsPreviewRenderConfig)
+    shorts_final: ShortsFinalRenderConfig = Field(default_factory=ShortsFinalRenderConfig)
     publication: PublicationPreparationConfig = Field(default_factory=PublicationPreparationConfig)
     youtube: YouTubePublishingConfig = Field(default_factory=YouTubePublishingConfig)
     verification: PublicationVerificationConfig = Field(default_factory=PublicationVerificationConfig)
@@ -572,7 +639,8 @@ def validate_selected_provider(settings: Settings) -> None:
             raise RuntimeError("pipeline.kokoro.voices_path must name an installed Kokoro voice pack")
     if settings.pipeline.content_provider == "codex":
         codex = settings.pipeline.codex
-        _validate_executable(codex.executable, "pipeline.codex.executable")
+        if not codex.socket_path.is_absolute():
+            raise RuntimeError("pipeline.codex.socket_path must be an absolute Unix-socket path")
 
 
 def _resolve_path(value: Path) -> Path:

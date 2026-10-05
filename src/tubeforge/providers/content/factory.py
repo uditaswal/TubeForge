@@ -5,8 +5,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from tubeforge.core.config import Settings
 from tubeforge.db.repositories import GenerationCacheRepository
 from tubeforge.domain.providers import ContentProvider
-from tubeforge.providers.content.codex_cli import CodexCliContentProvider
-from tubeforge.providers.content.ollama import OllamaContentProvider
+from tubeforge.providers.content.host_runner import HostRunnerContentProvider
 from tubeforge.providers.fake import FakeContentProvider, FixedScriptContentProvider
 
 
@@ -17,6 +16,4 @@ def create_content_provider(settings: Settings, session_factory: sessionmaker[Se
     if settings.pipeline.content_provider == "fixed":
         return FixedScriptContentProvider()
     cache = GenerationCacheRepository(session_factory)
-    if settings.pipeline.content_provider == "ollama":
-        return OllamaContentProvider(settings.pipeline.ollama, cache)
-    return CodexCliContentProvider(settings.pipeline.codex, cache)
+    return HostRunnerContentProvider(settings.pipeline.codex, cache)

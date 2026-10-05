@@ -1,0 +1,21 @@
+{
+  "operation": "GenerateShortsScriptV1",
+  "request": {
+    "topic": "Why TubeForge reviews a rendered Short before publishing",
+    "angle": "Explain the three checkpoints: an approved source-grounded script, an inspected real portrait render, and explicit publication approval. A finished file is not permission to publish.",
+    "target_duration_seconds": 45,
+    "language": "en",
+    "audience": "software engineers",
+    "prompt_version": "m6-content-v4",
+    "sources": [
+      {
+        "source_id": "tubeforge-readme-review-gates",
+        "url": "https://github.com/uditaswal/Youtube_Video_Producer/blob/main/readme.md",
+        "title": "TubeForge README: source, review, and publication gates",
+        "excerpt": "TubeForge is a self-hosted, approval-gated video-production pipeline. It creates durable generation jobs, produces narration, captions, and media renders, records review and publication checkpoints, and exposes a local Creator Studio dashboard. TubeForge is safe by default: no credential is stored in configuration, YouTube publishing is disabled and dry-run by default, and public publication requires an explicit approval path. Approved source notes are the minimum durable source packet. During script review, Creator Studio shows the exact saved sources above the narration. A Short is ready for review only after a real video has been rendered and manually inspected for a source-grounded script, readable captions, varied visuals, intelligible narration with appropriately mixed music, documented music licensing, and a working signed-in dashboard workflow. Passing automated tests or producing schema-valid script data does not establish creative quality."
+      }
+    ],
+    "review_mode": "manual",
+    "aspect_ratio": "9:16"
+  }
+}

@@ -35,6 +35,19 @@ class TimelineSegment:
     @property
     def duration_seconds(self)->float: return self.end_seconds-self.start_seconds
 
+
+def pace_segments(segments: tuple[TimelineSegment, ...], maximum_seconds: float) -> tuple[TimelineSegment, ...]:
+    """Split long visual holds into deterministic camera cuts for short-form pacing."""
+    output: list[TimelineSegment] = []
+    for segment in segments:
+        slices = max(1, math.ceil(segment.duration_seconds / maximum_seconds))
+        duration = segment.duration_seconds / slices
+        for index in range(slices):
+            start = segment.start_seconds + index * duration
+            end = segment.end_seconds if index == slices - 1 else start + duration
+            output.append(TimelineSegment(segment.scene_id, segment.section_id, start, end, segment.asset_path, segment.asset_checksum, segment.media_type))
+    return tuple(output)
+
 def build_timeline(package: ContentPackage, timing_map: dict[str,object], assets: dict[str,object], *, tolerance:float)->tuple[TimelineSegment,...]:
     phrases=timing_map.get("phrases")
     if not isinstance(phrases,list) or not phrases: raise ProviderValidationError("preview requires a nonempty validated timing map")
@@ -82,15 +95,21 @@ class PreviewFFprobe:
 class PreviewRenderer:
     def __init__(self,config:RenderProfile,*,ffmpeg:str="ffmpeg",probe:PreviewFFprobe|None=None,process_factory:Callable[..., Any]=subprocess.Popen,template_version:str=RENDERER_TEMPLATE_VERSION,poll_seconds:float=0.1)->None: self.config,self.ffmpeg,self.probe,self.process_factory,self.template_version,self.poll_seconds=config,ffmpeg,probe or PreviewFFprobe(timeout_seconds=config.ffprobe_timeout_seconds),process_factory,template_version,poll_seconds
     def identity(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path, *, approval_identity: str | None = None)->str:
-        value={"renderer":self.config.renderer_version,"template_version":self.template_version,"settings":self.config.model_dump(mode="json"),"narration":checksum(narration),"captions":checksum(captions),"segments":[(s.scene_id,s.section_id,s.start_seconds,s.end_seconds,s.asset_checksum,s.media_type) for s in segments],"transition":"cut", "approval_identity": approval_identity}
+        paced = pace_segments(segments, self.config.scene_max_duration_seconds)
+        value={"renderer":self.config.renderer_version,"template_version":self.template_version,"settings":self.config.model_dump(mode="json"),"narration":checksum(narration),"captions":checksum(captions),"segments":[(s.scene_id,s.section_id,s.start_seconds,s.end_seconds,s.asset_checksum,s.media_type) for s in paced],"transition":"paced-cut","motion_variants":[self.motion_variant(index) for index, segment in enumerate(paced) if segment.media_type == "image"], "approval_identity": approval_identity}
         return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(",",":")).encode()).hexdigest()
-    def command(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path)->list[str]:
+    def command(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path,*,music:Path|None=None)->list[str]:
+        segments = pace_segments(segments, self.config.scene_max_duration_seconds)
         command=[self.ffmpeg,"-nostdin","-y","-v","error","-threads",str(self.config.threads)]; filters=[]
         for i,scene in enumerate(segments):
             duration=f"{scene.duration_seconds:.6f}"
             command.extend(("-loop","1","-t",duration,"-i",str(scene.asset_path)) if scene.media_type=="image" else ("-stream_loop","-1","-t",duration,"-i",str(scene.asset_path)))
             filters.append(self._scene_filter(i, scene, duration))
-        command.extend(("-i",str(narration))); labels="".join(f"[v{i}]" for i in range(len(segments))); caption=str(captions.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'"); style=f"FontSize={self.config.caption_font_size},Alignment=2,MarginV=36,Outline=2,Shadow=1"
+        command.extend(("-i",str(narration)))
+        narration_index = len(segments)
+        if music is not None:
+            command.extend(("-stream_loop","-1","-i",str(music)))
+        labels="".join(f"[v{i}]" for i in range(len(segments))); caption=str(captions.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'"); style=f"FontSize={self.config.caption_font_size},Alignment=2,MarginV={self.config.caption_margin_vertical},MarginL={self.config.caption_margin_horizontal},MarginR={self.config.caption_margin_horizontal},Outline=2,Shadow=1"
         # Each independently rendered scene can lose up to one frame when its
         # measured narration duration is quantized to the configured frame
         # rate.  Without padding, ``-shortest`` uses that cumulative short
@@ -103,8 +122,17 @@ class PreviewRenderer:
         filters += [
             f"{labels}concat=n={len(segments)}:v=1:a=0[base]",
             f"[base]subtitles='{caption}':force_style='{style}',tpad=stop_mode=clone:stop_duration=10[outv]",
-            f"[{len(segments)}:a]apad=pad_dur=10[outa]",
         ]
+        if music is None:
+            filters.append(f"[{narration_index}:a]apad=pad_dur=10[outa]")
+        else:
+            music_index = narration_index + 1
+            filters.extend((
+                f"[{narration_index}:a]asplit=2[narration_mix][speech_key]",
+                f"[{music_index}:a]volume=0.16[music_quiet]",
+                "[music_quiet][speech_key]sidechaincompress=threshold=0.015:ratio=10:attack=20:release=350[ducked_music]",
+                "[narration_mix][ducked_music]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95,apad=pad_dur=10[outa]",
+            ))
         return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{segments[-1].end_seconds:.6f}","-movflags","+faststart",str(output)]
 
     def _scene_filter(self, index: int, scene: TimelineSegment, duration: str) -> str:
@@ -123,18 +151,34 @@ class PreviewRenderer:
         if scene.media_type != "image" or not self.config.image_motion_enabled:
             return f"[{index}:v]{common}[v{index}]"
         frames = max(1, math.ceil(scene.duration_seconds * self.config.fps))
-        # Alternate the pan direction by stable scene order.  The zoom grows
-        # gently from 1.0 to the configured ceiling and is independent of the
-        # source asset's dimensions or filename.
-        direction = "iw-iw/zoom" if index % 2 else "0"
-        zoom = f"min(zoom+({self.config.image_motion_zoom:.4f}-1)/{frames},{self.config.image_motion_zoom:.4f})"
+        # Four stable variants change direction and speed without disturbing
+        # the narration clock. Short paced cuts remain intentionally crisp;
+        # dissolves between sub-three-second scenes made caption reading feel
+        # softer and reduced the useful time on each composition.
+        variant = index % 4
+        ceiling = 1 + (self.config.image_motion_zoom - 1) * (1 if variant in {0, 2} else 0.62)
+        zoom = f"min(zoom+({ceiling:.4f}-1)/{frames},{ceiling:.4f})"
+        if variant == 0:
+            x, y = f"(iw-iw/zoom)*on/{frames}", "ih/2-ih/zoom/2"
+        elif variant == 1:
+            x, y = f"(iw-iw/zoom)*(1-on/{frames})", "ih/2-ih/zoom/2"
+        elif variant == 2:
+            x, y = "iw/2-iw/zoom/2", f"(ih-ih/zoom)*on/{frames}"
+        else:
+            x, y = "iw/2-iw/zoom/2", f"(ih-ih/zoom)*(1-on/{frames})"
+        overscan_width = round(self.config.width * self.config.image_motion_overscan)
+        overscan_height = round(self.config.height * self.config.image_motion_overscan)
         return (
-            f"[{index}:v]scale={self.config.width * 2}:{self.config.height * 2}:"
-            f"force_original_aspect_ratio=increase,crop={self.config.width * 2}:{self.config.height * 2},"
-            f"zoompan=z='{zoom}':x='{direction}':y='ih/2-ih/zoom/2':d={frames}:"
+            f"[{index}:v]scale={overscan_width}:{overscan_height}:"
+            f"force_original_aspect_ratio=increase,crop={overscan_width}:{overscan_height},"
+            f"zoompan=z='{zoom}':x='{x}':y='{y}':d={frames}:"
             f"s={self.config.width}x{self.config.height}:fps={self.config.fps},"
             f"trim=duration={duration},setpts=PTS-STARTPTS[v{index}]"
         )
+
+    @staticmethod
+    def motion_variant(index: int) -> str:
+        return ("pan-right-fast", "pan-left-gentle", "pan-down-fast", "pan-up-gentle")[index % 4]
     def validate(self,path:Path,expected:float)->dict[str,Any]:
         data=self.probe.inspect(path); streams=data.get("streams"); video=next((x for x in streams if x.get("codec_type")=="video"),None) if isinstance(streams,list) else None; audio=next((x for x in streams if x.get("codec_type")=="audio"),None) if isinstance(streams,list) else None
         try: duration=float(data["format"]["duration"]); width,height=int(video["width"]),int(video["height"]); rate=str(video["avg_frame_rate"]); sample_rate,channels=int(audio["sample_rate"]),int(audio["channels"])
@@ -161,12 +205,13 @@ class PreviewRenderer:
                 f"sample_rate={sample_rate!r}, channels={channels!r})"
             )
         return {"duration_seconds":duration,"width":width,"height":height,"frame_rate":rate,"fps":fps,"video_codec":str(video["codec_name"]),"audio_codec":str(audio["codec_name"]),"sample_rate":sample_rate,"channels":channels}
-    def render(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path,*,cancellation_requested:Callable[[],bool]|None=None)->dict[str,Any]:
+    def render(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path,*,music:Path|None=None,cancellation_requested:Callable[[],bool]|None=None)->dict[str,Any]:
         if not narration.is_file() or not captions.is_file() or narration.stat().st_size==0 or captions.stat().st_size==0: raise ProviderValidationError("preview narration or captions are missing")
         if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview command construction")
         output.parent.mkdir(parents=True,exist_ok=True)
         if shutil.disk_usage(output.parent).free<self.config.minimum_free_bytes: raise RetryableProviderError("insufficient disk space for preview render")
-        temporary=output.with_name(f"{output.stem}.part{output.suffix}"); temporary.unlink(missing_ok=True); command=self.command(segments,narration,captions,temporary)
+        if music is not None and (not music.is_file() or music.stat().st_size == 0): raise ProviderValidationError("selected music is missing or empty")
+        temporary=output.with_name(f"{output.stem}.part{output.suffix}"); temporary.unlink(missing_ok=True); command=self.command(segments,narration,captions,temporary,music=music)
         try:
             if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before FFmpeg execution")
             # FFmpeg can emit enough diagnostics to fill a PIPE while a long

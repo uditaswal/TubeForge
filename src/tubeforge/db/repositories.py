@@ -99,6 +99,11 @@ class GenerationCacheReservation:
 
 
 @dataclass(frozen=True, slots=True)
+class GenerationExhausted:
+    cache_key: str
+
+
+@dataclass(frozen=True, slots=True)
 class CachedGeneration:
     package: dict[str, object]
     provenance: dict[str, object]
@@ -145,13 +150,15 @@ class JobRepository:
 
         A claimed or actively processing job is deliberately never deletable: this
         keeps a worker from writing a checkpoint after its database row vanished.
-        Publication states are also excluded because they can represent a remote
-        side effect that must remain auditable.
+        Publication states that may have crossed a remote side-effect boundary
+        are excluded. Publication approval itself is safe: no publishing call
+        can occur until that explicit decision exists.
         """
         deletable = {
             JobState.SCRIPT_APPROVAL_REQUIRED,
             JobState.PREVIEW_READY,
             JobState.FINAL_READY,
+            JobState.PUBLICATION_APPROVAL_REQUIRED,
             JobState.FAILED_RETRYABLE,
             JobState.FAILED_VALIDATION,
             JobState.FAILED_EXHAUSTED,
@@ -447,6 +454,14 @@ class ArtifactRepository:
                 .order_by(ArtifactRecord.created_at, ArtifactRecord.stage, ArtifactRecord.name)
             )
             return [_artifact_from_record(record) for record in records]
+
+    def remove_for_job(self, job_id: str) -> list[Artifact]:
+        """Forget one retained job's local artifacts but preserve its audit trail."""
+        with self._session_factory.begin() as session:
+            records = list(session.scalars(select(ArtifactRecord).where(ArtifactRecord.job_id == job_id)))
+            artifacts = [_artifact_from_record(record) for record in records]
+            session.execute(delete(ArtifactRecord).where(ArtifactRecord.job_id == job_id))
+            return artifacts
 
     def save(self, artifact: Artifact) -> Artifact:
         with self._session_factory.begin() as session:
@@ -858,7 +873,7 @@ class GenerationCacheRepository:
 
     def reserve_or_get(
         self, request: ContentRequest, provider: str, model: str, prompt_version: str, *, now: datetime, reservation_seconds: int
-    ) -> CachedGeneration | GenerationCacheReservation | None:
+    ) -> CachedGeneration | GenerationCacheReservation | GenerationExhausted | None:
         """Return accepted data, a writer token, or None while another valid writer owns it."""
         now = _as_utc(now)
         key = self.cache_key(request, provider, model, prompt_version)
@@ -867,7 +882,7 @@ class GenerationCacheRepository:
         expires = now + timedelta(seconds=reservation_seconds)
         try:
             with self._session_factory.begin() as session:
-                session.add(GenerationCacheRecord(cache_key=key, normalized_request_json=material, provider=provider, model=model, prompt_version=prompt_version, state="reserved", reservation_token=token, reservation_expires_at=expires, package_json=None, provenance_json=None, usage_json=None, created_at=now, updated_at=now, accepted_at=None))
+                session.add(GenerationCacheRecord(cache_key=key, normalized_request_json=material, provider=provider, model=model, prompt_version=prompt_version, state="reserved", reservation_token=token, reservation_expires_at=expires, package_json=None, provenance_json=None, usage_json=None, invocation_count=0, failure_json=None, created_at=now, updated_at=now, accepted_at=None))
             return GenerationCacheReservation(key, token)
         except IntegrityError:
             with self._session_factory.begin() as session:
@@ -876,16 +891,18 @@ class GenerationCacheRepository:
                     return None
                 if record.state == "accepted" and record.package_json and record.provenance_json and record.usage_json:
                     return CachedGeneration(json.loads(record.package_json), json.loads(record.provenance_json), json.loads(record.usage_json))
+                if record.state == "exhausted":
+                    return GenerationExhausted(key)
                 expires_at = _as_utc(record.reservation_expires_at) if record.reservation_expires_at else None
-                if record.state == "reserved" and expires_at and expires_at <= now:
+                if record.state == "retryable" or (record.state == "reserved" and expires_at and expires_at <= now):
                     statement = (
                         update(GenerationCacheRecord)
                         .where(
                             GenerationCacheRecord.cache_key == key,
-                            GenerationCacheRecord.state == "reserved",
-                            GenerationCacheRecord.reservation_expires_at <= now,
+                            (GenerationCacheRecord.state == "retryable") | ((GenerationCacheRecord.state == "reserved") & (GenerationCacheRecord.reservation_expires_at <= now)),
                         )
                         .values(
+                            state="reserved",
                             reservation_token=token,
                             reservation_expires_at=expires,
                             normalized_request_json=material,
@@ -924,6 +941,25 @@ class GenerationCacheRepository:
                 )
             )
             return result.rowcount == 1
+
+    def consume_invocation(self, reservation: GenerationCacheReservation, *, maximum: int, now: datetime) -> bool:
+        """Atomically consume one external-call allowance for this immutable draft."""
+        with self._session_factory.begin() as session:
+            result = session.execute(update(GenerationCacheRecord).where(GenerationCacheRecord.cache_key == reservation.cache_key, GenerationCacheRecord.state == "reserved", GenerationCacheRecord.reservation_token == reservation.token, GenerationCacheRecord.invocation_count < maximum).values(invocation_count=GenerationCacheRecord.invocation_count + 1, updated_at=_as_utc(now)).execution_options(synchronize_session=False))
+            return result.rowcount == 1
+
+    def release_after_invocation_failure(self, reservation: GenerationCacheReservation, *, maximum: int, failure: dict[str, object], now: datetime) -> bool:
+        """Preserve the count across retryable worker/job restarts; never reset it."""
+        with self._session_factory.begin() as session:
+            record = session.scalar(select(GenerationCacheRecord).where(GenerationCacheRecord.cache_key == reservation.cache_key, GenerationCacheRecord.state == "reserved", GenerationCacheRecord.reservation_token == reservation.token))
+            if record is None:
+                return False
+            record.state = "exhausted" if record.invocation_count >= maximum else "retryable"
+            record.reservation_token = None
+            record.reservation_expires_at = None
+            record.failure_json = json.dumps(failure, sort_keys=True)
+            record.updated_at = _as_utc(now)
+            return True
 
 
 def _as_utc(value: datetime) -> datetime:

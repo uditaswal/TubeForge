@@ -7,6 +7,7 @@ import textwrap
 from dataclasses import dataclass
 
 from tubeforge.pipeline.narration import NarrationPhrase
+from tubeforge.pipeline.alignment import WordTiming
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,3 +69,60 @@ def render_vtt(cues: tuple[TimedPhrase, ...], line_length: int = 42) -> str:
         rows.extend((f"{_timestamp(cue.start_seconds, '.')} --> {_timestamp(cue.end_seconds, '.')}", _cue_text(cue.phrase.text, line_length, vtt=True), ""))
         previous = cue.end_seconds
     return "\n".join(rows)
+
+
+def render_highlighted_ass(
+    words: tuple[WordTiming, ...],
+    *,
+    width: int,
+    height: int,
+    font_size: int,
+    margin_vertical: int,
+    margin_horizontal: int,
+    words_per_cue: int = 3,
+) -> str:
+    """Render word-timed, safe-area portrait captions with active highlighting."""
+    if not words:
+        raise ValueError("highlighted captions require aligned words")
+    header = (
+        "[Script Info]\nScriptType: v4.00+\n"
+        f"PlayResX: {width}\nPlayResY: {height}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,"
+        "Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,"
+        "Alignment,MarginL,MarginR,MarginV,Encoding\n"
+        f"Style: Shorts,Arial,{font_size},&H00FFFFFF,&H0000D7FF,&H00101010,&H80000000,"
+        f"1,0,0,0,100,100,0,0,1,6,2,2,{margin_horizontal},{margin_horizontal},{margin_vertical},1\n\n"
+        "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
+    )
+    rows = [header]
+    for index, word in enumerate(words):
+        group_start = (index // words_per_cue) * words_per_cue
+        group = words[group_start : group_start + words_per_cue]
+        rendered = []
+        for candidate in group:
+            value = _ass_escape(candidate.word.upper())
+            rendered.append(f"{{\\c&H0000D7FF&\\b1}}{value}{{\\rShorts}}" if candidate.ordinal == word.ordinal else value)
+        if sum(len(candidate.word) for candidate in group) + max(0, len(group) - 1) > 16 and len(rendered) > 1:
+            split_at = (len(rendered) + 1) // 2
+            cue_text = " ".join(rendered[:split_at]) + r"\N" + " ".join(rendered[split_at:])
+        else:
+            cue_text = " ".join(rendered)
+        rows.append(
+            "Dialogue: 0,"
+            f"{_ass_timestamp(word.start_seconds)},{_ass_timestamp(word.end_seconds)},"
+            f"Shorts,,{margin_horizontal},{margin_horizontal},{margin_vertical},,{cue_text}\n"
+        )
+    return "".join(rows)
+
+
+def _ass_timestamp(seconds: float) -> str:
+    centiseconds = max(0, round(seconds * 100))
+    hours, remainder = divmod(centiseconds, 360_000)
+    minutes, remainder = divmod(remainder, 6_000)
+    seconds_part, fraction = divmod(remainder, 100)
+    return f"{hours}:{minutes:02}:{seconds_part:02}.{fraction:02}"
+
+
+def _ass_escape(value: str) -> str:
+    return value.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")

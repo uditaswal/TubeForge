@@ -71,7 +71,7 @@ def test_source_ingestion_needs_explicit_hosts() -> None:
         })
 
 
-def test_codex_and_piper_selection_validates_both_executables(tmp_path: Path) -> None:
+def test_codex_and_piper_selection_requires_an_absolute_socket_path(tmp_path: Path) -> None:
     model = tmp_path / "voice.onnx"
     model.write_bytes(b"model")
     piper = tmp_path / "piper"
@@ -89,7 +89,7 @@ def test_codex_and_piper_selection_validates_both_executables(tmp_path: Path) ->
                 "  content_provider: codex",
                 "  voice_provider: piper",
                 "  codex:",
-                f"    executable: {tmp_path / 'missing-codex'}",
+                "    socket_path: relative-codex.sock",
                 "  piper:",
                 f"    executable: {piper}",
                 f"    model_path: {model}",
@@ -98,5 +98,5 @@ def test_codex_and_piper_selection_validates_both_executables(tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    with pytest.raises(RuntimeError, match="pipeline.codex.executable"):
+    with pytest.raises(RuntimeError, match="pipeline.codex.socket_path"):
         load_settings(config)

@@ -10,9 +10,9 @@ from tubeforge.core.errors import ProviderValidationError, RetryableProviderErro
 from tubeforge.db.models import Base
 from tubeforge.db.repositories import GenerationCacheRepository
 from tubeforge.db.session import create_database
-from tubeforge.domain.contracts import ContentRequest, SourceReference
-from tubeforge.providers.content.factory import create_content_provider
+from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference
 from tubeforge.providers.content.ollama import OllamaContentProvider, OllamaResponse
+from tubeforge.providers.content.prompts import build_content_prompt, validate_video_package
 
 
 def request() -> ContentRequest:
@@ -52,10 +52,27 @@ def test_valid_generation_uses_structured_request_and_persistent_cache(resources
 
     provider = OllamaContentProvider(OllamaProviderConfig(base_url="http://ollama.lan:11434", model="small-model", connection_timeout_seconds=4, inference_timeout_seconds=90), cache, transport=transport)
     assert len(provider.generate_package(request()).scene_plans) == 6
-    assert provider.last_usage == {"prompt_eval_count": 120, "eval_count": 340}
+    assert provider.last_usage == {"prompt_eval_count": 120, "eval_count": 340, "validation_attempts": 1}
     assert calls[0]["stream"] is False and isinstance(calls[0]["format"], dict)
     assert provider.generate_package(request()).metadata.title_options == ("Why Rome Fell",)
     assert len(calls) == 1
+
+
+def test_shorts_structured_format_requires_six_developed_narration_sections(resources) -> None:
+    cache, _ = resources
+    value = short_request().model_copy(update={"prompt_version": "schema-bounds-v1"})
+    captured: dict[str, object] = {}
+
+    def transport(_url: str, payload: bytes, *_args) -> OllamaResponse:
+        captured.update(json.loads(payload))
+        accepted = short_package(value)
+        return OllamaResponse(200, json.dumps({"response": accepted.model_dump_json(), "done": True}).encode())
+
+    OllamaContentProvider(OllamaProviderConfig(retries=0), cache, transport=transport).generate_package(value)
+    schema = captured["format"]
+    assert schema["properties"]["script_sections"]["minItems"] == 6
+    assert schema["properties"]["script_sections"]["maxItems"] == 6
+    assert schema["$defs"]["ScriptSection"]["properties"]["narration"]["minLength"] == 105
 
 
 def test_retries_transient_transport_and_server_failures(resources) -> None:
@@ -127,10 +144,9 @@ def test_exhausted_connection_failure_is_retryable(resources) -> None:
     assert len(recovered.generate_package(request()).scene_plans) == 6
 
 
-def test_ollama_is_selectable_and_remote_url_is_validated(resources) -> None:
-    _, session_factory = resources
-    settings = Settings.model_validate({"app": {"name": "x", "environment": "test"}, "database": {"url": "sqlite:///x.db"}, "pipeline": {"content_provider": "ollama", "ollama": {"base_url": "http://inference-box.local:11434", "model": "qwen"}}})
-    assert isinstance(create_content_provider(settings, session_factory), OllamaContentProvider)
+def test_ollama_is_not_selectable_in_pipeline_configuration(resources) -> None:
+    with pytest.raises(ValueError, match="content_provider"):
+        Settings.model_validate({"app": {"name": "x", "environment": "test"}, "database": {"url": "sqlite:///x.db"}, "pipeline": {"content_provider": "ollama"}})
     with pytest.raises(ValueError, match="credentials"):
         OllamaProviderConfig(base_url="http://user:password@localhost:11434")
 
@@ -149,3 +165,125 @@ def test_ollama_configuration_is_normalized_before_transport() -> None:
         OllamaProviderConfig(model="   ")
     with pytest.raises(ValueError, match="blank"):
         OllamaProviderConfig(prompt_template_version="\t")
+
+
+def short_request() -> ContentRequest:
+    source = SourceReference(
+        source_id="source-1",
+        url="https://example.invalid/debugging",
+        title="Approved debugging brief",
+        excerpt="Your fastest debugging shortcut is finding the first observable failure. Later errors can hide the original cause. Start where behavior first differs from the expected result. Write down one assumption about that boundary, design the smallest focused check that can prove it wrong, change one variable, and record clear evidence before another edit. Move forward only after the current boundary behaves correctly. Apply the method to your next bug, save the result, and share the habit with your team.",
+    )
+    return request().model_copy(
+        update={
+            "topic": "A debugging habit that saves hours",
+            "angle": "Trace the first observable failure",
+            "target_duration_seconds": 45,
+            "prompt_version": "shorts-source-v2",
+            "sources": (source,),
+            "preset_name": "shorts",
+            "aspect_ratio": "9:16",
+        }
+    )
+
+
+def short_package(value: ContentRequest) -> ContentPackage:
+    raw = package(value)
+    sections = raw["script_sections"]
+    assert isinstance(sections, list)
+    bodies = (
+        "Your fastest debugging shortcut is finding the first observable failure.",
+        "Start where behavior first differs from the expected result, because later errors often hide the original cause completely. That boundary matters most.",
+        "Write down one assumption about that boundary, then design the smallest check that can prove it wrong quickly. Keep the check focused.",
+        "Change only one variable for each check, and record the evidence before another edit makes the result ambiguous. Evidence prevents repeated guesses.",
+        "Move forward only after the current boundary behaves correctly, repeating the same method until the failure disappears. Preserve each clear result.",
+        "Try this on your next bug, save the result, and share the habit with your team.",
+    )
+    for section, narration in zip(sections, bodies, strict=True):
+        section["narration"] = narration
+    return ContentPackage.model_validate(raw)
+
+
+def test_shorts_prompt_and_validation_enforce_source_hook_sentences_and_cta() -> None:
+    value = short_request()
+    prompt = build_content_prompt(value, template_version="m6-content-v4", max_chars=60_000)
+    assert "This is a YouTube Short" in prompt
+    assert "provided source excerpts" in prompt
+    assert "18 to 24 narration words in each section" in prompt
+    assert "108 to 144 narration words total" in prompt
+
+    accepted = short_package(value)
+    validate_video_package(accepted, value, provider_name="Ollama")
+
+    no_cta_sections = list(accepted.script_sections)
+    no_cta_sections[-1] = no_cta_sections[-1].model_copy(update={"narration": "The method ends by preserving the evidence for the next investigation."})
+    no_cta = accepted.model_copy(update={"script_sections": tuple(no_cta_sections)})
+    with pytest.raises(ProviderValidationError, match="call to action"):
+        validate_video_package(no_cta, value, provider_name="Ollama")
+
+    unsupported = value.model_copy(update={"sources": (value.sources[0].model_copy(update={"excerpt": None}),)})
+    unsupported_package = accepted.model_copy(update={"request": unsupported})
+    with pytest.raises(ProviderValidationError, match="approved source excerpt"):
+        validate_video_package(unsupported_package, unsupported, provider_name="Ollama")
+
+    repeated_sections = tuple(section.model_copy(update={"narration": "Use this method. " + section.narration}) for section in accepted.script_sections)
+    with pytest.raises(ProviderValidationError, match="repeat the same opening"):
+        validate_video_package(accepted.model_copy(update={"script_sections": repeated_sections}), value, provider_name="Ollama")
+
+    invented_sections = list(accepted.script_sections)
+    invented_sections[2] = invented_sections[2].model_copy(update={"narration": "Configure Kubernetes clusters, database replicas, network proxies, and cloud dashboards before rebuilding the deployment pipeline from scratch."})
+    with pytest.raises(ProviderValidationError, match="outside the approved source"):
+        validate_video_package(accepted.model_copy(update={"script_sections": tuple(invented_sections)}), value, provider_name="Ollama")
+
+
+def test_ollama_can_regenerate_a_locally_rejected_shorts_package(resources) -> None:
+    cache, _ = resources
+    value = short_request().model_copy(update={"prompt_version": "shorts-retry-v2"})
+    accepted = short_package(value)
+    rejected_sections = list(accepted.script_sections)
+    rejected_sections[-1] = rejected_sections[-1].model_copy(update={"narration": "The method ends by preserving clear evidence for the next investigation."})
+    rejected = accepted.model_copy(update={"script_sections": tuple(rejected_sections)})
+    outcomes = [rejected, accepted]
+    prompts: list[str] = []
+
+    def transport(_url: str, payload: bytes, *_: int) -> OllamaResponse:
+        request_payload = json.loads(payload)
+        prompts.append(request_payload["prompt"])
+        result = outcomes.pop(0)
+        return OllamaResponse(200, json.dumps({"response": result.model_dump_json(), "done": True}).encode())
+
+    provider = OllamaContentProvider(OllamaProviderConfig(validation_retries=1, retries=0), cache, transport=transport)
+    assert provider.generate_package(value).script_sections[-1].narration.startswith("Try this")
+    assert len(prompts) == 2 and "previous JSON was rejected" in prompts[1]
+    assert provider.last_usage == {"validation_attempts": 2}
+
+
+def test_ollama_cannot_rewrite_authoritative_request_or_sources(resources) -> None:
+    cache, _ = resources
+    value = request().model_copy(update={"prompt_version": "authority-v2"})
+    raw = package(value)
+    raw["request"] = {**raw["request"], "topic": "model rewrite", "sources": [{"source_id": "invented", "url": "https://example.invalid/invented", "title": "Invented"}]}  # type: ignore[index]
+
+    provider = OllamaContentProvider(
+        OllamaProviderConfig(retries=0),
+        cache,
+        transport=lambda *_: OllamaResponse(200, json.dumps({"response": json.dumps(raw), "done": True}).encode()),
+    )
+    accepted = provider.generate_package(value)
+    assert accepted.request == value
+    assert accepted.claims[0].source_ids == ("source-1",)
+
+
+def test_ollama_binds_factual_sections_to_generated_cited_claims_when_edge_is_omitted(resources) -> None:
+    cache, _ = resources
+    value = short_request().model_copy(update={"prompt_version": "missing-claim-edge-v1"})
+    raw = short_package(value).model_dump(mode="json")
+    for section in raw["script_sections"]:
+        section["contains_factual_claims"] = True
+        section["claim_ids"] = []
+
+    def transport(*_) -> OllamaResponse:
+        return OllamaResponse(200, json.dumps({"response": json.dumps(raw), "done": True}).encode())
+
+    generated = OllamaContentProvider(OllamaProviderConfig(retries=0), cache, transport=transport).generate_package(value)
+    assert all(section.claim_ids == ("claim-1",) for section in generated.script_sections)

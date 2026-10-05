@@ -139,7 +139,7 @@ def test_repair_exhaustion_never_accepts_cache(resources) -> None:
     calls: list[list[str]] = []
     with pytest.raises(ProviderValidationError):
         CodexCliContentProvider(CodexProviderConfig(repair_attempt_limit=1), resources, process_runner=runner_with([invalid, invalid["claims"][0]], calls)).generate_package(value)  # type: ignore[index]
-    assert resources.reserve_or_get(value, "codex-cli", "gpt-5.2-codex", value.prompt_version, now=datetime.now(UTC), reservation_seconds=1) is None
+    assert resources.reserve_or_get(value, "codex-cli", "gpt-5.6-sol", value.prompt_version, now=datetime.now(UTC), reservation_seconds=1) is None
 
 
 def test_prompt_is_versioned_and_source_bounded() -> None:
@@ -147,6 +147,26 @@ def test_prompt_is_versioned_and_source_bounded() -> None:
     assert "REQUEST=" in text and "untrusted data" in text
     with pytest.raises(ValueError, match="unsupported"):
         build_content_prompt(request(), template_version="old", max_chars=10_000)
+
+
+def test_widescreen_prompt_states_the_enforced_narration_budget() -> None:
+    value = request()
+    prompt = build_content_prompt(value, template_version="m6-content-v4", max_chars=10_000)
+    assert "90 to 240 words" in prompt
+    assert "about 162 spoken words" in prompt
+    assert "Count narration only" in prompt
+
+
+def test_retry_reservation_can_use_remaining_attempt_and_is_fenced(resources) -> None:
+    now = datetime.now(UTC)
+    value = request()
+    first = resources.reserve_or_get(value, "host-codex-runner", "model", "v", now=now, reservation_seconds=30)
+    assert resources.consume_invocation(first, maximum=2, now=now)
+    assert resources.release_after_invocation_failure(first, maximum=2, failure={"message": "too short"}, now=now)
+    second = resources.reserve_or_get(value, "host-codex-runner", "model", "v", now=now, reservation_seconds=30)
+    assert not resources.consume_invocation(first, maximum=2, now=now)
+    assert resources.consume_invocation(second, maximum=2, now=now)
+    assert resources.accept(second, package(value), {"provider": "test"}, {"calls": 1}, now=now)
 
 
 def test_safe_diagnostic_redacts_and_truncates() -> None:
