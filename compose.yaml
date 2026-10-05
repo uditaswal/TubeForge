@@ -1,6 +1,9 @@
 services:
   migrate:
     build: .
+    # Match the local operator so the dashboard can later remove its own
+    # generated artifacts from the bind-mounted data directory.
+    user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     command: ["alembic", "upgrade", "head"]
     volumes:
       - ./src:/app/src:ro
@@ -14,6 +17,7 @@ services:
 
   web:
     build: .
+    user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     command: ["uvicorn", "tubeforge.main:app", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
       migrate:
@@ -35,6 +39,7 @@ services:
 
   worker:
     build: .
+    user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     command: ["python", "-m", "tubeforge.workers.main"]
     depends_on:
       migrate:
@@ -45,6 +50,7 @@ services:
       - ./data:/app/data
       # Operator-supplied Piper ONNX voices and adjacent .onnx.json files.
       - ./models:/app/models:ro
+      - /run/tubeforge-codex:/run/tubeforge-codex
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
@@ -53,6 +59,7 @@ services:
 
   scheduler:
     build: .
+    user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     command: ["python", "-m", "tubeforge.scheduling.main"]
     depends_on:
       migrate:
@@ -61,6 +68,7 @@ services:
       - ./src:/app/src:ro
       - ./config:/app/config:ro
       - ./data:/app/data
+      - ./models:/app/models:ro
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src

@@ -26,3 +26,7 @@ data/
 autonomous_logs/
 models/*.onnx
 models/*.bin
+task.md
+issues.md
+# Generated acceptance media; retain and inspect locally, but do not commit it.
+artifacts/smoke/

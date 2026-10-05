@@ -2021,3 +2021,559 @@ adapter, but Ollama support and the required live LLM-to-video smoke remain.
   render evidence. The visual-source milestone remains **READY FOR REVIEW**:
   the next required end-to-end evidence is one authenticated, stock-selected
   Studio generation with its final artifact and provenance manifest inspected.
+
+## 2026-09-13 — persistent Creator Studio voice previews
+
+- Changed `GET /api/voices/{voice_id}/preview` to store one stable WAV per
+  voice and preview-text identity under `data/artifacts/voice-previews/`.
+  Repeated preview clicks return that file without invoking Kokoro/Piper again;
+  a process-local lock prevents two browser tabs from doing duplicate first
+  synthesis work.
+- Added private immutable response caching for the returned WAV, while still
+  validating cached audio before it is served. Restarted the Compose web
+  service and verified `/healthz` returns `{"status":"ok","database":"ok"}`.
+- Focused validation: `tests/test_api_workflow.py::test_voice_preview_is_synthesized_once_then_served_from_persistent_cache` passed (`1 passed` in
+  2.59s) in `tubeforge-local-media:smoke`; it proves two endpoint calls produce
+  one persisted WAV and exactly one synthesis call.
+
+## 2026-09-13 — dashboard script visibility, artifact cleanup, and A/V verification
+
+- Made **View script** available for every generation with a saved content
+  package. Only an unclaimed script-review job remains editable; later states
+  show the exact saved narration read-only and hide revision saving.
+- Added **Remove local files** for published generations. It deletes registered
+  local artifacts while preserving the generation, approvals, publication
+  audit, and activity history. Existing paused/failed local generations retain
+  the distinct destructive **Delete** action.
+- Found a live cleanup failure in the web logs: bind-mounted artifacts were
+  owned by an unmapped container UID, causing `PermissionError` during delete.
+  Compose now runs all TubeForge services as the local UID/GID and the existing
+  `data/` tree was repaired to `1000:1000`; recreated services report healthy
+  at `http://127.0.0.1:62065/healthz`.
+- Validation: `python3 -m py_compile src/tubeforge/api/app.py
+  src/tubeforge/db/repositories.py tests/test_api_workflow.py` and the focused
+  Docker API suite passed (`7 passed` in 106.66s). The real
+  `tests/test_real_local_smoke.py -k fixed` initially rendered successfully but
+  could not retain its host artifact under the old container UID; rerunning as
+  `1000:1000` passed (`1 passed` in 174.91s). Inspected
+  `artifacts/smoke/fixed_piper_six_scene_smoke.mp4`: 640x360 H.264 with 48 kHz
+  mono AAC, 71.844s and 2.6 MB; the matching narration WAV is 48 kHz mono PCM,
+  71.844s and 6.6 MB.
+- Current pipeline finding: audio/video combination is working end to end. Two
+  live dashboard jobs instead stopped earlier in asset acquisition with `no
+  permitted licensed asset for scene scene-1`; repair the stock-asset fallback
+  and validate a stock-selected Studio generation next.
+- Full regression validation: `217 passed, 2 skipped` in 1146.14s using the
+  UID-aligned `tubeforge-local-media:smoke` image. The skips are the opt-in
+  real smoke without a model environment variable and the unavailable Codex
+  CLI provider case; the real fixed Piper smoke was run separately above.
+- Post-recreate service check found the scheduler restarting because its
+  Compose service did not mount `/app/models`, while production validation
+  requires the configured Piper model path. Added the same read-only models
+  mount used by the worker, recreated that service, and verified scheduler,
+  web, and worker remain up with dashboard health still `ok`.
+
+## 2026-09-13 — publication-approval deletion correction
+
+- Dashboard evidence showed completed local renders stopped at
+  `publication_approval_required` without a delete control. This state occurs
+  before any publishing call; it was incorrectly omitted from the safe local
+  deletion allowlist.
+- Added that paused state to both the API presentation and the durable delete
+  guard. States that may have crossed a remote publishing boundary remain
+  protected.
+- Validation: `tests/test_api_workflow.py` passed (`7 passed` in 115.25s) in
+  the UID-aligned local test image. Recreated the local web service and
+  verified `GET http://127.0.0.1:62065/healthz` returns `ok`.
+
+## 2026-09-13 — safe recovery for unavailable licensed stock
+
+- Preserved the strict Wikimedia Commons licence filter: stock candidates must
+  still be public-domain or CC0 and satisfy the no-attribution asset policy.
+  When that search produces no permitted candidate, the hybrid media provider
+  now resolves the scene to local generated CC0 art instead of failing the
+  entire job.
+- The durable asset manifest distinguishes the requested stock search from the
+  resolved generated request and records a `fallback` object with the reason;
+  it never represents local art as a Wikimedia result. The Studio selector and
+  operator guide now disclose this behaviour.
+- Validation: focused media, orchestration, and dashboard tests passed after
+  the updated selector assertion (`tests/test_api_workflow.py`: `7 passed` in
+  100.21s). A real stock-selected run of
+  `tests/test_real_local_smoke.py -k fixed` passed (`1 passed, 1 deselected`
+  in 172.41s) using local Piper and FFmpeg. Inspected the retained final MP4:
+  640x360 H.264 video plus 48 kHz mono AAC, 72.784 seconds and 2,667,795 bytes.
+- Recreated the local web and worker services. All services are up and
+  `GET http://127.0.0.1:62065/healthz` returns
+  `{"status":"ok","database":"ok"}`. Previously failed-validation jobs
+  retain their history and must be deleted/recreated rather than resumed.
+
+## 2026-09-13 — Wikimedia outage recovery and IST Studio timestamps
+
+- Extended the explicit stock-to-local-CC0 fallback to retryable Wikimedia
+  search outages (`Wikimedia search unavailable` and timeouts), while retaining
+  the strict Commons licence filter when the service is reachable. The
+  manifest records the original stock request, local resolved request, and
+  outage reason.
+- Converted job and activity API timestamps to `Asia/Kolkata` and made the
+  Studio format every visible generation/activity time explicitly as IST, so
+  it is consistent across operator browsers.
+- Validation: the focused empty-result and simulated-outage pipeline tests
+  exited successfully; focused Studio API coverage passed (`2 passed, 5
+  deselected` in 29.04s), including ISO `+05:30` payloads and IST markup.
+
+## 2026-09-27 — dedicated portrait Shorts workflow (Phase 1)
+
+- Added a dashboard **Shorts — 9:16, 30–55s** preset without changing the
+  existing widescreen path. The API persists the chosen preset/aspect ratio
+  and rejects durations outside the preset's bounds. Production defaults to a
+  45-second Short; final output is fixed at 1080×1920 and 30 fps.
+- Added a local PCM-waveform word aligner tied to each synthesized phrase and
+  final narration duration. Shorts render large uppercase ASS captions with a
+  yellow active word, white context, and explicit portrait margins. The final
+  gate checks word timing, a first word within three seconds, caption safe
+  area/line width, 30–55 second duration, and visual holds no longer than three
+  seconds.
+- Split long narration scenes into deterministic <=3-second camera moves. A
+  first real render exposed both a clipped four-word caption and excessive
+  portrait overscan; captions now use three-word groups with bounded wrapping,
+  and portrait stills use 1.25× overscan. A subsequent gate failure exposed an
+  ASS parser that counted metadata as visible text; a field-count parser and
+  focused regression corrected it.
+- Focused alignment/caption/renderer/API/pipeline coverage exited successfully;
+  the ASS parser regression passed (`1 passed, 3 deselected`). Production
+  configuration validation printed `9:16 45 30 55 1080 1920 30`, and
+  `git diff --check` plus Python compilation completed cleanly.
+- Real acceptance used local Piper and FFmpeg under UID 1000:
+  `tests/test_real_local_smoke.py -k piper_short_renders_real` passed (`1
+  passed, 2 deselected` in 284.99s). The retained MP4 is 53.417 seconds,
+  1080×1920, 30 fps H.264 with 48 kHz mono AAC. Its independent quality report
+  passed with 168 aligned words, first word at 0.0489s, last word matched to the
+  53.417s narration, and maximum visual hold 2.8709s.
+- Inspected `artifacts/smoke/shorts_piper_1080x1920_contact_sheet.png` after
+  regenerating it from the passing artifact. Captions are readable and within
+  frame. The intentionally fake test narration and generic generated scene art
+  visibly confirm the next work is Phase 2 source-grounded writing followed by
+  Phase 3 coherent portrait visuals.
+- Repository hygiene: reviewed `git status --short` and `.gitignore`. The new
+  smoke MP4/WAV/JSON/contact sheet are intentional retained acceptance evidence;
+  no new cache, credential, model, database, or machine-local path was added.
+
+## 2026-09-27 — restricted host Codex runner continuation (blocked)
+
+- Scope: completed the repository-side typed socket protocol, fixed-command
+  Bubblewrap runner, worker socket provider, and durable two-invocation data
+  model. Production Compose/config now select the host runner and no longer
+  start Ollama.
+- Validation attempted: `git diff --check` passed. The host has no `python`
+  alias; `/usr/bin/python3` is installed but has neither `tubeforge` nor
+  `pydantic`. A UID-1000 probe of the existing socket activated the runner but
+  the service exited with `ExecStart=/usr/bin/python3 -m
+  tubeforge.host_codex_runner`, status 1, before it could answer.
+- Blocker: installing the root-owned `/opt/tubeforge-codex-runner` runtime
+  needed for the documented service unit requires interactive `sudo`; this
+  environment cannot provide a sudo password. No operator Codex auth was read
+  or copied, and no script was generated.
+- Next action: an operator installs the dedicated runtime (or grants
+  non-interactive scoped elevation), reloads the unit, and then the required
+  UID-1000/other-UID socket tests and full production validation can run.
+
+## 2026-09-27 — root-owned pinned Codex runtime contract (blocked)
+
+- Replaced the runner's ambient CLI lookup with fixed Bubblewrap paths for a
+  root-owned Node binary and `@openai/codex@0.149.0` entrypoint under
+  `/opt/tubeforge-codex-runner/codex-runtime`. The namespace binds that tree
+  read-only and has no `/home/uditaswal` mount. `CODEX_HOME` remains only the
+  dedicated account's `/var/lib/tubeforge-codex/.codex` bind.
+- Added `docs/tubeforge-codex-runner-runtime.md` with provisioning ownership
+  and pin requirements. No authentication data was inspected, copied, or
+  mounted.
+- Validation: Docker-focused runner/config tests passed: `9 passed in 1.34s`.
+  Production configuration validation printed `codex
+  /run/tubeforge-codex/codex.sock 2`; `git diff --check` passed.
+- Blocker/next action: provisioning `/opt` and reloading the host systemd unit
+  require administrator elevation unavailable to this sandbox. After that,
+  perform the live socket acceptance tests before invoking Codex.
+
+## 2026-09-28 — restricted host runner resume (still blocked on host elevation)
+
+- Confirmed the only discovered Node/Codex installation is the operator NVM
+  tree and reports `@openai/codex@0.149.0`; it was not used for execution,
+  copied, mounted, or authenticated. The required root-owned
+  `/opt/tubeforge-codex-runner/codex-runtime` path remains absent.
+- Attempted the documented administrator installation with the approved
+  root-owned Node 24.19.0 distribution and pinned Codex package. It stopped
+  before making a change because `sudo` requires an interactive administrator
+  password in this session. Dedicated-account login was deliberately not
+  attempted.
+- Verified `tubeforge-codex` exists, Bubblewrap reports `0.12.0`, and the
+  currently installed systemd unit is still the obsolete `/usr/bin/python3`
+  variant. It cannot run the runner dependencies; the checked-in replacement
+  fixes the interpreter and uses only `/opt` paths.
+- Corrected the provisioning guide to install Node below the exact
+  Bubblewrap-pinned `node/` directory, install Codex into the matching runtime
+  prefix, validate ownership/version before login, and document the root-owned
+  Python service environment/unit deployment. Added focused regression coverage
+  for the fixed runtime contract and worker factory selection.
+- Validation: `tests/test_host_codex_runner.py tests/test_config.py` passed
+  (`11 passed in 6.03s`) in `tubeforge-local-media:smoke`; the legacy Ollama
+  provider test container also exited `0` after production configuration was
+  changed to reject `content_provider: ollama`. `git diff --check` passed.
+- Next action: an administrator runs the documented `/opt` provisioning and
+  unit deployment, then the runner can be live-tested from UID 1000 and a
+  non-worker UID, followed by the dedicated-account interactive Codex login.
+# 2026-09-28 — Host Codex runner socket and usage-cap follow-up
+
+Scope: checked the operator-reported live socket result and reviewed the first
+valid-request path. The active service returned a structured Pydantic rejection
+for `{}` from host UID 1000, so the socket and service are reachable without
+starting Codex. Found that the worker's two-attempt cache could be bypassed by
+direct UID-1000 socket requests. Added an independent persistent host-side
+two-invocation cap keyed by the exact typed request; it is consumed immediately
+before the CLI launch and rejects the third request fail-closed. Tightened the
+Bubblewrap layout to mount required Node libraries, DNS settings, CA certs,
+the pinned runtime, the private Codex home, and its request workspace, without
+general `/usr` or `/bin` mounts.
+
+Validation: local isolated `node --version` returned `v24.19.0` and isolated
+Codex returned `codex-cli 0.149.0`; the host-cap smoke accepted two attempts
+and rejected a third. `compileall` and `git diff --check` passed. `pytest` is
+not installed in this execution environment, so the focused automated test
+has not yet run. No real Codex generation was launched. Next: reinstall and
+restart the root-owned runner, run focused tests and a live typed request, then
+inspect the resulting script. Status: IMPLEMENTED, not VERIFIED.
+
+Follow-up: the operator reinstalled the root-owned wheel and restarted the
+service; `systemctl is-active` returned `active`. Local introspection of that
+installed wheel confirmed `INVOCATION_LIMIT == 2`, the cap call in
+`run_request`, and no broad `/usr` mount. Before a real call, checked pinned
+`codex exec --help` and added fixed `--ignore-user-config`, `--ignore-rules`,
+and `--skip-git-repo-check` flags; an isolated `codex exec --help` smoke exited
+0. This last flag change requires one more wheel reinstall/service restart.
+Attempting to install pytest into `/tmp` failed because this execution
+environment has no package-index DNS access. No model invocation occurred.
+
+Follow-up: the operator installed the fixed CLI flags and the service was
+active. Local introspection confirmed those flags and the host cap in the
+installed wheel; an escalated UID-1000 malformed socket request still returned
+a typed validation error. One real 45-second Shorts request based on the
+TubeForge README was submitted through the socket. It spent one host-side
+attempt but returned `Codex CLI failed (1)` with only the generic stderr
+`Reading prompt from stdin...`; no script was produced. No second attempt was
+made. Added bounded extraction of JSONL `error`/`turn.failed` messages, with
+generated text omitted, so the next failure can be diagnosed. Synthetic
+extraction test, compile check, and `git diff --check` passed. The diagnostic
+change must be installed before any second request; Phase 1 remains
+IMPLEMENTED, not VERIFIED.
+
+Follow-up: operator ran the pinned CLI's `login status` as the dedicated
+account both outside and inside the exact Bubblewrap layout; both reported
+`Logged in using ChatGPT`. Anonymous HTTPS to the OpenAI API from the same
+layout returned HTTP 401, proving DNS/TLS reachability without a model call.
+Official OpenAI deprecation guidance says the runner's fixed
+`gpt-5.2-codex` model was retired on 2026-07-23; current ChatGPT-signed-in
+Codex model guidance also calls older 5.2/5.3 Codex models deprecated. This
+is a likely explanation for the first CLI exit, but the CLI JSONL error has
+not been observed. No second generation attempt was made. Next: present a
+supported model choice, usage implications, and one-attempt acceptance plan
+for operator approval before changing the model.
+Current gate is BLOCKED on that model decision; implementation exists but no
+real package has passed end-to-end acceptance.
+
+Follow-up: the operator approved `gpt-6-sol` as the fixed Codex CLI model.
+Updated the root-owned runner command, provider configuration defaults,
+production/default config, focused tests, README, and runtime deployment
+guide. No fallback or API key was added. Validation:
+`PYTHONPATH=/tmp/tubeforge-pytest-runner:src
+/opt/tubeforge-codex-runner/venv/bin/python -m pytest -q
+tests/test_host_codex_runner.py tests/test_codex_content.py tests/test_config.py`
+returned `28 passed in 2.14s`. The host service has not yet been reinstalled
+with this model or the bounded error extraction. The one remaining attempt
+for the exact first source packet is preserved; no new generation was run.
+Current status: IMPLEMENTED, not VERIFIED. Next: operator installs the wheel,
+then one live acceptance attempt and script inspection.
+
+Follow-up: operator reinstalled the reviewed wheel and restarted the service;
+`systemctl is-active` returned `active`. Local introspection of the installed
+wheel confirmed `gpt-6-sol`, `INVOCATION_LIMIT=2`, the 480-second timeout, and
+bounded JSONL diagnostics. The exact same README-grounded source packet was
+submitted once more through the UID-1000 socket. It returned
+`invalid_output` after Codex CLI exit 1; the CLI JSONL error was HTTP 400:
+`The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT
+account.` No script, claims, or scenes were produced. This was the second of
+two permitted launches for that packet. No further launch was made and no
+allowance reset or substitute packet was created. The runner remains
+fail-closed. Status: BLOCKED pending an operator decision on a supported
+ChatGPT-signed-in model/runtime path and a new bounded acceptance packet.
+
+Follow-up: the operator ran the pinned CLI's `debug models` under the
+dedicated account inside the exact Bubblewrap layout, refreshing the remote
+catalog without a prompt. It exited 0 and exposed only these picker-visible
+model IDs: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`. No model
+generation was launched and no credentials or raw catalog were printed.
+`gpt-6-sol` is not in this account's catalog, consistent with the earlier HTTP
+400. Next: obtain operator approval for a catalog-listed model and a genuinely
+revised/new source packet. Keep the exhausted packet blocked.
+
+Follow-up: treated the operator's "next" as approval of the immediately
+preceding recommendation: keep Codex CLI, pin dedicated-account catalog-listed
+`gpt-5.6-sol`, and test a substantively revised 45-second review-gates brief.
+Updated runner/config defaults, production config, focused tests, README, and
+runtime guide; no automatic fallback, API key, or allowance reset was added.
+Focused validation:
+`PYTHONPATH=/tmp/tubeforge-pytest-runner:src
+/opt/tubeforge-codex-runner/venv/bin/python -m pytest -q
+tests/test_host_codex_runner.py tests/test_codex_content.py tests/test_config.py`
+returned `28 passed in 1.89s`. The old packet remains exhausted; no new
+model launch has occurred. Next: operator reinstalls the root-owned wheel,
+then run a fresh bounded packet and inspect its actual script. Status:
+IMPLEMENTED, not VERIFIED.
+
+Added a reviewed, substantively new source packet at
+`tests/fixtures/host_codex_review_gates_request.json`, focused on the three
+review gates rather than the previous general TubeForge overview. Its source
+excerpt is drawn from the operator-facing README. Typed validation and prompt
+assembly passed; focused runner/provider/config tests now return `29 passed
+in 1.85s`. The new packet has not been submitted, so its two-attempt allowance
+is untouched.
+
+Follow-up on 2026-09-28: the operator showed a successful root-owned wheel
+reinstall and `systemctl is-active tubeforge-codex-runner.service` returning
+`active`. Read-only introspection of the installed wheel reported
+`CODEX_MODEL=gpt-5.6-sol`, `INVOCATION_LIMIT=2`, and `TIMEOUT_SECONDS=480`.
+The focused runner/provider/config suite returned `29 passed in 1.82s`;
+`git diff --check` passed, and `git check-ignore -v` confirmed the planned
+generated smoke response is ignored under `artifacts/smoke/`. A proposed live
+request containing the reviewed README-derived fixture was rejected before
+execution by the execution safety check because explicit authorization for
+that exact packet to reach the signed-in Codex service was not recorded.
+No new invocation or script artifact resulted. Status: BLOCKED pending that
+authorization. Next: submit the unchanged reviewed fixture once, inspect the
+returned package and creative quality, and stop within the existing two-attempt
+and eight-minute limits.
+
+Follow-up on 2026-09-28: after explicit approval for one live test, submitted
+the unchanged review-gates fixture through the UID-1000 Unix socket. The host
+returned `invalid_output`: Codex CLI received HTTP 400 `invalid_json_schema`
+because the Pydantic output schema did not mark `time_sensitive` (and other
+defaulted properties) required. No script was produced; the revised packet now
+has one of its two host invocations remaining. Official OpenAI Structured
+Outputs documentation confirms that every object property must be required
+and objects must set `additionalProperties: false`. Source repair recursively
+marks all properties required, removes Pydantic defaults, and keeps domain
+validation after generation. Also removed a hard-coded debugging storyline
+from the generic Shorts prompt and explicitly instructed the model to copy the
+immutable source request, including defaulted fields; the old storyline
+contradicted this source packet. The
+original packet's exhausted allowance was not reset.
+
+Validation: runner/provider/config tests `30 passed in 1.86s`; migration plus
+runner/provider/config tests `35 passed in 3.16s` after the final prompt
+clarification; the broad collectable suite
+`233 passed, 4 skipped in 214.91s`. A first broad run exposed a stale test
+assertion for migration `20260831_0019`; the test now checks current head
+`20260927_0020` and its new columns. The unfiltered suite could not collect
+`test_api_workflow.py`, `test_auth.py`, and `test_health.py` because the
+root-owned runner venv lacks the test-only `httpx2` package. No generated
+script or video artifact was produced. Status: BLOCKED pending deployment of
+the repaired wheel and separate approval for the final live attempt on this
+exact packet. Next: operator reinstalls/restarts the service; verify the
+installed schema, then use at most one final request and inspect its output.
+
+Follow-up on 2026-09-28: the operator reinstalled/restarted the root-owned
+wheel and showed the service active. Read-only installed-wheel checks confirmed
+`gpt-5.6-sol`, two attempts, a 480-second timeout, all declared schema
+properties required, and the revised source-copying prompt. Installed-wheel
+focused tests returned `30 passed in 1.83s` with the checkout's explicit
+default config path. After the operator explicitly approved the final attempt,
+submitted the unchanged review-gates fixture through the UID-1000 socket.
+Codex again returned HTTP 400 `invalid_json_schema`, this time because
+Pydantic emitted unsupported `format: uri` for a source URL. No script was
+produced. The revised packet has now spent both host attempts; no retry or
+allowance reset was made. Thus there are no rejected scripts to show, only the
+two bounded schema-error responses.
+
+Official OpenAI Structured Outputs documentation lists supported string
+formats and excludes `uri`. The local source now removes unsupported URL
+format and nonessential string-length constraints from the CLI-facing schema,
+while retaining Pydantic's post-generation validation. Focused runner,
+provider, config, and migration tests returned `35 passed in 3.00s`; schema
+inspection found only supported `date-time` format and no default or string
+length keys. This second schema repair is IMPLEMENTED but not deployed or
+proven with a real model output. Status: BLOCKED pending an operator decision
+about a genuinely new source packet/brief or alternate approved provider.
+Do not retry the exhausted packet merely by changing its wording.
+
+Follow-up on 2026-09-28: the operator chose to continue with Codex using a
+genuinely different editorial topic. Added
+`tests/fixtures/host_codex_caption_timing_request.json`: a 45-second portrait
+Short about TubeForge's word-to-WAV caption alignment, highlighted current
+word, portrait placement checks, and three-second pacing gates. Its 722-character
+source excerpt is a contiguous whitespace-normalized match to the README's
+YouTube Shorts workflow; it is not a rewording of the exhausted publication
+review-gates packet. The typed socket request is 1,728 bytes against a 65,536
+byte bound, and the assembled prompt is 4,188 characters against a 60,000
+character bound. Local schema inspection found all object fields required,
+`additionalProperties: false`, and no unsupported URL format/default/string
+length keys. Focused runner/provider/config/migration tests returned
+`36 passed in 3.06s`; `git check-ignore -v` showed the new source fixture is
+not ignored. No new model invocation occurred. Status: IMPLEMENTED, not
+VERIFIED. Next: deploy the latest root-owned wheel, verify its installed schema,
+obtain explicit approval for this exact packet, then submit one bounded live
+request and inspect any resulting script.
+An escalated read-only `sudo -n true` probe returned `sudo: a password is
+required`, so this session cannot deploy the root-owned wheel; operator host
+installation is required. No broad home access or credential copy was used.
+
+Follow-up on 2026-09-28: the operator installed the latest wheel and explicitly
+approved the exact caption-timing fixture. Read-only installed-wheel checks
+confirmed `gpt-5.6-sol`, two host attempts, 480-second timeout, the expected
+fixture SHA-256 `136fb4a784e90e7326b925aa945d241972db8f666b3a52e83c618ecd0a90b448`, a bounded prompt, all schema object fields required,
+and no unsupported schema keywords or formats. The first live request reached
+Codex and returned a generated package, but host `ContentPackage` validation
+rejected `scene_plans.1.fallback_visual` and
+`scene_plans.5.fallback_visual`: both exceeded the domain's 100-character
+limit. The runner removed its temporary output in `finally`, and the socket
+returned only the bounded validation errors; there is no retained script to
+inspect or claim as an artifact. One host invocation remains for this exact
+packet. No retry, cap reset, source-packet substitution, or provider fallback
+was made. Status: BLOCKED under the two-repair debugging guardrail; the
+45-minute active-debugging threshold was not used as the stopping reason.
+Next: obtain an operator choice between a narrow deterministic fallback-visual
+normalizer and a stricter schema/prompt contract; implement and test only the
+chosen option before any separately approved final live attempt.
+
+Follow-up on 2026-09-29: the operator selected the narrow deterministic
+fallback-visual correction. The checkout runner now shortens only
+`scene_plans[*].fallback_visual` values longer than 100 characters, at the last
+complete-word boundary within the limit. It records each corrected field and
+its original/normalized lengths in response provenance. All other fields,
+including narration, claims, and the immutable source request, remain
+unchanged; a value without a safe boundary still fails domain validation.
+The correction happens after the single CLI invocation and introduces no retry.
+Focused runner/provider/config/migration tests returned `39 passed in 3.08s`.
+The collectable regression suite returned `237 passed, 4 skipped in 212.29s`;
+three dashboard/API test files remain excluded because this environment lacks
+the test-only `httpx2` package. The generated fake package in the focused test
+was inspected for the unchanged request, claims, and script sections and for
+both normalization records. No live Codex request, real script, or video was
+produced. The existing `.gitignore` was reviewed; this correction creates no
+new generated path. Status: IMPLEMENTED in the checkout, but the restricted
+host-runner gate remains BLOCKED until the root-owned wheel is deployed and
+its installed code verified. The caption-timing packet still has exactly one
+host attempt remaining. Next: operator reinstall/restart the host service;
+perform read-only installed-wheel checks, then request separate approval for
+the final live attempt and inspect the returned script if successful.
+
+Follow-up on 2026-09-29 after operator deployment: SHA-256 of the checkout
+`src/tubeforge/host_codex_runner.py` and the installed root-owned wheel copy
+matched exactly (`bdba5b971016121d33f8c29d1160c2adc6b3da1b689323ce2be4d90381edfc68`).
+The installed module reports `gpt-5.6-sol`, a two-invocation limit, a
+480-second timeout, and the new normalizer. Running the runner test module
+against the installed wheel (without checkout `src` on `PYTHONPATH`) returned
+`12 passed in 0.99s`. Outside the restricted command shell, `systemctl
+is-active` returned `active` for both service and socket; host `stat` showed
+`0750 root:1000` on the socket directory and `0660 986:1000` on the socket.
+The UID-1000 shell connected and sent only `{}`, which the runner rejected at
+typed request validation with `invalid_output` because `request` was missing.
+This cannot reach `run_request` or consume a Codex invocation. No credentials
+were printed, no model call occurred, and the caption-timing packet retains its
+single final host attempt. Status: the deployment checks are VERIFIED, but the
+runner milestone remains BLOCKED pending separate approval for that attempt
+and real-script inspection. Next: request approval for the unchanged fixture,
+then send it at most once and review any returned script.
+
+## 2026-10-04 — Debian home-server dashboard access (blocked on host privilege)
+
+Scope: make the loopback-only Creator Studio dashboard safely reachable from
+other devices without exposing a public or LAN dashboard port. The selected
+path is Tailscale Serve, which terminates Tailnet HTTPS and proxies only to
+`http://127.0.0.1:62065`; production authentication already enables secure
+cookies.
+
+Evidence: the Compose web service is running with
+`127.0.0.1:62065->8080/tcp`; `GET /healthz` returned
+`{"status":"ok","database":"ok"}`. Unauthenticated `/` returned a 303
+redirect to `/login`, and `/api/jobs` returned 401. The normal laptop browser
+cannot use that loopback address because the application runs on the separate
+Debian home server; the Codex in-app `localhost` URL is only a preview proxy.
+
+Added the documented server procedure to `readme.md`: enable/sign in to
+`tailscaled`, start Compose, and run `tailscale serve --https=443
+http://127.0.0.1:62065`, then verify with `tailscale serve status` and the
+health endpoint. `git diff --check` passed. No application port binding was
+broadened and no credentials were accessed.
+
+Blocker: this SSH session has no system-bus privilege to start `tailscaled`
+(`Interactive authentication required`), so the final Tailnet endpoint and
+cross-device browser acceptance cannot be completed until the Debian operator
+runs the documented sudo commands. Next: enable `tailscaled`, configure the
+Tailnet proxy, record its HTTPS hostname, and verify an authenticated browser
+session from another Tailnet device.
+
+## 2026-10-04 — Caption-timing host Codex attempt audit
+
+Scope: after explicit operator direction to try a script, submit the unchanged
+reviewed `host_codex_caption_timing_request.json` packet exactly once through
+the restricted Unix socket. The first two local client starts failed before a
+socket connection (`python` was unavailable; then the execution sandbox denied
+the socket), so neither could reach `run_request` or consume an invocation.
+
+With host access, the UID-1000 client connected and submitted the unchanged
+packet. The runner returned `{"ok":false,"failure":{"code":"allowance_exhausted"}}`
+before invoking Codex. No model call, generated script, output draft, retry,
+cap reset, or fallback provider occurred. This durable response supersedes the
+previous record that the packet had one attempt remaining: the packet is
+exhausted, as are the two earlier reviewed packets.
+
+Next: prepare a substantively new, source-grounded packet and obtain separate
+operator approval for its first bounded host invocation. The rejected result
+contains no script to assess for source grounding or creative quality.
+
+## 2026-10-04 — Studio Codex prompt-version failure correction
+
+Scope: diagnose the Studio error for the job titled "bare minimum git commands
+required" and correct the production brief path. Read-only inspection of the
+local database found two jobs for that exact request. The first failed with
+`unsupported Codex content prompt template: video-brief-v2`; the generation
+cache recorded one failed attempt even though the host model was not reached.
+The second displayed the two-attempt error. The recorded cache state at
+inspection was `retryable` with invocation count 1; the failure sequence is
+consistent with the worker counting a local prompt validation error and the
+host rejecting an unsupported version before model execution.
+
+Creator Studio now writes the configured Codex prompt version into new video
+briefs, and the worker checks prompt assembly before reserving or consuming
+an invocation. Error text now identifies the limit as TubeForge's own rule,
+not a Codex quota. Existing failed jobs and their durable counters were left
+unchanged. Focused runner and dashboard API tests against the current checkout
+passed: `21 passed` in 113.40s. An initial Compose-container test used stale
+baked-in test files; rerunning with the checkout mounted read-only exposed two
+missing test imports, which were corrected before the passing run.
+
+Status: IMPLEMENTED. Next: recreate the Docker services and verify a fresh,
+source-grounded Studio job reaches the host Codex runner and produces a script
+that passes source and creative review. The root-owned host wheel only needs
+reinstallation for its updated diagnostic wording; the prompt-version fix is
+in the bind-mounted API and worker code. No generated paths were introduced.
+
+## 2026-10-04 — Widescreen narration budget and retry reservation
+
+The operator reported a real Codex response containing 62 narration words for
+a 60-second widescreen request (required 90–240). The widescreen prompt lacked
+an explicit word budget. Added shared narration limits used by both prompt
+and validator, a 162-word target for 60 seconds, and instructions to count
+narration only and revise within the same response. Also fixed a cache bug:
+reacquiring a retryable entry now sets state to reserved. Previously the new
+token could not consume the remaining attempt and produced a false limit error.
+Counters and ownership fencing remain intact.
+
+Focused validation: four narration-budget, short-output rejection, cache and
+retry-fencing tests passed, 13 deselected, in 16.82 seconds. The preceding
+broad regression was stopped at the operator's request: 173 passed before
+KeyboardInterrupt, not a complete regression pass. No new model request was
+sent. The corrected prompt is IMPLEMENTED but deployment is BLOCKED:
+`sudo -n` requires the operator's password to install the root-owned host wheel.
+The README records installation and service restart commands. Next: deploy
+the host wheel, then review a bounded real script before claiming VERIFIED.
+No new generated paths; existing ignore rules require no changes.

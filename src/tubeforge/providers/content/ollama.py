@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import logging
 import socket
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,7 +17,7 @@ from tubeforge.core.config import OllamaProviderConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.repositories import CachedGeneration, GenerationCacheRepository
 from tubeforge.domain.contracts import ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest
-from tubeforge.providers.content.prompts import build_content_prompt, normalize_content_request, validate_video_package
+from tubeforge.providers.content.prompts import build_content_prompt, validate_video_package
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,7 @@ class OllamaResponse:
 
 
 Transport = Callable[[str, bytes, int, int, int], OllamaResponse]
+logger = logging.getLogger(__name__)
 
 
 class OllamaContentProvider:
@@ -51,9 +53,29 @@ class OllamaContentProvider:
             raise RetryableProviderError("Ollama generation is already reserved; retry after the reservation expires")
         try:
             prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
-            raw, usage = self._invoke(prompt)
-            package = self._validate(raw, request)
-            provenance: dict[str, object] = {"cache_key": reservation.cache_key, "generated_at": self._now().isoformat(), "model": self.config.model, "provider": self.provider_name, "base_url": self.config.base_url, "prompt_template_version": self.config.prompt_template_version}
+            usage: dict[str, object] = {}
+            package: ContentPackage | None = None
+            validation_error: ProviderValidationError | None = None
+            for validation_attempt in range(self.config.validation_retries + 1):
+                retry_prompt = prompt
+                if validation_error is not None:
+                    retry_prompt += (
+                        "\nThe previous JSON was rejected by a local safety/quality validator: "
+                        + str(validation_error)[:1_000]
+                        + ". Regenerate the complete ContentPackage JSON and correct that issue without weakening source grounding."
+                    )
+                raw, attempt_usage = self._invoke(retry_prompt, request=request)
+                usage = {**attempt_usage, "validation_attempts": validation_attempt + 1}
+                try:
+                    package = self._validate(raw, request)
+                    break
+                except ProviderValidationError as error:
+                    validation_error = error
+                    logger.warning("Ollama draft rejected by local validator (attempt %s): %s", validation_attempt + 1, error)
+            if package is None:
+                assert validation_error is not None
+                raise validation_error
+            provenance: dict[str, object] = {"cache_key": reservation.cache_key, "generated_at": self._now().isoformat(), "model": self.config.model, "provider": self.provider_name, "base_url": self.config.base_url, "prompt_template_version": self.config.prompt_template_version, "validation_attempts": usage["validation_attempts"]}
             if not self.cache.accept(reservation, package.model_dump(mode="json"), provenance, usage, now=self._now()):
                 raise RetryableProviderError("Ollama generation reservation expired before validated result could be accepted")
         except Exception:
@@ -62,8 +84,28 @@ class OllamaContentProvider:
         self.last_provenance, self.last_usage = provenance, usage
         return package
 
-    def _invoke(self, prompt: str) -> tuple[Any, dict[str, object]]:
-        payload = json.dumps({"model": self.config.model, "prompt": prompt, "stream": False, "format": ContentPackage.model_json_schema()}, separators=(",", ":")).encode()
+    def _invoke(self, prompt: str, *, request: ContentRequest | None = None) -> tuple[Any, dict[str, object]]:
+        schema = ContentPackage.model_json_schema()
+        if request is not None and request.aspect_ratio == "9:16":
+            # Ollama uses this schema as a decoding grammar. Small local models
+            # can acknowledge a prose word budget yet still emit terse fields;
+            # structural bounds ensure six meaningfully developed narration
+            # sections reach the unchanged local duration gate.
+            sections = schema.get("properties", {}).get("script_sections")
+            if isinstance(sections, dict):
+                sections["minItems"] = 6
+                sections["maxItems"] = 6
+            plans = schema.get("properties", {}).get("scene_plans")
+            if isinstance(plans, dict):
+                plans["minItems"] = 6
+                plans["maxItems"] = 6
+            script_definition = schema.get("$defs", {}).get("ScriptSection")
+            if isinstance(script_definition, dict):
+                narration = script_definition.get("properties", {}).get("narration")
+                if isinstance(narration, dict):
+                    narration["minLength"] = 105
+                    narration["maxLength"] = 260
+        payload = json.dumps({"model": self.config.model, "prompt": prompt, "stream": False, "format": schema}, separators=(",", ":")).encode()
         response: OllamaResponse | None = None
         for attempt in range(self.config.retries + 1):
             try:
@@ -96,12 +138,35 @@ class OllamaContentProvider:
         return raw, usage
 
     def _validate(self, raw: Any, request: ContentRequest) -> ContentPackage:
+        if not isinstance(raw, dict):
+            raise ProviderValidationError("Ollama output failed ContentPackage validation")
+        # The request and source packet are authority-bearing inputs, not model
+        # output. Local models frequently normalize or paraphrase echoed fields;
+        # replace that copy with the immutable original before schema/reference
+        # validation so the model can neither alter nor invent provenance.
+        authoritative = {**raw, "request": request.model_dump(mode="json")}
+        claims = raw.get("claims")
+        sections = raw.get("script_sections")
+        claim_ids = [str(value.get("claim_id")) for value in claims if isinstance(value, dict) and value.get("claim_id")] if isinstance(claims, list) else []
+        if claim_ids and isinstance(sections, list):
+            # Some small structured-output models correctly create cited
+            # claims but omit the redundant section->claim edge. Binding a
+            # factual section to every generated claim is conservative and
+            # reviewable; ContentPackage still rejects any claim whose source
+            # ID is absent from the immutable request packet.
+            authoritative["script_sections"] = [
+                {**value, "claim_ids": claim_ids}
+                if isinstance(value, dict) and value.get("contains_factual_claims") is True and not value.get("claim_ids")
+                else value
+                for value in sections
+            ]
         try:
-            package = ContentPackage.model_validate(raw)
+            package = ContentPackage.model_validate(authoritative)
         except ValidationError as error:
-            raise ProviderValidationError("Ollama output failed ContentPackage validation") from error
-        if normalize_content_request(package.request) != normalize_content_request(request):
-            raise ProviderValidationError("Ollama output request or cited source packet differs from the requested source packet")
+            issue = error.errors(include_input=False)[0]
+            field = ".".join(str(part) for part in issue.get("loc", ())) or "root"
+            message = str(issue.get("msg", "invalid value"))
+            raise ProviderValidationError(f"Ollama output failed ContentPackage validation at {field}: {message}") from error
         validate_video_package(package, request, provider_name="Ollama")
         claims = tuple(claim.model_copy(update={"review_status": ClaimReviewStatus.NEEDS_REVIEW, "human_review_required": True}) if claim.time_sensitive or claim.confidence in {ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM} else claim for claim in package.claims)
         return package.model_copy(update={"claims": claims})

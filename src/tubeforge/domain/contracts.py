@@ -65,6 +65,8 @@ class ContentRequest(DomainModel):
     production_mode: str = Field(default="generated", pattern=r"^(generated|source_clip)$")
     source_url: HttpUrl | None = None
     clip_count: int = Field(default=1, ge=1, le=12)
+    preset_name: str = Field(default="default", min_length=1, max_length=100)
+    aspect_ratio: str = Field(default="16:9", pattern=r"^(16:9|9:16)$")
 
     @model_validator(mode="after")
     def require_unique_source_ids(self) -> ContentRequest:

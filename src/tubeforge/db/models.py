@@ -500,6 +500,8 @@ class GenerationCacheRecord(Base):
     package_json: Mapped[str | None] = mapped_column(Text)
     provenance_json: Mapped[str | None] = mapped_column(Text)
     usage_json: Mapped[str | None] = mapped_column(Text)
+    invocation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

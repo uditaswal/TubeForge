@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import struct
+import wave
 from argparse import Namespace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,17 +29,21 @@ from tubeforge.core.config import (
     PiperProviderConfig,
     PreviewRenderConfig,
     Settings,
+    ShortsFinalRenderConfig,
+    ShortsPreviewRenderConfig,
     VoicePipelineConfig,
 )
 from tubeforge.core.runtime import create_runtime
-from tubeforge.domain.contracts import ContentRequest, SourceReference
+from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.workers.service import WorkerService
+from tubeforge.providers.content.prompts import validate_video_package
 
 
 MODEL_ENV = "TUBEFORGE_SMOKE_PIPER_MODEL"
 TOPIC_ENV = "TUBEFORGE_SMOKE_TOPIC"
 PROMPT_VERSION_ENV = "TUBEFORGE_SMOKE_PROMPT_VERSION"
+VISUAL_SOURCE_ENV = "TUBEFORGE_SMOKE_VISUAL_SOURCE"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -182,7 +187,7 @@ def test_piper_job_creates_real_six_scene_smoke_video(
             codex=CodexProviderConfig(executable="codex", timeout_seconds=900),
             piper=PiperProviderConfig(model_path=PIPER_MODEL, cache_root=tmp_path / "piper-cache", timeout_seconds=300),
             voice=VoicePipelineConfig(artifact_root=work_root),
-            media=MediaPipelineConfig(cache_root=tmp_path / "asset-cache", min_width=64, min_height=64),
+            media=MediaPipelineConfig(provider="hybrid", cache_root=tmp_path / "asset-cache", min_width=64, min_height=64),
             preview=PreviewRenderConfig(width=640, height=360, minimum_free_bytes=1, timeout_seconds=900),
             final=FinalRenderConfig(width=640, height=360, minimum_free_bytes=1, timeout_seconds=900),
         ),
@@ -197,6 +202,7 @@ def test_piper_job_creates_real_six_scene_smoke_video(
             audience="general",
             prompt_version=os.environ.get(PROMPT_VERSION_ENV, "m24-real-smoke-v1"),
             sources=(SourceReference(source_id="local-design", url="https://example.invalid/tubeforge", title="TubeForge local pipeline"),),
+            visual_source=os.environ.get(VISUAL_SOURCE_ENV, "generated"),
         )
         job = runtime.jobs.create("m24-real-local-smoke", request)
         worker = WorkerService("real-smoke-worker", runtime.jobs, runtime.orchestrator, settings.worker, clock=lambda: datetime(2026, 8, 24, tzinfo=UTC))
@@ -223,6 +229,15 @@ def test_piper_job_creates_real_six_scene_smoke_video(
         assert len(assets) >= 6
         assert len({value["path"] for value in assets.values()}) == len(assets)
         assert len({value["checksum_sha256"] for value in assets.values()}) == len(assets)
+        if request.visual_source == "stock":
+            # Stock remains preferred, but a sparse verified Commons result
+            # must not prevent a safe local-video render.
+            for asset in assets.values():
+                fallback = asset.get("fallback")
+                if fallback is not None:
+                    assert fallback["to"] == "local generated CC0 scene art"
+                    assert asset["request"]["visual_source"] == "stock"
+                    assert asset["resolved_request"]["visual_source"] == "generated"
 
         smoke_root.mkdir(parents=True, exist_ok=True)
         accepted_video = smoke_root / f"{artifact_stem}.mp4"
@@ -281,5 +296,129 @@ def test_piper_job_creates_real_six_scene_smoke_video(
         midpoints = [(float(group[0]["start_seconds"]) + float(group[-1]["end_seconds"])) / 2 for group in scene_groups.values()]
         assert len(midpoints) >= 6
         assert len({_visual_frame_digest(accepted_video, timestamp) for timestamp in midpoints}) == len(midpoints)
+    finally:
+        runtime.database.dispose()
+
+
+def test_piper_short_renders_real_1080x1920_with_word_alignment(tmp_path: Path) -> None:
+    """Prove the complete sourced, portrait, captioned, music-mixed Shorts path."""
+    assert PIPER_MODEL is not None
+    writer_evidence = REPOSITORY_ROOT / "artifacts" / "smoke" / "ollama_shorts_content.json"
+    if not writer_evidence.is_file():
+        pytest.skip("run the real Ollama writer acceptance before the full Shorts render")
+    accepted_package = ContentPackage.model_validate(json.loads(writer_evidence.read_text(encoding="utf-8"))["package"])
+    validate_video_package(accepted_package, accepted_package.request, provider_name="Ollama evidence")
+
+    class AcceptedLocalWriter:
+        def generate_package(self, request: ContentRequest) -> ContentPackage:
+            return accepted_package.model_copy(update={"request": request})
+
+    database_path = tmp_path / "real-shorts-smoke.db"
+    _migrate(database_path)
+    smoke_root = REPOSITORY_ROOT / "artifacts" / "smoke"
+    work_root = tmp_path / "artifacts"
+    settings = Settings(
+        app=AppConfig(name="TubeForge Shorts smoke", environment="test"),
+        database=DatabaseConfig(url=f"sqlite:///{database_path}"),
+        pipeline=PipelineConfig(
+            content_provider="fake",
+            voice_provider="piper",
+            fake=FakeProviderConfig(artifact_root=tmp_path / "synthetic-visuals"),
+            piper=PiperProviderConfig(model_path=PIPER_MODEL, cache_root=tmp_path / "piper-cache", timeout_seconds=300),
+            voice=VoicePipelineConfig(artifact_root=work_root),
+            media=MediaPipelineConfig(provider="hybrid", cache_root=tmp_path / "asset-cache", min_width=64, min_height=64),
+            shorts_preview=ShortsPreviewRenderConfig(width=360, height=640, minimum_free_bytes=1, timeout_seconds=900, threads=2),
+            shorts_final=ShortsFinalRenderConfig(minimum_free_bytes=1, timeout_seconds=1800, threads=2),
+        ),
+    )
+    runtime = create_runtime(settings)
+    try:
+        runtime.orchestrator.content = AcceptedLocalWriter()
+        music_buffer = tmp_path / "quiet-circuit.wav"
+        sample_rate = 16_000
+        with wave.open(str(music_buffer), "wb") as stream:
+            stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(sample_rate)
+            stream.writeframes(b"".join(struct.pack("<h", round(1_200 * math.sin(2 * math.pi * 110 * index / sample_rate))) for index in range(sample_rate * 4)))
+        assert runtime.orchestrator.music_catalog is not None
+        runtime.orchestrator.music_catalog.upload(
+            name="Quiet Circuit acceptance bed",
+            filename=music_buffer.name,
+            payload=music_buffer.read_bytes(),
+            source_url="https://example.invalid/music/quiet-circuit",
+            license_name="CC BY 4.0",
+            license_url="https://creativecommons.org/licenses/by/4.0/",
+            attribution_required=True,
+            attribution="Quiet Circuit acceptance bed — TubeForge test — CC BY 4.0",
+            publishing_allowed=True,
+        )
+        request = accepted_package.request.model_copy(update={"music_track": "Quiet Circuit acceptance bed", "prompt_version": "shorts-quality-e2e-v1"})
+        job = runtime.jobs.create("shorts-real-local-smoke", request)
+        worker = WorkerService("shorts-smoke-worker", runtime.jobs, runtime.orchestrator, settings.worker)
+        assert worker.run_once().state is JobState.SCRIPT_APPROVAL_REQUIRED
+        content_artifact = runtime.artifacts.get(job.id, JobState.CONTENT_GENERATING, "content_package")
+        assert content_artifact is not None
+        content = json.loads(Path(content_artifact.path).read_text(encoding="utf-8"))
+        assert 108 <= len(" ".join(section["narration"] for section in content["script_sections"]).split()) <= 166
+        runtime.approvals.record("shorts-smoke-script", job.id, ApprovalGate.SCRIPT, actor="automated-real-smoke", reviewed_identity=content_artifact.checksum_sha256)
+        preview = worker.run_once()
+        assert preview is not None and preview.state is JobState.PREVIEW_READY, preview.failure_message if preview else "no job"
+        preview_manifest = runtime.artifacts.get(job.id, JobState.PREVIEW_RENDERING, "preview_manifest")
+        assert preview_manifest is not None
+        preview_identity = json.loads(Path(preview_manifest.path).read_text(encoding="utf-8"))["render_identity"]
+        runtime.approvals.record("shorts-smoke-preview", job.id, ApprovalGate.PREVIEW, actor="automated-real-smoke", reviewed_identity=preview_identity)
+        completed = worker.run_once()
+        assert completed is not None and completed.state is JobState.FINAL_READY, completed.failure_message if completed else "no job"
+
+        final = runtime.artifacts.get(job.id, JobState.FINAL_RENDERING, "final")
+        narration = runtime.artifacts.get(job.id, JobState.VOICE_GENERATION, "narration")
+        timing_artifact = runtime.artifacts.get(job.id, JobState.VOICE_GENERATION, "timing_map")
+        captions = runtime.artifacts.get(job.id, JobState.CAPTION_GENERATION, "captions")
+        quality_artifact = runtime.artifacts.get(job.id, JobState.FINAL_READY, "quality_report")
+        asset_manifest = runtime.artifacts.get(job.id, JobState.ASSET_ACQUISITION, "asset_manifest")
+        final_manifest = runtime.artifacts.get(job.id, JobState.FINAL_RENDERING, "final_manifest")
+        assert final and narration and timing_artifact and captions and quality_artifact and asset_manifest and final_manifest
+        timing = json.loads(Path(timing_artifact.path).read_text(encoding="utf-8"))
+        quality = json.loads(Path(quality_artifact.path).read_text(encoding="utf-8"))
+        assets = json.loads(Path(asset_manifest.path).read_text(encoding="utf-8"))
+        render_record = json.loads(Path(final_manifest.path).read_text(encoding="utf-8"))
+        assert timing["alignment"]["verified"] and timing["alignment"]["first_word_seconds"] <= 3
+        assert quality["passed"] and quality["shorts"]["maximum_visual_hold_seconds"] <= 3
+        assert len(set(quality["shorts"]["motion_variants"])) == 4
+        assert assets["quality"]["profile"].startswith("portrait-motion-v1:")
+        assert assets["quality"]["scene_count"] == assets["quality"]["unique_scene_count"] == 6
+        assert render_record["inputs"]["music"]["license_name"] == "CC BY 4.0"
+        assert "sidechaincompress=" in ";".join(render_record["command"])
+        assert Path(captions.path).suffix == ".ass" and "PlayResX: 1080" in Path(captions.path).read_text(encoding="utf-8")
+
+        published = worker.run_once()
+        assert published is not None and published.state is JobState.PUBLICATION_APPROVAL_REQUIRED
+        metadata_artifact = runtime.artifacts.get(job.id, JobState.PUBLICATION_PREPARING, "metadata")
+        assert metadata_artifact is not None
+        metadata = json.loads(Path(metadata_artifact.path).read_text(encoding="utf-8"))
+        assert "Music: Quiet Circuit acceptance bed" in metadata["description"]
+        assert settings.pipeline.youtube.dry_run and not settings.pipeline.youtube.enabled
+
+        smoke_root.mkdir(parents=True, exist_ok=True)
+        accepted_video = smoke_root / "shorts_piper_1080x1920_smoke.mp4"
+        temporary_video = accepted_video.with_suffix(".part.mp4")
+        shutil.copyfile(final.path, temporary_video); temporary_video.replace(accepted_video)
+        accepted_narration = smoke_root / "shorts_piper_1080x1920_smoke.wav"
+        temporary_narration = accepted_narration.with_suffix(".part.wav")
+        shutil.copyfile(narration.path, temporary_narration); temporary_narration.replace(accepted_narration)
+        probe = _probe(accepted_video)
+        video = next(stream for stream in probe["streams"] if stream.get("codec_type") == "video")
+        assert (video["width"], video["height"]) == (1080, 1920)
+        numerator, denominator = str(video["avg_frame_rate"]).split("/", 1)
+        assert float(numerator) / float(denominator) == pytest.approx(30, abs=0.01)
+        assert 30 <= float(probe["format"]["duration"]) <= 55
+        narration_rms = _decoded_audio_rms(accepted_narration)
+        mixed_rms = _decoded_audio_rms(accepted_video)
+        audio_mix_ratio = mixed_rms / narration_rms
+        assert narration_rms >= 10
+        assert 0.75 <= audio_mix_ratio <= 1.35
+        evidence = smoke_root / "shorts_piper_1080x1920_smoke.json"
+        evidence.write_text(json.dumps({"probe": probe, "timing": timing["alignment"], "quality": quality, "visuals": assets["quality"], "music": render_record["inputs"]["music"], "audio": {"narration_rms": narration_rms, "mixed_rms": mixed_rms, "mixed_to_narration_ratio": audio_mix_ratio}, "publication_state": published.state}, indent=2, sort_keys=True, default=str), encoding="utf-8")
+        contact_sheet = smoke_root / "shorts_piper_1080x1920_contact_sheet.png"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(accepted_video), "-vf", "fps=1/8,scale=270:480,tile=3x2", "-frames:v", "1", str(contact_sheet)], check=True, timeout=180)
     finally:
         runtime.database.dispose()

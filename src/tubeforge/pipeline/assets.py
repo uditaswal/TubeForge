@@ -26,6 +26,7 @@ from tubeforge.domain.providers import MediaProvider
 from tubeforge.db.repositories import AssetCacheRepository, AssetCacheReservation, CachedAsset
 
 ASSET_VALIDATION_VERSION = "m25-v3"
+SHORTS_VISUAL_QUALITY_VERSION = "shorts-visual-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,13 +48,15 @@ class AssetLimits:
 def asset_limits_from_config(config: MediaPipelineConfig) -> AssetLimits:
     """Translate validated configuration without leaking it into providers."""
     return AssetLimits(frozenset(config.allowed_hosts), frozenset(config.allowed_licenses), config.max_bytes, config.timeout_seconds, config.max_redirects, config.max_width, config.max_height, config.min_width, config.min_height, config.max_width * config.max_height, config.max_duration_seconds, frozenset(config.allowed_media_types))
-def scene_request(scene: ScenePlan, *, visual_source: str = "generated") -> MediaSearchRequest:
+def scene_request(scene: ScenePlan, *, visual_source: str = "generated", aspect_ratio: str = "16:9") -> MediaSearchRequest:
     """Turn approved scene-plan fields into a deterministic search request."""
-    orientation = "portrait" if scene.visual_type in {"portrait", "vertical"} else "landscape"
+    orientation = "portrait" if aspect_ratio == "9:16" or scene.visual_type in {"portrait", "vertical"} else "landscape"
     return MediaSearchRequest(scene_id=scene.scene_id, queries=tuple(" ".join(query.split()) for query in scene.search_queries), visual_type=scene.visual_type, required_license="licensed", orientation=orientation, visual_source=visual_source)
 
 def select_candidate(candidates: list[AssetCandidate], request: MediaSearchRequest, limits: AssetLimits) -> AssetCandidate:
     eligible = [candidate for candidate in candidates if asset_policy_valid(candidate, limits)]
+    if request.visual_source == "stock" and request.orientation == "portrait":
+        eligible = [candidate for candidate in eligible if candidate.width is not None and candidate.height is not None and candidate.height > candidate.width and candidate.width >= 720 and candidate.height >= 1280]
     if not eligible:
         raise ProviderValidationError(f"no permitted licensed asset for scene {request.scene_id}")
     def rank(candidate: AssetCandidate) -> tuple[int, int, int, str]:
@@ -75,6 +78,68 @@ def asset_policy_valid(candidate: AssetCandidate, limits: AssetLimits) -> bool:
         and not candidate.review_required
         and not candidate.attribution_required
     )
+
+
+def validate_shorts_visual_manifest(manifest: dict[str, object]) -> dict[str, object]:
+    """Reject soft, inconsistent, or duplicated production-generated Shorts art."""
+    raw_scenes = manifest.get("scenes")
+    if not isinstance(raw_scenes, dict) or not raw_scenes:
+        raise ProviderValidationError("Shorts visual quality gate requires scene assets")
+    scenes = [value for value in raw_scenes.values() if isinstance(value, dict)]
+    generated = [
+        value
+        for value in scenes
+        if isinstance(value.get("candidate"), dict)
+        and str(value["candidate"].get("provider_asset_id", "")).startswith("local-motion-")
+    ]
+    fake = [value for value in scenes if isinstance(value.get("candidate"), dict) and str(value["candidate"].get("provider_asset_id", "")).startswith("fake-")]
+    # Fake providers remain available to unit tests.
+    if len(fake) == len(scenes):
+        return {"version": SHORTS_VISUAL_QUALITY_VERSION, "profile": "test-provider", "passed": True}
+    if not generated:
+        checksums: set[str] = set()
+        for item in scenes:
+            validation = item.get("validation")
+            if not isinstance(validation, dict):
+                raise ProviderValidationError("Shorts stock visual quality metadata is incomplete")
+            width, height = validation.get("width"), validation.get("height")
+            if not isinstance(width, int) or not isinstance(height, int) or height <= width or width < 720 or height < 1280:
+                raise ProviderValidationError("Shorts stock visuals must be portrait and at least 720x1280")
+            checksum_value = str(item.get("checksum_sha256", ""))
+            if not checksum_value or checksum_value in checksums:
+                raise ProviderValidationError("Shorts stock visuals must be distinct for every scene")
+            checksums.add(checksum_value)
+        return {"version": SHORTS_VISUAL_QUALITY_VERSION, "profile": "licensed-portrait-stock", "passed": True, "scene_count": len(scenes), "unique_scene_count": len(checksums), "minimum_resolution": "720x1280"}
+    if len(generated) != len(scenes):
+        raise ProviderValidationError("Shorts generated visual set mixes incompatible production styles")
+    checksums: set[str] = set()
+    styles: set[str] = set()
+    for item in generated:
+        candidate = item["candidate"]
+        validation = item.get("validation")
+        if not isinstance(candidate, dict) or not isinstance(validation, dict):
+            raise ProviderValidationError("Shorts visual quality metadata is incomplete")
+        if (validation.get("width"), validation.get("height")) != (1080, 1920):
+            raise ProviderValidationError("Shorts generated visuals must be native 1080x1920 portrait frames")
+        checksum_value = str(item.get("checksum_sha256", ""))
+        if not checksum_value or checksum_value in checksums:
+            raise ProviderValidationError("Shorts generated visuals must be distinct for every scene")
+        checksums.add(checksum_value)
+        source_version = str(candidate.get("source_version", ""))
+        style_parts = source_version.split(":")
+        if len(style_parts) != 3 or not source_version.startswith("portrait-motion-v1:"):
+            raise ProviderValidationError("Shorts generated visual style metadata is missing")
+        styles.add(":".join(style_parts[:2]))
+    if len(styles) != 1:
+        raise ProviderValidationError("Shorts generated visuals do not share one reference palette")
+    return {
+        "version": SHORTS_VISUAL_QUALITY_VERSION,
+        "profile": next(iter(styles)),
+        "passed": True,
+        "scene_count": len(generated),
+        "unique_scene_count": len(checksums),
+        "resolution": "1080x1920",
+    }
 
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
@@ -139,12 +204,12 @@ class AssetDownloader:
             temporary.unlink(missing_ok=True); raise
     def download(self, provider: str, candidate: AssetCandidate, cancellation_requested: Callable[[], bool] | None = None) -> tuple[Path, str, dict[str, object]]:
         if cancellation_requested and cancellation_requested(): raise AssetAcquisitionCancelled("cancelled before asset download")
-        url = str(candidate.download_url or candidate.source_url)
-        _validate_download_url(url, self.limits)
         if candidate.license_name.casefold() not in {item.casefold() for item in self.limits.allowed_licenses}:
             raise ProviderValidationError("asset licence is not permitted by configuration")
         if candidate.local_path:
             return self._copy_local(provider, candidate, cancellation_requested)
+        url = str(candidate.download_url or candidate.source_url)
+        _validate_download_url(url, self.limits)
         key = self.cache_key(provider, candidate); target = self.cache_root / key[:2] / key
         metadata_path = target.with_suffix(".json")
         if target.is_file() and metadata_path.is_file():

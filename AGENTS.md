@@ -36,6 +36,61 @@ For requested implementation work:
   - atomic artifact promotion
   - cancellation handling
 
+## Delivery guardrails
+
+For multi-phase work, write a plan before editing. For each phase, specify one
+user-visible outcome, its acceptance test, the required artifact or evidence,
+and what is out of scope. Work on one phase at a time. Report its acceptance
+result before starting the next.
+
+Use these status labels exactly:
+
+- **NOT STARTED:** No implementation exists.
+- **IMPLEMENTED:** Code exists but has not been proven end to end.
+- **VERIFIED:** Required tests and real-artifact inspection passed.
+- **BLOCKED:** Progress requires a user decision or external dependency.
+
+Never call IMPLEMENTED work complete or working. For creative work, automated
+tests are insufficient: generate a real artifact, inspect it against the
+requested quality bar, and report concrete pass/fail evidence.
+
+### Script generation
+
+Use Codex CLI or Claude for production scripts. Do not use a local LLM for
+production generation, retries, or quality acceptance without operator
+approval for that specific run.
+
+Before changing the script provider, report the proposed provider, expected
+cost or token use, fallback behavior, and acceptance test. Accept a script
+only after reviewing its source grounding and creative quality; schema validity
+alone is insufficient.
+
+After two failed script attempts, or when the agreed time or token budget is
+reached, stop automatic retries. Show the rejected scripts and reasons, then
+request a decision between Codex CLI, Claude, or a revised brief.
+
+### Time and scope
+
+If the same root problem requires more than two repair attempts or 45 minutes
+of **active debugging**, stop and report the failure, evidence, two viable
+options, and a recommendation. Model downloads and otherwise healthy renders
+do not count as active debugging time.
+
+Do not add adjacent features while the current phase’s highest-risk acceptance
+test is failing.
+
+### Reporting and completion
+
+During long-running work, report every 20 minutes: the current phase, verified
+result or blocker, next acceptance test, and whether a user decision is needed.
+
+Before claiming a phase VERIFIED, run its required tests and inspect its real
+output. Test the signed-in dashboard when the phase changes an operator-facing
+workflow. Before claiming the full Shorts workflow complete, inspect one real
+30–55 second 1080×1920 video against the Shorts production standard in
+`readme.md`, verify the signed-in dashboard flow, and update the status
+documentation.
+
 ## Repository hygiene
 
 Before every commit (including autonomous commits), review `git status --short`

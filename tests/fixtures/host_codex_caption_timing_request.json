@@ -1,0 +1,21 @@
+{
+  "operation": "GenerateShortsScriptV1",
+  "request": {
+    "topic": "How TubeForge keeps captions in sync with a portrait Short",
+    "angle": "Explain the word-to-WAV alignment, highlighted current word, portrait safe-area checks, and three-second pacing gates as TubeForge implementation details. Do not present them as universal YouTube rules.",
+    "target_duration_seconds": 45,
+    "language": "en",
+    "audience": "software engineers building short videos",
+    "prompt_version": "m6-content-v4",
+    "sources": [
+      {
+        "source_id": "tubeforge-readme-caption-timing",
+        "url": "https://github.com/uditaswal/Youtube_Video_Producer/blob/main/readme.md",
+        "title": "TubeForge README: YouTube Shorts workflow",
+        "excerpt": "Shorts previews are rendered at 540×960. Approved finals are rendered at 1080×1920, 30 fps with H.264 video and AAC audio. A local waveform aligner binds every approved narration word to its generated WAV before captions are rendered. The final quality gate verifies that alignment against the assembled audio, rejects a first word after three seconds, rejects visual holds over three seconds, and validates portrait caption margins and line widths. Shorts use large uppercase ASS captions near the lower-middle safe area. The currently spoken word is yellow and surrounding words remain white. Scene holds are deterministically divided into shorter camera moves, so a long narration scene does not become one static shot."
+      }
+    ],
+    "review_mode": "manual",
+    "aspect_ratio": "9:16"
+  }
+}

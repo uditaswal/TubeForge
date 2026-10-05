@@ -5,8 +5,12 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 from datetime import UTC, datetime
+import hashlib
 import shutil
+import threading
+import wave
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -20,6 +24,7 @@ from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceRef
 from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
 from tubeforge.scheduling.service import next_run
+from tubeforge.providers.content.prompts import validate_video_package
 
 
 class ApprovalRequest(BaseModel):
@@ -54,6 +59,9 @@ class VideoBriefRequest(BaseModel):
     mcp_servers: tuple[str, ...] | None = None
     audience: str = Field(default="general", min_length=1, max_length=200)
     voice_id: str | None = Field(default=None, min_length=1, max_length=200)
+    source_url: str | None = Field(default=None, max_length=2_000)
+    source_title: str | None = Field(default=None, max_length=500)
+    source_excerpt: str | None = Field(default=None, max_length=24_000)
 
 
 class SourceClipRequest(BaseModel):
@@ -103,15 +111,18 @@ class SocialAccountCreateRequest(BaseModel):
     scopes: tuple[str, ...] = Field(default=(), max_length=50)
     credential: dict[str, object] | None = None
 
-def _video_request(value: VideoBriefRequest, settings: Settings) -> ContentRequest:
+def _video_request(value: VideoBriefRequest, settings: Settings, *, available_music: set[str] | None = None) -> ContentRequest:
     generation = settings.pipeline.video_generation
     name = value.preset or generation.default_preset
     try:
         preset = generation.presets[name]
     except KeyError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"unknown video preset: {name}") from error
+    duration = value.duration_seconds or preset.duration_seconds
+    if not preset.minimum_duration_seconds <= duration <= preset.maximum_duration_seconds:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{name} duration must be between {preset.minimum_duration_seconds} and {preset.maximum_duration_seconds} seconds")
     music = value.music_track if value.music_track is not None else preset.music_track
-    catalog = {track.name for track in generation.music_catalog}
+    catalog = available_music if available_music is not None else {track.name for track in generation.music_catalog}
     if music is not None and music not in catalog:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"unknown approved music track: {music}")
     mcp = value.mcp_servers if value.mcp_servers is not None else preset.mcp_servers
@@ -126,13 +137,24 @@ def _video_request(value: VideoBriefRequest, settings: Settings) -> ContentReque
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="rights-safe stock is not enabled in this TubeForge configuration")
     if value.visual_source == "generated" and settings.pipeline.media.provider == "wikimedia":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="local generated scene art is not enabled in this TubeForge configuration")
+    sources = [SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title="Operator-approved source notes", excerpt="\n".join(notes))]
+    if value.source_url:
+        if not value.source_title or not value.source_title.strip() or not value.source_excerpt or not value.source_excerpt.strip():
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source URL requires a source title and approved excerpt")
+        try:
+            sources.append(SourceReference(source_id="approved-source-1", url=value.source_url, title=value.source_title.strip(), excerpt=value.source_excerpt.strip()))
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source URL must be an absolute HTTP(S) URL") from error
+    elif value.source_title or value.source_excerpt:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source title and excerpt require a source URL")
     return ContentRequest(
-        topic=value.title, angle="\n".join(notes), target_duration_seconds=value.duration_seconds or preset.duration_seconds,
-        language="en", audience=value.audience, prompt_version="video-brief-v1",
-        sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title="Operator-provided notes", excerpt="\n".join(notes)),),
+        topic=value.title, angle="\n".join(notes), target_duration_seconds=duration,
+        language="en", audience=value.audience, prompt_version=settings.pipeline.codex.prompt_template_version,
+        sources=tuple(sources),
         notes=notes, review_mode=value.review_mode or preset.review_mode,
         captions_enabled=preset.captions_enabled if value.captions_enabled is None else value.captions_enabled,
         music_track=music, visual_style=value.visual_style or preset.visual_style, visual_source=value.visual_source, mcp_servers=tuple(mcp), voice_id=value.voice_id,
+        preset_name=name, aspect_ratio=preset.aspect_ratio,
     )
 
 
@@ -154,8 +176,21 @@ def _source_clip_request(value: SourceClipRequest) -> ContentRequest:
     )
 
 
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _as_ist(value: datetime) -> datetime:
+    """Present UTC-persisted timestamps to Studio operators in IST."""
+    return (value.replace(tzinfo=UTC) if value.tzinfo is None else value).astimezone(IST)
+
+
 def _job_payload(job: object) -> dict[str, object]:
-    return {"id": job.id, "state": job.state, "failure_message": job.failure_message, "created_at": job.created_at}
+    return {
+        "id": job.id,
+        "state": job.state,
+        "failure_message": job.failure_message,
+        "created_at": _as_ist(job.created_at),
+    }
 
 
 DASHBOARD_HTML = """<!doctype html>
@@ -185,6 +220,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.runtime = runtime
 
     attempts: dict[str, list[datetime]] = {}
+    # A voice sample is a fixed, public-to-the-local-dashboard phrase. Keep it
+    # outside individual job artifacts so selecting a narrator never launches
+    # synthesis again after the first successful request. The lock also avoids
+    # duplicate work when two browser tabs request the same new sample at once.
+    voice_preview_lock = threading.Lock()
+    voice_preview_text = "Welcome to TubeForge Studio. This is a local voice preview."
+
+    def cached_voice_preview_path(voice_id: str) -> Path:
+        key = hashlib.sha256(
+            f"voice-preview-v1\\0{voice_id}\\0{voice_preview_text}".encode("utf-8")
+        ).hexdigest()
+        return Path(runtime.orchestrator.artifact_root) / "voice-previews" / f"{key}.wav"
+
+    def valid_voice_preview(path: Path) -> bool:
+        try:
+            if not path.is_file() or path.stat().st_size <= 44:
+                return False
+            with wave.open(str(path), "rb") as stream:
+                return (
+                    stream.getnframes() > 0
+                    and stream.getnchannels() > 0
+                    and stream.getsampwidth() > 0
+                    and stream.getframerate() > 0
+                    and stream.getcomptype() == "NONE"
+                )
+        except (wave.Error, OSError, EOFError):
+            return False
 
     @app.middleware("http")
     async def require_dashboard_auth(request: Request, call_next):
@@ -300,7 +362,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/videos", status_code=status.HTTP_201_CREATED, tags=["videos"])
     def create_video(brief: VideoBriefRequest) -> dict[str, object]:
-        job = runtime.jobs.create(uuid4().hex, _video_request(brief, application_settings))
+        available_music = runtime.orchestrator.music_catalog.names() if runtime.orchestrator.music_catalog else set()
+        job = runtime.jobs.create(uuid4().hex, _video_request(brief, application_settings, available_music=available_music))
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
         return {**_job_payload(job), "watch_url": f"/api/jobs/{job.id}/artifacts/final"}
 
@@ -322,15 +385,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # quoted JavaScript strings, which prevents the whole script from parsing.
         source_controls = """<script>
         (() => {
+          // Persisted timestamps are serialized as IST; format them explicitly
+          // too, so every browser shows the same operator-facing timezone.
+          Date.prototype.toLocaleString = function(){return new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).format(this)+' IST';};
           const form = document.querySelector('#createForm');
           if (!form) return;
+          const presetLabel=document.createElement('label'); presetLabel.textContent='Format preset';
+          const presetSelect=document.createElement('select'); presetSelect.name='preset'; presetSelect.id='presetSelect';
+          presetSelect.append(Object.assign(document.createElement('option'),{value:'default',textContent:'Default — 16:9'}));
+          presetLabel.append(presetSelect); form.insertBefore(presetLabel,form.querySelector('[name=duration_seconds]').closest('label'));
+          fetch('/api/presets').then(response=>response.ok?response.json():[]).then(presets=>{presetSelect.replaceChildren();presets.forEach(preset=>presetSelect.append(Object.assign(document.createElement('option'),{value:preset.name,textContent:preset.label,dataset:{duration:preset.duration_seconds,min:preset.minimum_duration_seconds,max:preset.maximum_duration_seconds}})));presetSelect.value=presets.some(value=>value.name==='default')?'default':presets[0]?.name||'default';presetSelect.onchange=()=>{const option=presetSelect.selectedOptions[0],duration=form.querySelector('[name=duration_seconds]');if(!option)return;duration.value=option.dataset.duration;duration.min=option.dataset.min;duration.max=option.dataset.max;};presetSelect.onchange();});
           const visualLabel=document.createElement('label'); visualLabel.textContent='Visuals';
           const visualSelect=document.createElement('select'); visualSelect.name='visual_source'; visualSelect.id='visualSource';
-          visualSelect.append(Object.assign(document.createElement('option'),{value:'generated',textContent:'Generate local scene art'}),Object.assign(document.createElement('option'),{value:'stock',textContent:'Rights-safe stock (Wikimedia Commons)'}));
+          visualSelect.append(Object.assign(document.createElement('option'),{value:'generated',textContent:'Generate local scene art'}),Object.assign(document.createElement('option'),{value:'stock',textContent:'Rights-safe stock (Wikimedia Commons; local fallback if unavailable)'}));
           const visualHelp=document.createElement('span'); visualHelp.className='sub'; visualHelp.textContent='Google Image results are not used: a search result does not prove reuse rights.'; visualLabel.append(visualSelect,visualHelp);
           form.insertBefore(visualLabel, form.querySelector('[name=duration_seconds]').closest('label'));
           const originalFetch=window.fetch;
-          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.visual_source=visualSelect.value;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
+          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.music_track=document.querySelector('#musicSelect')?.value||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
           const panel = document.createElement('fieldset');
           panel.style.marginTop = '18px'; panel.style.border = '1px solid #31415f'; panel.style.borderRadius = '9px';
           panel.innerHTML = '<legend>Clip existing video / stream</legend><label>Source URL<input id="sourceClipUrl" type="url" placeholder="https://…"></label><label>Number of clips<input id="sourceClipCount" type="number" value="1" min="1" max="12"></label><label class="checkbox"><input id="sourceClipCaptions" type="checkbox"> Burn available captions</label><button id="sourceClipCreate" type="button" class="secondary">Create clip job</button>';
@@ -342,6 +413,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           voiceSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Default local voice'})); voiceLabel.append(voiceSelect,voicePreview,previewStatus);
           form.querySelector('button[type="submit"]').before(voiceLabel);
           fetch('/api/voices').then(response=>response.ok?response.json():[]).then(voices=>voices.forEach(voice=>voiceSelect.append(Object.assign(document.createElement('option'),{value:voice.id,textContent:voice.label+(voice.provider==='kokoro'?' — natural':'')}))));
+          const musicLabel=document.createElement('label');musicLabel.textContent='Background music';const musicSelect=document.createElement('select');musicSelect.name='music_track';musicSelect.id='musicSelect';musicLabel.append(musicSelect);form.querySelector('button[type="submit"]').before(musicLabel);
+          async function loadMusic(){const response=await fetch('/api/music');if(!response.ok)return;const selected=musicSelect.value;musicSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'No background music'}));(await response.json()).forEach(track=>musicSelect.append(Object.assign(document.createElement('option'),{value:track.name,textContent:track.name+' — '+track.license_name+(track.attribution_required?' (credit required)':'')})));musicSelect.value=selected;}
+          loadMusic();
+          const musicPanel=document.createElement('fieldset');musicPanel.style.marginTop='18px';musicPanel.style.border='1px solid #31415f';musicPanel.style.borderRadius='9px';musicPanel.innerHTML='<legend>Add licensed music</legend><p class="sub">Upload only a track whose actual licence permits this publishing use. “Royalty-free” alone is not a licence.</p><label>Track name<input id="musicName" maxlength="200"></label><label>Audio file<input id="musicFile" type="file" accept="audio/*"></label><label>Source URL<input id="musicSource" type="url" placeholder="https://…"></label><label>Actual licence name<input id="musicLicenseName" placeholder="e.g. CC BY 4.0"></label><label>Licence terms URL<input id="musicLicenseUrl" type="url" placeholder="https://…"></label><label class="checkbox"><input id="musicPublishingAllowed" type="checkbox"> I verified these terms permit the intended YouTube publishing use</label><label class="checkbox"><input id="musicAttributionRequired" type="checkbox"> Attribution is required</label><label>Attribution text<textarea id="musicAttribution" placeholder="Creator and required credit line"></textarea></label><button id="musicUpload" type="button" class="secondary">Upload approved track</button><div id="musicStatus" class="notice" role="status"></div>';
+          form.append(musicPanel);
+          document.querySelector('#musicUpload').onclick=async()=>{const file=document.querySelector('#musicFile').files[0],status=document.querySelector('#musicStatus');if(!file){status.textContent='Choose an audio file.';return;}const query=new URLSearchParams({name:document.querySelector('#musicName').value,filename:file.name,source_url:document.querySelector('#musicSource').value,license_name:document.querySelector('#musicLicenseName').value,license_url:document.querySelector('#musicLicenseUrl').value,attribution_required:String(document.querySelector('#musicAttributionRequired').checked),attribution:document.querySelector('#musicAttribution').value,publishing_allowed:String(document.querySelector('#musicPublishingAllowed').checked)});status.textContent='Validating and uploading…';const response=await fetch('/api/music?'+query,{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});const data=response.ok?await response.json():null;status.textContent=response.ok?'Approved track added to the catalog.':'Could not add track: '+await response.text();if(data){await loadMusic();musicSelect.value=data.name;}};
           voicePreview.onclick=async()=>{const voice=voiceSelect.value;if(!voice){previewStatus.textContent='Choose a voice first.';return;}voicePreview.disabled=true;voicePreview.textContent='Loading preview…';previewStatus.textContent='';try{const audio=new Audio(`/api/voices/${encodeURIComponent(voice)}/preview`);await audio.play();previewStatus.textContent='Playing local sample.';audio.onended=()=>previewStatus.textContent='';audio.onerror=()=>previewStatus.textContent='Voice preview could not be played.';}catch(_){previewStatus.textContent='Voice preview could not be loaded.';}finally{voicePreview.disabled=false;voicePreview.textContent='Preview voice';}};
           document.querySelector('#sourceClipCreate').addEventListener('click', async () => {
             const notice = document.querySelector('#notice');
@@ -366,31 +443,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           document.querySelector('#scheduleButton').onclick=async()=>{const body={name:document.querySelector('#scheduleName').value,cron:document.querySelector('#scheduleCron').value,timezone:document.querySelector('#scheduleTimezone').value};const r=await fetch('/api/schedules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});document.querySelector('#scheduleStatus').textContent=r.ok?'Schedule created.':'Could not create schedule: '+await r.text();if(r.ok)listOps();}; listOps();
         })();
         </script>"""
-        reviewer_controls = """<dialog id="scriptDialog" aria-labelledby="scriptTitle"><div class="modal-head"><h2 id="scriptTitle">Review script</h2><button class="close" type="button" id="scriptClose" aria-label="Close script">×</button></div><form id="scriptForm"><div class="modal-body"><p class="sub">Edit narration, then save. Saving creates a new exact script revision and requires a fresh approval.</p><div id="scriptSections"></div><label>Codex revision instruction<textarea id="codexInstruction" placeholder="e.g. Make the hook sharper, use a practical senior-engineer tone, and keep all claims accurate."></textarea></label><button id="copyCodexPrompt" class="secondary" type="button">Copy Codex prompt</button><div id="scriptNotice" class="notice"></div><div class="actions"><button class="small secondary" type="button" id="scriptCancel">Cancel</button><button class="small" type="submit">Save revision</button></div></div></form></dialog><script>
+        reviewer_controls = """<dialog id="scriptDialog" aria-labelledby="scriptTitle"><div class="modal-head"><h2 id="scriptTitle">Review script and sources</h2><button class="close" type="button" id="scriptClose" aria-label="Close script">×</button></div><form id="scriptForm"><div class="modal-body"><p class="sub">Review the exact source packet and narration. Saving creates a new exact script revision and requires a fresh approval.</p><h3>Approved sources</h3><div id="scriptSources"></div><h3>Narration</h3><div id="scriptSections"></div><label>Codex revision instruction<textarea id="codexInstruction" placeholder="e.g. Make the hook sharper, use a practical senior-engineer tone, and keep all claims accurate."></textarea></label><button id="copyCodexPrompt" class="secondary" type="button">Copy Codex prompt</button><div id="scriptNotice" class="notice"></div><div class="actions"><button class="small secondary" type="button" id="scriptCancel">Cancel</button><button class="small" type="submit">Save revision</button></div></div></form></dialog><script>
         (() => {
-          let currentJob=null, currentPackage=null;
-          const dialog=document.querySelector('#scriptDialog'), sections=document.querySelector('#scriptSections'), scriptNotice=document.querySelector('#scriptNotice');
+          let currentJob=null, currentPackage=null, scriptEditable=false;
+          const dialog=document.querySelector('#scriptDialog'), sections=document.querySelector('#scriptSections'), sources=document.querySelector('#scriptSources'), scriptNotice=document.querySelector('#scriptNotice');
           document.addEventListener('click', event=>{const button=event.target.closest('button');if(button&&(button.textContent==='Approve script'||button.textContent==='Approve preview')&&!button.disabled){button.disabled=true;button.textContent='Saving approval…';}},true);
           const makeButton=(label, cls, handler)=>{const b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=handler;return b;};
-          async function review(jobId){
-            currentJob=jobId; scriptNotice.textContent='Loading script…'; sections.replaceChildren(); dialog.showModal();
+          async function review(jobId, editable){
+            currentJob=jobId; scriptNotice.textContent='Loading script…'; sections.replaceChildren(); sources.replaceChildren(); dialog.showModal();
             const response=await fetch(`/api/jobs/${jobId}/script`);
             if(!response.ok){scriptNotice.textContent='Could not load script: '+await response.text();return;}
-            currentPackage=(await response.json()).package; scriptNotice.textContent='Review the narration, then save or approve it.';
-            currentPackage.script_sections.forEach((section,index)=>{const label=document.createElement('label');label.textContent=`Section ${index+1}`;const area=document.createElement('textarea');area.className='script-narration';area.value=section.narration;area.dataset.index=index;area.style.minHeight='130px';label.append(area);sections.append(label);});
+            scriptEditable=Boolean(editable); currentPackage=(await response.json()).package; scriptNotice.textContent=scriptEditable?'Review the sources and narration, then save or approve it.':'This saved script and its source packet are read-only because this generation has already moved past script review.';
+            currentPackage.request.sources.forEach(source=>{const card=document.createElement('div');card.className='event';const title=document.createElement('div');title.className='event-type';title.textContent=source.title;const link=document.createElement('a');link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=source.url;const excerpt=document.createElement('div');excerpt.className='event-detail';excerpt.textContent=source.excerpt||'No excerpt was stored.';card.append(title,link,excerpt);if(source.content_sha256){const checksum=document.createElement('div');checksum.className='sub';checksum.textContent='SHA-256 '+source.content_sha256;card.append(checksum);}sources.append(card);});
+            currentPackage.script_sections.forEach((section,index)=>{const label=document.createElement('label');label.textContent=`Section ${index+1}`;const area=document.createElement('textarea');area.className='script-narration';area.value=section.narration;area.dataset.index=index;area.disabled=!scriptEditable;area.style.minHeight='130px';label.append(area);sections.append(label);});
+            document.querySelector('#scriptForm button[type="submit"]').hidden=!scriptEditable;
+          }
+          async function removeLocalArtifacts(job){
+            if(!confirm(`Remove the local files for "${job.topic}"? The published-video audit will be kept.`))return;
+            const response=await fetch(`/api/jobs/${job.id}/artifacts`,{method:'DELETE'});
+            if(!response.ok){alert('Could not remove local files: '+await response.text());return;}
+            document.querySelector('#notice').textContent='Local files removed. The publication record and activity history were kept.';
           }
           async function decorate(){
             let response; try{response=await fetch('/api/jobs');if(!response.ok)return;}catch(_){return;}
             const jobs=new Map((await response.json()).map(job=>[job.id,job]));
-            document.querySelectorAll('.job[data-job-id]').forEach(card=>{const job=jobs.get(card.dataset.jobId);if(!job)return;const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}if(job.state==='script_approval_required'&&!card.querySelector('.script-review')){const actions=card.querySelector('.actions');if(actions){const button=makeButton('View / edit script','secondary',()=>review(job.id));button.classList.add('script-review');actions.prepend(button);}}});
+            document.querySelectorAll('.job[data-job-id]').forEach(card=>{const job=jobs.get(card.dataset.jobId);if(!job)return;const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}const actions=card.querySelector('.actions');if(!actions)return;if(job.artifacts.includes('content_package')&&!card.querySelector('.script-review')){const editable=job.state==='script_approval_required';const button=makeButton(editable?'View / edit script':'View script','secondary',()=>review(job.id,editable));button.classList.add('script-review');actions.prepend(button);}if(job.artifact_cleanup_eligible&&!card.querySelector('.artifact-cleanup')){const button=makeButton('Remove local files','danger',()=>removeLocalArtifacts(job));button.classList.add('artifact-cleanup');actions.append(button);}});
           }
           document.querySelector('#scriptClose').onclick=()=>dialog.close(); document.querySelector('#scriptCancel').onclick=()=>dialog.close();
-          document.querySelector('#scriptForm').onsubmit=async event=>{event.preventDefault();if(!currentJob||!currentPackage)return;const narrations=[...document.querySelectorAll('.script-narration')].map(area=>area.value.trim());if(narrations.some(value=>!value)){scriptNotice.textContent='Every script section needs narration.';return;}scriptNotice.textContent='Saving revision…';const response=await fetch(`/api/jobs/${currentJob}/script-revision`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({narrations,actor:'local-dashboard'})});scriptNotice.textContent=response.ok?'Revision saved. Approve the updated script to continue.':'Could not save: '+await response.text();if(response.ok){currentPackage.script_sections.forEach((section,index)=>section.narration=narrations[index]);setTimeout(()=>dialog.close(),700);}};
+          document.querySelector('#scriptForm').onsubmit=async event=>{event.preventDefault();if(!scriptEditable||!currentJob||!currentPackage)return;const narrations=[...document.querySelectorAll('.script-narration')].map(area=>area.value.trim());if(narrations.some(value=>!value)){scriptNotice.textContent='Every script section needs narration.';return;}scriptNotice.textContent='Saving revision…';const response=await fetch(`/api/jobs/${currentJob}/script-revision`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({narrations,actor:'local-dashboard'})});scriptNotice.textContent=response.ok?'Revision saved. Approve the updated script to continue.':'Could not save: '+await response.text();if(response.ok){currentPackage.script_sections.forEach((section,index)=>section.narration=narrations[index]);setTimeout(()=>dialog.close(),700);}};
           document.querySelector('#copyCodexPrompt').onclick=async()=>{if(!currentPackage){scriptNotice.textContent='Load a script first.';return;}const instruction=document.querySelector('#codexInstruction').value.trim()||'Improve clarity, pacing, and the hook while preserving factual accuracy.';const text=currentPackage.script_sections.map((section,index)=>`SECTION ${index+1}: ${section.narration}`).join('\n\n');const prompt=`Revise this TubeForge video script. ${instruction}\n\nKeep the same number and order of sections, return only the revised narration for each section, and do not add unsupported factual claims.\n\n${text}`;try{await navigator.clipboard.writeText(prompt);scriptNotice.textContent='Codex prompt copied to your clipboard.';}catch(_){scriptNotice.textContent='Clipboard access was blocked; copy the text from the sections manually.';}};
           const originalRefresh=window.setInterval; decorate(); originalRefresh(decorate,1000);
         })();
         </script>"""
-        return DASHBOARD_HTML.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("captions_enabled:d.has('captions_enabled')};let r", "captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null};let r").replace("if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')))", "if(j.artifacts.includes('final'))actions.append(button('Watch video','',()=>openVideo(j,'final','Final video')));else if(j.artifacts.includes('preview'))actions.append(button('Watch preview','secondary',()=>openVideo(j,'preview','Preview')))").replace("${j.artifacts.length} saved artifacts · ${j.event_count} activity events", "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}").replace("const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}", "").replace("</body>", source_controls + operations_controls + reviewer_controls + "</body>")
+        return DASHBOARD_HTML.replace("Give a title and the key points.", "Give a title, approved source notes, and optionally one cited source.").replace("<label>Notes<textarea name=\"notes\" required placeholder=\"One point per line\"></textarea></label>", "<label>Approved source notes<textarea name=\"notes\" required placeholder=\"One source-backed point per line\"></textarea></label><label>Source URL (optional)<input name=\"source_url\" type=\"url\" maxlength=\"2000\" placeholder=\"https://…\"></label><label>Source title<input name=\"source_title\" maxlength=\"500\" placeholder=\"Required with a source URL\"></label><label>Approved source excerpt<textarea name=\"source_excerpt\" maxlength=\"24000\" placeholder=\"Paste the exact supporting passage; pages are not silently scraped\"></textarea></label>").replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("captions_enabled:d.has('captions_enabled')};let r", "captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null,source_url:d.get('source_url')||null,source_title:d.get('source_title')||null,source_excerpt:d.get('source_excerpt')||null};let r").replace("if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')))", "if(j.artifacts.includes('final'))actions.append(button('Watch video','',()=>openVideo(j,'final','Final video')));else if(j.artifacts.includes('preview'))actions.append(button('Watch preview','secondary',()=>openVideo(j,'preview','Preview')))").replace("${j.artifacts.length} saved artifacts · ${j.event_count} activity events", "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}").replace("const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}", "").replace("</body>", source_controls + operations_controls + reviewer_controls + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -398,13 +483,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/jobs", tags=["jobs"])
     def list_jobs() -> list[dict[str, object]]:
-        deletable = {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY, JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.FAILED_EXHAUSTED, JobState.CANCELLED}
+        deletable = {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY, JobState.PUBLICATION_APPROVAL_REQUIRED, JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.FAILED_EXHAUSTED, JobState.CANCELLED}
         return [
             {
                 **_job_payload(job), "topic": job.request.topic,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
                 "event_count": len(runtime.events.list_for_job(job.id)),
                 "deletable": job.claim_owner is None and job.state in deletable,
+                "artifact_cleanup_eligible": job.claim_owner is None and job.state is JobState.PUBLISHED,
             }
             for job in runtime.jobs.list_recent()
         ]
@@ -422,28 +508,91 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             options.append({"id": "piper", "label": "Piper reliable fallback", "provider": "piper"})
         return options
 
+    @app.get("/api/presets", tags=["videos"])
+    def list_video_presets() -> list[dict[str, object]]:
+        return [
+            {
+                "name": name,
+                "label": ("Shorts" if preset.aspect_ratio == "9:16" else name.replace("-", " ").title()) + f" — {preset.aspect_ratio}, {preset.minimum_duration_seconds}–{preset.maximum_duration_seconds}s",
+                "duration_seconds": preset.duration_seconds,
+                "minimum_duration_seconds": preset.minimum_duration_seconds,
+                "maximum_duration_seconds": preset.maximum_duration_seconds,
+                "aspect_ratio": preset.aspect_ratio,
+            }
+            for name, preset in application_settings.pipeline.video_generation.presets.items()
+        ]
+
+    @app.get("/api/music", tags=["music"])
+    def list_music() -> list[dict[str, object]]:
+        catalog = runtime.orchestrator.music_catalog
+        if catalog is None:
+            return []
+        return [
+            track.model_dump(mode="json", exclude={"path"})
+            for track in catalog.list()
+        ]
+
+    @app.post("/api/music", status_code=status.HTTP_201_CREATED, tags=["music"])
+    async def upload_music(
+        request: Request,
+        name: str,
+        filename: str,
+        source_url: str,
+        license_name: str,
+        license_url: str,
+        attribution_required: bool = False,
+        attribution: str = "",
+        publishing_allowed: bool = False,
+    ) -> dict[str, object]:
+        catalog = runtime.orchestrator.music_catalog
+        if catalog is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="music catalog is not configured")
+        payload = bytearray()
+        async for chunk in request.stream():
+            payload.extend(chunk)
+            if len(payload) > catalog.max_bytes:
+                raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="music upload exceeds the 50 MB limit")
+        try:
+            record = catalog.upload(
+                name=name,
+                filename=filename,
+                payload=bytes(payload),
+                source_url=source_url,
+                license_name=license_name,
+                license_url=license_url,
+                attribution_required=attribution_required,
+                attribution=attribution,
+                publishing_allowed=publishing_allowed,
+            )
+        except ProviderValidationError as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+        return record.model_dump(mode="json", exclude={"path"})
+
     @app.get("/api/voices/{voice_id}/preview", tags=["voices"])
     def preview_voice(voice_id: str) -> FileResponse:
-        """Synthesize a short local sample using the same provider as a job."""
+        """Return one persistent local sample for the selected configured voice."""
         available = {item["id"] for item in list_voices()}
         if voice_id not in available:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="voice is not available")
-        try:
-            result = runtime.orchestrator.voice.synthesize(
-                VoiceRequest(
-                    text="Welcome to TubeForge Studio. This is a local voice preview.",
-                    language="en",
-                    voice_id=voice_id,
-                    section_id="dashboard-preview",
-                    phrase_id="dashboard-preview-v1",
-                )
-            )
-        except (ProviderValidationError, RetryableProviderError) as error:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"voice preview is unavailable: {error}") from error
-        path = Path(result.artifact_path)
-        if not path.is_file():
+        path = cached_voice_preview_path(voice_id)
+        with voice_preview_lock:
+            if not valid_voice_preview(path):
+                try:
+                    runtime.orchestrator.voice.synthesize(
+                        VoiceRequest(
+                            text=voice_preview_text,
+                            language="en",
+                            voice_id=voice_id,
+                            section_id="dashboard-preview",
+                            phrase_id="dashboard-preview-v1",
+                            output_path=str(path),
+                        )
+                    )
+                except (ProviderValidationError, RetryableProviderError) as error:
+                    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"voice preview is unavailable: {error}") from error
+        if not valid_voice_preview(path):
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="voice preview was not created")
-        return FileResponse(path, media_type="audio/wav", filename=f"{voice_id}-preview.wav")
+        return FileResponse(path, media_type="audio/wav", filename=f"{voice_id}-preview.wav", headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     @app.get("/api/jobs/{job_id}/events", tags=["jobs"])
     def get_job_events(job_id: str) -> list[dict[str, object]]:
@@ -452,7 +601,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
         return [
-            {"id": event.id, "event_type": event.event_type, "details": event.details, "created_at": event.created_at}
+            {"id": event.id, "event_type": event.event_type, "details": event.details, "created_at": _as_ist(event.created_at)}
             for event in runtime.events.list_for_job(job_id)
         ]
 
@@ -474,7 +623,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             runtime.events.append(job_id, "delete_rejected", reason=str(error))
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-        root = application_settings.pipeline.voice.artifact_root.resolve()
+        root = Path(runtime.orchestrator.artifact_root).resolve()
         for artifact in artifacts:
             path = Path(artifact.path).resolve()
             if path.is_relative_to(root) and path.is_file():
@@ -486,6 +635,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # Remove empty nested source/analysis/clip directories as well.
             shutil.rmtree(job_directory)
         runtime.events.append(job_id, "delete_completed", artifact_count=len(artifacts))
+
+    @app.delete("/api/jobs/{job_id}/artifacts", status_code=status.HTTP_204_NO_CONTENT, tags=["artifacts"])
+    def delete_published_local_artifacts(job_id: str) -> None:
+        """Reclaim published media without deleting the durable publication audit."""
+        try:
+            job = runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        if job.claim_owner is not None or job.state is not JobState.PUBLISHED:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="local artifact cleanup is available only after publication is complete")
+        artifacts = runtime.artifacts.remove_for_job(job_id)
+        root = Path(runtime.orchestrator.artifact_root).resolve()
+        for artifact in artifacts:
+            path = Path(artifact.path).resolve()
+            if path.is_relative_to(root) and path.is_file():
+                path.unlink()
+        job_directory = root / job_id
+        if job_directory.is_dir():
+            shutil.rmtree(job_directory)
+        runtime.events.append(job_id, "local_artifacts_removed", actor="local-dashboard", artifact_count=len(artifacts))
 
     @app.post("/api/jobs/{job_id}/approvals/{gate}", tags=["approvals"])
     def decide(job_id: str, gate: ApprovalGate, decision: ApprovalRequest) -> dict[str, object]:
@@ -545,6 +714,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="revision must include one narration for every script section")
             sections = tuple(section.model_copy(update={"narration": narration.strip()}) for section, narration in zip(package.script_sections, revision.narrations, strict=True))
             package = ContentPackage.model_validate({**package.model_dump(mode="json"), "script_sections": [section.model_dump(mode="json") for section in sections]})
+            if job.request.aspect_ratio == "9:16":
+                validate_video_package(package, job.request, provider_name="Revised")
             artifact = runtime.orchestrator._replace_json(
                 job_id,
                 JobState.CONTENT_GENERATING,
@@ -555,7 +726,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 job_id,
                 JobState.CONTENT_GENERATING,
                 "video_plan",
-                video_plan_from_package(package).model_dump(mode="json"),
+                video_plan_from_package(package, aspect_ratio=job.request.aspect_ratio).model_dump(mode="json"),
             )
             runtime.orchestrator._replace_json(
                 job_id,
@@ -566,6 +737,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             runtime.events.append(job_id, "script_revised", actor=revision.actor, content_package_checksum=artifact.checksum_sha256)
         except KeyError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        except ProviderValidationError as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
         return {"job_id": job_id, "reviewed_identity": artifact.checksum_sha256}

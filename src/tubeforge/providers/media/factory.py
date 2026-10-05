@@ -2,6 +2,7 @@
 from tubeforge.core.config import MediaPipelineConfig, FakeProviderConfig
 from tubeforge.domain.providers import MediaProvider
 from tubeforge.providers.fake import FakeMediaProvider
+from tubeforge.providers.media.local_graphics import LocalMotionGraphicsProvider
 from tubeforge.providers.media.wikimedia import WikimediaCommonsProvider
 from tubeforge.providers.media.router import VisualMediaProvider
 
@@ -12,5 +13,5 @@ def create_media_provider(config: MediaPipelineConfig, fake: FakeProviderConfig)
     if config.provider == "wikimedia":
         return WikimediaCommonsProvider(config)
     if config.provider == "hybrid":
-        return VisualMediaProvider(FakeMediaProvider(fake), WikimediaCommonsProvider(config))
+        return VisualMediaProvider(LocalMotionGraphicsProvider(fake), WikimediaCommonsProvider(config))
     raise ValueError(f"unsupported media provider: {config.provider}")
