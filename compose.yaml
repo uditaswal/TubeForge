@@ -18,7 +18,8 @@ services:
   web:
     build: .
     user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
-    command: ["uvicorn", "tubeforge.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    # OAuth callback query strings contain short-lived authorization codes.
+    command: ["uvicorn", "tubeforge.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -34,6 +35,10 @@ services:
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
+      TUBEFORGE_ACCOUNT_ENCRYPTION_KEY: ${TUBEFORGE_ACCOUNT_ENCRYPTION_KEY:-}
+      TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID: ${TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID:-}
+      TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET: ${TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET:-}
+      TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI: ${TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI:-}
     restart: unless-stopped
     mem_limit: 512m
 
@@ -56,6 +61,25 @@ services:
       PYTHONPATH: /app/src
     restart: unless-stopped
     mem_limit: 1g
+
+  publisher-worker:
+    profiles: ["publishing"]
+    build: .
+    user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
+    command: ["python", "-m", "tubeforge.publishing_worker.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    environment:
+      TUBEFORGE_CONFIG: /app/config/production.yaml
+      PYTHONPATH: /app/src
+      TUBEFORGE_ACCOUNT_ENCRYPTION_KEY: ${TUBEFORGE_ACCOUNT_ENCRYPTION_KEY:-}
+    restart: unless-stopped
+    mem_limit: 512m
 
   scheduler:
     build: .

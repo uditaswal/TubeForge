@@ -25,7 +25,16 @@ def test_fresh_sqlite_database_upgrades_to_head(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260927_0020"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261005_0028"
+            assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_connections'")).scalar_one() == "oauth_connections"
+            assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publishing_assets'")).scalar_one() == "publishing_assets"
+            assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publish_jobs'")).scalar_one() == "publish_jobs"
+            assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='destination_deliveries'")).scalar_one() == "destination_deliveries"
+            assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='delivery_attempts'")).scalar_one() == "delivery_attempts"
+            assert connection.execute(text("SELECT credential_refresh_fence FROM social_accounts LIMIT 0")).keys() == ["credential_refresh_fence"]
+            assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publisher_worker_heartbeats'")).scalar_one() == "publisher_worker_heartbeats"
+            assert connection.execute(text("SELECT reviewed_identity, submitted_at, submitted_by FROM publish_jobs LIMIT 0")).keys() == ["reviewed_identity", "submitted_at", "submitted_by"]
+            assert connection.execute(text("SELECT requested_action, requested_by, requested_at FROM destination_deliveries LIMIT 0")).keys() == ["requested_action", "requested_by", "requested_at"]
             assert connection.execute(text("SELECT invocation_count, failure_json FROM generation_cache LIMIT 0")).keys() == ["invocation_count", "failure_json"]
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='heavy_work_leases'")).scalar_one() == "heavy_work_leases"
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publication_observations'")).scalar_one() == "publication_observations"

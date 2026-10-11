@@ -7,9 +7,6 @@ from datetime import datetime
 from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from sqlalchemy.orm import DeclarativeBase
-
-
 class Base(DeclarativeBase):
     """Base class for future persisted domain models."""
 
@@ -63,6 +60,9 @@ class SocialAccountRecord(Base):
     external_account_id: Mapped[str | None] = mapped_column(String(300), index=True)
     auth_type: Mapped[str] = mapped_column(String(32), nullable=False)
     credential_ciphertext: Mapped[str | None] = mapped_column(Text)
+    credential_refresh_owner: Mapped[str | None] = mapped_column(String(128))
+    credential_refresh_fence: Mapped[str | None] = mapped_column(String(64))
+    credential_refresh_lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scopes_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="unconfigured")
@@ -72,6 +72,113 @@ class SocialAccountRecord(Base):
     last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OAuthConnectionRecord(Base):
+    """One short-lived, single-use authorization attempt bound to a Studio session."""
+    __tablename__ = "oauth_connections"
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    account_id: Mapped[str | None] = mapped_column(String(64))
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    verifier_ciphertext: Mapped[str | None] = mapped_column(Text)
+    redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    candidate_external_id: Mapped[str | None] = mapped_column(String(300))
+    candidate_label: Mapped[str | None] = mapped_column(String(200))
+    candidate_credential_ciphertext: Mapped[str | None] = mapped_column(Text)
+    candidate_scopes_json: Mapped[str | None] = mapped_column(Text)
+    candidate_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PublishingAssetRecord(Base):
+    """Immutable canonical media copy shared by manual and scheduled delivery."""
+    __tablename__ = "publishing_assets"
+    __table_args__ = (UniqueConstraint("sha256", name="uq_publishing_assets_sha256"),)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    staged_path: Mapped[str] = mapped_column(Text, nullable=False)
+    source_job_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="ready")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PublishJobRecord(Base):
+    """One manual or automated selection of a canonical asset."""
+    __tablename__ = "publish_jobs"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    asset_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    edition: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_identity: Mapped[str | None] = mapped_column(String(64))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_by: Mapped[str | None] = mapped_column(String(64))
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DestinationDeliveryRecord(Base):
+    """One durable delivery identity shared by manual and automation paths."""
+    __tablename__ = "destination_deliveries"
+    __table_args__ = (UniqueConstraint("asset_id", "account_id", "edition", name="uq_destination_delivery_identity"),)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    publish_job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    asset_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    account_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    external_account_id: Mapped[str] = mapped_column(String(300), nullable=False)
+    edition: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    required: Mapped[bool] = mapped_column(nullable=False, default=True)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False)
+    remote_id: Mapped[str | None] = mapped_column(String(500))
+    remote_url: Mapped[str | None] = mapped_column(Text)
+    remote_session_id: Mapped[str | None] = mapped_column(Text)
+    requested_action: Mapped[str | None] = mapped_column(String(32))
+    requested_by: Mapped[str | None] = mapped_column(String(64))
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    claim_owner: Mapped[str | None] = mapped_column(String(128))
+    claim_token: Mapped[str | None] = mapped_column(String(64))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DeliveryAttemptRecord(Base):
+    """Audit trail for one fenced upload attempt or read-only verification."""
+    __tablename__ = "delivery_attempts"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    delivery_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    claim_token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    remote_session_id: Mapped[str | None] = mapped_column(Text)
+    remote_id: Mapped[str | None] = mapped_column(String(500))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PublisherWorkerHeartbeatRecord(Base):
+    """Current publisher process presence, separate from delivery claim leases."""
+    __tablename__ = "publisher_worker_heartbeats"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    platforms_json: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
 class PublicationAttemptRecord(Base):

@@ -16,6 +16,9 @@ OAuth applications and credentials.
 See [docs/STATUS.md](docs/STATUS.md) for the authoritative release state,
 validation evidence, blockers, and next tasks. See
 [AUTONOMOUS_PROGRESS.md](AUTONOMOUS_PROGRESS.md) for the append-only work log.
+The [publishing delivery plan](plan.md) tracks the ordered implementation
+milestones and their acceptance evidence. The attached publishing dashboard
+concept is illustrative; it is not the current Creator Studio interface.
 
 ## Included capabilities
 
@@ -78,6 +81,79 @@ tubeforge create-admin --username <name>
 
 Use a production-only `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY` for any OAuth account
 credential envelopes. Never commit credentials, OAuth tokens, or Piper models.
+
+### Publishing account connection (Phase 1 in progress)
+
+Creator Studio now lists publishing accounts and reports their stored state.
+It enables **Connect YouTube** only when dashboard login, an encryption key,
+and a Google OAuth web application are configured. The browser is redirected
+to Google; after TubeForge discovers the authorized channel, the operator must
+confirm its exact channel ID before the encrypted credential is saved. A
+reconnection must discover the same channel ID. An account connection alone
+does not enable an upload.
+
+Creator Studio now offers **Compose manual post** for finished local videos and
+verified destination accounts. Select and preview one video, check the exact account
+identities, and enter a YouTube title and description or an Instagram caption
+for each destination. **Save publishing draft** validates and copies the final
+MP4 into content-addressed staging, then saves a separate metadata and account
+snapshot for each destination. The draft list shows persisted states, the staged
+video, exact account metadata, a bounded destination-attempt history, errors and
+remote receipt when present. The history omits encrypted upload-session details.
+Saving a draft does not upload or schedule a post. For a YouTube-only draft with
+private visibility, review the staged video and every destination detail, check
+the exact-review box, then choose **Submit private YouTube post**. This queues
+the reviewed snapshot for the live publisher worker; it does not mean the
+remote video has been published. **Refresh publishing activity** reads durable
+per-destination results. Mixed-platform and Instagram drafts cannot yet be
+submitted. A finished video can be drafted only
+once per account in the default edition.
+
+The publisher worker is an opt-in Compose service. With a stable
+`TUBEFORGE_ACCOUNT_ENCRYPTION_KEY` available to Compose and migrations applied,
+start it using `docker compose --profile publishing up -d publisher-worker`.
+It supports YouTube deliveries only at present and will process any already
+queued YouTube destinations. Studio shows whether a recent publisher heartbeat
+exists; an online heartbeat is operational presence, not proof that an upload
+or public post succeeded. The submit control is enabled only while the web
+service has the encryption key and a YouTube-capable worker has a recent
+heartbeat. Queued YouTube posts are private by default. An unknown remote
+outcome remains blocked for reconciliation; TubeForge will not automatically
+start a replacement upload. For a YouTube destination with an uncertain
+outcome and a saved session, **Inspect saved remote session** queues a read-only
+status check. If that check confirms an incomplete upload, **Continue saved
+upload session** explicitly queues transmission of only the missing bytes to
+the same session. Both actions show a pending state until the worker records a
+durable result; a missing session or unresolved outcome never triggers a fresh
+upload automatically.
+
+After reconnecting the exact YouTube account, **Resume after account
+reconnect** releases its blocked destination. A delivery with no remote session
+returns to the pending queue; one with a remote ID returns to read-only
+verification. A saved session without a remote ID stays uncertain and requires
+the inspect action above. Other destinations retain their own results.
+
+Supply these environment variables to the Compose web service through a
+protected local deployment secret source (the project `.env` path is ignored
+by Git):
+
+- `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY` — a stable Fernet key kept outside the
+  database, with a separate recoverable backup.
+- `TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID` and
+  `TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET` — from a Google OAuth **Web
+  application** whose YouTube Data API access is configured.
+- `TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI` — the exact registered HTTPS URL ending
+  in `/oauth/youtube/callback` on this Studio instance. The local loopback
+  dashboard URL remains `http://127.0.0.1:62065`; it is not an HTTPS callback.
+
+TubeForge requests YouTube upload and read-only scopes to identify the channel
+and preserve offline access. Google may restrict uploads from an unverified API
+project to private visibility; check the actual application's audit and consent
+status before relying on public scheduling. The account API rejects direct
+browser-supplied OAuth tokens and remote account IDs. Existing accounts created
+through that older path without remote validation appear as **verification
+required** until reconnected. Instagram connection is not yet available, so
+Instagram draft selection is not yet an operator-ready flow.
 
 ### Create a dashboard login account in Docker
 
