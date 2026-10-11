@@ -183,3 +183,34 @@ Completion requires:
    pass whenever an operator-visible capability changed
 
 When validation fails, continue debugging.
+
+## YouTube content skills
+
+Use the installed project skills in `.agents/skills/` for relevant TubeForge
+content tasks. Read the selected SKILL.md and required resources first; review
+supporting scripts before execution and resolve resources against their skill
+directory. Use `yt-script` for narration, hook candidates and scene directions,
+and execute its hook scorer. Use `yt-package` for coordinated titles/thumbnail
+text and execute its title checker; use `yt-seo` for descriptions and metadata.
+Use `yt-shorts` for supplied long-form repurposing, `yt-plan` for calendars,
+`yt-chapters` for appropriate long-form transcripts, and `yt-edit` for
+transcript-based edit recommendations. Use `yt-retention`, `yt-viral`,
+`yt-audit`, and `yt-comment` only with their required source data/capabilities.
+Never fabricate analytics, trends, sources, performance or tool execution.
+Heuristic scores are review signals, never predictions of views.
+
+Preserve channel voice profiles, selected format, script provider, review,
+scheduler and publishing policies. Skills supply content instructions/tools;
+rendering, narration, scheduling, analytics retrieval and publishing belong to
+the application/integrations. Interactive discovery does not install resources
+for the isolated runtime: verify installed-wheel resources and host deployment.
+Whenever skill locations or the content pipeline change, update these rules
+and the applicable README sections in the same change.
+
+The canonical yt-script source is `.agents/skills/yt-script/` only; do not update
+or load competing downloaded copies. Read its `SKILL.md`, `automation.md`,
+`hooks.json` and `hookscore.py` for narration generation/retries/revisions.
+Production prompts explicitly embed these resources and the complete brief;
+installed wheels must hash-match this source folder. Automation returns finished
+ordered narration separately from hooks, sources and production notes.
+Insufficient-source results block before TTS and require operator correction.

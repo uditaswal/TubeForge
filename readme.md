@@ -16,7 +16,7 @@ OAuth applications and credentials.
 See [docs/STATUS.md](docs/STATUS.md) for the authoritative release state,
 validation evidence, blockers, and next tasks. See
 [AUTONOMOUS_PROGRESS.md](AUTONOMOUS_PROGRESS.md) for the append-only work log.
-The [publishing delivery plan](plan.md) tracks the ordered implementation
+The [publishing delivery plan](docs/planning/publishing-delivery-plan.md) tracks the ordered implementation
 milestones and their acceptance evidence. The attached publishing dashboard
 concept is illustrative; it is not the current Creator Studio interface.
 
@@ -240,9 +240,9 @@ exact source packet permits at most two host-side CLI launches, each bounded
 to eight minutes; failed launches count. Usage draws from the dedicated
 ChatGPT sign-in's plan allowance or credits, not an API key.
 At the 2026-09-28 operator check, the dedicated account offered
-`gpt-5.6-sol` but not `gpt-6-sol`. The `gpt-5.6-sol` switch remains
-unverified until the host wheel is redeployed and a new, reviewed source
-packet produces a valid script. Do not reset an exhausted source packet or
+`gpt-5.6-sol` but not `gpt-6-sol`. The 2026-10-11 installed host runner produced a new, reviewed skill-enabled
+`gpt-5.6-sol` script; generation and source/tool provenance are verified.
+Finished-video quality remains subject to the Shorts acceptance checks. Do not reset an exhausted source packet or
 silently substitute a new one.
 
 In **New generation**, **Approved source notes** are the minimum durable source
@@ -383,3 +383,188 @@ work created new generated artifacts, local data, caches, model files, logs,
 credentials, or editor/OS files. Verify a new rule with
 `git check-ignore -v <path>` where practical. Do not add broad rules that hide
 source code, migrations, fixtures, or intentionally versioned configuration.
+
+## YouTube content skills
+
+All eleven skills live once under `.agents/skills/`: yt-script, yt-package,
+yt-seo, yt-shorts, yt-plan, yt-chapters, yt-edit, yt-retention, yt-viral,
+yt-audit and yt-comment. Read a skill before invoking it in Codex (for example,
+`$yt-script` or `$yt-package`). Supporting scripts resolve their own resources
+against their folder; application code does the same, independently of its
+working directory. Python 3.12/3.13 runs the standard-library scoring tools:
+
+```bash
+python3 .agents/skills/yt-script/hookscore.py --json --hook "Your supplied hook"
+python3 .agents/skills/yt-package/title.py --json --title "Your title" --thumb "CHECK FIRST"
+```
+
+### Connected writing skills
+
+The canonical script skill is `.agents/skills/yt-script/` only. Its `SKILL.md`
+references `automation.md`; hook formulas and `hookscore.py` are preserved.
+Downloaded repository copies are not edited or consulted by the runtime.
+Writing rules live in this skill, while the application enforces schema,
+source-failure separation, ordered narration, and exact-artifact approval.
+
+New v6 calls return a structured result with either `status: ready`, a
+ContentPackage and null reason, or `status: insufficient_sources`, null package
+and a concrete reason. Insufficient sources are blocked in `failed_validation`
+and shown as “Blocked: insufficient sources”; no script, TTS or automatic retry
+is created. Missing approved excerpts fail before a model call. Malformed JSON,
+missing fields and production panels inside narration fail validation; raw Codex
+replies are never used as speech. Only ordered `script_sections[].narration`
+feeds TTS. v6 rejects malformed packages without model repair calls.
+
+During script review, “Copy Codex prompt” prepares an explicit skill-loaded
+revision brief with the exact current package, full source context, format and
+voice. This prepares a prompt for an operator's external Codex session; it does
+not claim to have run Codex or saved a revision. Review the returned narration
+array, enter each section, save the revision, then approve its new exact identity.
+Unsupported revisions must be rejected rather than pasted into narration.
+
+Every submitted generation/repair prompt records its SHA256, resource hashes,
+automation mode and skill identifier in invocation provenance. Deploy the rebuilt
+wheel to the dedicated host runner after any canonical skill change; the worker
+refuses a resource mismatch before generating. Changing prompt versions does
+not authorize resetting or reusing exhausted source packets.
+
+
+The configured `m6-content-v6` generation path embeds **yt-script**, its 21
+hook formulas and scoring implementation, **yt-package** and its title checker,
+and **yt-seo** in each actual Codex generation prompt. These resources are
+included in the deployment wheel under `tubeforge/content_skills/`. The isolated
+host account receives instructions through the fixed prompt; it needs neither
+this checkout nor the developer's home or interactive skill discovery. Compose
+also mounts the canonical skills read-only for worker/web source deployments.
+The fixed Codex CLI provider, model, source grounding, two-invocation limit,
+eight-minute timeout, review gates and publishing policies remain in effect.
+Older prompt versions remain readable for existing jobs; every new generation and repair invocation explicitly embeds the updated
+yt-script skill, including legacy prompt templates. A new prompt version does not authorize reusing exhausted packets.
+
+- **yt-script:** five candidate hooks, narration, scene visual directions and
+  on-screen text. Application Python executes the included hook scorer before
+  selecting among the top two format-compatible candidates. It preserves the
+  model's source-appropriate choice if it is a finalist; otherwise it uses the
+  highest-scoring eligible candidate. Only the opening sentence changes.
+- **yt-package:** ten coordinated title options, thumbnail text of at most
+  three words, visual brief and accessibility description. Application Python
+  executes the title checker for every title against the selected thumbnail.
+  The model's first title remains the proposed publication title; warnings are
+  visible during review rather than treated as performance predictions.
+- **yt-seo:** a search-facing description, appropriate hashtags in that
+  description and at most fifteen relevant tags. It cannot invent resource
+  links or chapter timestamps. Chapters retain the application's supported
+  section-based schema.
+
+Scores are heuristic review signals, not predictions of views. Tool failures,
+missing resources and malformed content fail explicitly before downstream
+processing. The worker checks local resources and a no-model host preflight
+before reserving/counting a new v5/v6 invocation. The host must report identical
+resource hashes. Local/preflight failures do not spend an invocation; actual
+failed CLI launches retain the existing counting policy. Accepted results
+retain resource hashes, executed-tool reports, selection and usage in the
+cache and the job's `content_generation_evidence` checkpoint. Revisions require
+fresh exact-script approval; the review endpoint recalculates checks on current
+bytes and reports stale/invalid hook checks rather than claiming success.
+
+### Channel voice configuration
+
+Profiles are project-managed, non-secret application configuration in
+`config/production.yaml` (or the file selected by `TUBEFORGE_CONFIG`):
+
+```yaml
+pipeline:
+  codex:
+    prompt_template_version: m6-content-v6
+    default_channel_identity: engineering
+    voice_profiles:
+      default: "Clear, practical and conversational; no hype or invented experience."
+      engineering: "Speak to working engineers. Explain tradeoffs with concrete supplied examples. Avoid sales language."
+      cooking: "Use warm, direct kitchen instructions. Explain unfamiliar terms. Never invent recipe results."
+```
+
+A missing identity-specific profile uses the configured `default` profile, or
+TubeForge's built-in clear, practical, conversational default. It never pauses
+an unattended job for conversational setup. Identity and resolved voice text
+are saved in the immutable request, keeping channels and cache entries separate.
+This is writing voice; the existing **Voice** selector still controls local TTS.
+Channel identities do not connect OAuth accounts or authorize publication.
+
+In Creator Studio, select **Channel voice profile**, format and duration,
+enter approved source notes (and an exact excerpt for an optional source URL),
+and create a generation. Shorts remain 9:16, 30–55 seconds, with an immediate
+hook and concise payoff. Widescreen jobs retain their requested long-form
+format/duration. **Review script and sources** shows narration, scenes, title
+and thumbnail options, metadata and real hook/title reports. Inspect grounding
+and creative quality, then use the existing exact-script approval controls.
+Review the preview before approving final rendering. Publication remains a
+separate approval and configured integration.
+
+New Studio schedules save the channel/format/duration selected above their
+controls. Scheduled review policy remains unchanged. API schedules/topics may
+set `options.channel_identity`, `aspect_ratio`, `preset_name` and
+`duration_seconds`; topic options override schedule options. The scheduler uses
+the configured supported prompt version, not the obsolete `topic-queue-v1`.
+Invalid scheduled briefs are recorded as `invalid_request` without reserving a
+topic or invoking Codex. Simple bulk-topic titles alone are not a verified
+factual source packet: supply substantive approved notes before production use.
+
+### Deployment and verified limits
+
+**IMPLEMENTED:** production integration, score-based selection, channel
+profiles, scheduler propagation and dashboard review. Focused offline tests and
+installed-wheel resource checks pass. A real Codex package and actual signed-in
+Chromium script review are **VERIFIED**. Preview rendering is **VERIFIED**: the new 40.663s 540×960 artifact passed
+visual checks, and the operator confirmed intelligible, complete narration.
+Final 1080×1920 rendering is **BLOCKED**: the export hit the 1GiB worker
+memory limit (Docker OOM event), and the operator chose to leave it blocked.
+Do not describe the full Shorts workflow as verified or automatically retry
+the exhausted test job. A future operator-approved 2GiB test or lower-buffer
+renderer must prove a new final artifact before this status changes.
+The older retained Shorts render is not evidence for this integration.
+Rejected host drafts are retained in generation-cache failure evidence without
+being accepted or granting another invocation. FFmpeg input decoders, filters
+and encoder all respect the configured thread limit to bound render memory.
+
+After reviewing the changes, an administrator must install the built wheel
+and restart the runner from the repository root:
+
+```bash
+sudo /opt/tubeforge-codex-runner/venv/bin/pip install --force-reinstall --no-deps artifacts/wheels/tubeforge-0.1.0-py3-none-any.whl
+sudo systemctl restart tubeforge-codex-runner.service
+```
+
+The wheel must include `tubeforge/content_skills/`; an editable source install
+is unsuitable for the protected host account. Recreate the application services
+with `docker compose up -d --build web worker scheduler` after the host is ready.
+The only documented local dashboard is http://127.0.0.1:62065. No verification
+upload is authorized by installing this integration.
+
+**Installed only:** yt-shorts (supplied long-form repurposing), yt-plan
+(calendars), yt-chapters (appropriate transcripts), yt-edit (timestamped edit
+recommendations), yt-retention (real retention exports), yt-viral (real public
+channel listings), yt-audit (actual channel/video data), and yt-comment
+(supplied comments). They are available to developers but do not automatically
+run on every application job. Analytics retrieval, trend/source research,
+transcription, rendering, narration and live publishing require their own
+application dependencies, supplied data and authorization. Skills provide
+content instructions and supporting tools, not those integrations.
+
+See [the integration plan](docs/YOUTUBE_SKILLS_PLAN.md) and
+[status](docs/STATUS.md) for current acceptance evidence and next actions.
+
+## Repository layout and local artifacts
+
+Project content skills and their referenced tools live in `.agents/skills/`
+and are versioned with the application. See [the documentation index](docs/README.md)
+and [development helpers](scripts/README.md) for operational guides and scripts.
+Planning briefs live in `docs/planning/`; authenticated curl examples live in
+`docs/operations/`. Source, migrations, tests, fixtures, model metadata and
+reviewed deployment configuration remain versioned.
+
+Generated smoke media, deployment wheels, runtime databases/logs, downloaded
+model weights and machine-local credentials stay ignored. Removing their Git
+tracking preserves local copies; operators still provision model weights as
+specified above. Earlier commits may contain these artifacts; this cleanup does
+not rewrite repository history. Never commit `.env`, `.aws/`, `.codex/`, cookie
+jars or generated acceptance output.

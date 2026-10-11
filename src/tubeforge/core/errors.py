@@ -15,6 +15,13 @@ class ProviderValidationError(ProviderError):
     """An invalid provider result that needs operator correction."""
 
 
+class InsufficientSourcesError(ProviderValidationError):
+    """A blocked brief; never a narration result or automatic retry."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"insufficient_sources: {reason}")
+
+
 class ProviderAuthenticationError(ProviderError):
     """Authentication must be restored before retrying the operation."""
 

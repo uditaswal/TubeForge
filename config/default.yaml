@@ -42,7 +42,7 @@ pipeline:
     max_diagnostic_bytes: 8192
     reservation_seconds: 1200
     repair_attempt_limit: 0
-    prompt_template_version: "m6-content-v4"
+    prompt_template_version: "m6-content-v6"
     max_prompt_chars: 60000
   piper:
     executable: "piper"

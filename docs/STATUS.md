@@ -1,6 +1,6 @@
 # TubeForge Status
 
-Last reviewed: 2026-10-05
+Last reviewed: 2026-10-11
 Release target: R1 — Reliable Local Studio
 
 `docs/STATUS.md` is the authoritative current-status record. Historical work
@@ -13,7 +13,7 @@ retained under `docs/overnight/`.
 | --- | --- | --- | --- |
 | Automated regression suite | NEEDS REVALIDATION | The current unfiltered suite collected all 280 tests in the Compose web container on 2026-10-05 (`--collect-only -q`, 4.32s). `httpx2` is now a deprecation warning, not a collection error. Completed bounded groups: publishing account/auth 3, dashboard workflow 8, worker leases/ownership 6, legacy publication/provider 13, core contracts 38, analytics/experiments 7, optimization 5, topic scheduling 3, account OAuth/credential/YouTube adapter 11, manual publishing/asset/presence 4, and selected publication orchestrator 11 passed. The earlier orchestrator group timeout was cumulative; all selected cases passed when split. | Continue remaining bounded regressions; the local real-media publishing smoke has passed separately. |
 | Database migrations | PASS (FOCUSED) | All five migration tests, including fresh SQLite and legacy upgrade paths, passed alone in the Compose web container against head `20261005_0028` (`5 passed, 90.29s`). | Recheck after further migrations; full regression remains open. |
-| Restricted host Codex runner | BLOCKED | The Studio prompt-version fix is deployed. A subsequent real response had 62 narration words for a 60-second brief, below the 90–240 requirement. The checkout now gives Codex explicit word budgets shared with validation and corrects retry reservation state; four focused tests passed in 16.82s. | Operator must reinstall the root-owned host wheel and restart its service to activate the prompt correction (commands in README). Then validate a bounded real script; prior exhausted counters remain unchanged. |
+| Restricted host Codex runner | VERIFIED | Operator installed the final compatibility wheel; actual host skill preflight passes. Original verification exhausted two attempts (restart interruption, then rejected closing CTA). Operator-approved revised Codex brief produced reviewed content with actual scoring provenance. | Generation and signed-in review passed. Final render remains BLOCKED by the operator decision; exhausted counters remain unchanged. |
 | Local FFmpeg/Piper smoke | PASS | Dedicated Shorts smoke: `1 passed, 2 deselected` in 284.99s on 2026-09-27. Retained output is 53.417s, 1080x1920, 30 fps H.264/AAC; its gate verified 168 locally aligned words and a 2.871s maximum visual hold. The earlier widescreen stock smoke also remains retained. | Use a non-fake production writer and complete signed-in browser acceptance. |
 | Local Kokoro voice smoke | PASS | `af_bella` generated a valid 24 kHz local WAV (3.776 seconds) using the INT8 ONNX model on 2026-09-13. | Run a selected-voice job smoke after rebuilding the durable Compose image. |
 | Docker/Compose runtime | READY FOR REVIEW | Recreated migration, web, worker, and scheduler services on 2026-09-13 with local-UID bind-mount ownership. The scheduler now also mounts the configured local models; all services are running and `GET http://127.0.0.1:62065/healthz` returned `{"status":"ok","database":"ok"}`. | Sign in and exercise the Visuals selector with a stock-selected job. |
@@ -22,15 +22,35 @@ retained under `docs/overnight/`.
 
 ## Active milestone
 
-Publishing pipeline Phase 1 follows the repository inventory in `plan.md`.
-The existing Shorts quality work remains open under `docs/SHORTS_WORKFLOW.md`;
-its state has not been upgraded by the publishing plan.
+
+The updated yt-script automation request is the current integration scope.
+
+| Automation phase | Status | Evidence | Blocker / next action |
+| --- | --- | --- | --- |
+| 1. Canonical skill and references | **VERIFIED** | Only `.agents/skills/yt-script` changed for this request. SKILL.md references automation.md; hook tools preserved/executed. Wheel resources byte-match this folder. | Keep downloaded copies untouched. |
+| 2. Explicit invocation and strict output handling | **VERIFIED** | Final provider/skill/automation batch: 63 passed. Existing workflow batch: 84 passed. Compatibility: 26 passed plus one updated assertion rerun passed. All 85 Python files match the final wheel; actual host preflight matches prompt SHA256 and seven resource hashes. Signed-in API and exact revision checks pass. | Inspect real generated content and signed-in browser/media in Phase 3. |
+| 3. Production scripts and approved local preview | **BLOCKED** | Three real scripts and invocation hashes verified. Exact revised tutorial preview: 52.117s, 540×960; narration-only TTS and captions match. Signed-in browser passed. | Visual teaching standard fails with existing abstract renderer; auditory quality unverified. No publication. |
+
+YouTube content skills integration follows `docs/YOUTUBE_SKILLS_PLAN.md`.
+Publishing Phase 1 remains BLOCKED; the existing Shorts quality gates are not
+upgraded by this integration.
+
+| Integration phase | Status | Evidence | Blocker / next action |
+| --- | --- | --- | --- |
+| 1. Canonical skills and durable instructions | **VERIFIED** | Eleven canonical `.agents/skills/` installations inspected; selected resources and tools reviewed; actual hook/title CLI reports and wheel inventory checked. AGENTS/README and application-compatible skill instructions updated. | Retain one canonical source installation. |
+| 2. Application writing and review integration | **VERIFIED** | v5 embeds yt-script/package/seo in host prompts; real local scoring selects hooks and checks titles; channel voice snapshots, scheduler propagation, no-model hash preflight and signed-in API review have focused coverage. The final focused regression batch passed 63 tests in 318.86s. The deployed host wheel passes installed-resource preflight, and all six rendered Studio scripts pass Node syntax checks. Later worker/render fixes are loaded through the source mounts. | Actual host invocation and signed-in Chromium review passed; final provider checks: 39 passed. Existing API workflow: 8 passed. Operator listening check passed. Final 1080×1920 render is BLOCKED after OOM; the retained 540×960 preview passed visual/metadata checks. |
+| 3. Real Shorts acceptance | **BLOCKED** | Operator deployment and actual host no-model resource handshake passed. Original brief exhausted its two attempts; the operator approved a revised brief with an explicit closing CTA. A new 40.663s 540×960 preview passed validation/visual inspection; operator confirmed clear/complete narration. Full-resolution export failed with a recorded Docker OOM event; job is failed_exhausted. | Operator chose to leave final rendering BLOCKED. Preserve the preview and exhausted job/counters; a future operator-approved memory or renderer change needs a new controlled job. |
+
+Local evidence is retained under `artifacts/smoke/skills-integration/`; the
+wheel is `artifacts/wheels/tubeforge-0.1.0-py3-none-any.whl`. Both paths are
+ignored. Synthetic scoring fixtures are labelled explicitly and are not
+production script, rendering, or browser acceptance.
 
 ## Publishing milestone tracker
 
 | Phase | Status | Evidence | Blocker / next action |
 | --- | --- | --- | --- |
-| 0. Inventory and readiness | **VERIFIED** | `plan.md` inventories actual scheduler, database, publisher, dispatch, account, auth, and Studio contracts and records the migration order and account-readiness checklist. The attached HTML was inspected as a mockup. Baseline: 13 focused tests passed in the Compose web container; tests are baked into that image. | Start local Phase 1 implementation. |
+| 0. Inventory and readiness | **VERIFIED** | `docs/planning/publishing-delivery-plan.md` inventories actual scheduler, database, publisher, dispatch, account, auth, and Studio contracts and records the migration order and account-readiness checklist. The attached HTML was inspected as a mockup. Baseline: 13 focused tests passed in the Compose web container; tests are baked into that image. | Start local Phase 1 implementation. |
 | 1. Connect and manual publish | **BLOCKED** | Google OAuth, fenced queue, credential refresh, saved-session reconciliation and same-session resume have focused offline coverage. An isolated publisher process, signed-in exact-review private YouTube submit, durable operator inspect/resume requests, reconnect recovery and Studio audit passed focused tests. The retained 53.417s 1080×1920 Shorts MP4 staged with identical bytes, then a local fake-provider run reached one `published` parent/destination after exactly one upload and one read-only inspection. No live upload or browser interaction has been verified. | Obtain an accessible Instagram Login OAuth, publishing and media contract, then add its adapter; inspect the signed-in browser and controlled remote posts. Operator applications, credentials, exact test accounts/media and upload authorization are required for live acceptance. |
 | 2. Backlog autopilot | **NOT STARTED** | No canonical folder catalog, publishing automation, or safe archive worker. | Begin after Phase 1 acceptance. |
 | 3. Presets and account control | **NOT STARTED** | No versioned publishing preset or field-lock workflow. | Begin after Phase 2 acceptance. |
@@ -55,6 +75,29 @@ its state has not been upgraded by the publishing plan.
 
 ## Current blockers
 
+Updated yt-script automation request (2026-10-11): invocation/output handling
+and actual production generation are **VERIFIED**. Tutorial, explainer and
+comparison were generated with explicit updated skill/brief evidence. The exact
+revised tutorial reached local `preview_ready`; signed-in desktop/mobile review,
+revision-prompt copying and preview playback passed. Creative visual acceptance
+is **BLOCKED**: existing abstract graphics do not demonstrate the tutorial's
+terminal/staging actions. Audio has not been verified by listening. No publishing.
+Canonical `.agents/skills/yt-script` and deployed wheel hashes match. See
+`YT_SCRIPT_AUTOMATION_REPORT.md`. Repository hygiene is **VERIFIED**: 44 generated
+files untracked locally, all copies retained, skills staged/eligible, docs organized.
+
+The skills host deployment and revised Codex generation are verified, as is
+actual signed-in Chromium script review at desktop/mobile widths. Original
+source-packet counters remain exhausted. The first preview encountered an
+OOM kill under the 1GiB worker budget. Two targeted repairs bound filters,
+encoder and every input decoder; 12 renderer checks pass and checkpointed
+preview reached `preview_ready` with readable captions. The final 1080×1920
+export failed with a Docker OOM event; the job is `failed_exhausted` after
+three worker attempts. The operator confirmed clear/complete narration and
+explicitly chose to leave final rendering BLOCKED. No further render attempt
+or memory change is authorized in this session.
+
+
 1. Controlled live publication needs operator-provided Google and Meta
    applications, approved permissions, exact test accounts and media, and
    explicit authorization for each test. Current configuration contains no
@@ -63,7 +106,7 @@ its state has not been upgraded by the publishing plan.
    Reels examples use Facebook Login and a Page token, a different integration
    from the planned Instagram Login path; its OAuth and publishing contracts
    still need primary-source verification before implementation.
-   See `plan.md` for the readiness checklist.
+   See `docs/planning/publishing-delivery-plan.md` for the readiness checklist.
 2. Both host-side attempts for the original README-grounded packet failed
    before producing a script; that packet remains exhausted. Both attempts
    for the revised review-gates packet also failed before a script because
@@ -81,24 +124,13 @@ its state has not been upgraded by the publishing plan.
    publishing smoke passed with an in-process fake provider; remote receipts
    and signed-in browser interaction remain unverified.
 
+Local deployment: existing migrations applied after online backup; schema
+20261005_0028, health/database and login HTTP 200 pass. No publisher started.
+
 ## Next five tasks
 
-1. Verify the Instagram Login endpoint and media contract, then implement its
-   account-scoped OAuth/adapter, identity, token lifecycle, reconnect behavior,
-   container processing and failure recovery.
-2. Test the signed-in browser's exact-review, connection, activity and
-   reconciliation flows against the running dashboard.
-3. Run full API/UI, worker lease and concurrency regressions after Instagram
-   integration; inspect a real staged artifact and provider receipts.
-4. Obtain explicit test-upload authorization and application access, then
-   inspect controlled remote posts on YouTube and Instagram. Keep public
-   readiness separate from private test success.
-5. After Phase 1 acceptance, start the Phase 2 folder backlog contract.
-
-## Update protocol
-
-- Update this file whenever a milestone state, blocker, release gate, or next
-  task changes.
-- Every `DONE` item requires a linked test/artifact/command result.
-- Append detailed command output and investigation history to
-  `AUTONOMOUS_PROGRESS.md`; do not duplicate it here.
+1. Decide whether to accept the local preview's abstract visuals or scope a separate topic-appropriate visual implementation; no publication.
+2. Listen to the exact-approved tutorial preview and record auditory quality.
+3. Review the pending explainer/comparison scripts through their existing approval gates.
+4. Preserve the old exhausted final-render/OOM job; final 1080×1920 export remains outside this request.
+5. Review and commit intentional source/docs/skill changes; generated artifacts remain local-only. No remote push was performed.

@@ -13,3 +13,18 @@ data
 o
 __pycache__
 *.pyc
+# Keep machine-local secrets and generated assets out of the build context.
+.env
+.aws
+.codex
+.codex-overnight
+autonomous_logs
+artifacts
+git-repos
+build
+dist
+models/*.onnx
+models/*.bin
+preview*.mp4
+final-*.mp4
+:memory:.ses

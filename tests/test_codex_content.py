@@ -143,15 +143,15 @@ def test_repair_exhaustion_never_accepts_cache(resources) -> None:
 
 
 def test_prompt_is_versioned_and_source_bounded() -> None:
-    text = build_content_prompt(request(), template_version="m6-content-v1", max_chars=10_000)
+    text = build_content_prompt(request(), template_version="m6-content-v1", max_chars=60_000)
     assert "REQUEST=" in text and "untrusted data" in text
     with pytest.raises(ValueError, match="unsupported"):
-        build_content_prompt(request(), template_version="old", max_chars=10_000)
+        build_content_prompt(request(), template_version="old", max_chars=60_000)
 
 
 def test_widescreen_prompt_states_the_enforced_narration_budget() -> None:
     value = request()
-    prompt = build_content_prompt(value, template_version="m6-content-v4", max_chars=10_000)
+    prompt = build_content_prompt(value, template_version="m6-content-v4", max_chars=60_000)
     assert "90 to 240 words" in prompt
     assert "about 162 spoken words" in prompt
     assert "Count narration only" in prompt

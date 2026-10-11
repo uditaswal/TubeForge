@@ -204,13 +204,13 @@ def short_package(value: ContentRequest) -> ContentPackage:
     return ContentPackage.model_validate(raw)
 
 
-def test_shorts_prompt_and_validation_enforce_source_hook_sentences_and_cta() -> None:
+def test_shorts_prompt_loads_skill_and_preserves_legacy_validation() -> None:
     value = short_request()
     prompt = build_content_prompt(value, template_version="m6-content-v4", max_chars=60_000)
     assert "This is a YouTube Short" in prompt
-    assert "provided source excerpts" in prompt
-    assert "18 to 24 narration words in each section" in prompt
-    assert "108 to 144 narration words total" in prompt
+    assert "approved source excerpts" in prompt
+    assert "RESOURCE yt-script/automation.md" in prompt
+    assert "108 to 166 words" in prompt
 
     accepted = short_package(value)
     validate_video_package(accepted, value, provider_name="Ollama")

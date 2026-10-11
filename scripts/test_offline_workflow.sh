@@ -4,7 +4,7 @@
 
 set -Eeuo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8081}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:62065}"
 ACTOR="${ACTOR:-offline-smoke-test}"
 TARGET_DURATION_SECONDS="${TARGET_DURATION_SECONDS:-30}"
 POLL_SECONDS="${POLL_SECONDS:-2}"
@@ -80,10 +80,11 @@ safe = (
     and settings.pipeline.voice_provider == "fake"
     and settings.pipeline.media.provider == "fake"
     and not settings.pipeline.youtube.enabled
+    and not settings.auth.enabled
 )
 raise SystemExit(0 if safe else 1)
 ' || {
-  printf 'Refusing to run: this script requires fake content, voice, media, and disabled YouTube publishing.\n' >&2
+  printf 'Refusing to run: this script requires fake content, voice, media, disabled authentication, and disabled YouTube publishing.\n' >&2
   exit 2
 }
 

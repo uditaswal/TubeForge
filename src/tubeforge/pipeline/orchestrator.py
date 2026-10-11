@@ -242,6 +242,9 @@ class PipelineOrchestrator:
             package = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
             if package is None:
                 package = self.content.generate_package(self._effective_content_request(job)).model_dump(mode="json")
+                provenance = getattr(self.content, "last_provenance", None)
+                if provenance:
+                    self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "content_generation_evidence", {"provenance": provenance, "usage": getattr(self.content, "last_usage", None) or {}})
                 self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "content_package", package)
             if self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "video_plan") is None:
                 value = ContentPackage.model_validate(package)

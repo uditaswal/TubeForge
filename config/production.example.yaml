@@ -9,6 +9,10 @@ database:
 pipeline:
   content_provider: "fake" # Test offline first. Production supports codex + piper together.
   voice_provider: "fake"
+  codex:
+    prompt_template_version: "m6-content-v6"
+    default_channel_identity: "default"
+    voice_profiles: {} # Missing profiles use the documented built-in default.
   fake:
     enabled: true
     artifact_root: "/app/data/fake-artifacts"

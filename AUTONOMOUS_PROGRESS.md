@@ -3039,3 +3039,240 @@ endpoint or media-limit behavior is inferred from it. Phase 1 is now BLOCKED
 under the operator's two-minute stuck-task rule. The next action is to obtain
 the correct Meta provider contract and application access, then implement and
 test that adapter before signed-in browser and controlled remote acceptance.
+
+## 2026-10-11 — YouTube skills connected to the production writing boundary
+
+Scope: inspected AGENTS/README/status, all eleven installed skill instructions,
+selected supporting scorer/checker/formula resources, dashboard intake, topic
+scheduler, isolated host provider, structured schema, renderer handoff and
+publishing configuration. Wrote `docs/YOUTUBE_SKILLS_PLAN.md` before source
+edits. `.agents/skills/` was already canonical; no relocation or duplicate
+installation was introduced. Adapted voice/review instructions, preserving
+Python scripts and JSON resources. AGENTS now records when to use each skill,
+required source data, heuristic limits and same-change documentation maintenance.
+
+Implementation: configured v5 embeds only yt-script/package/seo in actual
+Codex prompts, ships resources inside the wheel, and keeps the existing model,
+provider, namespace and two-invocation policy. Host Python executes the supplied
+hook scorer/title checker. Hooks are scored before selecting a format-compatible
+finalist; only the opening sentence can change. Profiles are typed config and
+immutable per-channel request snapshots with an explicit default. The scheduler
+now uses a supported configured prompt and propagates voice/format/duration;
+invalid briefs finish their schedule run without reserving a topic. Studio adds
+a real profile selector and displays scene directions, packaging, metadata and
+actual scoring reports. Schedule saves report pending/failure and carry selected
+profile/format/duration without changing their review policy. Corrected a preset
+DOM bug by assigning fields on the existing `dataset` object. Generation usage
+and provenance are checkpointed alongside job content under ownership fencing.
+
+Validation: actual hook/title CLI runs passed. Initial tests exposed synthetic
+fixture configuration omissions, the stale image's missing docs/migrations, and
+a default-version compatibility regression; these were corrected, with focused
+reruns passing. Final retained Compose command ran `python -m pytest
+ tests/test_youtube_skills.py tests/test_host_codex_runner.py
+ tests/test_codex_content.py tests/test_domain_contracts.py tests/test_config.py
+ tests/test_topic_scheduling.py tests/test_auth.py tests/test_worker_service.py
+ tests/test_shorts_workflow.py -q -p no:cacheprovider` against current source,
+tests, migrations and docs: **63 passed, one Starlette deprecation warning,
+318.86 seconds**. `python3 -m compileall -q src` and `git diff --check` passed.
+Separate existing API workflow regressions are being retained in their own log.
+This is focused coverage, not a newly passing full unfiltered suite.
+
+Artifact inspection: the wheel contains all eleven SKILL.md files and selected
+supporting resources. Every wheel Python file matched current checkout bytes;
+wheel SHA-256 is `d2b7bef865f1da66e8698929642ac2ad3f525e6485f02304ee376d0fd524cd2a`.
+An extracted-wheel preflight using the host Python environment resolved its own
+resource directory, checked six hashes and executed both real tools. Synthetic
+fixture hook/title reports and package JSON were retained and inspected; the
+fixture is explicitly labelled, not production prose. Authenticated TestClient
+HTML was retained, and all six inline scripts passed the pinned Node's
+`--check`. No interactive browser behavior or creative video quality is inferred
+from those checks. Evidence is under `artifacts/smoke/skills-integration/`.
+Reviewed git status/hygiene; wheels are ignored under `artifacts/wheels/`, and
+`git check-ignore -v` confirmed both wheel and generated evidence paths. No
+commit, push, provider credential exchange or publication occurred.
+
+External blocker: a real worker-container `PreflightContentV1` request to the
+host socket returned legacy protocol/channel-field validation errors. It could
+not invoke Codex, and model invocation count for this probe is zero. The reviewed
+wheel must be installed in the root-owned host venv. Elevated `sudo -n` reports
+that a password is required; no automatic approval rejection occurred. Asked
+the operator to run the exact wheel install and service restart commands,
+without sharing a password. No old exhausted allowance was reset. Phase 1 is
+VERIFIED for skill inventory/instructions; application integration remains
+IMPLEMENTED and real Shorts acceptance BLOCKED, as recorded in STATUS.
+
+Next action: after administrator deployment, require successful hash preflight,
+recreate the app services, then generate a genuinely new approved packaging
+brief through the actual application. Review source grounding/creative quality,
+verify signed-in browser review and render/inspect a new 30–55s 1080×1920 video.
+Keep publishing unapproved. The retained older Shorts smoke is not evidence for
+this integration.
+
+### 2026-10-11 — deployed skills runner and bounded real acceptance
+
+Operator installed/restarted final host wheel (SHA256
+38ff4faeb5d55d34dcabffddf7bcc71a52c37e814d9ee8f17a4e3da9976daf70).
+Actual socket resource preflight now passes. Legacy retry-key regression:
+38 passed in 121.24s (`legacy-allowance-tests.log`). Original real brief:
+first request interrupted by service restart; second returned a draft rejected
+by the concrete final CTA validator. Draft wording was not retained by that
+version; report does not claim creative review. Original counters remain
+exhausted. Operator chose revised brief with Codex CLI and an exact final CTA;
+new bounded request is running. Added durable rejected-result retention on
+worker validation failure; focused checks pending. Chromium installed only
+under ignored smoke evidence for isolated signed-in browser acceptance.
+Next: inspect revised output, test browser and local rendering; no publishing.
+
+### 2026-10-11 — real Codex and browser acceptance; render memory repair
+
+Approved revised Codex packet accepted in 45.788s with six grounded claims,
+five hooks, ten titles, thumbnail and SEO metadata, actual tool results and
+resource hashes. Durable worker reached script review. Manual source/creative
+review retained in `real-creative-review.json`; opening wording has a minor
+repetition. Actual Chromium login/script review: no page errors, no mobile
+horizontal overflow; desktop/mobile screenshots retained. Final providers:
+39 passed in 385.82s. Existing API workflow: 8 passed in 828.52s. Renderer:
+12 passed in 15.91s, including input/filter/encoder thread bounds, cancellation
+and media validation. Preview first failed with cgroup `oom_kill 1` at 1GiB;
+first repair still had 127 threads and ~1GiB RSS. Stopped only its verification
+FFmpeg child (TERM then KILL after unresponsive teardown); worker durably
+recorded failure/retry and released its lease. Second repair bounds each
+input codec independently. Checkpointed retry is producing video bytes with
+no new OOM event; required output/quality acceptance remains pending.
+Production web recreated with canonical skill mount; `/healthz` confirms
+`status=ok`, `database=ok`. Worker/scheduler rollout pending render acceptance.
+Narration is 40.663s; the session cannot hear audio, so operator listening
+check requested. No publication, provider swap or allowance reset occurred.
+
+### 2026-10-11 — accepted preview; final render left BLOCKED
+
+Bounded-input retry reached `preview_ready` without a new script invocation:
+40.663s, 540×960, 30fps, H264/AAC, 48kHz mono. Preview checksum
+f34ecc1fb4bed1ecad5eca8dcf600b389e35fdc7d2f60b2b0e053b1733dd29e7.
+Six-frame contact sheet inspected: readable highlighted captions in safe area,
+varied portrait graphics, no sampled clipping/black frames. Limitation: abstract
+local motion graphics do not literally depict every cinematic scene direction.
+Operator confirmed narration clear and complete (`operator-audio-review.json`).
+Exact preview approved only for local full-resolution rendering. Final export
+failed; Docker event records `oom` for worker-run-ce259293bd95. Job
+`dfb2752b9365459680aa0b80c9f850a5` is `failed_exhausted`, attempt_count=3,
+claim released; no 1080×1920 final artifact was promoted. Both targeted render
+repairs stop here. Offered controlled 2GiB test versus lower-buffer rendering;
+operator explicitly chose "Leave final rendering BLOCKED". No further memory
+change/retry is made. Content generation and actual signed-in browser review
+are VERIFIED; full Shorts quality acceptance remains BLOCKED. No milestone
+is declared complete and no upload occurred. Web/worker/scheduler recreated
+with canonical skills; web health/database pass. Existing production active
+claims were zero before worker recreation. Source hygiene/diff checks pass,
+smoke browser/media/wheels are confirmed ignored. Next: retain evidence;
+resume final rendering only after a new operator decision.
+
+
+## 2026-10-11 — Updated yt-script automation intake
+
+Scope: inspected the existing uncommitted integration, downloaded skill, direct
+CLI generation/repair, isolated host invocation, dashboard revision and ordered
+TTS segmentation. Added `docs/YT_SCRIPT_AUTOMATION_PLAN.md` with phase outcomes,
+acceptance tests, evidence and exclusions.
+
+Validation: read resource inventory and relevant source using rg/cat/sed; the
+downloaded yt-script contains only original SKILL.md, hooks.json and hookscore.py.
+No production invocation, automated regression, generated narration or preview
+was run because the supplied updated skill is missing. Existing acceptance
+evidence is historical and does not verify this request.
+
+Blocker: requested the update’s local path or contents. Next action: inspect
+that supplied skill and references, update the existing downloaded folder, then
+implement and verify the planned integration. No invocation ledger or existing
+job was reset; no publication attempted.
+
+
+## 2026-10-11 production acceptance update
+
+Phase 3: **BLOCKED** on host deployment of repaired wheel SHA256
+`307fab40c9cc95a7429504a186049864687302e4d29fb3a3097f9a1abd422d0a`.
+The first actual tutorial call failed the existing ten-title acceptance gate.
+No script was approved or sent to TTS. The previous host discarded the rejected
+draft; its narration is unavailable. The narrow repair explicitly requests all
+ten titles, enforces existing title/hook counts in the CLI envelope and retains
+future domain-valid rejected drafts. Repair tests: 48 passed in 73.56s.
+Preserve the existing tutorial job and its one consumed attempt. Next: verify
+host deployment hashes, use the second and final tutorial attempt, then inspect
+tutorial/explainer/comparison scripts and an exact-approved local preview.
+No new creative artifact acceptance or publication is claimed.
+
+## 2026-10-11 — Repository tracking and operational documentation hygiene
+
+Scope: audited tracked files, sizes and ignore behavior. Confirmed project skills
+are versioned and not ignored. Removed 44 generated files from Git's index only,
+preserving every local copy (73,625,538 bytes). Added precise runtime/credential/
+build ignores and Docker context exclusions. Organized planning briefs under
+`docs/planning`, replaced stale curl commands with an authenticated exact-script
+review guide under `docs/operations`, added documentation/script indexes and
+moved the historical runner into scripts with a compatible root entry point.
+
+Validation: source/skill eligibility and runtime ignore checks passed; tracked
+artifact audit clean; new documentation links and shell syntax checks passed;
+`git diff --check` passed. Curl examples inspected against API contracts, not
+executed. No commit, push, artifact deletion or Git history rewrite. Existing
+application changes preserved. The prior repaired runner deployment now passes
+actual seven-resource and exact prompt-hash preflight; creative acceptance is
+next and is not claimed by this hygiene verification.
+
+
+## 2026-10-11 — Actual yt-script production acceptance and approved preview
+
+The repaired wheel deployed and all 85 Python files/canonical skill resources
+byte-match it (SHA256 307fab40c9cc95a7429504a186049864687302e4d29fb3a3097f9a1abd422d0a).
+Actual preflight and three accepted Codex stdin records match skill and prompt
+hashes. Tutorial used two attempts (first count rejection), explainer one,
+comparison two (first overlength fallback visual rejection). No source-packet
+allowance was reset. The comparison waited for existing render capacity before
+its second invocation; leases were preserved. The first rejected tutorial draft
+is unavailable; future domain-valid rejected drafts are retained.
+
+Source/creative review found the tutorial needed a staged-file boundary. Saved
+that grounded clarification through authenticated script-revision API; generated
+draft retained. Approval event and render input both pin revision checksum
+43d8792884172beb13876675a81f337848c9db5e52e30b00a3a07df10037b6f3.
+Local preview reached preview_ready: 52.117s, 540×960 H.264/AAC, 150 words,
+roughly 173 words/minute with pauses. Segmentation, actual Piper input texts and
+SRT match exact approved narration. Sampled frames/caption placement inspected.
+Visual teaching FAIL: existing abstract graphics do not implement requested
+terminal/staging demonstrations. Listening quality unverified; no auditory
+review claimed. No final export or publication was requested/run for this job.
+
+Signed-in Chromium acceptance on isolated real-app database passed editable
+script review, explicit-skill revision clipboard prompt, silent refresh/dialog
+preservation, desktop/mobile, no page errors/overflow, and paused approved preview
+metadata load. One fixture initially selected the read-only approved tutorial;
+corrected it to the editable explainer. Evidence: signed-in-browser-evidence.json,
+preview-inspection.json, screenshots/media/narration under ignored smoke folder.
+
+Current phase 3 creative acceptance remains BLOCKED by visuals/listening; full
+verification report is docs/YT_SCRIPT_AUTOMATION_REPORT.md. Repository hygiene
+and invocation/output-handling checks are VERIFIED. Existing final-export/OOM
+job untouched. Production processes restarted after zero active claims; health
+passed. Existing unrelated pending database migrations were discovered by live
+Studio heartbeat reads; online backup created before applying reviewed schema
+updates. No publisher was started and no upload occurred. Next: verify live schema,
+retain exact-reviewed evidence; operator may review audio and decide visual scope.
+
+Deployment follow-through: backed-up primary local database upgraded from
+20260927_0020 to existing head 20261005_0028 using checkout migrations mounted
+read-only. Heartbeat table exists; active pipeline claims zero; live health and
+login HTTP 200 pass. No migration code was added. Final staged/unstaged diff,
+tracked-skill/generated-artifact, ignored-tracked-file, new documentation link
+and shell syntax checks passed. Hygiene/report changes staged; no commit/push.
+
+## 2026-10-11 — External nginx dashboard diagnosis
+
+Read current primary schema and TubeForge/nginx routing after operator supplied
+historical missing-heartbeat-table traceback. Current primary schema is
+20261005_0028; publisher_worker_heartbeats exists. Direct and nginx-proxied health
+pass; nginx -t passes; nginx and TubeForge web share homelab. Proxy root returns
+303 /login; proxied login returns HTTP 200. No nginx configuration or networking
+was modified. Current production secure cookies require HTTPS at the browser.
+Requested exact external URL/current symptom to distinguish HTTP login behavior
+from external reachability; the supplied database error is no longer reproduced.

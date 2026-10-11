@@ -1,2 +1,0 @@
-2026-08-31T05:12:11.307969Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/uditaswal/docker/tubeforge/Youtube_Video_Producer/src/tubeforge/api/app.py:
-const jobsRoot=document.querySelector('#jobs'),filter=document.querySelector('#filter'),notice=document.querySelector('#notice'),cards=new Map();const esc=v=>String(v??'');const ready=s=>['preview_ready','final_ready','publication_approval_required','publication_ready','published'].includes(s),failed=s=>s.startsWith('failed_');

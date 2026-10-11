@@ -145,11 +145,24 @@ class CodexProviderConfig(BaseModel):
     max_diagnostic_bytes: int = Field(default=8_192, ge=256, le=65_536)
     reservation_seconds: int = Field(default=1_200, ge=10, le=14_400)
     repair_attempt_limit: int = Field(default=0, ge=0, le=5)
-    prompt_template_version: str = Field(default="m6-content-v2", min_length=1, max_length=100)
+    voice_profiles: dict[str, str] = Field(default_factory=dict)
+    default_channel_identity: str = Field(default="default", pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    prompt_template_version: str = Field(default="m6-content-v4", min_length=1, max_length=100)
     max_prompt_chars: int = Field(default=60_000, ge=1_000, le=200_000)
     socket_path: Path = Path("/run/tubeforge-codex/codex.sock")
     socket_timeout_seconds: int = Field(default=490, ge=1, le=600)
     invocation_limit: int = Field(default=2, ge=1, le=2)
+
+    @field_validator("voice_profiles")
+    @classmethod
+    def validate_voice_profiles(cls, profiles: dict[str, str]) -> dict[str, str]:
+        import re
+        if len(profiles) > 100:
+            raise ValueError("at most 100 channel voice profiles")
+        for identity, profile in profiles.items():
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", identity) or not profile.strip() or len(profile) > 4000:
+                raise ValueError("voice profiles require bounded channel IDs and nonblank text up to 4000 characters")
+        return profiles
 
     @field_validator("executable", "model", "prompt_template_version")
     @classmethod

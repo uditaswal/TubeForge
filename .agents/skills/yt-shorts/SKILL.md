@@ -32,5 +32,6 @@ reject one without reading the whole transcript.
 
 ## The gate
 
-Nothing here publishes. This skill writes and you publish. Every output ends in a block the user
-copies, and the last line of every run is the question: **ship it, or change it?**
+Nothing here publishes. Return structured content for TubeForge’s existing script-review
+status and exact-artifact dashboard approval controls. Unattended jobs never ask
+conversational approval questions or bypass review and scheduled-publishing policies.

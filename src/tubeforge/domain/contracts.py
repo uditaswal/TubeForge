@@ -41,6 +41,8 @@ class SourceReference(DomainModel):
 class ContentRequest(DomainModel):
     """Bounded, provider-neutral request for one structured content package."""
 
+    channel_identity: str = Field(default="default", pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    channel_voice_profile: str = Field(default="Clear, practical and conversational. Address the viewer directly; use complete sentences, explain unfamiliar terms, avoid hype, unsupported claims and invented personal experience.", min_length=1, max_length=4000)
     topic: str = Field(min_length=1, max_length=500)
     angle: str = Field(min_length=1, max_length=1_000)
     target_duration_seconds: int = Field(ge=30, le=7_200)
@@ -82,6 +84,15 @@ class ContentRequest(DomainModel):
         return self
 
 
+def generation_request_key_payload(request: ContentRequest) -> dict[str, object]:
+    """Keep legacy default-profile drafts on their existing durable allowance."""
+    value = request.model_dump(mode="json")
+    if request.prompt_version in {"m6-content-v1", "m6-content-v2", "m6-content-v3", "m6-content-v4"} and request.channel_identity == "default" and request.channel_voice_profile == ContentRequest.model_fields["channel_voice_profile"].default:
+        value.pop("channel_identity")
+        value.pop("channel_voice_profile")
+    return value
+
+
 class CitedClaim(DomainModel):
     """A factual assertion with durable source links and human-review signal."""
 
@@ -113,6 +124,14 @@ class ScriptSection(DomainModel):
 
     @model_validator(mode="after")
     def require_claims_for_factual_sections(self) -> ScriptSection:
+        # Reject serialized production panels rather than speaking them. This
+        # checks field separation, not the script's editorial quality.
+        import re
+        if not self.narration.strip() or re.search(
+            r"```|\[(?:ON SCREEN|HOOK|PRODUCTION|SOURCE|SCORE)[^\]]*\]|^\s*(?:ON SCREEN|Hook \d+|Sources|Production notes|Hook scores)\s*:",
+            self.narration, re.I | re.M,
+        ):
+            raise ValueError("narration must contain audience-facing speech without production panels")
         if self.contains_factual_claims and not self.claim_ids:
             raise ValueError("factual script sections must reference cited claims")
         return self
@@ -162,6 +181,7 @@ class ContentPackage(DomainModel):
     scene_plans: tuple[ScenePlan, ...] = Field(min_length=1, max_length=500)
     metadata: VideoMetadata
     thumbnail_brief: ThumbnailBrief
+    hook_options: tuple[str, ...] = Field(default=(), max_length=5)
     clip_candidates: tuple[ClipCandidate, ...] = Field(default=(), max_length=8)
 
     @model_validator(mode="after")

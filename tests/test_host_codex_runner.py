@@ -104,7 +104,8 @@ def test_review_gates_smoke_packet_is_typed_and_prompt_bounded() -> None:
     prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
     assert "REQUEST=" in prompt
     assert "Copy ContentPackage.request exactly from REQUEST" in prompt
-    assert "topic-specific tension or payoff" in prompt
+    assert "RESOURCE yt-script/automation.md" in prompt
+    assert "Deliver the topic's promised payoff" in prompt
     assert "next bug" not in prompt
 
 

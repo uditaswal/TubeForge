@@ -13,7 +13,7 @@ from tubeforge.scheduling.service import SchedulerService
 
 def main() -> None:
     settings = load_settings(); runtime = create_runtime(settings)
-    scheduler = SchedulerService(runtime.schedules, runtime.topics, scheduler_id=f"scheduler-{uuid.uuid4().hex}", reservation_seconds=settings.scheduler.topic_reservation_seconds)
+    scheduler = SchedulerService(runtime.schedules, runtime.topics, scheduler_id=f"scheduler-{uuid.uuid4().hex}", reservation_seconds=settings.scheduler.topic_reservation_seconds, codex_config=settings.pipeline.codex)
     stopping = False
     def stop(_: int, __: object) -> None:
         nonlocal stopping; stopping = True

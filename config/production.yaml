@@ -22,7 +22,7 @@ pipeline:
     socket_timeout_seconds: 490
     invocation_limit: 2
     reservation_seconds: 1200
-    prompt_template_version: "m6-content-v4"
+    prompt_template_version: "m6-content-v6"
   video_generation:
     default_preset: "default"
     presets:

@@ -9,7 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 
 COPY pyproject.toml readme.md ./
 COPY src ./src
+COPY .agents/skills ./.agents/skills
 COPY migrations ./migrations
+COPY docs ./docs
 COPY tests ./tests
 COPY alembic.ini ./
 RUN python -m pip install --no-cache-dir ".[dev,local-media,kokoro]"

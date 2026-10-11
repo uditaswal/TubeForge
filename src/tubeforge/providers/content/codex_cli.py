@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from tubeforge.core.config import CodexProviderConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
-from tubeforge.db.repositories import CachedGeneration, GenerationCacheRepository
+from tubeforge.db.repositories import CachedGeneration, GenerationCacheRepository, GenerationExhausted
 from tubeforge.domain.contracts import ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest
 from tubeforge.providers.content.prompts import build_content_prompt, build_repair_prompt, normalize_content_request, validate_video_package
 
@@ -42,22 +42,47 @@ class CodexCliContentProvider:
         self._process_runner = process_runner or _run_codex_process
         self.last_provenance: dict[str, object] | None = None
         self.last_usage: dict[str, object] | None = None
+        self._invocation_prompts: list[dict[str, object]] = []
 
     def generate_package(self, request: ContentRequest) -> ContentPackage:
+        prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
+        from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
+        if self.config.prompt_template_version in SKILL_TEMPLATES:
+            preflight()
+        if self.config.prompt_template_version == SKILL_TEMPLATE:
+            from tubeforge.providers.content.output import require_source_excerpts
+            require_source_excerpts(request)
         now = self._now()
         cached = self.cache.reserve_or_get(request, self.provider_name, self.config.model, request.prompt_version, now=now, reservation_seconds=self.config.reservation_seconds)
         if isinstance(cached, CachedGeneration):
+            if self.config.prompt_template_version in SKILL_TEMPLATES and cached.provenance.get("youtube_skills", {}).get("resource_hashes") != preflight():
+                raise ProviderValidationError("Cached generation uses different skill resources; review a new brief")
             package = self._validate_package(cached.package, request)
             self.last_provenance, self.last_usage = cached.provenance, cached.usage
             return package
+        if isinstance(cached, GenerationExhausted):
+            raise ProviderValidationError("TubeForge's two-attempt limit for this exact source packet is exhausted; operator review is required")
         if cached is None:
             raise RetryableProviderError("Codex generation is already reserved; retry after the reservation expires")
+        if not self.cache.consume_invocation(cached, maximum=self.config.invocation_limit, now=now):
+            raise ProviderValidationError("TubeForge's two-attempt limit for this exact source packet is exhausted; operator review is required")
+        self._invocation_prompts = []
+        self._reservation = cached
         try:
             prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
             raw, usage = self._invoke(prompt)
+            if self.config.prompt_template_version == SKILL_TEMPLATE:
+                from tubeforge.providers.content.output import unwrap_generation
+                raw = unwrap_generation(raw)
             package = self._validate_or_repair(raw, request)
             package_json = package.model_dump(mode="json")
             provenance: dict[str, object] = {"cache_key": cached.cache_key, "generated_at": self._now().isoformat(), "model": self.config.model, "prompt_template_version": self.config.prompt_template_version, "prompt_version": request.prompt_version, "provider": self.provider_name}
+            if self.config.prompt_template_version in SKILL_TEMPLATES:
+                from tubeforge.providers.content.youtube_skills import select_hook
+                package, provenance["youtube_skills"] = select_hook(package)
+                validate_video_package(package, request, provider_name="Codex")
+                package_json = package.model_dump(mode="json")
+            provenance["invocations"] = self._invocation_prompts
             if not self.cache.accept(cached, package_json, provenance, usage, now=self._now()):
                 raise RetryableProviderError("Codex generation reservation expired before validated result could be accepted")
         except Exception as error:
@@ -66,7 +91,7 @@ class CodexCliContentProvider:
             # retaining its short reservation prevents a tight retry loop from
             # repeatedly accepting or repairing the same malformed response.
             if not isinstance(error, ProviderValidationError):
-                self.cache.abandon(cached)
+                self.cache.release_after_invocation_failure(cached, maximum=self.config.invocation_limit, failure={"type": type(error).__name__, "message": str(error)[:1000]}, now=self._now())
             raise
         self.last_provenance, self.last_usage = provenance, usage
         return package
@@ -76,10 +101,14 @@ class CodexCliContentProvider:
         return [self.config.executable, "exec", "--ephemeral", "--sandbox", "read-only", "--model", self.config.model, "--output-schema", str(output_schema), "--output-last-message", str(output_file), "--json"]
 
     def _invoke(self, prompt: str) -> tuple[Any, dict[str, object]]:
+        from tubeforge.providers.content.prompts import prompt_evidence
+        self._invocation_prompts.append(prompt_evidence(prompt))
         with tempfile.TemporaryDirectory(prefix="tubeforge-codex-") as temporary:
             root = Path(temporary)
             schema_path, output_path = root / "content-package.schema.json", root / "content-package.json"
-            schema_path.write_text(json.dumps(ContentPackage.model_json_schema(), sort_keys=True), encoding="utf-8")
+            from tubeforge.host_codex_runner import codex_output_schema
+            from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE
+            schema_path.write_text(json.dumps(codex_output_schema(envelope=self.config.prompt_template_version == SKILL_TEMPLATE), sort_keys=True), encoding="utf-8")
             result = self._process_runner(self.build_cli_args(schema_path, output_path), prompt, output_path, self.config.timeout_seconds, self.config.max_output_bytes)
             diagnostics = _safe_diagnostic(result.stderr or result.stdout, self.config.max_diagnostic_bytes)
             if result.returncode != 0:
@@ -102,13 +131,15 @@ class CodexCliContentProvider:
             except ProviderValidationError:
                 raise
             except ValidationError as error:
-                if attempt >= self.config.repair_attempt_limit:
+                if self.config.prompt_template_version == "m6-content-v6" or attempt >= self.config.repair_attempt_limit:
                     raise ProviderValidationError("Codex output failed ContentPackage validation") from error
                 target = _repair_target(error, candidate)
                 if target is None:
                     raise ProviderValidationError("Codex output has a non-targetable ContentPackage validation error") from error
                 path, value = target
                 repair_prompt = build_repair_prompt(request, field_path=_format_path(path), invalid_value=value, validation_error=_safe_validation_error(error), template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
+                if not self.cache.consume_invocation(self._reservation, maximum=self.config.invocation_limit, now=self._now()):
+                    raise ProviderValidationError("TubeForge's two-attempt limit is exhausted before field repair")
                 replacement, _ = self._invoke(repair_prompt)
                 candidate = _replace_path(candidate, path, _extract_repair_value(replacement, path))
         raise AssertionError("unreachable")

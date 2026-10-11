@@ -862,9 +862,10 @@ class GenerationCacheRepository:
 
     @staticmethod
     def key_material(request: ContentRequest, provider: str, model: str, prompt_version: str) -> str:
+        from tubeforge.domain.contracts import generation_request_key_payload
         value = {
             "model": model,
-            "normalized_request": _normalize_cache_value(request.model_dump(mode="json")),
+            "normalized_request": _normalize_cache_value(generation_request_key_payload(request)),
             "prompt_version": prompt_version,
             "provider": provider,
         }
