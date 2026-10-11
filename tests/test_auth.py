@@ -31,8 +31,12 @@ def test_dashboard_requires_login_and_csrf_for_mutation(tmp_path: Path) -> None:
         assert dashboard.status_code == 200
         assert "presetSelect" in dashboard.text
         assert "Review script and sources" in dashboard.text
+        assert r"join('\n\n')" in dashboard.text
         assert "Add licensed music" in dashboard.text
         assert "musicUpload" in dashboard.text
+        assert "Publishing accounts" in dashboard.text
+        assert "Connections require verified platform authorization" in dashboard.text
+        assert client.get("/api/social-accounts").status_code == 200
         assert client.post("/api/topics", json={"title": "A topic"}).status_code == 403
         csrf = client.cookies.get("tubeforge_csrf")
         assert client.post("/api/topics", json={"title": "A topic"}, headers={"x-csrf-token": csrf}).status_code == 201

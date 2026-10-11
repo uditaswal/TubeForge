@@ -416,7 +416,7 @@ class SocialAccountRepository:
     def create(self, account_id: str, *, platform: str, display_name: str, external_account_id: str | None, auth_type: str, credential_ciphertext: str | None, scopes: tuple[str, ...], capabilities: tuple[str, ...], token_expires_at: datetime | None = None) -> SocialAccount:
         if platform not in {"youtube", "instagram", "facebook", "snapchat"}: raise ValueError("unsupported platform")
         now = datetime.now(UTC)
-        record = SocialAccountRecord(id=account_id, platform=platform, display_name=display_name.strip(), external_account_id=external_account_id, auth_type=auth_type, credential_ciphertext=credential_ciphertext, scopes_json=json.dumps(scopes), token_expires_at=token_expires_at, status="connected" if credential_ciphertext else "manual_handoff_required", capabilities_json=json.dumps(capabilities), is_default=False, disabled=False, last_validated_at=None, created_at=now, updated_at=now)
+        record = SocialAccountRecord(id=account_id, platform=platform, display_name=display_name.strip(), external_account_id=external_account_id, auth_type=auth_type, credential_ciphertext=credential_ciphertext, scopes_json=json.dumps(scopes), token_expires_at=token_expires_at, status="unconfigured" if auth_type == "oauth" else "manual_handoff_required", capabilities_json=json.dumps(capabilities), is_default=False, disabled=False, last_validated_at=None, created_at=now, updated_at=now)
         if not record.display_name: raise ValueError("display name must not be blank")
         with self._session_factory.begin() as session: session.add(record)
         return _social_account_from_record(record)
@@ -807,7 +807,10 @@ def _schedule_from_record(record: ScheduleRecord) -> Schedule:
 
 
 def _social_account_from_record(record: SocialAccountRecord) -> SocialAccount:
-    return SocialAccount(record.id, record.platform, record.display_name, record.external_account_id, record.auth_type, tuple(json.loads(record.scopes_json)), record.status, tuple(json.loads(record.capabilities_json)), record.is_default, record.disabled, record.token_expires_at, record.last_validated_at)
+    # Older API calls could mark browser-supplied tokens connected without
+    # validating the remote identity. Never surface those rows as trusted.
+    status = "verification_required" if record.status == "connected" and record.last_validated_at is None else record.status
+    return SocialAccount(record.id, record.platform, record.display_name, record.external_account_id, record.auth_type, tuple(json.loads(record.scopes_json)), status, tuple(json.loads(record.capabilities_json)), record.is_default, record.disabled, record.token_expires_at, record.last_validated_at)
 
 
 def _job_event_from_record(record: JobEventRecord) -> JobEvent:

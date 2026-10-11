@@ -2577,3 +2577,465 @@ sent. The corrected prompt is IMPLEMENTED but deployment is BLOCKED:
 The README records installation and service restart commands. Next: deploy
 the host wheel, then review a bounded real script before claiming VERIFIED.
 No new generated paths; existing ignore rules require no changes.
+
+## 2026-10-05 — Publishing pipeline inventory and milestone plan
+
+Scope: reviewed the attached publishing design and HTML concept against the
+checkout's SQLite/Alembic schema, topic scheduler, YouTube adapter, generic
+dispatch prototype, encrypted social-account envelope, Creator Studio API and
+dashboard, generation and clipping entrypoints. Wrote `plan.md` with phases
+0–6, one visible outcome/acceptance/out-of-scope per phase, migration order,
+external application checklist and delivery invariants. Updated the current
+tracker in `docs/STATUS.md` and linked the plan from `readme.md`. The HTML is
+sample data and interactions, not proof of implementation.
+
+Validation: file-level contract inspection and `git diff --check`; no media
+artifact was produced in this documentation phase. Ran
+`docker compose exec -T web python -m pytest tests/test_publication_dispatch.py tests/test_youtube_publisher.py tests/test_social_accounts.py tests/test_topic_scheduling.py -q`:
+13 passed in 48.99s. The container bind-mounts current `src` but its test files
+were baked into the image, so this is a focused baseline, not a fresh full
+regression. Pytest emitted a cache-write permission warning. The existing
+YouTube publisher is private-first and the generic dispatch attempt is not
+connected to the worker. The account API can presently mark an operator-
+supplied encrypted credential as connected without verifying remote identity;
+Phase 1 must correct that before presenting it as a working connection.
+
+Phase 0 status: VERIFIED, as recorded in `docs/STATUS.md`. Phase 1 remains NOT
+STARTED. Blocker for live acceptance: no operator application configuration or
+authorization for real uploads. Next action: implement the local Phase 1
+connection and manual delivery path; later request controlled account/media
+access for its remote acceptance test. No generated or sensitive paths were
+introduced; `.gitignore` needs no change for this documentation phase.
+
+## 2026-10-05 — Publishing Phase 1 account trust boundary and Google OAuth
+
+Scope: removed browser credential and claimed remote-ID intake from the account
+creation API; newly created OAuth placeholders are `unconfigured`, and legacy
+`connected` rows without remote validation are reported as
+`verification_required`. Validation errors no longer echo rejected input,
+including an accidentally submitted refresh token. Creator Studio shows actual
+account state, a disabled YouTube connection when configuration is absent, and
+an enabled action only when the backend can initiate the Google OAuth flow.
+
+Added a durable OAuth attempt table (`20261005_0021`), encrypted PKCE verifier,
+ten-minute expiry, one-use state bound to a signed-in Studio session, official
+Google code exchange and channel discovery, a confirmation page displaying
+the exact channel ID, and encrypted credential persistence after confirmation.
+Reconnection checks channel identity. Compose passes through only configured
+web-service OAuth variables; `readme.md` documents the exact HTTPS callback and
+current limits. Uvicorn access logging is disabled in Compose so callback query
+strings do not expose short-lived authorization codes. No live Google or Meta
+call was made.
+
+Validation: `python3 -m compileall -q` on changed Python modules passed.
+Focused disposable-Compose tests with current `tests/` and `migrations/`
+mounted passed: six Google OAuth, state, account API, signed-in auth and fresh
+migration tests in 40.41s; the signed-in connection test then passed in 18.58s.
+Earlier account/auth focused runs passed (2 and 3 tests). One test exposed a
+FastAPI 422 response echoing a submitted token; the redacted validation
+handler fixed it and the test passed. Another test exposed SQLite returning
+naive timestamps; UTC normalization fixed it and the state test passed. Pytest
+reported its existing cache-write warning in the read-only container.
+After scope validation and reconnect identity coverage, seven focused tests
+passed in 51.62s and the expanded signed-in OAuth test passed in 16.49s.
+`docker compose config --quiet`, `git diff --check`, and changed-source
+`compileall` passed.
+
+Phase 1 status: IMPLEMENTED, not VERIFIED. Instagram OAuth, manual publishing,
+remote outcome reconciliation, real dashboard interaction, and controlled
+provider tests remain. Next action: implement Instagram connection and the
+shared manual destination path. No generated or sensitive paths were added;
+`.gitignore` already covers local `.env`, data, cache and test output.
+
+## 2026-10-05 — Publishing Phase 1 canonical video and manual drafts
+
+Scope: added content-addressed registration of completed final MP4 artifacts.
+The registry checks the job state and artifact checkpoint, copies into local
+publishing staging, verifies the source hash and ffprobe result, atomically
+promotes the staged copy, and deduplicates by SHA-256. A real one-second FFmpeg
+MP4 was generated in a disposable test directory and its staged bytes,
+dimensions and duration inspected. Source mutation after checkpoint was
+rejected. Added `20261005_0022` and `20261005_0023` migrations for canonical
+assets, parent publish jobs and per-account destination deliveries. The manual
+draft service freezes exact account IDs, remote identities and metadata,
+requires verified encrypted accounts, and prevents a second default-edition
+delivery for the same video/account pair. The signed-in Studio composer and
+API list ready videos, save drafts and show persisted destination states; its
+save action does not upload. Updated the README operator flow.
+
+Validation with checkout `tests/` and `migrations/` mounted into disposable
+Compose web containers: fresh migration to `20261005_0023` passed (1 test,
+15.94s); fresh and existing upgrade-path checks through `20261005_0022`
+passed (2 tests, 31.08s); real-media asset test passed (1, 11.42s); draft
+service test passed (1, 5.71s); signed-in draft API and auth tests passed (2,
+36.61s). A later OAuth state test passed (1, 6.20s) after clearing the
+temporary encrypted credential and PKCE verifier on confirmation and deleting
+expired attempts on new starts. Docker's existing orphan-container and pytest
+cache-write warnings did not affect the passing tests. No external platform
+call or upload occurred. `.gitignore` was reviewed: staged video is under the
+already-ignored `data/` tree, and no new machine-local path needs a rule.
+
+Phase 1 status: IMPLEMENTED, not VERIFIED. The signed-in browser interaction,
+Instagram OAuth, manual submit and delivery worker, uncertain-outcome
+reconciliation, full regression, and controlled remote publication inspection
+remain. Next: complete local submit/delivery safety, then seek the explicit
+test-upload authorization and app/account setup needed for live acceptance.
+
+Additional focused regression on the current checkout: migration, asset and
+draft service group passed (7 tests, 80.44s); Google OAuth, OAuth state,
+account intake, signed-in OAuth and draft API group passed (6, 43.11s);
+existing dispatch, YouTube adapter, social account and scheduler group passed
+(13, 40.46s). The composer now has a preview action using the existing
+authenticated final-artifact player; its focused signed-in API/HTML test passed
+(1, 17.64s). `docker compose config --quiet`, changed-source `compileall`,
+`git diff --check`, and `git check-ignore -v data/publishing/staging/example.mp4`
+passed; the ignore rule is `.gitignore:11:data/`. Browser playback itself
+remains unverified.
+
+## 2026-10-05 — Publishing Phase 1 fenced delivery core
+
+Scope: added migration `20261005_0024` for destination lease owner/token,
+expiry, retry deadline and an append-only delivery-attempt table. A reviewed
+draft can now transition transactionally to queued after account identity is
+rechecked. Added a destination queue that claims one account at a time, fences
+all result writes by owner/token/live lease, and moves expired or timed-out
+uploads to `unknown_outcome`. Verification claims are read-only, can wait for
+remote processing, and do not reopen an upload. Parent publication is recorded
+only after every required destination is verified published. The executor
+checks staged video bytes against the canonical SHA-256 before remote work,
+decrypts account credentials only inside the worker boundary, encrypts the
+resumable-session value at rest, and requires a matching remote account and
+metadata observation. No real provider adapter or running worker is wired;
+the executor was exercised through an offline adapter only. No submit control
+was exposed to operators while delivery remains unconfigured.
+
+Validation: fresh SQLite migration to the new head passed (1 test, 15.62s),
+then all five migration tests including legacy upgrade paths passed in 77.24s.
+Fenced claims, expired-lease recovery, delayed verification, frozen account
+identity and same-account serialization passed (3 tests, 19.32s). Offline
+executor publication, altered staged bytes and upload timeout tests passed
+(3 tests, 17.71s). An earlier combined queue/executor run passed 4 tests in
+23.52s; after encrypting session values the executor and migration checks
+passed 3 tests in 26.81s. Changed-source `compileall` and `git diff --check`
+passed. Existing read-only Compose pytest cache warning remains. No live
+platform request, upload or paid API call occurred. No new generated or
+sensitive path was introduced; `.gitignore` already covers local `data/`.
+
+Phase 1 remains IMPLEMENTED. Next: implement account-scoped provider adapters,
+credential refresh and an always-on worker; expose submit only after those
+paths have a truthful API and UI state. Instagram OAuth and controlled remote
+acceptance still need operator application access and explicit upload consent.
+The signed-in manual draft API, draft service and auth regressions also passed
+against `20261005_0024` (3 tests, 40.21s).
+
+An account-scoped YouTube adapter was added after checking Google's current
+[resumable upload protocol](https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol)
+and [videos.insert contract](https://developers.google.com/youtube/v3/docs/videos/insert).
+It rechecks the OAuth token's actual channel before session creation, opens a
+private-by-default resumable session, requires the executor to persist its
+encrypted URL before bytes are sent, uploads in fenced chunks, and reads back
+the remote video, channel, processing state and visibility. A publication
+receipt must match frozen title, description, channel and intended privacy.
+Mocked HTTP tests proved channel mismatch is refused before session creation
+and untrusted session URLs are refused; adapter, executor and queue together
+passed 8 tests in 34.15s, and the final identity-focused adapter run passed
+3 tests in 1.35s. This is an offline adapter, not a live upload. Credential
+refresh, session-status reconciliation, Instagram and an always-on worker are
+still required before exposing submit.
+
+## 2026-10-05 — Publishing Phase 1 credential refresh fence
+
+Scope: added migration `20261005_0025` for per-account refresh owner, fence and
+lease expiry. `AccountCredentialManager` decrypts only within the worker,
+refreshes near-expiring credentials outside a database transaction, and writes
+back only while its lease and original encrypted credential still match. A
+new OAuth reconnection clears any old refresh claim. Google's documented
+offline token endpoint is called only through the injectable refresher; it
+retains the encrypted refresh token, replaces the access token, and marks an
+`invalid_grant` account as needing reconnection. Temporary refresh errors
+leave the account connected and move only its delivery to a safe retry wait.
+The delivery executor now resolves credentials through this manager before
+remote work. YouTube identity and metadata rejection before session creation
+are classified as safe preflight failures; errors after session creation still
+become uncertain outcomes. No live refresh or upload occurred.
+
+Validation: fresh migration to `20261005_0025` passed (1 test, 18.08s), then
+all five fresh/legacy migration tests passed in 76.95s. Credential lock,
+reconnect race and mocked token-endpoint tests passed (3, 11.10s). Credential,
+queue and executor group passed (9, 47.29s); executor with a genuinely expired
+stored token and injected refresher passed (3, 19.11s). After safe preflight
+classification, adapter, executor and credential tests passed (9, 27.95s).
+Changed-source `compileall`, `git diff --check` and `git check-ignore` for
+staged video passed. No new generated path was introduced. Phase 1 remains
+IMPLEMENTED: Instagram connection, provider session reconciliation, running
+worker, signed-in submit flow and controlled remote proof remain.
+
+Added explicit reconciliation for an uncertain delivery with a saved encrypted
+YouTube resumable session. The queue claims only that delivery under a fence;
+the adapter sends Google's empty status PUT, which either returns the completed
+video ID or proves that the existing session is incomplete. A completed ID
+advances to read-only video verification; an incomplete or unproven response
+stays `unknown_outcome` and cannot create another session. The executor's
+`reconcile_once` does not call `open_session` or `upload`. Mocked adapter,
+executor and queue tests passed (`10 passed`, 35.55s); the timeout test
+observed exactly one session creation and one upload invocation before remote
+confirmation. This is offline evidence. Same-session continuation after a 308,
+the running worker and operator reconciliation UI remain open.
+
+Implemented explicit same-session continuation. Google is queried with an
+empty status PUT; on `308`, its acknowledged byte range determines the next
+offset, and only remaining bytes are sent to the saved session URI. No new
+session is opened. An incomplete remote outcome remains blocked unless this
+explicit resume path is invoked. Mocked adapter tests passed (5, 1.41s),
+fenced queue/executor tests including interrupted upload, read-only check,
+same-session resume and final verification passed (7, 40.51s), and the
+combined adapter/queue/executor group passed (12, 41.90s).
+
+Added an opt-in `publisher-worker` Compose service with an account encryption
+key requirement, separate polling from the generation worker, and a background
+presence heartbeat. The queue filters unsupported platforms so a YouTube-only
+worker cannot claim Instagram deliveries. Migration `20261005_0026` stores
+heartbeat rows; signed-in `/api/publishing/status` and Studio show actual
+recent presence while truthfully keeping submit unavailable. A fresh migration
+passed (1, 20.01s), all five upgrade-path tests passed against head in 94.42s,
+and signed-in readiness/heartbeat tests passed (2, 27.88s).
+`docker compose --profile publishing config --quiet`, changed-source compile,
+and `git diff --check` passed. The worker was not started on the production
+database, and no live external request occurred. Next: isolated worker smoke,
+then safe submit/activity UI; Instagram remains unavailable.
+
+## 2026-10-05 — Publishing Phase 1 reviewed private submission and stop condition
+
+Scope: make a saved private YouTube draft reviewable and explicitly queueable
+from the signed-in Studio. Migration `20261005_0027` records the submitted
+operator, time and exact reviewed identity. The draft API exposes staged MP4
+preview and per-destination metadata/activity; submission rejects stale review
+hashes, missing CSRF, duplicate submission, unsupported destinations and an
+offline publisher. Studio shows the copied video, canonical SHA-256, each
+destination's account and metadata, an exact-review checkbox, worker status,
+and an explicit activity refresh. Only private YouTube destinations can be
+submitted. The worker still treats uncertain remote outcomes conservatively;
+no live provider request or upload was attempted.
+
+Validation: the fresh `20261005_0027` migration test passed (1, 16.74s);
+queue/executor submit regressions passed (7, 40.39s); the signed-in API test
+passed with real FFmpeg MP4 staging, preview bytes, CSRF, stale-hash rejection,
+durable queueing and duplicate rejection (1, 20.19s). After the activity UI
+edit, the signed-in API and isolated publisher process tests passed together
+(2, 55.23s). Changed-source compile and `git diff --check` passed. The full
+five-test migration file, run concurrently with those focused tests, timed out
+at 110 seconds after two tests and did not prove the new head's legacy paths.
+The operator's two-minute stuck-test rule ends this session here. The likely
+resource contention is unconfirmed; rerun that file alone next session.
+
+Phase 1 remains IMPLEMENTED, not VERIFIED. Instagram connection/delivery,
+operator unknown-outcome reconciliation, signed-in browser inspection, full
+regression and explicitly authorized controlled remote posts remain. No
+milestone is claimed complete by this entry.
+
+## 2026-10-05 — Isolated migration revalidation
+
+The full `tests/test_migrations.py` file was rerun alone in the Compose web
+container with the same 110-second command limit. All five fresh and legacy
+upgrade-path tests passed at head `20261005_0027` in 88.23 seconds. The prior
+concurrent timeout did not repeat. Phase 1 remains IMPLEMENTED because the
+Instagram, signed-in browser and controlled remote acceptance gates are open.
+
+## 2026-10-05 — Publishing Phase 1 durable operator reconciliation requests
+
+Scope: expose uncertain YouTube delivery recovery without turning an unknown
+remote outcome into a fresh upload. Migration `20261005_0028` stores an
+operator's requested action and timestamp on the destination. The signed-in,
+CSRF-protected API accepts a read-only inspect request only for an uncertain
+delivery with a saved session. Same-session continuation requires a preceding
+read-only result proving the upload incomplete. The publisher worker polls
+durable requests and uses the existing fenced reconciler/resumer; failed or
+expired claims remain uncertain. Studio shows each pending request, the
+read-only inspect action and the explicit same-session continuation action.
+It does not expose the encrypted session URI.
+
+Validation: queue/executor tests cover duplicate requests, continuation
+before inspection rejection, read-only recovery without reopening an upload,
+and explicit same-session continuation. Queue, executor and isolated worker
+group: 8 passed in 54.00s. Signed-in API plus fresh migration: 2 passed in
+43.17s, including CSRF and pending-state checks. All five fresh/legacy
+migration tests passed alone in 90.29s at head `20261005_0028`. Changed
+source compilation and `git diff --check` passed before the final tracker
+edits. The signed-in draft API and Studio now expose up to 100 recent
+destination attempts per post while omitting encrypted session IDs; the
+focused signed-in test passed again (1, 22.59s). No provider request, upload,
+or publication occurred. Phase 1 remains
+IMPLEMENTED, not VERIFIED; Instagram, browser and controlled remote
+acceptance remain.
+
+## 2026-10-05 — Publishing Phase 1 reconnect recovery
+
+Added an operator action for an `auth_required` destination after the exact
+account is reconnected. The queue checks the account identity and credential
+before release. No remote session or ID returns to `pending`; a saved remote
+ID returns to read-only `verifying`; a saved upload session without an ID
+remains `unknown_outcome` for explicit inspection. The action records a
+durable audit attempt and never initiates an upload itself. Studio exposes
+the action only after the matching account is connected and explains the
+reconnect requirement otherwise.
+
+Focused queue tests passed (4, 23.23s), including all three remote-state
+branches and a disconnected account rejection. The signed-in API test passed
+(1, 23.62s), including false/true reconnect readiness and the saved-session
+boundary. No live provider call occurred. Phase 1 remains IMPLEMENTED; its
+remote and browser acceptance is still open.
+
+Follow-up regression after clearing a stale requested action during reconnect:
+`tests/test_delivery_queue.py tests/test_manual_publish_api.py` passed together
+(`5 passed`, 45.22s). Changed-source compile and `git diff --check` passed.
+
+Next Instagram connection check: Meta's Business Login reference returned a
+login gate and the Get Started page returned HTTP 429 on 2026-10-05. The
+Meta-owned Postman folder confirms the Instagram Login product and scopes but
+does not expose the complete authorization-code exchange in this environment.
+Per the operator's two-minute stuck-task rule, stop this session without
+guessing provider URLs or exchanging credentials. No Instagram code or live
+provider request was added in this check.
+
+## 2026-10-05 — Full-suite collection recheck
+
+The current unfiltered Compose test suite collected all 280 tests with
+`python -m pytest --collect-only -q` in 4.32 seconds. The prior `httpx2`
+collection error did not recur; only Starlette's deprecation warning remains.
+No dependency was installed or changed. Execution of the full suite remains
+open, so the automated regression gate stays NEEDS REVALIDATION. Next: run
+bounded groups and observe any longer real-media test separately.
+
+Follow-up bounded regressions in the Compose web container, each with a
+110-second command limit: `tests/test_auth.py tests/test_youtube_oauth_api.py
+tests/test_publishing_account_intake.py` passed (3, 51.06s);
+`tests/test_api_workflow.py` passed in two four-test groups (4 in 77.36s;
+4 in 75.40s); and `tests/test_worker_service.py` passed (6, 35.42s), including
+lease renewal, global admission and stale-owner fencing. These results do not
+prove the full 280-test suite or a signed-in browser flow.
+
+## 2026-10-05 — Real Shorts artifact publishing-stage smoke
+
+The retained `artifacts/smoke/shorts_piper_1080x1920_smoke.mp4` was inspected
+with ffprobe: H.264 video, AAC audio, 53.417 seconds, 1080×1920, 30 fps,
+6,898,889 bytes. In an isolated temporary database and artifact root, the
+production `PublishingAssetRegistry` registered the real final artifact,
+copied it to content-addressed staging, and served the preview path. The
+staged bytes matched the source exactly and the SHA-256 was
+`dfa1621209ae854a5457f2bfab1702e9a357876c7b0477dafb45d43373236d93`.
+No destination was queued and no provider request occurred. This is local
+artifact evidence for Phase 1, not a browser or remote-publication proof.
+
+## 2026-10-05 — Bounded regression expansion and stop condition
+
+The completed Compose groups passed: legacy publication/provider tests
+(`test_publication_dispatch.py`, `test_publication_lifecycle.py`,
+`test_platform_variants.py`, `test_social_accounts.py`,
+`test_youtube_publisher.py`) 13 passed in 8.31s; core state, approval,
+quality, configuration, database, source, music and visual-routing contracts
+38 passed in 59.00s. An analytics/experiment/optimization/topic-scheduling
+group reached the 110-second command timeout after 13 passing indicators,
+without a terminal pytest summary. Its remaining case was not identified and
+the group is not claimed passing. Under the operator's two-minute stuck-test
+rule, stop this session; next session isolate the slow case before further
+regression work. No source code changed during these test runs.
+
+## 2026-10-05 — Timed-out regression group resolved by splitting
+
+The test pending after the prior 13 indicators was
+`tests/test_topic_scheduling.py::test_tick_only_fires_due_schedule_once` in
+the command's collection order. It passed alone in 20.35s. The complete
+analytics and experiment files passed together (7, 34.70s); the optimization
+file passed (5, 32.18s); and the complete topic-scheduling file passed
+(3, 46.51s). The prior combined command exceeded 110 seconds cumulatively;
+no individual test failure was found. The full 280-test suite remains
+unexecuted, and Phase 1 remains IMPLEMENTED pending Instagram, browser and
+controlled remote acceptance.
+
+## 2026-10-05 — Publishing regression follow-up and stop condition
+
+The account-scoped credential, YouTube adapter, Google OAuth and durable OAuth
+state group passed (`11 passed`, 18.51s). The signed-in manual publish API,
+draft, canonical asset and publisher-presence group passed (`4 passed`,
+39.92s). A selected `test_pipeline_orchestrator.py` publication checkpoint,
+restart, cancellation and unknown-outcome group then reached the 110-second
+command timeout after five passing indicators without a final pytest summary.
+No failure is inferred from the indicators and the group is not claimed
+passing. Stop this session under the operator's two-minute stuck-test rule;
+split those cases into smaller commands next session. No source code or live
+provider state changed during these test runs.
+
+## 2026-10-05 — Publication orchestrator timeout resolved by bounded pairs
+
+The 11 selected publication-related orchestrator cases all passed when split:
+restart after remote ID plus ambiguous creation (2, 64.58s); metadata and
+thumbnail recovery plus mutation boundary (2, 67.66s); cancellation after
+remote ID plus disabled publishing (2, 48.38s); local publication preparation
+plus checkpoint template versioning (2, 49.00s); thumbnail cancellation
+cleanup plus lost-ownership fencing (2, 28.97s); and source-clip checkpoint
+reuse (1, 10.11s). These cases cover existing restart, cancellation,
+approval, and unknown-outcome invariants. The prior combined 110-second
+timeout was cumulative, not an individual failure. The entire 280-test suite
+and controlled remote acceptance remain open.
+
+## 2026-10-05 — Studio inline JavaScript syntax repair
+
+A local Node runtime exposed an invalid JavaScript string in the script-review
+panel: Python's triple-quoted HTML had turned `\n\n` into literal newlines
+inside `.join('…')`, preventing that inline script from parsing. The source
+now emits escaped newline characters. The signed-in dashboard auth test
+passed (`1 passed`, 22.37s) and checks the rendered escape. An isolated
+assembled dashboard response was generated from the current app (52,265
+bytes); all six inline scripts passed `node --check`. The temporary HTML and
+JavaScript files were removed. This validates syntax, not browser interaction.
+
+Meta documentation check: the accessible [Meta-owned Postman Reels examples](https://www.postman.com/meta/instagram/request/5kkpkh6/upload-a-reel-to-an-ig-container)
+are under Instagram API with Facebook Login and use a Page access token at
+`graph.facebook.com`; [Meta's Instagram Login folder](https://www.postman.com/meta/instagram/folder/6raa77c/instagram-api-with-instagram-login) documents the separate
+`instagram_business_basic` and `instagram_business_content_publish` scopes,
+but does not expose its Reels publishing or authorization-code contract here.
+The Instagram Login adapter remains unimplemented rather than borrowing the
+Facebook Login request shape. No provider call or credential exchange occurred.
+
+## 2026-10-05 — Real Shorts file through the local manual publishing path
+
+An isolated Compose smoke (`timeout 110s docker compose run --rm --no-deps
+-T -v artifacts/smoke:/app/shorts-smoke:ro web python -` with an inline fake
+provider) copied the retained `shorts_piper_1080x1920_smoke.mp4` into a
+temporary artifact root and database, registered its final checkpoint,
+created one exact YouTube-account draft, submitted its reviewed identity, and
+ran the fenced executor twice. The fake provider opened one session, accepted
+one upload, and returned one matching read-only observation. Parent and
+destination both reached `published` in the isolated database. The asset was
+53.417s, 1080×1920, SHA-256
+`dfa1621209ae854a5457f2bfab1702e9a357876c7b0477dafb45d43373236d93`.
+The temporary database and copy were removed. This validates local handoff
+and state transitions only; no YouTube or Instagram request, remote receipt,
+or signed-in browser interaction occurred.
+
+Instagram media-readiness observation: `ffprobe` measured the retained Shorts
+file at H.264 30 fps, 1080×1920, AAC 48 kHz and about 162,827 bps audio.
+Meta's accessible [Facebook Login Reels reference](https://www.postman.com/meta/workspace/instagram/documentation/23987686-9386f468-7714-490f-9bfc-9442db5c8f00)
+lists 128 kbps audio. This suggests a separate Instagram rendition may be
+needed, but it does not prove the Instagram Login limit or a provider rejection.
+Verify the selected Instagram Login media contract before transcoding, and
+include the exact rendition hash in the operator review identity.
+
+## 2026-10-05 — Publishing status audit and Instagram source check
+
+Reviewed `plan.md`, `docs/STATUS.md`, the uncommitted worktree, and the
+earlier validation evidence. `git diff --check` passed. Corrected the status
+record's stale claim that the local real-media publishing smoke was pending;
+its fake-provider result is now distinguished from remote receipts. The
+current unfiltered 280-test suite still needs execution.
+
+Meta's current [Instagram Login collection](https://www.postman.com/meta/instagram/folder/1z5vxzu/instagram-api-with-instagram-login)
+confirms the separate `instagram_business_content_publish` permission. The
+[Business Login reference](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login/)
+returned a login gate, and the [Instagram Login content-publishing reference](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/content-publishing/)
+was inaccessible. The accessible official [Reels example](https://www.postman.com/meta/instagram/request/gabnx7r/publish-reel)
+is explicitly under Facebook Login and uses a Page token. No Instagram Login
+endpoint or media-limit behavior is inferred from it. Phase 1 is now BLOCKED
+under the operator's two-minute stuck-task rule. The next action is to obtain
+the correct Meta provider contract and application access, then implement and
+test that adapter before signed-in browser and controlled remote acceptance.
