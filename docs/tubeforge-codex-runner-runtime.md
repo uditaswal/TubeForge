@@ -88,3 +88,26 @@ change narration, claims, source request, or any other field, and it does not
 invoke Codex again. If no safe boundary exists, ordinary domain validation
 still rejects the package. This is a format repair, not creative-quality
 acceptance; the resulting script still needs source and editorial review.
+
+
+## Content skill resources
+
+Generation and repair prompts explicitly embed the selected yt-script, yt-package and yt-seo resources
+from the root-owned wheel's `tubeforge/content_skills/`. Python executes the
+reviewed scorer/checker outside Bubblewrap; the Codex namespace still exposes
+only the fixed Node runtime, workspace and dedicated Codex home. No worker-
+supplied path, command or arbitrary prompt is accepted. `PreflightContentV1`
+validates prompt assembly, tool availability and fixed runtime paths without
+calling Codex or charging either attempt ledger. A worker compares the seven
+resource hashes before its generation reservation. Redeploy the wheel to both
+source/runtime boundaries whenever these resources change. See README for
+voice profiles and the reviewed wheel installation command.
+
+The canonical updated script skill is `.agents/skills/yt-script/`; include its
+referenced `automation.md` in the wheel. v6 uses a strict ContentGenerationResult
+envelope to return insufficient-source failures without a ContentPackage.
+Successful invocation provenance records a SHA256 of the actual stdin prompt
+and its resource hashes. The production model and fallback policy are unchanged.
+After deployment, verify `PreflightContentV1` matches the canonical resource
+hashes before spending an invocation. Historical v5 packages remain reviewable;
+resource changes require a new reviewed brief, never an exhausted-ledger reset.

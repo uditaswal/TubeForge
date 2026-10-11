@@ -14,15 +14,16 @@ class GenerateShortsScriptRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    operation: str = Field(default="GenerateShortsScriptV1", pattern=r"^GenerateShortsScriptV1$")
+    operation: str = Field(default="GenerateShortsScriptV1", pattern=r"^(GenerateShortsScriptV1|PreflightContentV1)$")
     request: ContentRequest
 
 
 class HostRunnerFailure(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    code: str = Field(pattern=r"^(timeout|unavailable|allowance_exhausted|invalid_output|quality_rejected|source_mismatch)$")
+    code: str = Field(pattern=r"^(timeout|unavailable|allowance_exhausted|invalid_output|quality_rejected|source_mismatch|insufficient_sources)$")
     message: str = Field(max_length=1_000)
+    invocation_started: bool = True
 
 
 class HostRunnerSuccess(BaseModel):

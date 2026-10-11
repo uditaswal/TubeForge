@@ -65,7 +65,7 @@ to publication metadata before approval.
 | Phase | Deliverable | Current state |
 | --- | --- | --- |
 | 1 | Portrait preset, duration/output contract, word timing, highlighted captions, pacing gate | Implemented; real Piper/FFmpeg acceptance evidence retained under `artifacts/smoke/` |
-| 2 | Source-grounded local production writer with hook, complete sentences, CTA, and script/source review | Implemented; real local-model acceptance is the current gate |
+| 2 | Source-grounded local production writer with hook, complete sentences, CTA, and script/source review | Implemented; approved host Codex generation acceptance remains blocked on deployment |
 | 3 | Consistent vertically composed b-roll/motion-graphics style plus visual-quality gate | Implemented; focused media/render tests pass, full finished-Short inspection remains in Phase 5 |
 | 4 | Operator-approved music catalog, recorded licence/attribution, quiet ducked mix, dashboard audio upload | Implemented; focused catalog/API/mix tests pass, full audio inspection remains in Phase 5 |
 | 5 | Signed-in browser acceptance of a finished Short with visual/audio inspection and dry-run publication | Pending |
@@ -87,7 +87,9 @@ pinned `@openai/codex@0.149.0` runtime at
 | 4 | Creator Studio reflects the persisted review/render/delete workflow. | Signed-in browser evidence for every operator action and refresh. | Live YouTube publication. |
 | 5 | The finished Short is handed off with regression and runtime evidence. | Full suite, health check, real 30–55s portrait artifact inspection, and updated status/progress records. | Enabling YouTube publishing. |
 
-The runner protocol has one request: `GenerateShortsScriptV1`. It accepts only
+The runner protocol has one generation request: `GenerateShortsScriptV1`, plus
+read-only `PreflightContentV1`, which validates resources/runtime without calling
+Codex or consuming an attempt. The generation request accepts only
 the bounded topic, audience, duration, prompt version, and immutable approved
 source packet. It never accepts a prompt, path, executable, model, CLI flag,
 environment value, schema, or arbitrary command from the worker. It builds the
@@ -110,3 +112,15 @@ the exact reviewed script must remain visible to the operator. Visual and music
 assets must carry durable licence/provenance records; “royalty-free” is not a
 licence. YouTube remains disabled and dry-run unless the operator explicitly
 configures credentials and approves publication.
+
+
+## YouTube skill integration
+
+New `m6-content-v5` jobs embed the installed yt-script, yt-package and yt-seo
+resources from the wheel. Application Python scores five hooks, selects a
+format-compatible finalist, checks ten title/thumbnail pairings and retains
+reports for exact-script review. Channel voice profiles are snapshotted in the
+request; older jobs and supported widescreen formats remain readable. See
+README and `docs/YOUTUBE_SKILLS_PLAN.md`. Local integration tests are separate
+from real host Codex generation, finished-video inspection and browser acceptance;
+none of those production gates is upgraded by a synthetic fixture.

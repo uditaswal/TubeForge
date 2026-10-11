@@ -66,6 +66,9 @@ def test_shorts_renderer_is_portrait_30fps_and_caps_visual_holds(tmp_path: Path)
     assert "*on/" in graph and "*(1-on/" in graph
     assert "MarginV=360" in graph and "MarginL=96" in graph
     assert command[command.index("-r") + 1] == "30"
+    assert command[command.index("-filter_complex_threads") + 1] == str(profile.threads)
+    assert command[command.index("-threads", command.index("-c:v")) + 1] == str(profile.threads)
+    assert command.count("-threads") == len(paced) + 2
     assert [PreviewRenderer.motion_variant(index) for index in range(4)] == ["pan-right-fast", "pan-left-gentle", "pan-down-fast", "pan-up-gentle"]
 
 

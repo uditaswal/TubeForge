@@ -100,9 +100,12 @@ class PreviewRenderer:
         return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(",",":")).encode()).hexdigest()
     def command(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path,*,music:Path|None=None)->list[str]:
         segments = pace_segments(segments, self.config.scene_max_duration_seconds)
-        command=[self.ffmpeg,"-nostdin","-y","-v","error","-threads",str(self.config.threads)]; filters=[]
+        command=[self.ffmpeg,"-nostdin","-y","-v","error","-threads",str(self.config.threads),"-filter_complex_threads",str(self.config.threads)]; filters=[]
         for i,scene in enumerate(segments):
             duration=f"{scene.duration_seconds:.6f}"
+            # Input codec options apply only to the following input. PNG frame
+            # decoders otherwise create an automatic pool for every paced cut.
+            command.extend(("-threads",str(self.config.threads)))
             command.extend(("-loop","1","-t",duration,"-i",str(scene.asset_path)) if scene.media_type=="image" else ("-stream_loop","-1","-t",duration,"-i",str(scene.asset_path)))
             filters.append(self._scene_filter(i, scene, duration))
         command.extend(("-i",str(narration)))
@@ -133,7 +136,7 @@ class PreviewRenderer:
                 "[music_quiet][speech_key]sidechaincompress=threshold=0.015:ratio=10:attack=20:release=350[ducked_music]",
                 "[narration_mix][ducked_music]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95,apad=pad_dur=10[outa]",
             ))
-        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{segments[-1].end_seconds:.6f}","-movflags","+faststart",str(output)]
+        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{segments[-1].end_seconds:.6f}","-movflags","+faststart",str(output)]
 
     def _scene_filter(self, index: int, scene: TimelineSegment, duration: str) -> str:
         """Create a stable, subtle camera move for stills without affecting timing.

@@ -13,7 +13,6 @@ data/
 *.db-shm
 *.db-wal
 # Pytest / test-generated artifacts
-.pytest_cache/
 .pytest-*
 .m*-pytest-*
 .m*-focused-tmp*
@@ -22,11 +21,26 @@ data/
 .safety-pytest-*
 .test-tmp/
 **/__pycache__/
-*.py[cod]
 autonomous_logs/
 models/*.onnx
 models/*.bin
-task.md
 issues.md
 # Generated acceptance media; retain and inspect locally, but do not commit it.
 artifacts/smoke/
+# Locally built deployment wheels
+artifacts/wheels/
+
+# Machine-local credentials and interactive agent state; project skills stay tracked.
+/.aws/
+/.codex/
+/.codex-overnight/
+/git-repos/
+/build/
+/dist/
+/o/
+/:memory:.ses
+/src/tubeforge/core/r
+# Root-level downloaded previews and session output.
+/preview*.mp4
+/final-*.mp4
+/*.log

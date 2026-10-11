@@ -13,11 +13,9 @@ For a video aimed at the subscriber feed, say so and spend the effort on `/yt-pa
 
 ## Before you write
 
-1. Read `~/.claude/youtube/voice.md` if it exists. That is the user's voice profile: how they talk
-   on camera, the words they never use, who they are talking to, what they will not claim. If it
-   does not exist, ask for **three of their own videos**, read or transcribe them, infer the voice,
-   and write the file. A script in the wrong voice is worse than no script, because they have to
-   read it out loud.
+1. Use TubeForge's `pipeline.codex.voice_profiles` for the selected channel identity.
+   Missing profiles use the documented default. Unattended jobs never wait for
+   conversational input; interactive developers may request supplied voice examples.
 2. Never invent a number, a result or a source. If a figure would strengthen it and you do not have
    one, ask for it or write the line without it.
 
@@ -43,5 +41,18 @@ problem is the title, not the description.
 
 ## The gate
 
-Nothing here publishes. This skill writes and you publish. Every output ends in a block the user
-copies, and the last line of every run is the question: **ship it, or change it?**
+Nothing here publishes. Return structured content for TubeForge’s existing script-review
+status and exact-artifact dashboard approval controls. Unattended jobs never ask
+conversational approval questions or bypass review and scheduled-publishing policies.
+
+## TubeForge runtime
+
+Resolve resources relative to this skill directory. Instructions are embedded in
+bounded Codex prompts from the installed wheel; application Python executes the
+reviewed scoring tools and records reports. Scores are review signals, not view
+predictions. Preserve source grounding. Shorts use 9:16, 30–55 seconds, an
+immediate hook and concise payoff; retain requested long-form behavior for 16:9.
+Return ContentPackage fields, including scene directions/on-screen text, title,
+thumbnail brief, description/tags and five hook_options. The opening sentence
+must exactly match a candidate. Keep model-selected source-appropriate hooks;
+show scored alternatives during dashboard review rather than inventing scores.

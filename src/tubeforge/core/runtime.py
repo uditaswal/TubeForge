@@ -98,4 +98,4 @@ def create_runtime(settings: Settings) -> Runtime:
             max_chars=source_policy.max_chars,
             timeout_seconds=source_policy.timeout_seconds,
         )
-    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, SchedulerService(schedules, topics, scheduler_id="api-scheduler", reservation_seconds=settings.scheduler.topic_reservation_seconds), AuthService(database.session_factory), accounts, token_cipher, orchestrator)
+    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, SchedulerService(schedules, topics, scheduler_id="api-scheduler", reservation_seconds=settings.scheduler.topic_reservation_seconds, codex_config=settings.pipeline.codex), AuthService(database.session_factory), accounts, token_cipher, orchestrator)

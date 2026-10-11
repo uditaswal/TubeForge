@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Callable
 
 from tubeforge.core.config import CodexProviderConfig
-from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
+from tubeforge.core.errors import InsufficientSourcesError, ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.repositories import CachedGeneration, GenerationCacheRepository, GenerationExhausted
 from tubeforge.domain.contracts import ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest
 from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse
@@ -29,10 +29,29 @@ class HostRunnerContentProvider:
 
     def generate_package(self, request: ContentRequest) -> ContentPackage:
         # Reject an unsupported prompt before reserving or charging a model call.
-        build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
+        prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
+        from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
+        if request.prompt_version in SKILL_TEMPLATES:
+            hashes = preflight()
+            try:
+                readiness = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), GenerateShortsScriptRequest(operation="PreflightContentV1", request=request).model_dump_json().encode(), self.config.socket_timeout_seconds))
+            except Exception as error:
+                raise ProviderValidationError(f"Host skill preflight failed before invocation: {error}") from error
+            if not readiness.ok or readiness.result is None or readiness.result.provenance.get("resource_hashes") != hashes:
+                reason = readiness.failure.message if readiness.failure else "host skill resources differ from worker; redeploy host wheel"
+                raise ProviderValidationError(f"Host skill preflight failed before invocation: {reason}")
+            if request.prompt_version == SKILL_TEMPLATE:
+                from tubeforge.providers.content.prompts import prompt_evidence
+                if readiness.result.provenance.get("prompt_sha256") != prompt_evidence(prompt)["prompt_sha256"]:
+                    raise ProviderValidationError("Host skill preflight failed before invocation: assembled prompt differs; redeploy host wheel")
+        if request.prompt_version == "m6-content-v6":
+            from tubeforge.providers.content.output import require_source_excerpts
+            require_source_excerpts(request)
         now = self._now()
         cached = self.cache.reserve_or_get(request, self.provider_name, self.config.model, request.prompt_version, now=now, reservation_seconds=self.config.reservation_seconds)
         if isinstance(cached, CachedGeneration):
+            if request.prompt_version in SKILL_TEMPLATES and cached.provenance.get("youtube_skills", {}).get("resource_hashes") != hashes:
+                raise ProviderValidationError("Cached generation uses different skill resources; operator must review a new prompt version")
             package = self._validate(cached.package, request)
             self.last_provenance, self.last_usage = cached.provenance, cached.usage
             return package
@@ -42,12 +61,15 @@ class HostRunnerContentProvider:
             raise RetryableProviderError("Codex generation is already reserved; retry after the reservation expires")
         if not self.cache.consume_invocation(cached, maximum=self.config.invocation_limit, now=now):
             raise ProviderValidationError("TubeForge's two-attempt limit for this exact source packet is exhausted; operator review is required")
+        response = None
         try:
             response = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), GenerateShortsScriptRequest(request=request).model_dump_json().encode(), self.config.socket_timeout_seconds))
             if not response.ok or response.failure:
                 failure = response.failure
                 code = failure.code if failure else "invalid_output"
                 message = failure.message if failure else "host runner returned an invalid response"
+                if code == "insufficient_sources":
+                    raise InsufficientSourcesError(message)
                 if code == "timeout":
                     raise RetryableProviderError(message)
                 if code == "unavailable":
@@ -62,7 +84,12 @@ class HostRunnerContentProvider:
             if not self.cache.accept(cached, package.model_dump(mode="json"), provenance, usage, now=self._now()):
                 raise RetryableProviderError("Codex generation reservation expired before acceptance")
         except Exception as error:
-            self.cache.release_after_invocation_failure(cached, maximum=self.config.invocation_limit, failure={"type": type(error).__name__, "message": str(error)[:1000]}, now=self._now())
+            failure = {"type": type(error).__name__, "message": str(error)[:1000]}
+            if response is not None and response.result is not None:
+                # Retain the rejected draft for operator review without accepting it
+                # or changing the durable invocation allowance.
+                failure["rejected_result"] = response.result.model_dump(mode="json")
+            self.cache.release_after_invocation_failure(cached, maximum=self.config.invocation_limit, failure=failure, now=self._now())
             raise
         self.last_provenance, self.last_usage = provenance, usage
         return package
@@ -72,6 +99,9 @@ class HostRunnerContentProvider:
         if normalize_content_request(package.request) != normalize_content_request(request):
             raise ProviderValidationError("host runner output source packet differs from the requested source packet")
         validate_video_package(package, request, provider_name="Codex")
+        from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, evaluate
+        if request.prompt_version in SKILL_TEMPLATES:
+            evaluate(package)
         claims = tuple(claim.model_copy(update={"review_status": ClaimReviewStatus.NEEDS_REVIEW, "human_review_required": True}) if claim.time_sensitive or claim.confidence in {ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM} else claim for claim in package.claims)
         return package.model_copy(update={"claims": claims})
 

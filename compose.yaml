@@ -7,6 +7,7 @@ services:
     command: ["alembic", "upgrade", "head"]
     volumes:
       - ./src:/app/src:ro
+      - ./.agents/skills:/app/.agents/skills:ro
       - ./config:/app/config:ro
       - ./data:/app/data
       - ./models:/app/models:ro
@@ -29,6 +30,7 @@ services:
       - "127.0.0.1:62065:8080"
     volumes:
       - ./src:/app/src:ro
+      - ./.agents/skills:/app/.agents/skills:ro
       - ./config:/app/config:ro
       - ./data:/app/data
       - ./models:/app/models:ro
@@ -51,6 +53,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./src:/app/src:ro
+      - ./.agents/skills:/app/.agents/skills:ro
       - ./config:/app/config:ro
       - ./data:/app/data
       # Operator-supplied Piper ONNX voices and adjacent .onnx.json files.
@@ -72,6 +75,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./src:/app/src:ro
+      - ./.agents/skills:/app/.agents/skills:ro
       - ./config:/app/config:ro
       - ./data:/app/data
     environment:
@@ -90,6 +94,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./src:/app/src:ro
+      - ./.agents/skills:/app/.agents/skills:ro
       - ./config:/app/config:ro
       - ./data:/app/data
       - ./models:/app/models:ro

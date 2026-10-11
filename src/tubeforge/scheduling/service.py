@@ -18,21 +18,32 @@ def next_run(cron: str, timezone: str, after: datetime) -> datetime:
     return croniter(cron, local).get_next(datetime).astimezone(UTC)
 
 
-def request_from_topic(topic: Topic, schedule: Schedule) -> ContentRequest:
+def request_from_topic(topic: Topic, schedule: Schedule, codex_config=None) -> ContentRequest:
     """Build the same provider-neutral request accepted by manual generation."""
     options = {**schedule.options, **topic.options}
     notes = tuple(line.strip() for line in topic.notes.splitlines() if line.strip()) or ("Operator supplied topic.",)
+    from tubeforge.core.config import CodexProviderConfig
+    from tubeforge.providers.content.youtube_skills import voice_for
+    config = codex_config or CodexProviderConfig()
+    channel, profile = voice_for(config, options.get("channel_identity"))
+    aspect = str(options.get("aspect_ratio", "16:9"))
+    duration = int(options.get("duration_seconds", 45 if aspect == "9:16" else 60))
+    if aspect == "9:16" and not 30 <= duration <= 55:
+        raise ValueError("scheduled Shorts require 30–55 seconds")
     return ContentRequest(
-        topic=topic.title, angle="\n".join(notes), target_duration_seconds=int(options.get("duration_seconds", 60)),
+        channel_identity=channel, channel_voice_profile=profile, aspect_ratio=aspect,
+        preset_name=str(options.get("preset_name", "shorts" if aspect == "9:16" else "default")),
+        topic=topic.title, angle="\n".join(notes), target_duration_seconds=duration,
         language=str(options.get("language", "en")), audience=str(options.get("audience", "general")),
-        prompt_version="topic-queue-v1", sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title="Operator-provided notes", excerpt="\n".join(notes)),),
+        prompt_version=config.prompt_template_version, sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title="Operator-provided notes", excerpt="\n".join(notes)),),
         notes=notes, review_mode=str(options.get("review_mode", "auto")), captions_enabled=bool(options.get("captions_enabled", True)),
         visual_style=str(options.get("visual_style", "cinematic-tech")),
     )
 
 
 class SchedulerService:
-    def __init__(self, schedules: ScheduleRepository, topics: TopicRepository, *, scheduler_id: str, reservation_seconds: int = 600) -> None:
+    def __init__(self, schedules: ScheduleRepository, topics: TopicRepository, *, scheduler_id: str, reservation_seconds: int = 600, codex_config=None) -> None:
+        self.codex_config = codex_config
         self.schedules, self.topics, self.scheduler_id, self.reservation_seconds = schedules, topics, scheduler_id, reservation_seconds
 
     def run(self, schedule: Schedule, *, now: datetime | None = None, run_key: str | None = None) -> dict[str, object]:
@@ -49,7 +60,13 @@ class SchedulerService:
             return {"state": "no_topic", "schedule_id": schedule.id}
         topic = ready[0]
         job_id = uuid4().hex
-        job = self.topics.reserve_and_create_job(topic_id=topic.id, scheduler_id=self.scheduler_id, job_id=job_id, request=request_from_topic(topic, schedule), lease_seconds=self.reservation_seconds)
+        from tubeforge.core.errors import ProviderValidationError
+        try:
+            request = request_from_topic(topic, schedule, self.codex_config)
+        except (ValueError, ProviderValidationError) as error:
+            self.schedules.finish_run(run_id=run_id, state="invalid_request", now=now, topic_id=topic.id, details={"reason": str(error)[:1000]})
+            return {"state": "invalid_request", "schedule_id": schedule.id, "topic_id": topic.id, "reason": str(error)[:1000]}
+        job = self.topics.reserve_and_create_job(topic_id=topic.id, scheduler_id=self.scheduler_id, job_id=job_id, request=request, lease_seconds=self.reservation_seconds)
         if job is None:
             self.schedules.finish_run(run_id=run_id, state="contention", now=now, topic_id=topic.id)
             return {"state": "contention", "schedule_id": schedule.id}

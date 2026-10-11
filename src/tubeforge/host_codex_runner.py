@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from tubeforge.core.errors import InsufficientSourcesError, ProviderValidationError
 from tubeforge.domain.contracts import ContentPackage
 from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess
 from tubeforge.providers.content.prompts import build_content_prompt, normalize_content_request
@@ -43,6 +44,14 @@ NODE_LIBRARIES = (
     "libdl.so.2", "libstdc++.so.6", "libm.so.6", "libgcc_s.so.1",
     "libpthread.so.0", "libc.so.6", "ld-linux-x86-64.so.2",
 )
+
+
+class RejectedContentError(ValueError):
+    """Return a domain-valid rejected draft to the worker's existing audit cache."""
+
+    def __init__(self, reason: str, result: HostRunnerSuccess) -> None:
+        super().__init__(reason)
+        self.result = result
 
 
 def peer_uid(connection: socket.socket) -> int:
@@ -69,8 +78,8 @@ def fixed_paths(request_id: str, root: Path = Path("/var/lib/tubeforge-codex")) 
     return output / "content-package.schema.json", output / "content-package.json"
 
 
-def encode_failure(code: str, message: str) -> bytes:
-    return HostRunnerResponse(ok=False, failure={"code": code, "message": message[:1000]}).model_dump_json().encode()
+def encode_failure(code: str, message: str, *, invocation_started: bool = True) -> bytes:
+    return HostRunnerResponse(ok=False, failure={"code": code, "message": message[:1000], "invocation_started": invocation_started}).model_dump_json().encode()
 
 
 def _redact(value: str) -> str:
@@ -101,7 +110,7 @@ def cli_failure_detail(stdout: bytes, stderr: bytes) -> str:
     return _redact("; ".join(failures[-2:]) or stderr.decode(errors="replace") or f"CLI events: {event_types}")
 
 
-def codex_output_schema() -> dict[str, object]:
+def codex_output_schema(*, envelope: bool = False) -> dict[str, object]:
     """Make the domain schema acceptable to Codex's strict structured output.
 
     Pydantic omits defaulted fields from ``required`` and emits string
@@ -109,7 +118,12 @@ def codex_output_schema() -> dict[str, object]:
     request is supplied in full in the prompt, so the model can echo those
     values; the domain validator still checks the result after generation.
     """
-    schema = ContentPackage.model_json_schema()
+    from tubeforge.providers.content.output import ContentGenerationResult
+    schema = (ContentGenerationResult if envelope else ContentPackage).model_json_schema()
+    if envelope:
+        # These are existing acceptance invariants, made visible to the CLI.
+        schema["$defs"]["VideoMetadata"]["properties"]["title_options"]["minItems"] = 10
+        schema["$defs"]["ContentPackage"]["properties"]["hook_options"]["minItems"] = 5
 
     def make_strict(value: object) -> None:
         if isinstance(value, dict):
@@ -176,7 +190,10 @@ class AllowanceExhaustedError(Exception):
 
 def consume_invocation(request: GenerateShortsScriptRequest, root: Path = RUNNER_ROOT) -> None:
     """Durably count even failed CLI launches before any model invocation."""
-    digest = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
+    from tubeforge.domain.contracts import generation_request_key_payload
+    material = request.model_dump(mode="json")
+    material["request"] = generation_request_key_payload(request.request)
+    digest = hashlib.sha256(json.dumps(material, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     with sqlite3.connect(root / "invocations.sqlite3", timeout=10) as database:
         database.execute("CREATE TABLE IF NOT EXISTS invocations (request_hash TEXT PRIMARY KEY, count INTEGER NOT NULL)")
@@ -218,9 +235,14 @@ def run_request(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROO
     workspace = schema_path.parent
     workspace.mkdir(mode=0o700, parents=True, exist_ok=False)
     try:
-        schema_path.write_text(json.dumps(codex_output_schema(), sort_keys=True), encoding="utf-8")
+        schema_path.write_text(json.dumps(codex_output_schema(envelope=request.request.prompt_version == "m6-content-v6"), sort_keys=True), encoding="utf-8")
         prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
+        from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, preflight
+        skill_hashes = preflight() if request.request.prompt_version in SKILL_TEMPLATES else None
         command = bubblewrap_args(workspace)
+        if request.request.prompt_version == "m6-content-v6":
+            from tubeforge.providers.content.output import require_source_excerpts
+            require_source_excerpts(request.request)
         consume_invocation(request, root)
         started = time.monotonic()
         try:
@@ -232,6 +254,9 @@ def run_request(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROO
         if not output_path.is_file() or output_path.stat().st_size > MAX_OUTPUT_BYTES:
             raise ValueError("Codex CLI did not produce a bounded structured package")
         raw = json.loads(output_path.read_text(encoding="utf-8"))
+        if request.request.prompt_version == "m6-content-v6":
+            from tubeforge.providers.content.output import unwrap_generation
+            raw = unwrap_generation(raw)
         normalized, normalizations = normalize_fallback_visuals(raw)
         package = ContentPackage.model_validate(normalized)
         if normalize_content_request(package.request) != normalize_content_request(request.request):
@@ -245,6 +270,16 @@ def run_request(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROO
             if isinstance(event, dict) and isinstance(event.get("usage"), dict):
                 usage = event["usage"]
         provenance: dict[str, object] = {"provider": "host-codex-runner", "model": CODEX_MODEL, "generated_at": datetime.now(UTC).isoformat(), "elapsed_seconds": round(time.monotonic() - started, 3)}
+        from tubeforge.providers.content.prompts import prompt_evidence
+        provenance["invocations"] = [prompt_evidence(prompt)]
+        if skill_hashes is not None:
+            from tubeforge.providers.content.youtube_skills import select_hook
+            try:
+                package, provenance["youtube_skills"] = select_hook(package)
+            except ProviderValidationError as error:
+                raise RejectedContentError(str(error), HostRunnerSuccess(
+                    package=package.model_dump(mode="json"), provenance=provenance, usage=usage,
+                )) from error
         if normalizations:
             provenance["normalizations"] = normalizations
         return HostRunnerSuccess(package=package.model_dump(mode="json"), provenance=provenance, usage=usage)
@@ -268,10 +303,28 @@ def main() -> None:
         with connection:
             try:
                 request = receive_request(connection)
-                response = HostRunnerResponse(ok=True, result=run_request(request)).model_dump_json().encode()
+                if request.operation == "PreflightContentV1":
+                    from tubeforge.providers.content.youtube_skills import preflight
+                    hashes = preflight()
+                    prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
+                    from tubeforge.providers.content.prompts import prompt_evidence
+                    evidence = prompt_evidence(prompt)
+                    with tempfile.TemporaryDirectory(dir=RUNNER_ROOT) as workspace:
+                        bubblewrap_args(Path(workspace))
+                    result = HostRunnerSuccess(package={}, provenance={"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True})
+                else:
+                    result = run_request(request)
+                response = HostRunnerResponse(ok=True, result=result).model_dump_json().encode()
                 if len(response) > MAX_RESPONSE_BYTES:
                     raise ValueError("runner response exceeds its socket limit")
                 connection.sendall(response)
+            except RejectedContentError as error:
+                response = HostRunnerResponse(ok=False, result=error.result, failure={
+                    "code": "quality_rejected", "message": str(error)[:1000], "invocation_started": True,
+                }).model_dump_json().encode()
+                connection.sendall(response if len(response) <= MAX_RESPONSE_BYTES else encode_failure("invalid_output", "rejected draft exceeds socket limit"))
+            except InsufficientSourcesError as error:
+                connection.sendall(encode_failure("insufficient_sources", str(error).removeprefix("insufficient_sources: ")))
             except PermissionError as error:
                 connection.sendall(encode_failure("unavailable", str(error)))
             except TimeoutError as error:
@@ -279,7 +332,7 @@ def main() -> None:
             except AllowanceExhaustedError as error:
                 connection.sendall(encode_failure("allowance_exhausted", str(error)))
             except Exception as error:
-                connection.sendall(encode_failure("invalid_output", str(error)))
+                connection.sendall(encode_failure("invalid_output", str(error), invocation_started=request.operation != "PreflightContentV1" if "request" in locals() else False))
 
 
 if __name__ == "__main__":
