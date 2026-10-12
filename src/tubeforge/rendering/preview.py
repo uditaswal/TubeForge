@@ -136,7 +136,15 @@ class PreviewRenderer:
                 "[music_quiet][speech_key]sidechaincompress=threshold=0.015:ratio=10:attack=20:release=350[ducked_music]",
                 "[narration_mix][ducked_music]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95,apad=pad_dur=10[outa]",
             ))
-        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{segments[-1].end_seconds:.6f}","-movflags","+faststart",str(output)]
+        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,*self._quality_args(),"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{segments[-1].end_seconds:.6f}","-movflags","+faststart",str(output)]
+
+    def _quality_args(self, *, intermediate: bool = False) -> list[str]:
+        if self.config.video_codec != "libx264":
+            return []
+        # Bounded rendering transcodes each scene twice. Give the temporary
+        # scene encode more headroom so small terminal glyphs survive the final pass.
+        crf = max(0, self.config.video_crf - 4) if intermediate else self.config.video_crf
+        return ["-crf", str(crf)]
 
     def _scene_filter(self, index: int, scene: TimelineSegment, duration: str) -> str:
         """Create a stable, subtle camera move for stills without affecting timing.
@@ -276,7 +284,7 @@ class PreviewRenderer:
         # Motion variant uses the global cut index, but each FFmpeg process
         # has only one input stream, always numbered zero.
         graph=self._scene_filter(index,scene,duration).replace(f"[{index}:v]","[0:v]",1)
-        return [self.ffmpeg,"-nostdin","-y","-v","error","-threads",str(self.config.threads),"-filter_complex_threads",str(self.config.threads),"-threads",str(self.config.threads),*input_args,"-filter_complex",graph,"-map",f"[v{index}]","-an","-c:v",self.config.video_codec,"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-frames:v",str(frame_count),"-movflags","+faststart",str(output)]
+        return [self.ffmpeg,"-nostdin","-y","-v","error","-threads",str(self.config.threads),"-filter_complex_threads",str(self.config.threads),"-threads",str(self.config.threads),*input_args,"-filter_complex",graph,"-map",f"[v{index}]","-an","-c:v",self.config.video_codec,*self._quality_args(intermediate=True),"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-frames:v",str(frame_count),"-movflags","+faststart",str(output)]
 
     def _bounded_finish_command(self,concat:Path,narration:Path,captions:Path,output:Path,duration:float,music:Path|None)->list[str]:
         caption=str(captions.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'")
@@ -288,7 +296,7 @@ class PreviewRenderer:
         else:
             command.extend(("-stream_loop","-1","-i",str(music)))
             filters.extend(("[1:a]asplit=2[narration_mix][speech_key]","[2:a]volume=0.16[music_quiet]","[music_quiet][speech_key]sidechaincompress=threshold=0.015:ratio=10:attack=20:release=350[ducked_music]","[narration_mix][ducked_music]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95,apad=pad_dur=10[outa]"))
-        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{duration:.6f}","-movflags","+faststart",str(output)]
+        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,*self._quality_args(),"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{duration:.6f}","-movflags","+faststart",str(output)]
 
     @staticmethod
     def _stop_process(process: Any, *, graceful: bool) -> None:

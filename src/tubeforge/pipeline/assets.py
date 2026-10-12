@@ -24,7 +24,7 @@ from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidatio
 from tubeforge.domain.contracts import AssetCandidate, MediaSearchRequest, ScenePlan
 from tubeforge.domain.providers import MediaProvider
 from tubeforge.db.repositories import AssetCacheRepository, AssetCacheReservation, CachedAsset
-from tubeforge.providers.media.local_graphics import STYLE_VERSION as STORYBOARD_STYLE_VERSION
+from tubeforge.providers.media.local_graphics import SUPPORTED_STYLE_VERSIONS as SUPPORTED_STORYBOARD_STYLES
 
 ASSET_VALIDATION_VERSION = "m25-v3"
 SHORTS_VISUAL_QUALITY_VERSION = "shorts-visual-v2"
@@ -128,7 +128,7 @@ def validate_shorts_visual_manifest(manifest: dict[str, object]) -> dict[str, ob
         checksums.add(checksum_value)
         source_version = str(candidate.get("source_version", ""))
         style_parts = source_version.split(":")
-        if len(style_parts) != 3 or not source_version.startswith(f"{STORYBOARD_STYLE_VERSION}:"):
+        if len(style_parts) != 3 or style_parts[0] not in SUPPORTED_STORYBOARD_STYLES:
             raise ProviderValidationError("Shorts generated visual style metadata is missing")
         styles.add(":".join(style_parts[:2]))
     if len(styles) != 1:

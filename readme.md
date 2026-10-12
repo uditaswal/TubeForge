@@ -282,7 +282,9 @@ Each video in Creator Studio has a **Visuals** choice:
   each approved scene. The storyboard retains a subject, purpose, composition,
   display text and explanatory visual elements next to narration. FFmpeg draws
   terminal, package, branch, comparison or sequence layouts from those reviewed
-  fields at 1080×1920 for Shorts. A complete asset-stage manifest and contact
+  fields at 1080×1920 for Shorts. Terminal scenes display the approved command
+  and concise output in a dedicated terminal pane; commands too long to remain
+  legible fail asset generation for revision. A complete asset-stage manifest and contact
   sheet record scene order, hashes and rights information. Existing approved
   scripts without the new fields use search terms as fallback labels and need
   visual review. FFmpeg adds paced camera moves and crisp cuts.
@@ -352,6 +354,11 @@ TubeForge’s Shorts workflow targets a complete 30–55 second video exported a
 1080×1920 (9:16). Production scripts use Codex CLI or Claude. Local LLMs are
 not production script providers unless the operator approves one for a
 specific run.
+
+The production Shorts final profile uses H.264 CRF 18. Memory-bounded renders
+encode temporary scene clips at CRF 14 before the captioned final pass, reducing
+compression of small text across the two encodes. `video_crf` is configurable
+per render profile; lower values increase quality and file size.
 
 A Short is ready for review only after a real video has been rendered and
 manually inspected for:
