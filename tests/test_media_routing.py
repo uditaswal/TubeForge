@@ -26,7 +26,7 @@ def test_hybrid_media_provider_routes_generated_to_local_scene_art(tmp_path) -> 
     assert candidate.local_path and candidate.license_name == "CC0-1.0"
     assert candidate.source_version and candidate.source_version.startswith(f"{STYLE_VERSION}:{PALETTE_ID}:")
     assert (candidate.width, candidate.height) == (1920, 1080)
-    assert candidate.provider_asset_id.startswith("local-motion-")
+    assert candidate.provider_asset_id.startswith("local-storyboard-")
     assert provider.provider_name(_request("generated")) == "local-generated"
 
 
@@ -65,6 +65,29 @@ def test_generated_shorts_art_is_full_hd_portrait_and_scene_specific(tmp_path) -
     manifest["scenes"]["scene-2"]["checksum_sha256"] = "a" * 64
     with pytest.raises(ProviderValidationError, match="distinct"):
         validate_shorts_visual_manifest(manifest)
+
+
+def test_local_storyboard_frame_changes_with_scene_subject_and_display_text(tmp_path) -> None:
+    provider = create_media_provider(MediaPipelineConfig(provider="hybrid"), FakeProviderConfig(artifact_root=tmp_path))
+    base = _request("generated").model_copy(update={
+        "orientation": "portrait", "visual_subject": "Inspect changed files",
+        "visual_purpose": "Show what git status reports", "on_screen_text": "git status",
+        "visual_elements": ("staged changes", "unstaged changes", "untracked files"),
+        "queries": ("git status", "staged versus unstaged"),
+    })
+    first = provider.search(base)[0]
+    second = provider.search(base.model_copy(update={"visual_subject": "Stage the chosen file", "on_screen_text": "git add path"}))[0]
+    assert first.local_path and second.local_path
+    assert Path(first.local_path).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert hashlib.sha256(Path(first.local_path).read_bytes()).digest() != hashlib.sha256(Path(second.local_path).read_bytes()).digest()
+    labels_changed = provider.search(base.model_copy(update={"visual_elements": ("one selected file", "other edits")}))[0]
+    assert labels_changed.provider_asset_id != first.provider_asset_id
+    first_path = Path(first.local_path)
+    first_path.write_bytes(b"corrupt cached source")
+    recovered = provider.search(base)[0]
+    assert recovered.local_path == first.local_path
+    assert first_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
 
 
 def test_wikimedia_stock_retains_only_no_attribution_public_domain_or_cc0(monkeypatch) -> None:

@@ -15,12 +15,15 @@
 
 ## Planning and design
 
-- [Publishing delivery plan](planning/publishing-delivery-plan.md)
+- [Publishing and dashboard implementation plan](../design_doc/tubeforge-publishing-design.md)
+- [Proposed fine-grained implementation order](../design_doc/tubeforge-implementation-order.md)
+- [Earlier publishing inventory and delivery evidence](planning/publishing-delivery-plan.md)
 - [Product backlog](planning/product-backlog.md)
 - [Operator requests](planning/operator-requests.md)
 - [Stream clipper integration brief](planning/stream-clipper-brief.md)
 - [Stream clipper assessment](stream_clipper_integration_assessment.md)
 - [YouTube skills integration plan](YOUTUBE_SKILLS_PLAN.md)
+- [Video visual pipeline inventory and tasks 1–3 evidence](VIDEO_VISUAL_INVENTORY.md)
 - [yt-script automation acceptance](YT_SCRIPT_AUTOMATION_PLAN.md)
 - [yt-script implementation and verification report](YT_SCRIPT_AUTOMATION_REPORT.md)
 

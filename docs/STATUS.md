@@ -1,11 +1,19 @@
 # TubeForge Status
 
-Last reviewed: 2026-10-11
+Last reviewed: 2026-10-12
 Release target: R1 — Reliable Local Studio
 
 `docs/STATUS.md` is the authoritative current-status record. Historical work
 evidence belongs in `AUTONOMOUS_PROGRESS.md`; historical overnight planning is
 retained under `docs/overnight/`.
+
+## Forward implementation plan
+
+Current priority is the user-requested [Docker Short quality benchmark](../design_doc/docker-short-benchmark.md). Reference/ZIP review, source-grounded script acceptance and local artifact production are **VERIFIED**. The [finished MP4](../artifacts/benchmark/docker-short/final/docker-short.mp4) is 44.405s, 1080×1920/30fps, −15.73 LUFS and −1.67 dBTP. Final-byte checks, full decode, 52 short audio-aligned caption groups, all-frame text bounds, encoded frame inspection and black/silence checks passed. **Overall creative acceptance is BLOCKED** pending the requested user listening/comparison review: this environment cannot hear audio. The [guide and review](DOCKER_SHORT_BENCHMARK_GUIDE.md) distinguish measured improvements from subjective judgment. This is a local benchmark, not a claim that the new renderer is integrated into the production worker.
+
+Publishing task 6 remains **IMPLEMENTED**, with two final focused tests passing (22.82s) and the production API rejecting a stale parent script identity with HTTP 409; its exact child preview/final acceptance remains open. Task 7 is **NOT STARTED**. The temporary tasks 5–7 reviewer and sessions have been removed and its token verified invalid. A one-off Compose migration dependency reported missing revision `20261005_0028`; no database history was modified. The benchmark uses isolated local assets and does not require this migration.
+
+The [consolidated publishing/dashboard plan](../design_doc/tubeforge-publishing-design.md) defines ordered tasks and acceptance checks. Documentation consolidation is verified; it does not change the implementation or verification states below. Reconcile existing evidence before selecting its next task.
 
 ## Release gates
 
@@ -45,6 +53,16 @@ Local evidence is retained under `artifacts/smoke/skills-integration/`; the
 wheel is `artifacts/wheels/tubeforge-0.1.0-py3-none-any.whl`. Both paths are
 ignored. Synthetic scoring fixtures are labelled explicitly and are not
 production script, rendering, or browser acceptance.
+
+## Visual production tasks 1–3 (12 October 2026)
+
+| Task | Status | Evidence | Blocker / next action |
+| --- | --- | --- | --- |
+| 1. Inventory generation and donor visual code | **VERIFIED** | [Focused inventory](VIDEO_VISUAL_INVENTORY.md) maps current script/plan, routing, renderer and both donor files with checked local commits. The [second-pass reuse review](../design_doc/tubeforge-publishing-design.md#second-pass-reuse-review--12-october-2026) compares additional donor utilities with current TubeForge contracts. Operator confirmed written permission and waived license review. | Reuse the recorded source-level candidates at their planned tasks; do not add a second pipeline. |
+| 2. Narration-linked scene plan | **VERIFIED** | A fresh production Codex invocation for job `42899f0c102248e3a64af4baaa41429e` used the canonical skill resources (live preflight matched prompt and seven resource hashes), then returned six source-grounded narration sections and six explicit scene subjects, purposes, compositions and element lists. All five factual claims map to supplied official Docker sources. One immutable script revision (`d506a74654f8…`) was reviewed and approved by identity; the worker used it for TTS and preview. Focused Compose tests passed (16 checks). | Keep the accepted scene fields and approved artifact identity through later scene repair. |
+| 3. Relevant visuals and contact sheets | **VERIFIED** | Production job `0394bd453cd24dc4adbeee5ac5c1fee4` reused the source-grounded Codex package from cache, saved a shortened six-section revision through the existing revision handler, and rendered only after exact checksum `68e711a27e12…` was approved. The running v9 worker saved a complete [six-scene contact sheet](../data/artifacts/0394bd453cd24dc4adbeee5ac5c1fee4/storyboard/contact-sheet-001.png), accepted-asset/storyboard/license manifests and a 43.016-second local preview. Every scene was inspected against narration: the image branches to two named containers, comparison and exact commands are legible, `docker ps` shows distinct source-supported rows, and removal/state is explained. All six CC0 local assets have distinct hashes that match files; no fallback or omitted scene. The preview manifest names the approved content hash and six asset hashes. Affected Compose suite: 58 passed, 3 environment-dependent smoke tests skipped in 11m39s. | Task 3 acceptance passed. Its retained preview is unapproved; task 4 used a fresh approved job for the final. No publication. |
+| 4. Render and inspect one finished Short | **VERIFIED** | [Production job `9df50ade…`](TASK4_VIDEO_REVIEW.md) used the exact approved script revision and corrected preview identity; its registered 43.033s 1080×1920 H.264/AAC final binds the same content, audio, captions and six assets. A 2-second-interval visual sheet, full decode, black/silence checks and safe-width caption audit passed. The operator watched/listened to the full final and reported good voice, pacing, captions and visuals, with no defect. The temporary signed-in review account/session was removed and its token now returns HTTP 401. Current-worktree Compose suite: 57 passed in 746.51s. | Task 4 acceptance passed. Dashboard state is `publication_approval_required`; no publication approval or upload. Continue with task 5 scene replacement. |
+| 5. Replace or regenerate one scene | **VERIFIED** | [Real child draft and preview](TASK5_SCENE_REVIEW.md) changed only scene 3, reused five of six accepted asset hashes and 11 of 12 phrase-audio hashes, and rebuilt narration/timing/captions into a 43.179s preview. Its contact sheet, two-second timeline and full-size scene frame were inspected; 101 captions fit the portrait gate. The signed-in production Studio API created separate child `8481109b…` with the same reviewed content SHA while the parent script and final stayed unchanged; its audit event and authenticated script/artifact reads passed. Current-worktree regression: 77 passed; final focused rerun: 2 passed. | Task 5 accepted. The signed-in child awaits its own exact script/preview approval for task 6; no publication. |
 
 ## Publishing milestone tracker
 
@@ -129,8 +147,8 @@ Local deployment: existing migrations applied after online backup; schema
 
 ## Next five tasks
 
-1. Decide whether to accept the local preview's abstract visuals or scope a separate topic-appropriate visual implementation; no publication.
-2. Listen to the exact-approved tutorial preview and record auditory quality.
-3. Review the pending explainer/comparison scripts through their existing approval gates.
-4. Preserve the old exhausted final-render/OOM job; final 1080×1920 export remains outside this request.
-5. Review and commit intentional source/docs/skill changes; generated artifacts remain local-only. No remote push was performed.
+1. Resolve the finished Docker benchmark's user listening/comparison review; revise only concrete defects, then record creative acceptance.
+2. Verify task 6: stale approvals cannot authorize a changed revision, including the signed-in dashboard flow.
+3. Produce and inspect a second distinct topic under the same profile for task 7.
+4. Bridge exact approved generated artifacts into the canonical library for task 8, without automatic publication.
+5. Resume task 9 local manual upload and Compose review using existing delivery APIs; keep live platform acceptance separate.

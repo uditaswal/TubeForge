@@ -3276,3 +3276,558 @@ pass; nginx -t passes; nginx and TubeForge web share homelab. Proxy root returns
 was modified. Current production secure cookies require HTTPS at the browser.
 Requested exact external URL/current symptom to distinguish HTTP login behavior
 from external reachability; the supplied database error is no longer reproduced.
+
+## 2026-10-11 — Consolidated publishing/dashboard implementation plan
+
+Reviewed both supplied design documents in `design_doc/`. Merged frontend
+ownership, same-origin/static-export choices, component boundaries, incremental
+migration and prototype verification limits into `tubeforge-publishing-design.md`.
+Added stable task IDs, phase acceptance/evidence boundaries and per-change
+update rules; removed `TUBEFORGE_DASHBOARD_HANDOFF.md` after coverage checks.
+Preserved the HTML prototype and existing implementation evidence. Updated
+AGENTS and documentation entry points, keeping STATUS authoritative. Narrowed
+the design_doc ignore rule to allow the plan and HTML reference into Git.
+Validation: Python local Markdown-link/coverage/removal assertions passed;
+`git diff --check` passed; `git check-ignore -v` confirms explicit exceptions
+for the two retained design files. No application code, runtime, or publishing
+behavior changed; no application smoke test is claimed. Next action: reconcile
+current publishing acceptance evidence against P0.1 before implementation.
+
+## 2026-10-12 — Proposed fine-grained implementation order
+
+Documented 24 sequential tasks in `design_doc/tubeforge-implementation-order.md`
+for operator review. Video quality leads; stream clipping is task 23 and Next.js
+migration is task 24. Separated YouTube OAuth/upload/scheduling from Instagram
+API selection/OAuth/media publishing and identified tasks that can share focused
+acceptance work. Linked the proposal from the main design and docs index, and
+allowlisted the new source document in `.gitignore`. Validation: task numbering,
+requested final positions, local links, `git diff --check` and `git check-ignore`
+passed. No implementation or live-post behavior was changed. Next action:
+operator reviews and adjusts the order before execution.
+
+## 2026-10-12 — Visual production tasks 1–3, source implementation
+
+Scope: operator authorized tasks 1–3, donor code reuse and a focused workflow;
+license review was explicitly waived. Inventoried the current script/VideoPlan,
+asset routing/cache, FFmpeg renderer and two local donor visual/scene-repair
+modules. Donor commits: khaoss `69d8f0cf2872bd1467b4d09d12eb1109603345e7`;
+darkz `e26792ae00dc1ec2434faf32632896609396dfad`.
+
+Implementation: canonical yt-script automation now requests a concrete visual
+subject, purpose, composition and two to four display elements. Existing
+ScenePlan/VideoPlan/MediaSearchRequest carry those fields. Local FFmpeg scene
+art renders terminal, branch, layer, split or sequence compositions from them;
+old abstract local graphics invalidate at asset-stage recovery. Every accepted
+scene now appears in a storyboard manifest with narration, source/license,
+hash and route, plus ordered FFmpeg contact-sheet artifacts. Dockerfile adds
+DejaVu fonts. No new script provider, paid adapter or live post was used.
+
+Validation: source `compileall` and `git diff --check` passed. Direct pipeline
+smoke reached `ASSETS_READY` and saved `storyboard_manifest` plus
+`contact_sheet_001` under `artifacts/smoke/storyboard-pipeline/rendered/storyboard-smoke-3/`.
+Retained approved tutorial, explainer and comparison scripts each produced six
+portrait frames and a complete sheet in `artifacts/smoke/storyboard-visuals/`;
+all 18 asset hashes, CC0 labels, source URLs and sheet paths passed inspection.
+A seven-scene direct check produced two pages and rejected a changed checksum.
+The manually directed tutorial sheet at
+`artifacts/smoke/storyboard-visuals/editorial-tutorial/contact-sheet-001.png`
+was visually inspected: labels teach a file selection, staged/unstaged status,
+commit and local-vs-remote flow more clearly than the prior abstract art.
+Older approved scripts still render search-keyword labels and generic diagram
+nodes, so creative acceptance remains open. The fake pipeline sheet is
+integration evidence only.
+
+The offline wheel was installed into an isolated temporary target; its prompt
+contains the new scene fields, all seven skill resources pass preflight, and
+the canonical automation file byte-matches. Prepared wheel SHA256:
+`da8aee71c61484020dc5db15d9c4bbb74496ec923cd18e9b1cbce96820240183`.
+Docker API access was denied; an attempted temporary pytest installation failed
+on DNS resolution. Both were stopped within the operator's 20-minute limit.
+No host restart, container rebuild or new Codex model attempt occurred.
+Exact delayed administrator commands and remaining acceptance checks are in
+`docs/VIDEO_VISUAL_INVENTORY.md`. Next action: deploy when available, run focused
+Compose tests and actual host prompt preflight, then inspect a fresh production
+contact sheet before claiming tasks 2–3 VERIFIED.
+
+## 2026-10-12 — Visual request recovery audit
+
+Reviewed the task 1–3 asset stage against checkpoint/restart behavior. Found
+that a cached scene asset could be reused by scene ID even when its approved
+visual subject or other search request changed. Moved request/route derivation
+before the cache decision and require an exact request match. Explicit stock-to-
+local fallback remains reusable when its original request is unchanged.
+
+A new focused regression function directly executed under the available Python
+runtime: the changed scene searched once, while unchanged scenes kept their
+accepted hashes. Existing fake-asset checkpoint and stock-fallback regression
+functions also passed by direct invocation. These are focused direct executions,
+not a full pytest run; pytest remains unavailable until container access.
+Rebuilt and isolated-installed the updated wheel; canonical skill bytes and all
+seven resource hashes passed. Its current SHA256 is
+`05747c2c77946e198ca2c8dc55aafcbfc510a979a8f508464bce4020a04161e1`;
+this supersedes the wheel hash in the earlier entry. No host service was
+restarted and no model attempt was spent. Next action remains the delayed
+administrator deployment and actual production acceptance checks.
+
+## 2026-10-12 — Storyboard output gate and deployment handoff
+
+The current `m6-content-v6` package validator now requires each scene's
+subject, purpose, composition and visual elements before asset acquisition.
+This closes the gap where a schema-valid new package could silently use
+generic fallback graphics. Existing approved older packages retain their
+compatibility path. The canonical skill remains the home of editorial rules.
+
+Validation: the prepared wheel was rebuilt from current source and installed
+into an isolated target. Its bundled `yt-script/automation.md` byte-matches
+the canonical folder; all seven skill resources pass preflight. A retained
+six-scene tutorial package with explicit directions passed the installed
+validator, and the same package missing one scene's visual elements was
+rejected. Source compileall, `git diff --check` and the wheel ignore rule
+passed. Pytest is absent from the available host environment; Docker and
+the actual host runner socket remain inaccessible from this session, so a
+production invocation and container regression suite remain unverified. No
+model attempt or external API call was made.
+
+Prepared wheel SHA256: `15c852b537409926d0174ef452d77123a859d8c7f87ddc2bde06dbf1c0a799eb`.
+Exact administrator install/restart commands remain in
+`docs/VIDEO_VISUAL_INVENTORY.md`. Next: operator deploys that wheel and
+rebuilds web/worker; verify live preflight and a fresh, source-grounded script
+and contact sheet before upgrading tasks 2–3 from IMPLEMENTED to VERIFIED.
+
+## 2026-10-12 — Second-pass donor reuse review
+
+Scope: compared local `youtube-automation-agent` HEAD
+`e26792ae00dc1ec2434faf32632896609396dfad`, `youtube-autopilot` HEAD
+`69d8f0cf2872bd1467b4d09d12eb1109603345e7`, and
+`youtube-agent-skill` HEAD `a2feb2104981a375ffd4f87ee04f4f5344ac43c6`
+with current TubeForge contracts. Inspected source/claim provenance, scene
+readiness, recovery, metadata validation, Shorts selection, format/profile
+templates, metrics exports and the installed chapter/edit tools. No donor
+code was run or copied and no platform API was called.
+
+Recorded concrete small reuse candidates and acceptance checks in the main
+design plan: source/claim review at script approval, checksum-aware per-scene
+readiness at final approval, selected format-profile data, and the already
+installed chapters/edit CLI for appropriate long-form output. Explicitly
+excluded donor file-existence recovery, silent metadata truncation,
+overlapping automatic Shorts selection, fixed aspect/duration heuristics and
+zero-filled missing metrics. The operator's prior reuse authorization removes
+the old standalone license-review gate. Task 1 remains VERIFIED; tasks 2–3
+still require the previously documented host deployment and real output check.
+
+Validation: local clone `git rev-parse HEAD` checks, bounded source reads,
+`git diff --check`, Markdown link/heading inspection and git-status review.
+This was a documentation review, so no application test or deployment is
+claimed. Next: use these candidates only at their listed implementation
+tasks, preserving TubeForge's existing reliable pipeline.
+
+## 2026-10-12 — Dashboard and deployed visual-generation check
+
+The running TubeForge web container answered `GET /healthz` with HTTP 200 and
+`{"status":"ok","database":"ok"}`; `/` redirected to login. The app browser
+was opened at the documented `http://127.0.0.1:62065/login` URL. The running
+worker reports `portrait-storyboard-v6`, `m6-content-v6`, all four new scene
+fields and the storyboard module, and has DejaVu Sans installed. Selected
+installed host modules byte-match source. A live, read-only
+`PreflightContentV1` request returned success with exact worker/host prompt
+SHA256 and seven canonical skill-resource hashes. No Codex attempt was spent.
+
+Focused tests ran in a temporary Compose web container with current checkout
+tests mounted read-only: `tests/test_storyboard.py`,
+`tests/test_domain_contracts.py` and `tests/test_media_routing.py` passed
+12/12. Three targeted asset checkpoint/recovery tests passed. The new v6
+visual-direction test initially failed because its fake fixture had three
+scenes, then because a six-scene version exceeded the 45-second narration
+bound. The fixture was corrected to six scenes and a bounded narration;
+the test then passed. These two fixture repairs did not change runtime code.
+All focused commands completed within the operator's 20-minute limit.
+
+Inspected the earlier generated Git tutorial contact sheet, a manually
+directed storyboard variant and a 12-second frame of the retained 52.117s
+540x960 preview. The new diagram/terminal layout conveys more specific
+actions than the older abstract preview frame, but the retained generated
+sheet still repeats search-query labels and the manually directed sheet is
+not production Codex output. No new finished video was produced, no
+signed-in dashboard review occurred and no publication was attempted. Tasks
+2–3 remain IMPLEMENTED until a new source-grounded script and resulting
+contact sheet pass creative inspection; task 4's full video remains open.
+
+## 2026-10-12 — Production Docker comparison, script approval and visual acceptance
+
+Scope: verify the newly deployed canonical yt-script invocation against a fresh,
+substantive official-Docker source packet, then exercise the existing script
+approval, asset and preview workflow. The missing ignored Piper ONNX model was
+restored from an identical local worktree copy (SHA256
+`5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f`),
+which let the existing web/worker containers recover without changing their
+configured voice or script provider. `GET /healthz` returned healthy with a
+working database. The model file is ignored by Git.
+
+A live `PreflightContentV1` for the exact Docker brief returned matching prompt
+and all seven skill resource hashes. Production job
+`42899f0c102248e3a64af4baaa41429e` made one Codex invocation (generation
+cache accepted, `invocation_count=1`). Its six-section narration and five
+claims were reviewed against three official Docker source excerpts; all six
+scenes carried explicit subject, purpose, composition and visual elements. The
+immutable content-package SHA256 `d506a74654f8a655993d194607f39e9ab42a5a018cd7d8aeac3ef8bb6441de32`
+was recorded as the script approval identity, after which the normal worker
+advanced through assets, Piper TTS, captions and preview. Task 2 acceptance
+passed. No script retry, alternative provider or publication occurred.
+
+Artifacts inspected: `data/artifacts/42899f0c102248e3a64af4baaa41429e/`
+contains the content package, source packet, storyboard and license manifests,
+six-scene contact sheet, captions, timing map and `preview.mp4`. The preview is
+41.592 seconds, H.264/AAC, 540×960, with 115 aligned words; captions SRT covers
+all eight speech phrases. Six sampled preview frames and the complete contact
+sheet were visually inspected. The storyboard manifest links each narration
+beat to the accepted asset SHA256, provider, source and license. The visual
+acceptance test **failed**: repeated bars/text cards, truncated subject copy,
+and weak diagram semantics do not adequately teach the image/container
+comparison. The preview repeats those defects; its soundtrack was not
+listened to end to end and the signed-in dashboard review was not exercised.
+The job remains `preview_ready` for local review only; no final/publish
+approval was given. Task 3 stays IMPLEMENTED, and task 4 is not claimed.
+
+Validation: focused Compose checks from the immediately preceding implementation
+session passed 16 checks; no production code changed in this acceptance pass.
+`ffprobe` confirmed preview duration, codecs and dimensions. `git status --short`
+was reviewed; generated artifacts and the restored model are ignored. Next
+action: improve the generic local frame grammar using the approved scene
+fields, rerun focused asset/render checks, regenerate a complete sheet and
+inspect all six scenes before accepting task 3.
+
+## 2026-10-12 — v7 local storyboard repair and second production preview
+
+Scope: one bounded repair pass after the first production sheet failed visual
+acceptance. `src/tubeforge/providers/media/local_graphics.py` now draws
+scene-direction-driven flow, package, branching, terminal and checklist
+layouts and omits long truncated subject paragraphs. The style identifier is
+`portrait-storyboard-v7`; `pipeline/assets.py` validates against that shared
+provider constant so stale v6 cached art cannot pass the style gate.
+
+Validation: an isolated Compose render generated all six approved Docker
+frames; the complete sheet and individual tiles were inspected. The targeted
+Compose storyboard/asset/orchestrator selection passed 10 tests (43 deselected)
+in 123.35 seconds. `docker compose build web worker` and
+`docker compose up -d --no-deps web worker` succeeded. The running worker
+reported v7 and `GET /healthz` reported a healthy database. A second durable
+job, `0d8a765c71a948cebaf6c8f01e572043`, reused the original reviewed
+content-package SHA256 `d506a74654f8a655993d194607f39e9ab42a5a018cd7d8aeac3ef8bb6441de32`
+from the generation cache; no new Codex invocation or script retry occurred.
+That identity was explicitly approved through the same approval repository and
+event path as the dashboard. The worker reached `preview_ready` and saved the
+new storyboard sheet, asset/rights manifests, narration, captions and a
+41.592-second 540×960 H.264/AAC preview.
+
+Creative inspection: all six accepted visual frames are distinct, with a
+readable image-to-two-containers branch and caption-safe lower region. A sampled
+preview frame at 13 seconds shows that branch and karaoke captions. The
+labels are still too abstract for acceptance: "docker run command", "image
+outline" and "two running rows" are placeholders, not literal command/output
+or app state. Full audio listening and signed-in dashboard interaction were
+not performed. Task 3 remains IMPLEMENTED; no preview, final or publication
+approval was granted. Next action: tighten visual-element requirements in the
+canonical yt-script automation resource, deploy the resource to the host
+runner, then use one fresh production package and full audiovisual inspection
+to determine task 3 acceptance.
+
+## 2026-10-12 — Concrete visual-label skill and host deployment boundary
+
+Scope: correct the source of generic storyboard labels in the canonical
+`.agents/skills/yt-script/automation.md` without duplicating editorial rules
+in application code. The added instruction requires display-ready,
+source-supported command/output/object/state labels and rejects placeholders.
+No other skill folder was changed. Hatchling built a wheel from this checkout;
+its four yt-script files byte-match the canonical source. Wheel SHA256:
+`0df2950d4ff5f95be58e9eb24ab27c4d5d141cc85c38736fa79babadaa6da3d1`.
+The rebuilt TubeForge web/worker images were started; 36 focused
+`test_youtube_skills.py` and `test_script_automation.py` checks passed.
+
+A live read-only `PreflightContentV1` for the approved Docker brief confirmed
+the expected deployment boundary: the worker reports automation SHA256
+`43d6266882abaa515e4b5c9b114e6585d9ae2a215d039263ad20f281573e4a13`,
+while the installed host runner still reports
+`e41d6756f637221c4c819112c0328dc30f52f905899f61a26108a29ab71a01be`;
+assembled prompt hashes also differ. Production would reject a new request
+before spending an attempt. The first preflight shell probe used `docker exec
+-u 1000`, which lacked the container's service group and could not access the
+socket; rerunning under the actual worker identity succeeded. This was a probe
+identity issue, not a runner failure. The exact sudo install/restart commands
+are in `docs/VIDEO_VISUAL_INVENTORY.md`. No host installation was attempted
+because sudo requires the operator's password. No new model invocation,
+preview approval, final render or publication occurred.
+
+Next action: after the operator deploys the wheel and restarts the dedicated
+runner, require live prompt and resource hash equality before creating one
+fresh source-grounded production job. Inspect its narration, all six visual
+frames, complete preview audio and captions; keep task 3 IMPLEMENTED until the
+actual output meets the creative bar.
+
+An independent offline visual check rendered scene 3 and scene 5 with literal
+labels supported by the already approved source packet: `docker run`, one
+shared web-app image and two containers; `docker ps`, two running containers
+and loss of unstored changes. Both 1080×1920 frames were inspected. The branch
+relationship is clearer and labels fit, but the terminal scene remains a
+stylized list rather than actual command output. These files under
+`data/artifacts/yt-script-visual-labels-offline/` are design proofs, not
+approved production assets; they do not change task 3's acceptance state.
+`git ls-files` confirms all four canonical yt-script resources are tracked;
+`git check-ignore` does not exclude them. `git diff --check` passed and the
+new wheel is ignored under `data/`. The rebuilt dashboard still answered
+`GET /healthz` with a healthy database.
+
+## 2026-10-12 — Source-backed command visuals prepared without another model attempt
+
+The prior goal turn changed the canonical skill and prepared a host wheel; this
+turn rechecked current deployment first. `PreflightContentV1` still reported
+worker automation SHA256 `43d6266882abaa515e4b5c9b114e6585d9ae2a215d039263ad20f281573e4a13`
+versus host `e41d6756f637221c4c819112c0328dc30f52f905899f61a26108a29ab71a01be`.
+Both prior Docker jobs remain `preview_ready`. No new job was submitted.
+
+An official Docker CLI run reference supports a named detached `nginx:alpine`
+container and `docker ps` image/status/name columns. A four-source brief was
+prepared under ignored `artifacts/smoke/storyboard-production-v7/`; it asks
+for two distinct illustrative names, exact commands and source-supported
+state, and forbids invented IDs, times or published ports. The worker accepted
+its `ContentRequest` and source excerpts. The 40,360-character assembled
+prompt embeds the updated skill and named command; SHA256
+`a094a10866e97abe8ffab882881177367ca114632a8e1e84587328f04fbf3407`.
+Read-only host preflight for this exact packet still returned prompt and
+resource mismatches, confirming that a new model invocation must wait for
+host deployment.
+
+A bounded renderer repair now fits full commands in diagram slots and rejects
+a label only if it cannot fit even at the minimum readable size. The style
+was bumped to `portrait-storyboard-v8` to invalidate cached older frames.
+Offline 1080×1920 terminal and branch design proofs were inspected: both
+`docker run --name web-a -d nginx:alpine` and the matching `web-b` command
+remain visible, and the branch identifies the shared image and two named
+instances. These are not approved production scenes. Focused Compose tests:
+8 selected storyboard/asset/orchestrator tests passed in 101.90 seconds;
+6 media-routing tests passed in 3.08 seconds after the final fit adjustment.
+Rebuilt web/worker images run v8, and the dashboard health/database endpoint
+returned OK. The final Hatchling wheel byte-matches the canonical four
+`yt-script` files and renderer; SHA256
+`375bab05a7e679d830546ef7b2c3d42a7ea77826f73a0e5711075259085eb88c`.
+The exact sudo install/restart commands remain in
+`docs/VIDEO_VISUAL_INVENTORY.md`. No new Codex attempt, signed-in approval,
+final render or publication occurred. Task 3 stays IMPLEMENTED pending host
+deployment and a fresh production contact sheet/preview acceptance review.
+
+## 2026-10-12 — Third host deployment check; task 3 production acceptance blocked
+
+Rechecked the current worktree, final wheel SHA256
+`375bab05a7e679d830546ef7b2c3d42a7ea77826f73a0e5711075259085eb88c`,
+and live `PreflightContentV1` for the prepared four-source Docker brief. The
+socket operation succeeded, but `prompt_match=False` and
+`resource_match=False` for the third consecutive goal turn. The running worker
+has canonical automation SHA256
+`43d6266882abaa515e4b5c9b114e6585d9ae2a215d039263ad20f281573e4a13`;
+the host runner still has
+`e41d6756f637221c4c819112c0328dc30f52f905899f61a26108a29ab71a01be`.
+Both existing production jobs remain `preview_ready`. This preflight is
+read-only; no new job or model attempt was started. No publication occurred.
+
+Tasks 1 and 2 remain VERIFIED. Task 3's code and offline v8 visual proofs are
+implemented, but the prior production preview failed creative inspection and
+the fresh production invocation needed to verify the repair cannot start until
+the dedicated host runner receives the prepared wheel. No further local-only
+render would prove that acceptance result. `docs/STATUS.md` therefore records
+task 3 as BLOCKED; the exact host install/restart commands remain in
+`docs/VIDEO_VISUAL_INVENTORY.md`. After deployment, first require matching
+prompt SHA256 and seven resource hashes, then generate, review and approve the
+new source-grounded package and inspect its complete contact sheet/preview.
+
+## 2026-10-12 — Tasks 1–3 production visual acceptance
+
+The previously blocked dedicated host runner changed externally. A live
+read-only `PreflightContentV1` for the prepared four-source Docker brief matched
+assembled prompt SHA256
+`a094a10866e97abe8ffab882881177367ca114632a8e1e84587328f04fbf3407`
+and all seven skill-resource hashes. Durable job
+`884fc38c19fa430f946dd4078bc1868d` made one production Codex invocation,
+returning six source-linked narration sections, five verified claims and six
+explicit source-grounded scene plans. The generated content SHA256
+`53406a6dd4ad6277bfbe67ba5c358a91972c2133d5b9dd5b7f499627df99d5f3`
+was reviewed and approved exactly. Its v8 contact sheet was inspected. The
+asset stage succeeded, but TTS measured 57.481 seconds of speech plus pauses,
+so the first job correctly ended `failed_validation` for duration. No raw or
+failed output became a spoken/published script.
+
+An independent general renderer mismatch was found in that production sheet:
+scene 2's comparison became a package grid, and scene 5's requested CLI table
+became a generic step flow. A bounded v9 repair added a three-element
+comparison layout and recognized CLI/table scenes. The two resulting 1080×1920
+frames were inspected; 8 focused storyboard/asset/orchestrator tests passed.
+The web/worker images were rebuilt and restarted; the running worker reported
+`portrait-storyboard-v9`. The canonical skill was unchanged, so the already
+matching host skill/prompt preflight remained valid.
+
+A second durable job, `0394bd453cd24dc4adbeee5ac5c1fee4`, reused the same
+Codex package from generation cache. A shortened, source-supported six-section
+narration passed `ContentPackage` and 45-second word-bound validation, was saved
+via the existing `/script-revision` handler, and was approved by its fresh
+checksum `68e711a27e121355e24605a4f4b7af696be47407540aaa61bb67af1fa831ffdc`.
+The worker then saved six accepted v9 frames, complete storyboard/asset/license
+manifests, aligned narration and captions, and a 43.016-second 540×960
+H.264/AAC local preview. The preview manifest's content input equals the
+approved checksum, and all six referenced asset hashes match accepted files.
+Every contact-sheet scene was visually inspected for its narrated teaching
+point, readable labels, source-supported commands, rights and complete
+coverage. Six midpoint preview frames were sampled; the caption zone is clear,
+although isolated karaoke chunks split technical commands awkwardly. That is
+recorded for task 4's full audiovisual review. Preview approval, final render
+and publication were not triggered.
+
+The broader affected Compose batch
+`tests/test_storyboard.py tests/test_media_routing.py
+tests/test_pipeline_orchestrator.py tests/test_real_local_smoke.py
+tests/test_youtube_skills.py` was bounded by `timeout 1200s` and finished in
+699.19 seconds: 58 passed, 3 environment-dependent smoke tests skipped, no
+failures. The generated preview and complete sheet were inspected, so tasks
+1–3 are VERIFIED in `docs/STATUS.md` and the active design-plan row. Next
+planned phase is task 4's complete audiovisual and 1080×1920 final-video
+acceptance; no claim about that phase is made here.
+
+### 2026-10-12 — task 4 caption repair and finished-render gate
+
+Scope: inspected the approved Docker image/container preview for task 4, repaired
+portrait highlighted captions, rendered an inspection-only corrected preview,
+and tested the existing 1080×1920 worker path. The production job
+`0394bd453cd24dc4adbeee5ac5c1fee4` remains `preview_ready`; no preview
+approval, final promotion or publication was recorded.
+
+The original preview's burned captions dropped CLI punctuation (showing
+`D NGINX ALPINE`) and grouped words across phrase boundaries. The caption
+renderer now maps display tokens from the exact narration text to existing
+waveform-aligned words, keeps command punctuation and phrase boundaries, and
+chooses a balanced two-line wrap within the 18-character portrait gate.
+The current-worktree focused Shorts suite passed 6 tests. The broader
+container-image suite (Shorts, pipeline orchestrator and real local smoke)
+passed 45 with 3 environment-dependent skips in 718.84s; its tests were baked
+into the image while source code was mounted. `git diff --check` passed.
+
+The corrected 43.016s 540×960 H.264/AAC inspection preview has SHA-256
+`fc2dc7d0099da01e7dc4b4e01c2eed9cb22a3f4418fa41a4487010e7919517bb`.
+All 99 caption events were measured at at most 18 visible characters per line.
+The timeline sheet and full-resolution frames at 17, 23 and 30s were inspected:
+source-grounded commands and the `docker ps` comparison remain legible, while
+`-d nginx:alpine` and `nginx:alpine` appear correctly in captions. The operator
+confirmed that the unchanged narration source sounds clear. FFprobe found 30fps,
+540×960, H.264/AAC mono 48kHz; silence detection found no span longer than
+one second below -35dB. Full-video watching/listening remains unverified.
+Details and timecodes are in `docs/TASK4_VIDEO_REVIEW.md`. Generated inspection
+media is ignored by Git, verified with `git check-ignore -v`.
+
+An inspection-only 1080×1920 render in the 1GiB worker profile failed with
+Docker `oom` event `youtube_video_producer-worker-run-522f683dc784`; no final
+file was promoted. The same memory root already had two targeted repairs and
+an operator decision to leave it blocked. Under AGENTS.md's two-repair rule,
+further automatic retries stopped. Automatic approval review also rejected a
+new temporary admin account because changing the local auth boundary lacked
+explicit authorization and cleanup proof; no account was created. Requested
+operator decisions: bounded-memory sequential rendering (recommended) versus
+a controlled 2GiB worker test, and whether a temporary local review login may
+be created and removed. Next action after those decisions: submit a fresh job
+through the signed-in workflow, inspect/approve its exact corrected preview,
+render 1080×1920, and watch/listen to the entire final MP4. Do not publish.
+
+### 2026-10-12 — task 4 bounded production final and exact review
+
+Scope: with the operator's explicit decisions, finished bounded-memory Shorts
+rendering under the unchanged 1 GiB worker and used one temporary local admin
+login for the signed-in script/preview workflow. No platform publication was
+requested or performed.
+
+The renderer now encodes paced still scenes sequentially, concatenates them and
+composites audio/captions within a global deadline. It preserves cancellation,
+cleanup and atomic promotion. A real 43.033333s 1080×1920/30fps H.264/AAC
+inspection render succeeded; its SHA-256 is
+`5a07aca026a4d7a8d7959867894eb0e09854d797618b1f5ae51e893da6182ecc`.
+A live worker sample used 583.9 MiB of its 1 GiB limit. An initial bounded
+command exposed a global/local input-index error; it was fixed before the
+successful inspection run and final production job.
+
+A fresh signed-in job `9df50ade54724d3ba7dd9e96e6521e88` reused the
+approved source-packet cache without a new model attempt. The previously
+reviewed six narrations were saved through `/script-revision`; the returned
+content checksum was exactly
+`68e711a27e121355e24605a4f4b7af696be47407540aaa61bb67af1fa831ffdc`.
+The script was approved by that identity. The production 43.016s 540×960
+preview matched the corrected inspection preview byte for byte (SHA-256
+`fc2dc7d0099da01e7dc4b4e01c2eed9cb22a3f4418fa41a4487010e7919517bb`),
+and its identity `70c4c38837af9935ce0800960de640207be2718466b2bb1f30e4d502600464db`
+was approved. Its manifest names the exact content, audio, caption, timing and
+six accepted asset hashes. All 99 ASS events fit the 18-character visible-line
+gate and retain `--name`, `-d`, `nginx:alpine`, `web-a`, `web-b` and `docker ps`.
+
+The worker registered a 43.033333s 1080×1920 final with the same SHA-256 as
+the inspection render. Its manifest records `bounded-segments`, the approved
+preview identity and approval ID, and identical content/audio/caption/timing/
+asset inputs. The signed-in dashboard API reported the final artifact and
+`publication_approval_required`. A two-second-interval sheet covering the
+entire Short was inspected: opening image/container diagram, package/process
+distinction, literal two commands, `docker ps` comparison and state/removal
+close align with the approved six-section narration. Scenes are mostly static
+teaching diagrams, with cuts, gentle motion and karaoke captions for pacing.
+Full-video decode passed, with no detected black span >=0.2s or silence >=1s
+below -35dB; mean audio -16.3dB, peak -0.0dB. The operator previously
+confirmed the unchanged narration voice is clear, but has not yet confirmed
+full-final listening. Task 4 therefore remains IMPLEMENTED.
+
+Validation: current-worktree Compose command
+`docker compose run --rm --no-deps -v "$PWD/tests:/app/tests:ro" web timeout 1200s python -m pytest -q -p no:cacheprovider tests/test_rendering_preview.py tests/test_shorts_workflow.py tests/test_pipeline_orchestrator.py`
+passed 57 tests in 746.51 seconds. The temporary admin user and all sessions
+were deleted after dashboard verification; the revoked token received HTTP 401
+and its local token file was removed. Review artifacts and timecoded findings:
+`docs/TASK4_VIDEO_REVIEW.md`. Next action: obtain operator full-video watch/
+listen result and repair any concrete defect before marking task 4 VERIFIED.
+
+### 2026-10-12 — task 4 creative acceptance closed
+
+The operator watched and listened to the entire registered 43-second
+1080×1920 final for job `9df50ade54724d3ba7dd9e96e6521e88` and reported
+that the voice, pacing, captions and visuals look and sound good, with no defect.
+This closes the full-video audiovisual gate left open in the preceding task 4
+entry. The exact script/preview/final identity checks, 57 passing focused tests,
+timecoded visual review, technical media checks and temporary-login cleanup are
+recorded there and in `docs/TASK4_VIDEO_REVIEW.md`. Task 4 is now VERIFIED in
+`docs/STATUS.md`. The job remains `publication_approval_required`; no
+publication approval or upload occurred. Next action is task 5: selective
+one-scene replacement with reuse, rebuild and fresh approval evidence.
+
+### 2026-10-12 — task 5 one-scene revision implementation and real preview
+
+Scope: inspected the existing job, asset, phrase-audio, approval and Studio contracts; added an immutable child-draft scene revision through the existing SQL job/artifact/event tables, operator API and Studio control. The parent job remains `publication_approval_required` and its content/final are unchanged. The child is created atomically at `script_approval_required`; asset and phrase manifests are copied as hints that the worker revalidates before reuse. No publication or provider switch was made.
+
+Focused signed-in API and fake-worker tests pass. The live production child `f04cf18133e14b0d92987b1b9b7b16c3` changed the Docker `web-a` scene and was approved at exact script checksum `9660e2d6ea194bae5584e073f9505d7565ef484f94ef1e36b5dd182fbdcc116d` after source/claim review. The worker reused five of six asset hashes and eleven of twelve phrase-audio hashes, rebuilt narration/timing/captions, and rendered a 43.179-second preview with identity `7427626da75e517d5ddc6801b99900c501ebe81d5d7ce5f77d8c148ae0c918f8`. Its contact sheet, sampled scene frame and two-second timeline sheet were inspected; 101 ASS events fit the 18-character caption gate. Full media decode, black-span and silence checks found no defect. Details are in `docs/TASK5_SCENE_REVIEW.md`.
+
+The broad current-worktree Studio/API/pipeline regression command is still running at this log entry. The new preview is deliberately unapproved, and no child final exists. Signed-in production Studio acceptance remains open because the prior one-time temporary review login was removed; a new temporary test login with cleanup has been requested. Task 5 remains IMPLEMENTED. Next action: finish regression results and signed-in production Studio check, then record task 5 acceptance before starting task 6.
+# 2026-10-12 — Task 5 signed-in acceptance
+
+Authorized temporary local reviewer account was created with a three-hour session and credentials kept mode 0600 in the web container. The running Studio page served the scene editor; signed-in `POST /api/jobs/9df50ade54724d3ba7dd9e96e6521e88/scene-revisions` returned 201 and child `8481109bb4e8495ab0fe0ca8a86b6d28` with exact reviewed content SHA `9660e2d6…`. Authenticated script and activity reads returned 200; the parent stayed at content SHA `68e711a2…`; the inspected earlier child preview served as `video/mp4`. Current-worktree API/pipeline regression passed 77 tests in 981.46s, and final focused scene checks passed 2 tests in 37.53s. The inspected 43.179s preview, storyboard and caption/black/silence checks are recorded in `docs/TASK5_SCENE_REVIEW.md`. Task 5 is VERIFIED; next is stale approval and final identity binding for task 6. The temporary account remains only for tasks 6–7 and must be deleted with its sessions afterward. No publication.
+
+
+### 2026-10-12 — Docker benchmark reference, grounding and local production
+
+Scope changed to the objective in the supplied goal file: create and inspect a 30–55s Docker tutorial matching the supplied Claude example. All four attachments were found. The ZIP was inventoried and scanned before selected installation: 81 Markdown files, no executable/symlink/traversal entries; the ten viral-short-form files were fully read and copied without running its optional npx install command. The named ai-video skill is absent. Reference source and a 12-frame contact sheet were inspected; ffprobe measured 36.033s, 1080×1920, 30fps, and loudnorm measured −15.16 LUFS / −1.37 dBTP. The guide and sequential benchmark plan record strengths, limitations and lessons.
+
+Two real production Codex invocations passed canonical skill/resource preflight. Attempt one (127 words) was rejected editorially for a formal opening and padding. Attempt two (115 words) is accepted after checking all six claims against five official Docker documents; the hook scorer was executed and its 44/100 heuristic result is disclosed. The exact source package and reusable topic JSON are versioned under examples/docker-short-benchmark. The actual disposable Docker run/ps/logs/stop/rm sequence succeeded; only its own output was captured, and its container was removed.
+
+Local Kokoro voice plus Whisper base.en transcript alignment produced 44.405s of narration. A collapsed article timestamp is preserved by joining it to its neighboring measured caption group; no word is dropped or assigned character-weight timing. The original synthesized bed ducks under speech. Storyboard inspection found readable separated captions and terminal commands; final visual refinements and encode are next. No paid inference or publication. Generated artifacts and the isolated environment are ignored; git diff --check passed.
+
+Prior work cleanup: the authorized tasks 5–7 temporary admin/session was removed and token invalidation verified. After mounting current tests instead of the stale baked tests, two focused scene/approval tests passed in 22.82s. Task 6 remains unverified end to end and task 7 unstarted; an existing one-off migration dependency reported missing revision 20261005_0028. No database migration history was changed.
+
+
+### 2026-10-12 — Finished Docker benchmark artifact and inspection
+
+The final local MP4 is artifacts/benchmark/docker-short/final/docker-short.mp4, SHA-256 8e442b7a9c525bddd8f2f305943b0f669d9a8a59c2b4ccdb34359c1596207aba. The prepare/stills/render/verify commands are documented with versioned source in examples/docker-short-benchmark. Final verification passed: 44.405s, 1080×1920, 30fps H.264/AAC, −15.73 LUFS and −1.67 dBTP; exact source/audio/MP4 hashes; full decode; 52 caption chunks with maximum three lexical words; caption transcript completeness and monotonic timing. Every text box was checked in every rendered frame against the conservative portrait safe region. FFmpeg blackdetect (0.2s) and silencedetect (−40 dB, 1s) found no spans.
+
+Inspected final artifacts: encoded-contact-sheet.jpg at two-second intervals, encoded-run-detail.png at 9.5s, and the prior 12-frame full-size storyboard candidates. No clipping or caption/terminal collisions were found. The actual Docker demo container was verified absent after cleanup. Separate ASR recognized the complete command workflow, with one what/with discrepancy; this is not represented as perfect pronunciation proof. Caption onset refinements used eight exact contiguous recognition matches while retaining measured word endings; 109 matching groups then had a 12ms median / 164ms maximum onset difference.
+
+The guide now compares measured reference/final results honestly: matching portrait/codecs and similar loudness, larger commands and audio-based timing, but a slower 44.4s teaching pace versus 36.0s. Native audio preview explicitly returned that this environment cannot accept audio input. No subjective listening claim is made. The final video was displayed and the user asked to assess voice, pacing, sound balance and whether it meets the reference. Phase 4/overall creative acceptance remains IMPLEMENTED pending that review; the goal remains active. No publication, remote push, or claim of production renderer integration. Source compilation and git diff --check passed; generated benchmark media, model cache and environment are ignored.
+
+
+### 2026-10-12 — Benchmark blocked audit
+
+The final artifact hash was revalidated against the render manifest and still matches; technical/visual evidence remains valid. The previous continuation added an audit but did not advance the remaining listening/comparison requirement. The same external dependency has now recurred across three consecutive goal turns, with no answer to the existing finished-video review question. No media process is running and no further safe independent test can substitute for subjective listening. Overall creative acceptance is BLOCKED pending that review; no completion claim, new generation, render, or publication.

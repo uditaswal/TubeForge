@@ -19,11 +19,12 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
+from tubeforge.api.scene_ui import SCENE_CONTROLS
 from tubeforge.core.runtime import Runtime, create_runtime
 from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, VoiceRequest, video_plan_from_package
 from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
@@ -31,6 +32,7 @@ from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
 from tubeforge.scheduling.service import next_run
 from tubeforge.providers.content.prompts import validate_video_package
 from tubeforge.pipeline.manual_publish import ManualPublishService
+from tubeforge.pipeline.scene_revisions import StaleSceneRevision, create_scene_revision
 from tubeforge.pipeline.delivery_queue import DeliveryQueue
 from tubeforge.pipeline.publishing_assets import PublishingAssetRegistry, READY_STATES
 from tubeforge.db.models import DeliveryAttemptRecord, PublishingAssetRecord, SocialAccountRecord
@@ -54,6 +56,21 @@ class ScriptRevisionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     narrations: tuple[str, ...] = Field(min_length=1, max_length=500)
+    actor: str = Field(default="local-dashboard", min_length=1, max_length=200)
+
+
+class SceneRevisionRequest(BaseModel):
+    """One scene edit forked into a new manually reviewed job."""
+
+    model_config = ConfigDict(extra="forbid")
+    scene_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    expected_content_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    narration: str | None = Field(default=None, min_length=1, max_length=12_000)
+    visual_subject: str | None = Field(default=None, min_length=1, max_length=200)
+    visual_purpose: str | None = Field(default=None, min_length=1, max_length=300)
+    composition: str | None = Field(default=None, min_length=1, max_length=200)
+    on_screen_text: str | None = Field(default=None, max_length=500)
+    visual_elements: tuple[str, ...] | None = Field(default=None, max_length=4)
     actor: str = Field(default="local-dashboard", min_length=1, max_length=200)
 
 class ScriptRevisionPromptRequest(BaseModel):
@@ -807,6 +824,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const originalRefresh=window.setInterval; decorate(); originalRefresh(decorate,1000);
         })();
         </script>"""
+        reviewer_controls += SCENE_CONTROLS
         return DASHBOARD_HTML.replace("Give a title and the key points.", "Give a title, approved source notes, and optionally one cited source.").replace("<label>Notes<textarea name=\"notes\" required placeholder=\"One point per line\"></textarea></label>", "<label>Approved source notes<textarea name=\"notes\" required placeholder=\"One source-backed point per line\"></textarea></label><label>Source URL (optional)<input name=\"source_url\" type=\"url\" maxlength=\"2000\" placeholder=\"https://…\"></label><label>Source title<input name=\"source_title\" maxlength=\"500\" placeholder=\"Required with a source URL\"></label><label>Approved source excerpt<textarea name=\"source_excerpt\" maxlength=\"24000\" placeholder=\"Paste the exact supporting passage; pages are not silently scraped\"></textarea></label>").replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("captions_enabled:d.has('captions_enabled')};let r", "captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null,source_url:d.get('source_url')||null,source_title:d.get('source_title')||null,source_excerpt:d.get('source_excerpt')||null};let r").replace("if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')))", "if(j.artifacts.includes('final'))actions.append(button('Watch video','',()=>openVideo(j,'final','Final video')));else if(j.artifacts.includes('preview'))actions.append(button('Watch preview','secondary',()=>openVideo(j,'preview','Preview')))").replace("${j.artifacts.length} saved artifacts · ${j.event_count} activity events", "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}").replace("const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}", "").replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
@@ -1000,17 +1018,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             runtime.jobs.get(job_id)
             reviewed_identity = decision.reviewed_identity
-            if gate is ApprovalGate.SCRIPT and reviewed_identity is None:
+            if gate is ApprovalGate.SCRIPT:
                 package = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_package")
                 if package is None:
                     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="script is unavailable")
+                if reviewed_identity is not None and reviewed_identity != package.checksum_sha256:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="script changed; reload before approving")
                 reviewed_identity = package.checksum_sha256
-            if gate is ApprovalGate.PREVIEW and reviewed_identity is None:
+            if gate is ApprovalGate.PREVIEW:
                 manifest = runtime.artifacts.get(job_id, JobState.PREVIEW_RENDERING, "preview_manifest")
                 if manifest is None:
                     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="preview manifest is unavailable")
                 import json
-                reviewed_identity = str(json.loads(Path(manifest.path).read_text(encoding="utf-8"))["render_identity"])
+                preview_identity = str(json.loads(Path(manifest.path).read_text(encoding="utf-8"))["render_identity"])
+                if reviewed_identity is not None and reviewed_identity != preview_identity:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="preview changed; reload before approving")
+                reviewed_identity = preview_identity
             runtime.approvals.record(
                 uuid4().hex,
                 job_id,
@@ -1108,6 +1131,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
         return {"job_id": job_id, "reviewed_identity": artifact.checksum_sha256}
 
+    @app.post("/api/jobs/{job_id}/scene-revisions", status_code=status.HTTP_201_CREATED, tags=["jobs"])
+    def revise_scene(job_id: str, revision: SceneRevisionRequest) -> dict[str, object]:
+        """Fork one scene into a paused draft; the original job stays immutable."""
+        changes = revision.model_dump(exclude_none=True, exclude={"scene_id", "expected_content_sha256", "actor"})
+        try:
+            child_id, identity = create_scene_revision(
+                runtime, job_id, scene_id=revision.scene_id,
+                expected_content_sha256=revision.expected_content_sha256,
+                actor=revision.actor, changes=changes,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        except StaleSceneRevision as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        except (ValueError, ValidationError, ProviderValidationError) as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+        return {"job_id": child_id, "parent_job_id": job_id, "scene_id": revision.scene_id, "reviewed_identity": identity, "state": JobState.SCRIPT_APPROVAL_REQUIRED.value}
+
     @app.get("/api/jobs/{job_id}/artifacts/{name}", tags=["artifacts"])
     def get_artifact(job_id: str, name: str) -> FileResponse:
         """Serve a registered logical artifact name or its exact file name."""
@@ -1124,7 +1165,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = Path(artifact.path)
         if not path.is_file():
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="artifact is unavailable")
-        media_type = "video/mp4" if path.suffix.lower() == ".mp4" else "application/json"
+        media_type = {
+            ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg", ".wav": "audio/wav",
+        }.get(path.suffix.lower(), "application/json")
         return FileResponse(path, media_type=media_type)
 
     return app

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tubeforge.core.config import PreviewRenderConfig
+from tubeforge.core.config import PreviewRenderConfig, ShortsFinalRenderConfig
 from tubeforge.core.errors import ProviderValidationError
 from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, TimelineSegment, build_timeline, parse_frame_rate
 
@@ -159,3 +159,49 @@ def test_image_motion_can_be_disabled_without_changing_video_asset_handling(tmp_
         tmp_path / "preview.mp4.part",
     )
     assert "zoompan=" not in command[command.index("-filter_complex") + 1]
+
+
+def test_bounded_final_commands_use_one_scene_at_a_time_and_keep_audio_mix(tmp_path: Path) -> None:
+    renderer = PreviewRenderer(ShortsFinalRenderConfig())
+    asset = tmp_path / "scene.png"; asset.write_bytes(b"asset")
+    narration = tmp_path / "narration.wav"; narration.write_bytes(b"speech")
+    captions = tmp_path / "captions.ass"; captions.write_text("[Script Info]\n", encoding="utf-8")
+    music = tmp_path / "music.wav"; music.write_bytes(b"music")
+    scene = TimelineSegment("scene", "section", 0, 2.5, asset, "a" * 64, "image")
+    segment = renderer._bounded_segment_command(0, scene, 75, tmp_path / "segment-0000.mp4")
+    finish = renderer._bounded_finish_command(tmp_path / "segments.txt", narration, captions, tmp_path / "final.mp4", 2.5, music)
+
+    assert renderer.config.bounded_memory
+    assert segment.count("-i") == 1 and "zoompan=" in segment[segment.index("-filter_complex") + 1]
+    assert segment[segment.index("-frames:v") + 1] == "75"
+    second = renderer._bounded_segment_command(1, scene, 75, tmp_path / "segment-0001.mp4")
+    assert "[0:v]" in second[second.index("-filter_complex") + 1]
+    assert "[1:v]" not in second[second.index("-filter_complex") + 1]
+    assert "[v1]" in second[second.index("-filter_complex") + 1]
+    assert finish[finish.index("-f") + 1] == "concat"
+    assert "sidechaincompress=" in finish[finish.index("-filter_complex") + 1]
+    assert "subtitles=" in finish[finish.index("-filter_complex") + 1]
+    assert finish[-1].endswith("final.mp4")
+
+
+def test_bounded_render_cancellation_removes_segments_and_partial_output(tmp_path: Path) -> None:
+    asset = tmp_path / "scene.png"; asset.write_bytes(b"asset")
+    narration = tmp_path / "narration.wav"; narration.write_bytes(b"speech")
+    captions = tmp_path / "captions.ass"; captions.write_text("[Script Info]\n", encoding="utf-8")
+    segment = TimelineSegment("scene", "section", 0, 1, asset, "a" * 64, "image")
+    created: list[RunningProcess] = []
+
+    def factory(command, **_kwargs):
+        process = RunningProcess(command)
+        created.append(process)
+        return process
+
+    checks = iter((False, False, False, True))
+    renderer = PreviewRenderer(ShortsFinalRenderConfig(minimum_free_bytes=1), process_factory=factory, poll_seconds=0)
+    with pytest.raises(PreviewRenderCancelled, match="cancelled during FFmpeg"):
+        renderer.render((segment,), narration, captions, tmp_path / "final.mp4", cancellation_requested=lambda: next(checks))
+
+    assert created[0].terminated and created[0].waited
+    assert not (tmp_path / "final.mp4").exists()
+    assert not (tmp_path / "final.part.mp4").exists()
+    assert not list(tmp_path.glob("final.part.segments-*"))

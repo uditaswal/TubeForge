@@ -167,6 +167,42 @@ def test_saved_revision_requires_fresh_exact_approval(tmp_path):
         assert segment_content_package(saved)[-1].text==narrations[-1]
 
 
+def test_signed_in_scene_edit_creates_separate_review_draft(tmp_path):
+    settings=Settings(app=AppConfig(name='test',environment='test'),database=DatabaseConfig(url=f'sqlite:///{tmp_path}/scene-edit.db'),auth=AuthConfig(enabled=True,secure_cookies=False))
+    settings.pipeline.voice.artifact_root=tmp_path/'artifacts'
+    app=create_app(settings);runtime=app.state.runtime;Base.metadata.create_all(runtime.database.engine)
+    runtime.auth.create_admin('operator','long-test-password')
+    value=request().model_copy(update={'aspect_ratio':'16:9'})
+    parent=runtime.jobs.create('scene-parent',value)
+    runtime.jobs.update_state(parent.id,JobState.SCRIPT_APPROVAL_REQUIRED)
+    original=runtime.orchestrator._replace_json(parent.id,JobState.CONTENT_GENERATING,'content_package',package().model_copy(update={'request':value}).model_dump(mode='json'))
+    scene=package().scene_plans[0]
+    body={'scene_id':scene.scene_id,'expected_content_sha256':original.checksum_sha256,'visual_subject':'A more explicit source-grounded diagram','actor':'operator'}
+    with TestClient(app) as client:
+        assert client.post(f'/api/jobs/{parent.id}/scene-revisions',json=body).status_code==401
+        assert client.post('/login',json={'username':'operator','password':'long-test-password'}).status_code==200
+        client.headers['x-csrf-token']=client.cookies['tubeforge_csrf']
+        stale={**body,'expected_content_sha256':'0'*64}
+        assert client.post(f'/api/jobs/{parent.id}/scene-revisions',json=stale).status_code==409
+        assert client.post(f'/api/jobs/{parent.id}/scene-revisions',json={**body,'visual_subject':scene.visual_subject}).status_code==422
+        response=client.post(f'/api/jobs/{parent.id}/scene-revisions',json=body)
+        assert response.status_code==201,response.text
+        child=response.json()['job_id']
+        assert child!=parent.id and response.json()['state']=='script_approval_required'
+        assert runtime.jobs.get(child).state==JobState.SCRIPT_APPROVAL_REQUIRED
+        assert runtime.artifacts.get(parent.id,JobState.CONTENT_GENERATING,'content_package').checksum_sha256==original.checksum_sha256
+        assert response.json()['reviewed_identity']!=original.checksum_sha256
+        stale_approval={'status':'approved','actor':'operator','reviewed_identity':original.checksum_sha256}
+        assert client.post(f'/api/jobs/{child}/approvals/script',json=stale_approval).status_code==409
+        assert client.get(f'/api/jobs/{child}/events').json()[-1]['event_type']=='scene_revision_created'
+        assert client.get(f'/api/jobs/{child}/script').json()['package']['scene_plans'][0]['visual_subject']==body['visual_subject']
+        assert any(event['event_type']=='scene_revision_created' and event['details']['child_job_id']==child for event in client.get(f'/api/jobs/{parent.id}/events').json())
+        assert any(event['event_type']=='scene_revision_created' and event['details']['parent_job_id']==parent.id for event in client.get(f'/api/jobs/{child}/events').json())
+        assert client.get('/').status_code==200
+        assert 'id="sceneDialog"' in client.get('/').text
+        assert 'Revise one scene' in client.get('/').text
+
+
 def test_host_source_failure_blocks_before_script_or_tts(tmp_path):
     from tubeforge.core.config import CodexProviderConfig
     from tubeforge.db.repositories import GenerationCacheRepository

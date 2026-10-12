@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from tubeforge.providers.media.local_graphics import STYLE_VERSION as STORYBOARD_STYLE_VERSION
 
 from tubeforge.core.config import (
     AppConfig,
@@ -384,7 +385,7 @@ def test_piper_short_renders_real_1080x1920_with_word_alignment(tmp_path: Path) 
         assert timing["alignment"]["verified"] and timing["alignment"]["first_word_seconds"] <= 3
         assert quality["passed"] and quality["shorts"]["maximum_visual_hold_seconds"] <= 3
         assert len(set(quality["shorts"]["motion_variants"])) == 4
-        assert assets["quality"]["profile"].startswith("portrait-motion-v1:")
+        assert assets["quality"]["profile"].startswith(f"{STORYBOARD_STYLE_VERSION}:")
         assert assets["quality"]["scene_count"] == assets["quality"]["unique_scene_count"] == 6
         assert render_record["inputs"]["music"]["license_name"] == "CC BY 4.0"
         assert "sidechaincompress=" in ";".join(render_record["command"])

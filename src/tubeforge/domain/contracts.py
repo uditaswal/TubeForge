@@ -143,6 +143,16 @@ class ScenePlan(DomainModel):
     search_queries: tuple[str, ...] = Field(min_length=1, max_length=10)
     on_screen_text: str | None = Field(default=None, max_length=500)
     fallback_visual: str = Field(min_length=1, max_length=100)
+    visual_subject: str | None = Field(default=None, min_length=1, max_length=200)
+    visual_purpose: str | None = Field(default=None, min_length=1, max_length=300)
+    composition: str | None = Field(default=None, min_length=1, max_length=200)
+    visual_elements: tuple[str, ...] = Field(default=(), max_length=4)
+
+    @model_validator(mode="after")
+    def require_short_visual_elements(self) -> ScenePlan:
+        if any(not item.strip() or len(item) > 80 for item in self.visual_elements):
+            raise ValueError("visual elements must be nonblank and at most 80 characters")
+        return self
 
 
 class Chapter(DomainModel):
@@ -222,6 +232,12 @@ class VideoPlanScene(DomainModel):
     fallback_strategy: str = Field(min_length=1, max_length=100)
     camera_direction: str = Field(default="gentle pan", min_length=1, max_length=200)
     asset_references: tuple[str, ...] = Field(default=(), max_length=20)
+    visual_subject: str = Field(default="", max_length=200)
+    visual_purpose: str = Field(default="", max_length=300)
+    composition: str = Field(default="", max_length=200)
+    on_screen_text: str = Field(default="", max_length=500)
+    search_queries: tuple[str, ...] = Field(default=(), max_length=10)
+    visual_elements: tuple[str, ...] = Field(default=(), max_length=4)
 
 
 class VideoPlan(DomainModel):
@@ -250,7 +266,23 @@ def video_plan_from_package(package: ContentPackage, *, target_platform: str = "
     """Create a deterministic storyboard projection without changing old providers."""
     scenes = {scene.scene_id: scene for scene in package.scene_plans}
     duration = package.request.target_duration_seconds / len(package.script_sections)
-    projected = tuple(VideoPlanScene(scene_id=section.scene_id, duration_seconds=duration, narration=section.narration, visual_intent=scenes[section.scene_id].visual_type, preferred_strategy="licensed_asset", fallback_strategy=scenes[section.scene_id].fallback_visual, asset_references=()) for section in package.script_sections)
+    projected = tuple(
+        VideoPlanScene(
+            scene_id=section.scene_id,
+            duration_seconds=duration,
+            narration=section.narration,
+            visual_intent=scenes[section.scene_id].visual_type,
+            preferred_strategy="licensed_asset",
+            fallback_strategy=scenes[section.scene_id].fallback_visual,
+            visual_subject=scenes[section.scene_id].visual_subject or scenes[section.scene_id].search_queries[0],
+            visual_purpose=scenes[section.scene_id].visual_purpose or scenes[section.scene_id].visual_type,
+            composition=scenes[section.scene_id].composition or scenes[section.scene_id].visual_type,
+            on_screen_text=scenes[section.scene_id].on_screen_text or "",
+            search_queries=scenes[section.scene_id].search_queries,
+            visual_elements=scenes[section.scene_id].visual_elements,
+        )
+        for section in package.script_sections
+    )
     narration = "\n\n".join(section.narration for section in package.script_sections)
     return VideoPlan(topic=package.request.topic, notes=package.request.notes, target_platform=target_platform, duration_seconds=package.request.target_duration_seconds, aspect_ratio=aspect_ratio, audience=package.request.audience, language=package.request.language, hook=package.script_sections[0].narration[:500], narration=narration, style=package.request.visual_style, music_intent=package.request.music_track, continuity_identity=f"{package.request.visual_style}:{package.request.language}", scenes=projected)
 
@@ -283,6 +315,11 @@ class MediaSearchRequest(DomainModel):
     required_license: str = Field(min_length=1, max_length=200)
     orientation: str = Field(default="landscape", pattern=r"^(landscape|portrait|square|any)$")
     visual_source: str = Field(default="generated", pattern=r"^(generated|stock)$")
+    visual_subject: str = Field(default="", max_length=200)
+    visual_purpose: str = Field(default="", max_length=300)
+    composition: str = Field(default="", max_length=200)
+    on_screen_text: str = Field(default="", max_length=500)
+    visual_elements: tuple[str, ...] = Field(default=(), max_length=4)
 
     @model_validator(mode="after")
     def require_safe_queries(self) -> MediaSearchRequest:

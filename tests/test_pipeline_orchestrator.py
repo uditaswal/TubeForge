@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 import wave
 
 import pytest
@@ -13,8 +14,9 @@ from tubeforge.db.repositories import ApprovalRepository, ArtifactRepository, Jo
 from tubeforge.db.session import create_database
 from tubeforge.domain.contracts import AssetCandidate, ContentPackage, ContentRequest, SourceReference
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.pipeline.assets import AssetLimits
+from tubeforge.pipeline.assets import AssetLimits, scene_request
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
+from tubeforge.pipeline.scene_revisions import StaleSceneRevision, create_scene_revision
 from tubeforge.pipeline.sources import SourceSnapshot
 from tubeforge.pipeline.publication import identity as publication_identity
 from tubeforge.rendering.preview import checksum
@@ -376,6 +378,9 @@ def test_shorts_pipeline_checkpoints_word_alignment_and_highlighted_captions(pip
     caption_text = Path(captions.path).read_text(encoding="utf-8")
     assert "PlayResX: 1080" in caption_text and "Dialogue:" in caption_text
     assert plan["aspect_ratio"] == "9:16"
+    storyboard = runner._required_json(job_id, JobState.ASSET_ACQUISITION, "storyboard_manifest")
+    assert len(storyboard["scenes"]) == len(plan["scenes"])
+    assert Path(storyboard["contact_sheets"][0]).is_file()
     assert portrait_preview.calls == 1
 
 def test_assets_stage_acquires_validated_fake_asset_and_reuses_checkpoint(tmp_path: Path) -> None:
@@ -401,6 +406,88 @@ def test_assets_stage_acquires_validated_fake_asset_and_reuses_checkpoint(tmp_pa
         assert media.calls == calls
     finally:
         database.dispose()
+
+
+def test_asset_resume_reuses_unchanged_scenes_but_refreshes_changed_visual_direction(pipeline) -> None:
+    runner, _, media, *_ = pipeline
+    job_id = "changed-scene-assets"
+    runner.jobs.create(job_id, request())
+    assert runner.run(job_id).state is JobState.SCRIPT_APPROVAL_REQUIRED
+    approve(runner, job_id, ApprovalGate.SCRIPT)
+    with pytest.raises(PipelineInterrupted):
+        runner.run(job_id, interrupt_after=JobState.ASSET_ACQUISITION)
+
+    package = ContentPackage.model_validate(runner._required_json(job_id, JobState.CONTENT_GENERATING, "content_package"))
+    accepted = {}
+    for scene in package.scene_plans:
+        media_request = scene_request(scene)
+        route = runner.visual_router.route(scene)
+        candidate = media.search(media_request)[0]
+        path, cache_key, metadata = runner.asset_acquirer.acquire("FakeMediaProvider", candidate)
+        accepted[scene.scene_id] = {
+            "scene_id": scene.scene_id, "request": media_request.model_dump(mode="json"),
+            "resolved_request": media_request.model_dump(mode="json"),
+            "visual_route": route.model_dump(mode="json"),
+            "candidate": candidate.model_dump(mode="json"), "cache_key": cache_key,
+            "path": str(path), "checksum_sha256": metadata["checksum_sha256"], "validation": metadata,
+        }
+    runner._replace_json(job_id, JobState.ASSET_ACQUISITION, "asset_manifest", {"scenes": accepted})
+    original_hashes = {scene_id: item["checksum_sha256"] for scene_id, item in accepted.items()}
+    changed = package.scene_plans[1].model_copy(update={"visual_subject": "A different approved visual subject"})
+    revised = package.model_copy(update={"scene_plans": (package.scene_plans[0], changed, *package.scene_plans[2:])})
+    runner._replace_json(job_id, JobState.CONTENT_GENERATING, "content_package", revised.model_dump(mode="json"))
+    calls_before = media.calls
+    with pytest.raises(PipelineInterrupted):
+        runner.run(job_id, interrupt_after=JobState.ASSETS_READY)
+    assert media.calls == calls_before + 1
+    after = runner._required_json(job_id, JobState.ASSET_ACQUISITION, "asset_manifest")["scenes"]
+    assert after[package.scene_plans[0].scene_id]["checksum_sha256"] == original_hashes[package.scene_plans[0].scene_id]
+    assert after[changed.scene_id]["request"]["visual_subject"] == "A different approved visual subject"
+
+
+def test_scene_revision_forks_review_and_reuses_unaffected_assets_and_voice(pipeline) -> None:
+    runner, content, media, voice, _ = pipeline
+    parent_id = "scene-parent"
+    runner.jobs.create(parent_id, request())
+    assert runner.run(parent_id).state is JobState.SCRIPT_APPROVAL_REQUIRED
+    parent_content = runner._required_artifact(parent_id, JobState.CONTENT_GENERATING, "content_package")
+    runner.approvals.record("parent-script", parent_id, ApprovalGate.SCRIPT, reviewed_identity=parent_content.checksum_sha256)
+    assert runner.run(parent_id).state is JobState.PREVIEW_READY
+    original_assets = runner._required_json(parent_id, JobState.ASSET_ACQUISITION, "asset_manifest")["scenes"]
+    original_package = ContentPackage.model_validate(runner._required_json(parent_id, JobState.CONTENT_GENERATING, "content_package"))
+    original_voice = {item["phrase_id"]: item["checksum_sha256"] for item in runner._required_json(parent_id, JobState.VOICE_GENERATION, "voice_manifest")["voices"]}
+    scene = original_package.scene_plans[1]
+    section = next(item for item in original_package.script_sections if item.scene_id == scene.scene_id)
+    runtime = SimpleNamespace(jobs=runner.jobs, orchestrator=runner, events=runner.events)
+    with pytest.raises(StaleSceneRevision):
+        create_scene_revision(runtime, parent_id, scene_id=scene.scene_id, expected_content_sha256="0" * 64, actor="operator", changes={"visual_subject": "An updated teaching diagram"})
+    child_id, child_hash = create_scene_revision(
+        runtime, parent_id, scene_id=scene.scene_id,
+        expected_content_sha256=parent_content.checksum_sha256, actor="operator",
+        changes={"visual_subject": "An updated teaching diagram", "narration": section.narration + " Now compare them."},
+    )
+    assert runner.jobs.get(child_id).state is JobState.SCRIPT_APPROVAL_REQUIRED
+    assert runner._required_artifact(child_id, JobState.CONTENT_GENERATING, "content_package").checksum_sha256 == child_hash != parent_content.checksum_sha256
+    assert runner._required_artifact(parent_id, JobState.CONTENT_GENERATING, "content_package").checksum_sha256 == parent_content.checksum_sha256
+    runner.approvals.record("stale-child-script", child_id, ApprovalGate.SCRIPT, reviewed_identity=parent_content.checksum_sha256)
+    assert runner.run(child_id).state is JobState.SCRIPT_APPROVAL_REQUIRED
+    assert runner.artifacts.get(child_id, JobState.VOICE_GENERATION, "narration") is None
+    media_before, voice_before, content_before = media.calls, voice.calls, content.calls
+    runner.approvals.record("child-script", child_id, ApprovalGate.SCRIPT, reviewed_identity=child_hash)
+    assert runner.run(child_id).state is JobState.PREVIEW_READY
+    assert content.calls == content_before  # No second model invocation.
+    assert media.calls == media_before + 1
+    assert voice.calls == voice_before + 1
+    revised_assets = runner._required_json(child_id, JobState.ASSET_ACQUISITION, "asset_manifest")["scenes"]
+    for scene_id in original_assets:
+        if scene_id != scene.scene_id:
+            assert revised_assets[scene_id]["checksum_sha256"] == original_assets[scene_id]["checksum_sha256"]
+    assert revised_assets[scene.scene_id]["request"]["visual_subject"] == "An updated teaching diagram"
+    revised_voice = {item["phrase_id"]: item["checksum_sha256"] for item in runner._required_json(child_id, JobState.VOICE_GENERATION, "voice_manifest")["voices"]}
+    for phrase_id, checksum in original_voice.items():
+        if phrase_id in revised_voice:
+            assert revised_voice[phrase_id] == checksum
+    assert runner._required_json(child_id, JobState.PREVIEW_RENDERING, "preview_manifest")["inputs"]["content"] == child_hash
 
 
 def test_stock_asset_shortage_falls_back_to_local_cc0_art_with_provenance(tmp_path: Path) -> None:

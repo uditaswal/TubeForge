@@ -19,6 +19,7 @@ from tubeforge.domain.contracts import (
     SourceReference,
     ThumbnailBrief,
     VideoMetadata,
+    video_plan_from_package,
 )
 
 
@@ -84,6 +85,19 @@ def test_content_package_validates_cross_references() -> None:
     )
 
     assert package.claims[0].source_ids == ("S1",)
+    plan = video_plan_from_package(package)
+    assert plan.scenes[0].visual_subject == "rain formation diagram"
+    assert plan.scenes[0].visual_purpose == "diagram"
+    assert plan.scenes[0].search_queries == ("rain formation diagram",)
+    specified = package.scene_plans[0].model_copy(update={
+        "visual_subject": "Water vapour and droplets",
+        "visual_purpose": "Show condensation",
+        "composition": "layer diagram",
+        "visual_elements": ("water vapour", "droplets"),
+    })
+    directed = video_plan_from_package(package.model_copy(update={"scene_plans": (specified,)}))
+    assert directed.scenes[0].visual_subject == "Water vapour and droplets"
+    assert directed.scenes[0].visual_elements == ("water vapour", "droplets")
 
 
 def test_contract_rejects_unknown_source_and_unsupported_factual_section() -> None:

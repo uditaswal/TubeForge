@@ -40,6 +40,21 @@ section with sentence punctuation; avoid repeatedly opening sections with the
 same phrase. Keep each scene vertically composable with concise display text
 and a concrete changing subject or composition. Describe a visual that teaches
 the point; generic decorative imagery alone is insufficient for a tutorial.
+In each scene plan, supply `visual_subject` (the specific thing viewers see),
+`visual_purpose` (what it explains about that scene's narration), and
+`composition` (the shot, screen layout or explanatory diagram). Keep
+`on_screen_text` short and sourced. For a command tutorial, show the actual
+supported command or operation rather than a generic terminal backdrop.
+Supply two to four concise `visual_elements` naming what the audience should
+see within that composition, in the order it changes or connects. These are
+source-grounded display labels, not media search keywords or new claims.
+Write each element as display-ready content that can be placed directly inside
+the diagram: the supported command or visible output, a specific object, or
+the state before and after an action. Avoid production placeholders such as
+"command", "terminal", "image outline", "two rows", "warning", or "run
+control". If a source supports only the command name, show that exact name
+without inventing arguments or output. For a comparison, use the same concrete
+labels on both sides so the viewer can see what is shared and what changes.
 
 ## Output and review
 

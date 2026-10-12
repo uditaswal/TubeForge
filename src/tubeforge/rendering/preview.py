@@ -1,6 +1,6 @@
 """Deterministic FFmpeg preview rendering with validated argument arrays."""
 from __future__ import annotations
-import hashlib, json, math, shutil, subprocess, time
+import hashlib, json, math, shutil, subprocess, tempfile, time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -214,31 +214,81 @@ class PreviewRenderer:
         output.parent.mkdir(parents=True,exist_ok=True)
         if shutil.disk_usage(output.parent).free<self.config.minimum_free_bytes: raise RetryableProviderError("insufficient disk space for preview render")
         if music is not None and (not music.is_file() or music.stat().st_size == 0): raise ProviderValidationError("selected music is missing or empty")
-        temporary=output.with_name(f"{output.stem}.part{output.suffix}"); temporary.unlink(missing_ok=True); command=self.command(segments,narration,captions,temporary,music=music)
+        temporary=output.with_name(f"{output.stem}.part{output.suffix}"); temporary.unlink(missing_ok=True)
+        deadline=time.monotonic()+self.config.timeout_seconds
         try:
-            if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before FFmpeg execution")
-            # FFmpeg can emit enough diagnostics to fill a PIPE while a long
-            # render is being polled.  We classify failures by exit status, so
-            # discard the bounded diagnostic stream instead of risking a child
-            # blocked on an unread pipe.
-            process=self.process_factory(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
-            deadline=time.monotonic()+self.config.timeout_seconds
-            while process.poll() is None:
-                if cancellation_requested and cancellation_requested():
-                    self._stop_process(process, graceful=True)
-                    raise PreviewRenderCancelled("cancelled during FFmpeg execution")
-                if time.monotonic() >= deadline:
-                    self._stop_process(process, graceful=False)
-                    raise subprocess.TimeoutExpired(command,self.config.timeout_seconds)
-                time.sleep(self.poll_seconds)
-            if process.returncode: raise RetryableProviderError("FFmpeg preview render failed")
+            if self.config.bounded_memory:
+                command=self._render_bounded(segments,narration,captions,temporary,music,cancellation_requested,deadline)
+            else:
+                command=self.command(segments,narration,captions,temporary,music=music)
+                self._run_command(command,cancellation_requested,deadline)
             if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview validation")
             metadata=self.validate(temporary,segments[-1].end_seconds)
             if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview acceptance")
-            temporary.replace(output); return {"command":command,"metadata":metadata,"checksum_sha256":checksum(output)}
+            temporary.replace(output); return {"command":command,"metadata":metadata,"checksum_sha256":checksum(output),"render_strategy":"bounded-segments" if self.config.bounded_memory else "single-graph"}
         except subprocess.TimeoutExpired as error: raise RetryableProviderError("FFmpeg preview render timed out") from error
         except OSError as error: raise ProviderValidationError("FFmpeg executable is unavailable") from error
         finally: temporary.unlink(missing_ok=True)
+
+    def _run_command(self,command:list[str],cancellation_requested:Callable[[],bool]|None,deadline:float)->None:
+        if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before FFmpeg execution")
+        # Discard diagnostics rather than risk blocking on an unread FFmpeg pipe.
+        process=self.process_factory(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,shell=False)
+        while process.poll() is None:
+            if cancellation_requested and cancellation_requested():
+                self._stop_process(process,graceful=True)
+                raise PreviewRenderCancelled("cancelled during FFmpeg execution")
+            if time.monotonic()>=deadline:
+                self._stop_process(process,graceful=False)
+                raise subprocess.TimeoutExpired(command,self.config.timeout_seconds)
+            time.sleep(self.poll_seconds)
+        if process.returncode: raise RetryableProviderError("FFmpeg preview render failed")
+
+    def _render_bounded(self,segments:tuple[TimelineSegment,...],narration:Path,captions:Path,output:Path,music:Path|None,cancellation_requested:Callable[[],bool]|None,deadline:float)->list[str]:
+        """Encode one paced scene at a time, then burn captions over their concat.
+
+        The original graph held every 1080x1920 decoder and zoompan buffer in
+        memory simultaneously. Sequential scene files cap the live filter
+        graph at one scene while preserving the same scene order and motion.
+        All intermediates live beside the atomic output and are removed on
+        success, failure or cancellation.
+        """
+        paced=pace_segments(segments,self.config.scene_max_duration_seconds)
+        with tempfile.TemporaryDirectory(prefix=f"{output.stem}.segments-",dir=output.parent) as directory:
+            workspace=Path(directory)
+            clips=[]
+            for index,scene in enumerate(paced):
+                if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled between FFmpeg segments")
+                frame_count=round(scene.end_seconds*self.config.fps)-round(scene.start_seconds*self.config.fps)
+                if frame_count<=0: raise ProviderValidationError("paced scene has no output frames")
+                clip=workspace/f"segment-{index:04d}.mp4"
+                self._run_command(self._bounded_segment_command(index,scene,frame_count,clip),cancellation_requested,deadline)
+                clips.append(clip)
+            concat=workspace/"segments.txt"
+            concat.write_text("".join(f"file '{clip.name}'\n" for clip in clips),encoding="utf-8")
+            command=self._bounded_finish_command(concat,narration,captions,output,segments[-1].end_seconds,music)
+            self._run_command(command,cancellation_requested,deadline)
+            return command
+
+    def _bounded_segment_command(self,index:int,scene:TimelineSegment,frame_count:int,output:Path)->list[str]:
+        duration=f"{scene.duration_seconds:.6f}"
+        input_args=["-loop","1","-t",duration,"-i",str(scene.asset_path)] if scene.media_type=="image" else ["-stream_loop","-1","-t",duration,"-i",str(scene.asset_path)]
+        # Motion variant uses the global cut index, but each FFmpeg process
+        # has only one input stream, always numbered zero.
+        graph=self._scene_filter(index,scene,duration).replace(f"[{index}:v]","[0:v]",1)
+        return [self.ffmpeg,"-nostdin","-y","-v","error","-threads",str(self.config.threads),"-filter_complex_threads",str(self.config.threads),"-threads",str(self.config.threads),*input_args,"-filter_complex",graph,"-map",f"[v{index}]","-an","-c:v",self.config.video_codec,"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-frames:v",str(frame_count),"-movflags","+faststart",str(output)]
+
+    def _bounded_finish_command(self,concat:Path,narration:Path,captions:Path,output:Path,duration:float,music:Path|None)->list[str]:
+        caption=str(captions.resolve()).replace("\\","/").replace(":","\\:").replace("'","\\'")
+        style=f"FontSize={self.config.caption_font_size},Alignment=2,MarginV={self.config.caption_margin_vertical},MarginL={self.config.caption_margin_horizontal},MarginR={self.config.caption_margin_horizontal},Outline=2,Shadow=1"
+        command=[self.ffmpeg,"-nostdin","-y","-v","error","-threads",str(self.config.threads),"-filter_complex_threads",str(self.config.threads),"-f","concat","-safe","1","-i",str(concat),"-i",str(narration)]
+        filters=[f"[0:v]subtitles='{caption}':force_style='{style}',tpad=stop_mode=clone:stop_duration=10[outv]"]
+        if music is None:
+            filters.append("[1:a]apad=pad_dur=10[outa]")
+        else:
+            command.extend(("-stream_loop","-1","-i",str(music)))
+            filters.extend(("[1:a]asplit=2[narration_mix][speech_key]","[2:a]volume=0.16[music_quiet]","[music_quiet][speech_key]sidechaincompress=threshold=0.015:ratio=10:attack=20:release=350[ducked_music]","[narration_mix][ducked_music]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95,apad=pad_dur=10[outa]"))
+        return [*command,"-filter_complex",";".join(filters),"-map","[outv]","-map","[outa]","-c:v",self.config.video_codec,"-threads",str(self.config.threads),"-pix_fmt",self.config.pixel_format,"-r",str(self.config.fps),"-c:a",self.config.audio_codec,"-b:a",self.config.audio_bitrate,"-t",f"{duration:.6f}","-movflags","+faststart",str(output)]
 
     @staticmethod
     def _stop_process(process: Any, *, graceful: bool) -> None:
