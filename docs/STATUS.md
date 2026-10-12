@@ -1,6 +1,6 @@
 # TubeForge Status
 
-Last reviewed: 2026-10-12
+Last reviewed: 2026-10-13
 Release target: R1 — Reliable Local Studio
 
 `docs/STATUS.md` is the authoritative current-status record. Historical work
@@ -8,6 +8,17 @@ evidence belongs in `AUTONOMOUS_PROGRESS.md`; historical overnight planning is
 retained under `docs/overnight/`.
 
 ## Forward implementation plan
+
+Terminal visual quality phase 1 is **VERIFIED in the homeserver checkout**: production local-art
+terminal scenes now render the approved command and result as a legible console,
+and the Shorts final H.264 profile explicitly uses CRF 18 with CRF 14 temporary
+clips in the memory-bounded path. The homeserver one-off Compose run passed 67
+relevant tests. A three-second 1080×1920 H.264/AAC bounded render passed; the
+encoded frame and full decode were inspected. See [the phase plan](planning/terminal-visual-quality-plan.md).
+The running production worker has not been restarted and may retain its loaded
+code/configuration until its next restart. Animated typing/reveal synced to
+narration remains phase 2; this phase alone does not establish parity with
+Claude's complete video.
 
 Current priority is the user-requested [Docker Short quality benchmark](../design_doc/docker-short-benchmark.md). Reference/ZIP review, source-grounded script acceptance and local artifact production are **VERIFIED**. The [finished MP4](../artifacts/benchmark/docker-short/final/docker-short.mp4) is 44.405s, 1080×1920/30fps, −15.73 LUFS and −1.67 dBTP. Final-byte checks, full decode, 52 short audio-aligned caption groups, all-frame text bounds, encoded frame inspection and black/silence checks passed. **Overall creative acceptance is BLOCKED** pending the requested user listening/comparison review: this environment cannot hear audio. The [guide and review](DOCKER_SHORT_BENCHMARK_GUIDE.md) distinguish measured improvements from subjective judgment. This is a local benchmark, not a claim that the new renderer is integrated into the production worker.
 

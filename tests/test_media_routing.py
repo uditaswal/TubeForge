@@ -62,6 +62,11 @@ def test_generated_shorts_art_is_full_hd_portrait_and_scene_specific(tmp_path) -
     assert report["passed"] is True
     assert report["unique_scene_count"] == 2
 
+    legacy = json.loads(json.dumps(manifest))
+    for item in legacy["scenes"].values():
+        item["candidate"]["source_version"] = item["candidate"]["source_version"].replace(STYLE_VERSION, "portrait-storyboard-v9")
+    assert validate_shorts_visual_manifest(legacy)["passed"] is True
+
     manifest["scenes"]["scene-2"]["checksum_sha256"] = "a" * 64
     with pytest.raises(ProviderValidationError, match="distinct"):
         validate_shorts_visual_manifest(manifest)
@@ -87,6 +92,21 @@ def test_local_storyboard_frame_changes_with_scene_subject_and_display_text(tmp_
     recovered = provider.search(base)[0]
     assert recovered.local_path == first.local_path
     assert first_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_terminal_scene_shows_the_approved_command_and_rejects_unreadable_text(tmp_path) -> None:
+    provider = create_media_provider(MediaPipelineConfig(provider="hybrid"), FakeProviderConfig(artifact_root=tmp_path))
+    request = _request("generated").model_copy(update={
+        "orientation": "portrait", "visual_type": "terminal",
+        "visual_subject": "Inspect your container", "composition": "large terminal",
+        "on_screen_text": "docker ps -a",
+        "visual_elements": ("CONTAINER ID  STATUS", "demo  Exited (0)"),
+    })
+    candidate = provider.search(request)[0]
+    assert candidate.local_path and Path(candidate.local_path).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert (candidate.width, candidate.height) == (1080, 1920)
+    with pytest.raises(ProviderValidationError, match="too long to read"):
+        provider.search(request.model_copy(update={"on_screen_text": "docker " + "very-long-argument " * 30}))
 
 
 

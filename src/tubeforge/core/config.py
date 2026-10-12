@@ -279,6 +279,7 @@ class RenderProfile(BaseModel):
     fps_tolerance: float = Field(default=0.05, ge=0, le=0.25)
     pixel_format: str = Field(default="yuv420p", pattern=r"^[A-Za-z0-9_]+$")
     video_codec: str = Field(default="libx264", pattern=r"^[A-Za-z0-9_.-]+$")
+    video_crf: int = Field(default=23, ge=0, le=51)
     audio_codec: str = Field(default="aac", pattern=r"^[A-Za-z0-9_.-]+$")
     audio_bitrate: str = Field(default="128k", pattern=r"^[0-9]+[kKmM]$")
     threads: int = Field(default=1, ge=1, le=4)

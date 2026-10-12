@@ -162,7 +162,7 @@ def test_image_motion_can_be_disabled_without_changing_video_asset_handling(tmp_
 
 
 def test_bounded_final_commands_use_one_scene_at_a_time_and_keep_audio_mix(tmp_path: Path) -> None:
-    renderer = PreviewRenderer(ShortsFinalRenderConfig())
+    renderer = PreviewRenderer(ShortsFinalRenderConfig(video_crf=18))
     asset = tmp_path / "scene.png"; asset.write_bytes(b"asset")
     narration = tmp_path / "narration.wav"; narration.write_bytes(b"speech")
     captions = tmp_path / "captions.ass"; captions.write_text("[Script Info]\n", encoding="utf-8")
@@ -174,6 +174,7 @@ def test_bounded_final_commands_use_one_scene_at_a_time_and_keep_audio_mix(tmp_p
     assert renderer.config.bounded_memory
     assert segment.count("-i") == 1 and "zoompan=" in segment[segment.index("-filter_complex") + 1]
     assert segment[segment.index("-frames:v") + 1] == "75"
+    assert segment[segment.index("-crf") + 1] == "14"
     second = renderer._bounded_segment_command(1, scene, 75, tmp_path / "segment-0001.mp4")
     assert "[0:v]" in second[second.index("-filter_complex") + 1]
     assert "[1:v]" not in second[second.index("-filter_complex") + 1]
@@ -181,6 +182,7 @@ def test_bounded_final_commands_use_one_scene_at_a_time_and_keep_audio_mix(tmp_p
     assert finish[finish.index("-f") + 1] == "concat"
     assert "sidechaincompress=" in finish[finish.index("-filter_complex") + 1]
     assert "subtitles=" in finish[finish.index("-filter_complex") + 1]
+    assert finish[finish.index("-crf") + 1] == "18"
     assert finish[-1].endswith("final.mp4")
 
 
