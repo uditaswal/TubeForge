@@ -43,14 +43,17 @@ sentence of at most 18 words, complete sentences, and a concrete final CTA.
 Rejected drafts are not cached and may be regenerated twice with the bounded
 local validator result.
 
-Generated Shorts frames use a local standard-library graphics provider at
-native 1080×1920. Every scene shares the
-`portrait-motion-v1:midnight-cyan-violet-amber` descriptor while its approved
-visual query deterministically selects a distinct layout and focal point. The
-asset gate checks native portrait resolution, unique scene bytes, and one
-palette identity. Portrait stock must be at least 720×1280; unsuitable stock
-falls back before acquisition. The final gate also verifies at least three
-camera variants, maximum hold time, and caption safe-area/line-width limits.
+Generated Shorts frames use local FFmpeg storyboard graphics at native
+1080×1920. Each scene carries an approved subject, purpose, composition and
+display elements; old packages use search-query fallback labels that require
+visual review. The current style descriptor is
+`portrait-storyboard-v6:midnight-cyan-violet-amber`. Asset acceptance stores
+a complete scene-linked manifest and contact sheet and checks native portrait
+resolution, unique scene bytes and one palette identity. Those technical checks
+do not prove the diagrams teach the narration; inspect the contact sheet.
+Portrait stock must be at least 720×1280; unsuitable stock falls back before
+acquisition. The final gate also verifies camera variants, maximum hold time,
+and caption safe-area/line-width limits.
 
 Music comes only from the approved local catalog. Dashboard uploads require a
 decodable audio file, source URL, actual licence and terms URL, attribution

@@ -30,6 +30,8 @@ from tubeforge.pipeline.narration import NarrationPhrase, segment_content_packag
 from tubeforge.pipeline.music import MusicCatalog
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
 from tubeforge.pipeline.quality import validate_final_artifact
+from tubeforge.pipeline.storyboard import render_contact_sheets, storyboard_manifest
+from tubeforge.providers.media.local_graphics import STYLE_VERSION as STORYBOARD_STYLE_VERSION
 from tubeforge.pipeline.visual_router import VisualRouter
 from tubeforge.pipeline.variants import plan_variants
 from tubeforge.pipeline.sources import SourceIngestor, source_packet
@@ -270,10 +272,13 @@ class PipelineOrchestrator:
             accepted = manifest["scenes"]
             for scene in package.scene_plans:
                 if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before asset search")
-                current = accepted.get(scene.scene_id)
-                if current and self._accepted_asset_valid(current): continue
                 route = self.visual_router.route(scene, visual_source=job.request.visual_source)
                 request = scene_request(scene, visual_source=job.request.visual_source, aspect_ratio=job.request.aspect_ratio)
+                current = accepted.get(scene.scene_id)
+                if (isinstance(current, dict) and current.get("request") == request.model_dump(mode="json")
+                        and (current.get("fallback") is not None or current.get("visual_route") == route.model_dump(mode="json"))
+                        and self._accepted_asset_valid(current)):
+                    continue
                 resolved_request = request
                 fallback: dict[str, str] | None = None
                 try:
@@ -301,6 +306,17 @@ class PipelineOrchestrator:
                 self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", manifest)
             selected = {scene_id: AssetCandidate.model_validate(item["candidate"]) for scene_id, item in accepted.items()}
             self._replace_json(job.id, JobState.ASSET_ACQUISITION, "license_manifest", attribution_manifest(selected))
+            if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before contact sheet")
+            visual_plan = video_plan_from_package(package, aspect_ratio=job.request.aspect_ratio)
+            self._replace_json(job.id, JobState.CONTENT_GENERATING, "video_plan", visual_plan.model_dump(mode="json"))
+            visual_review = storyboard_manifest(package, visual_plan, accepted)
+            pages = render_contact_sheets(visual_review, self._artifact_path(job.id, "storyboard"))
+            if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled after contact sheet")
+            for index, page in enumerate(pages, 1):
+                self._save_file(job.id, JobState.ASSET_ACQUISITION, f"contact_sheet_{index:03d}", page,
+                                {"generator": "ffmpeg", "scene_count": len(visual_review["scenes"]), "page": index})
+            visual_review["contact_sheets"] = [str(page) for page in pages]
+            self._replace_json(job.id, JobState.ASSET_ACQUISITION, "storyboard_manifest", visual_review)
             self._transition(job, JobState.ASSETS_READY); return
         if job.state is JobState.ASSETS_READY:
             self._transition(job, JobState.VOICE_GENERATION); return
@@ -366,7 +382,7 @@ class PipelineOrchestrator:
                     timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
                     words = tuple(WordTiming(**value) for value in timing.get("words", []))
                     profile = self.shorts_final_renderer.config
-                    vtt = render_highlighted_ass(words, width=profile.width, height=profile.height, font_size=profile.caption_font_size, margin_vertical=profile.caption_margin_vertical, margin_horizontal=profile.caption_margin_horizontal)
+                    vtt = render_highlighted_ass(words, width=profile.width, height=profile.height, font_size=profile.caption_font_size, margin_vertical=profile.caption_margin_vertical, margin_horizontal=profile.caption_margin_horizontal, phrases=cues)
                 else:
                     vtt = render_vtt(cues, self.voice_config.caption_line_length)
             else:
@@ -736,7 +752,7 @@ class PipelineOrchestrator:
             result = renderer.render(segments, Path(narration.path), Path(captions.path), output, music=music_path, cancellation_requested=cancellation_requested)
         self._ensure_ownership(force=True)
         identity = hashlib.sha256(json.dumps({"source_render_identity": source_render_identity, "artifact_checksum": result["checksum_sha256"], "render_instance": uuid.uuid4().hex}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        provenance = {"render_identity": identity, "source_render_identity": source_render_identity, "renderer_template_version": renderer.template_version, "input_identity": input_identity, "inputs": inputs, "probe": result["metadata"], "validation": result["metadata"], "command": result["command"], "approval_identity": approval_identity, "approval_id": approval_id}
+        provenance = {"render_identity": identity, "source_render_identity": source_render_identity, "renderer_template_version": renderer.template_version, "render_strategy": result.get("render_strategy", "single-graph"), "input_identity": input_identity, "inputs": inputs, "probe": result["metadata"], "validation": result["metadata"], "command": result["command"], "approval_identity": approval_identity, "approval_id": approval_id}
         artifact = self._save_artifact(Artifact(job.id, stage, name, str(output), str(result["checksum_sha256"]), provenance))
         self._replace_json(job.id, stage, f"{name}_manifest", {**provenance, "artifact_checksum": artifact.checksum_sha256})
         _event("render_completed", job_id=job.id, render=name, output=str(output), checksum_sha256=artifact.checksum_sha256)
@@ -944,6 +960,10 @@ class PipelineOrchestrator:
             candidate_data = value["candidate"]
             if not isinstance(candidate_data, dict) or not {"license_name", "editorial_only", "review_required", "attribution_required"}.issubset(candidate_data): return False
             candidate = AssetCandidate.model_validate(candidate_data)
+            if candidate.provider_asset_id.startswith("local-motion-"):
+                return False  # Rebuild abstract v1 graphics from the approved scene fields.
+            if candidate.provider_asset_id.startswith("local-storyboard-") and not str(candidate.source_version or "").startswith(STORYBOARD_STYLE_VERSION + ":"):
+                return False  # A resumed asset stage must use the current graphics design.
             if not (
                 path.is_file()
                 and path.stat().st_size > 0

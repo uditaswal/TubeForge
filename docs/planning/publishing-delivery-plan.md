@@ -1,5 +1,7 @@
 # Publishing pipeline delivery plan
 
+Forward execution now follows [the consolidated publishing/dashboard plan](../../design_doc/tubeforge-publishing-design.md). Retain this document’s earlier inventory and evidence; current release state remains in `docs/STATUS.md`.
+
 This plan turns the 4 October 2026 publishing design and dashboard concept into
 repository work. The attached HTML is a **sample interaction**, not an app to
 deploy or evidence of connected accounts. `docs/STATUS.md` is the authoritative

@@ -25,8 +25,16 @@ autonomous_logs/
 models/*.onnx
 models/*.bin
 issues.md
+design_doc/*
+!design_doc/tubeforge-publishing-design.md
+!design_doc/tubeforge-implementation-order.md
+!design_doc/tubeforge-dashboard.html
+!design_doc/docker-short-benchmark.md
+
 # Generated acceptance media; retain and inspect locally, but do not commit it.
 artifacts/smoke/
+artifacts/benchmark/
+.venv-benchmark/
 # Locally built deployment wheels
 artifacts/wheels/
 

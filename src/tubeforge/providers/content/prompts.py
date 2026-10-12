@@ -72,6 +72,18 @@ def validate_video_package(package: ContentPackage, request: ContentRequest, *, 
     planned_scenes = [scene.scene_id for scene in package.scene_plans]
     if section_scenes != planned_scenes:
         raise ProviderValidationError(f"{provider_name} output must map ordered script sections one-to-one to ordered scene plans")
+    if request.prompt_version == CONTENT_TEMPLATE_VERSION:
+        incomplete = [
+            scene.scene_id for scene in package.scene_plans
+            if not (scene.visual_subject and scene.visual_subject.strip()
+                    and scene.visual_purpose and scene.visual_purpose.strip()
+                    and scene.composition and scene.composition.strip()
+                    and scene.visual_elements)
+        ]
+        if incomplete:
+            raise ProviderValidationError(
+                f"{provider_name} storyboard scenes lack a concrete subject, purpose, composition or visual elements: {', '.join(incomplete)}"
+            )
     narration = " ".join(section.narration.strip() for section in package.script_sections)
     word_count = len(re.findall(r"\b\w+\b", narration, flags=re.UNICODE))
     # Normal narration is commonly around 2--3 words/second. Keep generous

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import re
 import textwrap
 from dataclasses import dataclass
 
@@ -80,6 +81,7 @@ def render_highlighted_ass(
     margin_vertical: int,
     margin_horizontal: int,
     words_per_cue: int = 3,
+    phrases: tuple[TimedPhrase, ...] | None = None,
 ) -> str:
     """Render word-timed, safe-area portrait captions with active highlighting."""
     if not words:
@@ -96,17 +98,32 @@ def render_highlighted_ass(
         "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
     )
     rows = [header]
-    for index, word in enumerate(words):
-        group_start = (index // words_per_cue) * words_per_cue
-        group = words[group_start : group_start + words_per_cue]
+    caption_words = _caption_words(words, phrases)
+    for index, word in enumerate(caption_words):
+        phrase_start = index
+        while phrase_start and caption_words[phrase_start - 1].phrase_id == word.phrase_id:
+            phrase_start -= 1
+        group_start = phrase_start + ((index - phrase_start) // words_per_cue) * words_per_cue
+        group = caption_words[group_start : group_start + words_per_cue]
+        group = tuple(candidate for candidate in group if candidate.phrase_id == word.phrase_id)
         rendered = []
         for candidate in group:
             value = _ass_escape(candidate.word.upper())
             rendered.append(f"{{\\c&H0000D7FF&\\b1}}{value}{{\\rShorts}}" if candidate.ordinal == word.ordinal else value)
-        if sum(len(candidate.word) for candidate in group) + max(0, len(group) - 1) > 16 and len(rendered) > 1:
-            split_at = (len(rendered) + 1) // 2
+        lengths = [len(candidate.word) for candidate in group]
+        if sum(lengths) + max(0, len(group) - 1) > 16 and len(rendered) > 1:
+            choices = []
+            for split_at in range(1, len(group)):
+                first = sum(lengths[:split_at]) + split_at - 1
+                second = sum(lengths[split_at:]) + len(group) - split_at - 1
+                choices.append((max(first, second), abs(first - second), split_at))
+            longest, _, split_at = min(choices)
+            if longest > 18:
+                raise ValueError("highlighted caption exceeds portrait line width")
             cue_text = " ".join(rendered[:split_at]) + r"\N" + " ".join(rendered[split_at:])
         else:
+            if sum(lengths) + max(0, len(group) - 1) > 18:
+                raise ValueError("highlighted caption exceeds portrait line width")
             cue_text = " ".join(rendered)
         rows.append(
             "Dialogue: 0,"
@@ -114,6 +131,39 @@ def render_highlighted_ass(
             f"Shorts,,{margin_horizontal},{margin_horizontal},{margin_vertical},,{cue_text}\n"
         )
     return "".join(rows)
+
+
+def _caption_words(words: tuple[WordTiming, ...], phrases: tuple[TimedPhrase, ...] | None) -> tuple[WordTiming, ...]:
+    """Keep punctuation and CLI tokens intact while using the aligned word times."""
+    if phrases is None:
+        return words
+    by_phrase: dict[str, list[WordTiming]] = {}
+    for word in words:
+        by_phrase.setdefault(word.phrase_id, []).append(word)
+    output: list[WordTiming] = []
+    for cue in phrases:
+        aligned = by_phrase.pop(cue.phrase.phrase_id, None)
+        if not aligned:
+            raise ValueError("highlighted captions are missing phrase word timings")
+        tokens = cue.phrase.text.split()
+        expected = [match for token in tokens for match in re.findall(r"[^\W_]+(?:[’'-][^\W_]+)*", token, re.UNICODE)]
+        if [value.casefold() for value in expected] != [word.word.casefold() for word in aligned]:
+            raise ValueError("highlighted caption text differs from aligned narration")
+        cursor = 0
+        for token in tokens:
+            count = len(re.findall(r"[^\W_]+(?:[’'-][^\W_]+)*", token, re.UNICODE))
+            if count == 0:
+                if not output or output[-1].phrase_id != cue.phrase.phrase_id:
+                    raise ValueError("highlighted caption has isolated punctuation")
+                prior = output[-1]
+                output[-1] = WordTiming(prior.word + " " + token, prior.phrase_id, prior.section_id, prior.ordinal, prior.start_seconds, prior.end_seconds)
+                continue
+            span = aligned[cursor : cursor + count]
+            output.append(WordTiming(token, cue.phrase.phrase_id, cue.phrase.section_id, span[0].ordinal, span[0].start_seconds, span[-1].end_seconds))
+            cursor += count
+    if by_phrase:
+        raise ValueError("highlighted captions contain unreferenced word timings")
+    return tuple(output)
 
 
 def _ass_timestamp(seconds: float) -> str:

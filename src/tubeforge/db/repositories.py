@@ -132,6 +132,48 @@ class JobRepository:
             raise ValueError(f"job already exists: {job_id}") from error
         return _job_from_record(record)
 
+    def create_scene_revision(self, job_id: str, parent_id: str, request: ContentRequest, artifacts: tuple[Artifact, ...], *, scene_id: str, actor: str, content_checksum: str) -> PipelineJob:
+        """Expose a complete, unclaimed review draft in one database commit."""
+        now = datetime.now(UTC)
+        with self._session_factory.begin() as session:
+            parent = session.get(PipelineJobRecord, parent_id)
+            if parent is None:
+                raise KeyError(f"job not found: {parent_id}")
+            if parent.claim_owner is not None or JobState(parent.state) not in {
+                JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY,
+                JobState.FINAL_READY, JobState.PUBLICATION_APPROVAL_REQUIRED,
+            }:
+                raise ValueError("scene revisions require an unclaimed local review job")
+            record = PipelineJobRecord(
+                id=job_id, request_json=request.model_dump_json(),
+                state=JobState.SCRIPT_APPROVAL_REQUIRED.value, resume_state=None,
+                failure_message=None, created_at=now, updated_at=now,
+                claim_owner=None, claimed_at=None, lease_expires_at=None,
+                heartbeat_at=None, attempt_count=0, next_retry_at=None,
+                cancellation_requested_at=None, authentication_restored_at=None,
+            )
+            session.add(record)
+            for artifact in artifacts:
+                if artifact.job_id != job_id:
+                    raise ValueError("revision artifact belongs to another job")
+                session.add(ArtifactRecord(
+                    job_id=job_id, stage=artifact.stage.value, name=artifact.name,
+                    path=artifact.path, checksum_sha256=artifact.checksum_sha256,
+                    provenance_json=json.dumps(artifact.provenance, sort_keys=True),
+                    created_at=now,
+                ))
+            session.add(JobEventRecord(
+                job_id=parent_id, event_type="scene_revision_created",
+                details_json=json.dumps({"child_job_id": job_id, "scene_id": scene_id, "actor": actor, "content_package_checksum": content_checksum}, sort_keys=True),
+                created_at=now,
+            ))
+            session.add(JobEventRecord(
+                job_id=job_id, event_type="scene_revision_created",
+                details_json=json.dumps({"parent_job_id": parent_id, "scene_id": scene_id, "actor": actor, "content_package_checksum": content_checksum}, sort_keys=True),
+                created_at=now,
+            ))
+        return _job_from_record(record)
+
     def get(self, job_id: str) -> PipelineJob:
         with self._session_factory() as session:
             record = session.get(PipelineJobRecord, job_id)

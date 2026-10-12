@@ -294,6 +294,7 @@ class RenderProfile(BaseModel):
     image_motion_enabled: bool = True
     image_motion_zoom: float = Field(default=1.08, ge=1.0, le=1.25)
     image_motion_overscan: float = Field(default=2.0, ge=1.0, le=2.0)
+    bounded_memory: bool = False
     renderer_version: str = Field(default="m9-preview-v1", min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -349,8 +350,9 @@ class ShortsFinalRenderConfig(RenderProfile):
     word_highlight_captions: bool = True
     scene_max_duration_seconds: float = 3.0
     image_motion_overscan: float = 1.25
+    bounded_memory: bool = True
     minimum_free_bytes: int = 500_000_000
-    renderer_version: str = "shorts-final-v1"
+    renderer_version: str = "shorts-final-v2"
 
 
 class PublicationPreparationConfig(BaseModel):

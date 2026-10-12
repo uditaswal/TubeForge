@@ -1,0 +1,14 @@
+{
+  "title": "The only Docker commands you need to get started",
+  "package": "content-package.json",
+  "voice": "af_bella",
+  "speed": 1.06,
+  "scenes": [
+    {"kind": "hook", "label": "DOCKER / YOUR FIRST CONTAINER", "heading": "STOP MEMORIZING", "subheading": "START RUNNING.", "state": "5 COMMANDS"},
+    {"kind": "run", "label": "01 / RUN", "heading": "START THE APP", "subheading": "Docker installed and running", "commands": ["docker run --name demo \\", "  -d nginx:alpine"], "state": "RUNNING"},
+    {"kind": "ps", "label": "02 / CHECK", "heading": "IS IT RUNNING?", "subheading": "Check the name, image and status", "commands": ["docker ps"], "state": "RUNNING"},
+    {"kind": "logs", "label": "03 / READ", "heading": "SEE WHAT IT SAYS", "subheading": "Read the app's recorded output", "commands": ["docker logs demo"], "state": "RUNNING"},
+    {"kind": "stop", "label": "04 / STOP", "heading": "STOP ≠ DELETE", "subheading": "The container still exists", "commands": ["docker stop demo"], "state": "STOPPED"},
+    {"kind": "rm", "label": "05 / REMOVE", "heading": "CLEAN UP", "subheading": "Remove the stopped practice container", "commands": ["docker rm demo"], "state": "REMOVED"}
+  ]
+}

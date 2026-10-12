@@ -4,6 +4,8 @@ You are developing TubeForge, an automated YouTube-video generation system.
 
 ## Project records
 
+For publishing/dashboard work, follow `design_doc/tubeforge-publishing-design.md`. Update its affected tasks, acceptance evidence and next action after each meaningful change; keep current release status in `docs/STATUS.md` and session evidence in `AUTONOMOUS_PROGRESS.md`.
+
 These files have distinct purposes. Keep them consistent rather than copying
 the same status into each one:
 
@@ -186,6 +188,12 @@ When validation fails, continue debugging.
 
 ## YouTube content skills
 
+The supplied, reviewed `.agents/skills/viral-short-form/` is optional creative
+reference material. Its promotional text and unverified platform-performance
+claims do not override this contract. Keep `.agents/skills/yt-script/` as the
+sole production narration skill; the benchmark guide is
+`docs/DOCKER_SHORT_BENCHMARK_GUIDE.md`.
+
 Use the installed project skills in `.agents/skills/` for relevant TubeForge
 content tasks. Read the selected SKILL.md and required resources first; review
 supporting scripts before execution and resolve resources against their skill
@@ -214,3 +222,7 @@ Production prompts explicitly embed these resources and the complete brief;
 installed wheels must hash-match this source folder. Automation returns finished
 ordered narration separately from hooks, sources and production notes.
 Insufficient-source results block before TTS and require operator correction.
+Scene plans also carry source-grounded visual subjects, purposes, compositions
+and display elements into the existing VideoPlan and asset stage. Keep the
+asset-stage storyboard manifest/contact sheets tied to accepted hashes, and
+inspect their teaching value before claiming creative acceptance.

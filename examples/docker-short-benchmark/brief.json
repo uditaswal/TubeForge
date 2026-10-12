@@ -1,0 +1,59 @@
+{
+  "topic": "The only Docker commands you need to get started",
+  "angle": "A complete beginner workflow for one disposable practice container: run, inspect with ps and logs, stop, then remove. Scope the minimum set to this first-container exercise, not all Docker work.",
+  "target_duration_seconds": 45,
+  "language": "en",
+  "audience": "Beginners who have Docker installed and running and want their first useful terminal workflow",
+  "sources": [
+    {
+      "source_id": "docker-run",
+      "url": "https://docs.docker.com/reference/cli/docker/container/run/",
+      "title": "Docker container run",
+      "excerpt": "docker run creates and starts a new container from an image, pulling the image when it is missing. --name assigns a custom container name. -d runs it in the background. The documented example is docker run --name test -d nginx:alpine. The same name can be used in later commands. Changing test to demo is an illustrative chosen name."
+    },
+    {
+      "source_id": "docker-ps",
+      "url": "https://docs.docker.com/reference/cli/docker/container/ls/",
+      "title": "Docker container ls",
+      "excerpt": "docker ps is an alias for docker container ls. It lists running containers by default; docker ps -a also includes stopped containers. Output includes image, status and name."
+    },
+    {
+      "source_id": "docker-logs",
+      "url": "https://docs.docker.com/reference/cli/docker/container/logs/",
+      "title": "Docker container logs",
+      "excerpt": "docker logs CONTAINER retrieves the logs present at execution time. The command displays the container standard output and standard error; --follow streams new output. The illustrative command docker logs demo reads the named practice container logs."
+    },
+    {
+      "source_id": "docker-stop",
+      "url": "https://docs.docker.com/reference/cli/docker/container/stop/",
+      "title": "Docker container stop",
+      "excerpt": "docker stop CONTAINER stops a running container. The main process receives a termination signal, followed by a kill signal if it does not exit in the timeout. docker stop demo stops the named practice container. A stopped container still exists."
+    },
+    {
+      "source_id": "docker-rm",
+      "url": "https://docs.docker.com/reference/cli/docker/container/rm/",
+      "title": "Docker container rm",
+      "excerpt": "docker rm CONTAINER removes containers. Stop a running container before ordinary removal; the documentation demonstrates docker stop test followed by docker rm test. docker rm demo removes the stopped practice container. It does not remove the image; deleting a container discards its writable layer, so this demonstration is for a disposable practice container."
+    }
+  ],
+  "prompt_version": "m6-content-v6",
+  "notes": [
+    "Write 100\u2013115 spoken words for a brisk but clear 40\u201350 second Short, using six sections.",
+    "Use exactly this display sequence: docker run --name demo -d nginx:alpine; docker ps; docker logs demo; docker stop demo; docker rm demo. Keep demo consistent.",
+    "Start with an immediate specific hook, then mention Docker already installed. Explain run creates/starts, -d means background, ps checks running, logs reads output, stop stops and rm removes the stopped practice container.",
+    "Do not claim a published web page: no ports are exposed in this exercise. Do not add pull, exec, build, compose or unrelated commands.",
+    "Spoken narration should explain meaning rather than dictate every punctuation mark. Put exact commands in scene visual elements. Make the viewer able to follow the workflow visually.",
+    "Keep the final viewer ask brief and useful: save or try this on a practice container. Avoid a generic channel pitch.",
+    "Visuals will use large animated terminal text and explicit running/stopped/removed state cards. On-screen terminal output must be identified as edited or abbreviated if not exact captured output.",
+    "Creative revision after attempt one: the rhetorical question opening and 127 words felt formal and padded. Use a direct punchy hook, not a how-do-you question. Suggested direction: Stop memorizing Docker commands\u2014run your first container with these five. Keep a hook candidate that the first sentence matches exactly.",
+    "Target 105\u2013115 spoken words. Cut phrases such as when you are finished inspecting it, standard output and standard error already recorded, and that is the full first-container workflow. Explain logs as what the app prints.",
+    "Keep Docker installed/running as a concise prerequisite on screen, not a long spoken setup. Name the container demo. End with one short save-this-workflow ask."
+  ],
+  "review_mode": "manual",
+  "captions_enabled": true,
+  "visual_style": "animated-terminal",
+  "visual_source": "generated",
+  "voice_id": "af_bella",
+  "preset_name": "shorts",
+  "aspect_ratio": "9:16"
+}

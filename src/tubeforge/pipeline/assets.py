@@ -24,9 +24,10 @@ from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidatio
 from tubeforge.domain.contracts import AssetCandidate, MediaSearchRequest, ScenePlan
 from tubeforge.domain.providers import MediaProvider
 from tubeforge.db.repositories import AssetCacheRepository, AssetCacheReservation, CachedAsset
+from tubeforge.providers.media.local_graphics import STYLE_VERSION as STORYBOARD_STYLE_VERSION
 
 ASSET_VALIDATION_VERSION = "m25-v3"
-SHORTS_VISUAL_QUALITY_VERSION = "shorts-visual-v1"
+SHORTS_VISUAL_QUALITY_VERSION = "shorts-visual-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +52,7 @@ def asset_limits_from_config(config: MediaPipelineConfig) -> AssetLimits:
 def scene_request(scene: ScenePlan, *, visual_source: str = "generated", aspect_ratio: str = "16:9") -> MediaSearchRequest:
     """Turn approved scene-plan fields into a deterministic search request."""
     orientation = "portrait" if aspect_ratio == "9:16" or scene.visual_type in {"portrait", "vertical"} else "landscape"
-    return MediaSearchRequest(scene_id=scene.scene_id, queries=tuple(" ".join(query.split()) for query in scene.search_queries), visual_type=scene.visual_type, required_license="licensed", orientation=orientation, visual_source=visual_source)
+    return MediaSearchRequest(scene_id=scene.scene_id, queries=tuple(" ".join(query.split()) for query in scene.search_queries), visual_type=scene.visual_type, required_license="licensed", orientation=orientation, visual_source=visual_source, visual_subject=scene.visual_subject or scene.search_queries[0], visual_purpose=scene.visual_purpose or scene.visual_type, composition=scene.composition or scene.visual_type, on_screen_text=scene.on_screen_text or "", visual_elements=scene.visual_elements)
 
 def select_candidate(candidates: list[AssetCandidate], request: MediaSearchRequest, limits: AssetLimits) -> AssetCandidate:
     eligible = [candidate for candidate in candidates if asset_policy_valid(candidate, limits)]
@@ -90,7 +91,7 @@ def validate_shorts_visual_manifest(manifest: dict[str, object]) -> dict[str, ob
         value
         for value in scenes
         if isinstance(value.get("candidate"), dict)
-        and str(value["candidate"].get("provider_asset_id", "")).startswith("local-motion-")
+        and str(value["candidate"].get("provider_asset_id", "")).startswith(("local-motion-", "local-storyboard-"))
     ]
     fake = [value for value in scenes if isinstance(value.get("candidate"), dict) and str(value["candidate"].get("provider_asset_id", "")).startswith("fake-")]
     # Fake providers remain available to unit tests.
@@ -127,7 +128,7 @@ def validate_shorts_visual_manifest(manifest: dict[str, object]) -> dict[str, ob
         checksums.add(checksum_value)
         source_version = str(candidate.get("source_version", ""))
         style_parts = source_version.split(":")
-        if len(style_parts) != 3 or not source_version.startswith("portrait-motion-v1:"):
+        if len(style_parts) != 3 or not source_version.startswith(f"{STORYBOARD_STYLE_VERSION}:"):
             raise ProviderValidationError("Shorts generated visual style metadata is missing")
         styles.add(":".join(style_parts[:2]))
     if len(styles) != 1:

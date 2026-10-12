@@ -19,7 +19,7 @@ from tubeforge.core.state_machine import JobState
 from tubeforge.providers.content import youtube_skills as skills
 from tubeforge.providers.content.host_runner import HostRunnerContentProvider
 from tubeforge.providers.content.host_runner_protocol import HostRunnerResponse, HostRunnerSuccess
-from tubeforge.providers.content.prompts import build_content_prompt
+from tubeforge.providers.content.prompts import build_content_prompt, validate_video_package
 from tubeforge.providers.fake import FakeContentProvider
 from tubeforge.scheduling.service import request_from_topic
 
@@ -32,6 +32,11 @@ def request():
 
 def package():
     value = FakeContentProvider().generate_package(request()).model_dump(mode="json")
+    for scene in value['scene_plans']:
+        scene['visual_subject'] = scene['on_screen_text']
+        scene['visual_purpose'] = 'Explain the corresponding reviewed script beat'
+        scene['composition'] = 'screen sequence'
+        scene['visual_elements'] = [scene['on_screen_text'], 'Exact reviewed script']
     hooks = ["Why should you review your exact script before rendering?", "Check your exact script before you render this video.", "Your script needs review before rendering starts.", "What does your script review actually protect?", "How can you check your script before rendering?"]
     value['hook_options'] = hooks
     value['script_sections'][0]['narration'] = hooks[0] + ' Review the exact saved source and narration before rendering your video.'
@@ -62,6 +67,25 @@ def test_missing_resource_and_invalid_candidate_fail_explicitly(tmp_path):
     malformed = package().model_copy(update={'hook_options': ('wrong',)})
     with pytest.raises(ProviderValidationError, match='five distinct'):
         skills.evaluate(malformed)
+
+
+def test_current_skill_output_requires_explicit_scene_visual_direction() -> None:
+    six_scene_request = request().model_copy(update={'notes': ('Inspect the source', 'Review the script', 'Check narration', 'Approve the revision')})
+    raw = FakeContentProvider().generate_package(six_scene_request).model_dump(mode='json')
+    for index, section in enumerate(raw['script_sections'], 1):
+        section['narration'] = (f'Review the exact script for scene {index}. '
+                                'Check the approved source, narration, and visual before rendering this scene.')
+    for scene in raw['scene_plans']:
+        scene['visual_subject'] = scene['on_screen_text']
+        scene['visual_purpose'] = 'Explain the corresponding reviewed script beat'
+        scene['composition'] = 'screen sequence'
+        scene['visual_elements'] = [scene['on_screen_text'], 'Exact reviewed script']
+    accepted = ContentPackage.model_validate(raw)
+    validate_video_package(accepted, accepted.request, provider_name='Codex')
+    missing = accepted.scene_plans[0].model_copy(update={'visual_elements': ()})
+    malformed = accepted.model_copy(update={'scene_plans': (missing, *accepted.scene_plans[1:])})
+    with pytest.raises(ProviderValidationError, match='storyboard scenes lack'):
+        validate_video_package(malformed, accepted.request, provider_name='Codex')
 
 
 def test_remote_preflight_failure_does_not_reserve_or_count(tmp_path):

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import math
+import re
 import struct
 import wave
 from pathlib import Path
 
 from tubeforge.core.config import ShortsFinalRenderConfig
-from tubeforge.pipeline.alignment import LocalWordAligner, verify_word_alignment
-from tubeforge.pipeline.captions import render_highlighted_ass
+from tubeforge.pipeline.alignment import LocalWordAligner, WordTiming, verify_word_alignment
+from tubeforge.pipeline.captions import TimedPhrase, render_highlighted_ass
+from tubeforge.pipeline.narration import NarrationPhrase
 from tubeforge.pipeline.orchestrator import _ass_dialogue_text
 from tubeforge.rendering.preview import PreviewRenderer, TimelineSegment, pace_segments
 
@@ -48,6 +50,35 @@ def test_highlighted_ass_uses_portrait_safe_area_and_active_word_colour(tmp_path
     assert ",96,96,360,1" in captions
     assert "&H0000D7FF" in captions
     assert captions.count("Dialogue:") == 4
+
+
+def test_highlighted_ass_preserves_commands_and_phrase_boundaries() -> None:
+    first = NarrationPhrase(phrase_id="phrase-0000000000000001", section_id="section-1", ordinal=0, text="Enter docker run --name web-a -d nginx:alpine.")
+    second = NarrationPhrase(phrase_id="phrase-0000000000000002", section_id="section-1", ordinal=1, text="Docker starts web-a detached.")
+    words = tuple(
+        WordTiming(word, phrase.phrase_id, phrase.section_id, ordinal, ordinal * 0.3, (ordinal + 1) * 0.3)
+        for ordinal, (word, phrase) in enumerate(
+            [(word, first) for word in ("Enter", "docker", "run", "name", "web-a", "d", "nginx", "alpine")]
+            + [(word, second) for word in ("Docker", "starts", "web-a", "detached")]
+        )
+    )
+    cues = (TimedPhrase(first, 0, 2.4), TimedPhrase(second, 2.4, 3.6))
+    captions = render_highlighted_ass(words, width=1080, height=1920, font_size=80, margin_vertical=360, margin_horizontal=96, phrases=cues)
+
+    assert "--NAME" in captions and "-D" in captions and "NGINX:ALPINE." in captions
+    assert "D NGINX ALPINE" not in captions
+    assert all(not ("DETACHED" in line and "ENTER" in line) for line in captions.splitlines() if line.startswith("Dialogue:"))
+    assert captions.count("Dialogue:") == 11
+
+
+def test_highlighted_ass_wraps_real_portrait_width_edge_cases() -> None:
+    phrase = NarrationPhrase(phrase_id="phrase-0000000000000003", section_id="section-1", ordinal=0, text="Separate containers—so what distinguishes web-a from web-b?")
+    lexical_words = ("Separate", "containers", "so", "what", "distinguishes", "web-a", "from", "web-b")
+    words = tuple(WordTiming(word, phrase.phrase_id, phrase.section_id, index, index * 0.3, (index + 1) * 0.3) for index, word in enumerate(lexical_words))
+    captions = render_highlighted_ass(words, width=1080, height=1920, font_size=80, margin_vertical=360, margin_horizontal=96, phrases=(TimedPhrase(phrase, 0, 2.4),))
+    for row in (line for line in captions.splitlines() if line.startswith("Dialogue:")):
+        visible = re.sub(r"\{[^}]*\}", "", row.split(",", 9)[-1])
+        assert all(len(line.strip()) <= 18 for line in visible.split(r"\N"))
 
 
 def test_shorts_renderer_is_portrait_30fps_and_caps_visual_holds(tmp_path: Path) -> None:

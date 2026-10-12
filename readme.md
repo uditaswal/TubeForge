@@ -16,9 +16,10 @@ OAuth applications and credentials.
 See [docs/STATUS.md](docs/STATUS.md) for the authoritative release state,
 validation evidence, blockers, and next tasks. See
 [AUTONOMOUS_PROGRESS.md](AUTONOMOUS_PROGRESS.md) for the append-only work log.
-The [publishing delivery plan](docs/planning/publishing-delivery-plan.md) tracks the ordered implementation
-milestones and their acceptance evidence. The attached publishing dashboard
-concept is illustrative; it is not the current Creator Studio interface.
+The [publishing and dashboard implementation plan](design_doc/tubeforge-publishing-design.md)
+defines the forward work and acceptance checks. The [earlier delivery plan](docs/planning/publishing-delivery-plan.md)
+retains inventory and acceptance evidence. The [dashboard prototype](design_doc/tubeforge-dashboard.html)
+is illustrative; it is not the current Creator Studio interface.
 
 ## Included capabilities
 
@@ -27,7 +28,7 @@ concept is illustrative; it is not the current Creator Studio interface.
 - Content-provider, media-provider, voice-provider, and publishing boundaries;
   deterministic/fake adapters support offline testing.
 - Local FFmpeg rendering with paced four-direction camera motion, native
-  portrait motion-graphic scene art or rights-safe public-domain/CC0 Wikimedia stock,
+  portrait storyboard graphics or rights-safe public-domain/CC0 Wikimedia stock,
   selectable Kokoro narration with a reliable Piper
   fallback, highlighted captions, licensed/ducked background music, final-artifact quality
   checks, publication metadata/thumbnail preparation, and source clips.
@@ -278,13 +279,19 @@ approval requirements.
 Each video in Creator Studio has a **Visuals** choice:
 
 - **Generate local scene art** creates one durable, scene-specific image for
-  each approved scene. Shorts use native 1080×1920 compositions built from one
-  fixed midnight/cyan/violet/amber reference palette and four layout families.
-  FFmpeg adds paced horizontal/vertical moves at two speeds and crisp cuts.
+  each approved scene. The storyboard retains a subject, purpose, composition,
+  display text and explanatory visual elements next to narration. FFmpeg draws
+  terminal, package, branch, comparison or sequence layouts from those reviewed
+  fields at 1080×1920 for Shorts. A complete asset-stage manifest and contact
+  sheet record scene order, hashes and rights information. Existing approved
+  scripts without the new fields use search terms as fallback labels and need
+  visual review. FFmpeg adds paced camera moves and crisp cuts.
+  Deploy the updated host wheel and rebuild the web/worker image before using
+  these new fields in production; see [visual pipeline handoff](docs/VIDEO_VISUAL_INVENTORY.md).
 - **Rights-safe stock (Wikimedia Commons)** searches only Wikimedia Commons and
   accepts only public-domain or CC0 candidates that satisfy the asset policy.
   If the search is unavailable or none qualify, the hybrid provider falls back
-  explicitly to local generated CC0 scene art so the job can render without
+  explicitly to local generated CC0 scene graphics so the job can render without
   weakening the licence policy. The asset manifest preserves the requested
   stock source, the resolved local source, and the reason for the fallback.
 
@@ -300,7 +307,7 @@ For Shorts, the visual gate rejects non-portrait or undersized stock, mixed
 generated styles, missing palette identity, repeated scene bytes, repetitive
 camera motion, visual holds over three seconds, and captions outside the
 configured safe area. Landscape stock which cannot meet the portrait source
-floor falls back to the local motion-graphics provider before it can be used.
+floor falls back to the local storyboard graphics provider before it can be used.
 
 ## Licensed background music
 
@@ -359,6 +366,11 @@ manually inspected for:
 Passing automated tests or producing schema-valid script data does not
 establish creative quality. Retain the rendered video and a concise pass/fail
 report with concrete evidence.
+Portrait highlighted captions preserve punctuation in technical tokens such as
+`--name`, `-d` and `nginx:alpine`, stay within their narration phrase, and wrap
+within the configured safe-area line width. The first corrected Docker example
+and its unresolved final-render gate are recorded in
+[`docs/TASK4_VIDEO_REVIEW.md`](docs/TASK4_VIDEO_REVIEW.md).
 
 ## Creator Studio UI contract
 
@@ -422,6 +434,15 @@ not claim to have run Codex or saved a revision. Review the returned narration
 array, enter each section, save the revision, then approve its new exact identity.
 Unsupported revisions must be rejected rather than pasted into narration.
 
+The Studio's “Revise one scene” action opens the saved storyboard and that
+scene's narration and visual direction. Saving creates a separate job paused at
+script review; the original video and its approvals remain unchanged. Review
+and approve the child's exact script before its worker rebuild, then inspect
+and approve its new preview. Unchanged accepted scene assets and phrase audio
+are reused only after their hashes and request identities are revalidated.
+This scene-revision flow is currently **IMPLEMENTED**; its real production
+artifact acceptance is tracked in `docs/STATUS.md`.
+
 Every submitted generation/repair prompt records its SHA256, resource hashes,
 automation mode and skill identifier in invocation provenance. Deploy the rebuilt
 wheel to the dedicated host runner after any canonical skill change; the worker
@@ -440,6 +461,11 @@ The fixed Codex CLI provider, model, source grounding, two-invocation limit,
 eight-minute timeout, review gates and publishing policies remain in effect.
 Older prompt versions remain readable for existing jobs; every new generation and repair invocation explicitly embeds the updated
 yt-script skill, including legacy prompt templates. A new prompt version does not authorize reusing exhausted packets.
+Current v6 output must provide a subject, purpose, composition and visual
+elements for every scene; incomplete storyboards fail validation before asset
+acquisition. The canonical automation skill asks for display-ready,
+source-supported visual labels rather than placeholders; the renderer places
+those labels into diagrams. Existing approved older packages remain readable.
 
 - **yt-script:** five candidate hooks, narration, scene visual directions and
   on-screen text. Application Python executes the included hook scorer before
@@ -514,14 +540,19 @@ factual source packet: supply substantive approved notes before production use.
 **IMPLEMENTED:** production integration, score-based selection, channel
 profiles, scheduler propagation and dashboard review. Focused offline tests and
 installed-wheel resource checks pass. A real Codex package and actual signed-in
-Chromium script review are **VERIFIED**. Preview rendering is **VERIFIED**: the new 40.663s 540×960 artifact passed
-visual checks, and the operator confirmed intelligible, complete narration.
-Final 1080×1920 rendering is **BLOCKED**: the export hit the 1GiB worker
-memory limit (Docker OOM event), and the operator chose to leave it blocked.
-Do not describe the full Shorts workflow as verified or automatically retry
-the exhausted test job. A future operator-approved 2GiB test or lower-buffer
-renderer must prove a new final artifact before this status changes.
-The older retained Shorts render is not evidence for this integration.
+Chromium script review are **VERIFIED**. Preview rendering is **VERIFIED** for
+the earlier 40.663s 540×960 artifact, whose visual checks and operator
+narration review passed. Its former single-graph 1080×1920 export hit the
+1 GiB worker memory limit. The operator later authorized bounded-memory
+rendering. Production job `9df50ade54724d3ba7dd9e96e6521e88` passed signed-in
+script and exact-preview approval, then registered a 43.033s 1080×1920 final
+under the unchanged 1 GiB limit. Its manifest binds the approved preview and
+accepted script/audio/captions/assets; visual, caption and technical checks are
+recorded in [`docs/TASK4_VIDEO_REVIEW.md`](docs/TASK4_VIDEO_REVIEW.md). The full
+Shorts workflow is **VERIFIED** for this finished local Short: the operator
+watched and listened to the complete final and reported good voice, pacing,
+captions and visuals with no defect. The job is at publication approval; no
+publication approval was given.
 Rejected host drafts are retained in generation-cache failure evidence without
 being accepted or granting another invocation. FFmpeg input decoders, filters
 and encoder all respect the configured thread limit to bound render memory.
@@ -568,3 +599,18 @@ tracking preserves local copies; operators still provision model weights as
 specified above. Earlier commits may contain these artifacts; this cleanup does
 not rewrite repository history. Never commit `.env`, `.aws/`, `.codex/`, cookie
 jars or generated acceptance output.
+## Docker Short benchmark
+
+The [benchmark guide](docs/DOCKER_SHORT_BENCHMARK_GUIDE.md) records the supplied
+Claude video's strengths, limitations, attachment audit and reusable production
+checks. The reviewed `.agents/skills/viral-short-form/` provides optional craft
+references; canonical production narration still uses `yt-script`. The active
+[benchmark plan](design_doc/docker-short-benchmark.md) tracks the finished-video
+acceptance work separately from unfinished publishing tasks 6–7.
+
+The [finished local Short](artifacts/benchmark/docker-short/final/docker-short.mp4)
+is ready for review. [Reusable benchmark source](examples/docker-short-benchmark/README.md)
+includes the exact accepted narration, topic data, local voice/alignment and
+renderer, plus final-byte verification commands. Technical/visual checks passed;
+subjective listening acceptance is pending. This benchmark renderer is not yet
+part of the production worker. Generated media remains local and ignored by Git.
