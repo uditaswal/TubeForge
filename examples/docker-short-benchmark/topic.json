@@ -1,14 +1,115 @@
 {
   "title": "The only Docker commands you need to get started",
-  "package": "content-package.json",
+  "package": "content-package-cta-revision.json",
   "voice": "af_bella",
   "speed": 1.06,
+  "music": {
+    "enabled": true,
+    "bpm": 96,
+    "progression": [
+      [
+        57,
+        [
+          57,
+          60,
+          64
+        ]
+      ],
+      [
+        53,
+        [
+          53,
+          57,
+          60
+        ]
+      ],
+      [
+        48,
+        [
+          48,
+          52,
+          55
+        ]
+      ],
+      [
+        55,
+        [
+          55,
+          59,
+          62
+        ]
+      ]
+    ],
+    "level": 0.085,
+    "duck": 0.5
+  },
   "scenes": [
-    {"kind": "hook", "label": "DOCKER / YOUR FIRST CONTAINER", "heading": "STOP MEMORIZING", "subheading": "START RUNNING.", "state": "5 COMMANDS"},
-    {"kind": "run", "label": "01 / RUN", "heading": "START THE APP", "subheading": "Docker installed and running", "commands": ["docker run --name demo \\", "  -d nginx:alpine"], "state": "RUNNING"},
-    {"kind": "ps", "label": "02 / CHECK", "heading": "IS IT RUNNING?", "subheading": "Check the name, image and status", "commands": ["docker ps"], "state": "RUNNING"},
-    {"kind": "logs", "label": "03 / READ", "heading": "SEE WHAT IT SAYS", "subheading": "Read the app's recorded output", "commands": ["docker logs demo"], "state": "RUNNING"},
-    {"kind": "stop", "label": "04 / STOP", "heading": "STOP ≠ DELETE", "subheading": "The container still exists", "commands": ["docker stop demo"], "state": "STOPPED"},
-    {"kind": "rm", "label": "05 / REMOVE", "heading": "CLEAN UP", "subheading": "Remove the stopped practice container", "commands": ["docker rm demo"], "state": "REMOVED"}
-  ]
+    {
+      "kind": "hook",
+      "label": "DOCKER / YOUR FIRST CONTAINER",
+      "heading": "STOP MEMORIZING",
+      "subheading": "START RUNNING.",
+      "state": "5 COMMANDS"
+    },
+    {
+      "kind": "run",
+      "label": "01 / RUN",
+      "heading": "START THE APP",
+      "subheading": "Docker installed and running",
+      "commands": [
+        "docker run --name demo \\",
+        "  -d nginx:alpine"
+      ],
+      "state": "RUNNING"
+    },
+    {
+      "kind": "ps",
+      "label": "02 / CHECK",
+      "heading": "IS IT RUNNING?",
+      "subheading": "Check the name, image and status",
+      "commands": [
+        "docker ps"
+      ],
+      "state": "RUNNING"
+    },
+    {
+      "kind": "logs",
+      "label": "03 / READ",
+      "heading": "SEE WHAT IT SAYS",
+      "subheading": "Read the app's recorded output",
+      "commands": [
+        "docker logs demo"
+      ],
+      "state": "RUNNING"
+    },
+    {
+      "kind": "stop",
+      "label": "04 / STOP",
+      "heading": "STOP ≠ DELETE",
+      "subheading": "The container still exists",
+      "commands": [
+        "docker stop demo"
+      ],
+      "state": "STOPPED"
+    },
+    {
+      "kind": "rm",
+      "label": "05 / REMOVE",
+      "heading": "CLEAN UP",
+      "subheading": "Remove the stopped practice container",
+      "commands": [
+        "docker rm demo"
+      ],
+      "state": "REMOVED"
+    }
+  ],
+  "cta": {
+    "chips": [
+      "RUN",
+      "CHECK",
+      "CLEAN UP"
+    ],
+    "headline": "FOLLOW FOR MORE",
+    "subline": "PRACTICAL DOCKER LESSONS"
+  }
 }

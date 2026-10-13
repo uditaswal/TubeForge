@@ -1,6 +1,6 @@
 # The only Docker commands you need to get started
 
-Accepted narration — 115 words. Sources and production notes below are not spoken.
+Local CTA revision — 111 spoken words. The earlier Codex-written package is retained unchanged; this copy applies the operator's requested follow ending. Sources and production notes below are not spoken.
 
 Stop memorizing Docker commands—run your first container with these five.
 
@@ -12,7 +12,7 @@ Then read docker logs demo. Logs show what the app prints, so you can inspect it
 
 Stop the practice container with docker stop demo. Stopping ends the process, but the container still exists until you remove it.
 
-Finally, use docker rm demo to remove the stopped container, while leaving the image in place. Save this workflow and try it on a disposable practice container.
+Finally, use docker rm demo to remove the stopped container, while leaving the image in place. Follow for more practical Docker lessons.
 
 ## Scene outline
 
@@ -23,7 +23,7 @@ Finally, use docker rm demo to remove the stopped container, while leaving the i
 | 12.08–19.25s | 02 / CHECK: IS IT RUNNING?. Check the name, image and status |
 | 19.25–25.64s | 03 / READ: SEE WHAT IT SAYS. Read the app's recorded output |
 | 25.64–33.89s | 04 / STOP: STOP ≠ DELETE. The container still exists |
-| 33.89–44.41s | 05 / REMOVE: CLEAN UP. Remove the stopped practice container |
+| 33.89–42.87s | 05 / REMOVE: CLEAN UP. Remove the stopped practice container; follow card begins near 40.18s |
 
 ## Source support
 

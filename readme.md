@@ -606,18 +606,24 @@ tracking preserves local copies; operators still provision model weights as
 specified above. Earlier commits may contain these artifacts; this cleanup does
 not rewrite repository history. Never commit `.env`, `.aws/`, `.codex/`, cookie
 jars or generated acceptance output.
-## Docker Short benchmark
 
-The [benchmark guide](docs/DOCKER_SHORT_BENCHMARK_GUIDE.md) records the supplied
-Claude video's strengths, limitations, attachment audit and reusable production
-checks. The reviewed `.agents/skills/viral-short-form/` provides optional craft
-references; canonical production narration still uses `yt-script`. The active
+## Short-form rulebook and local benchmark
+
+The [topic-independent short-form rulebook](docs/SHORT_FORM_VIDEO_RULEBOOK.md)
+sets the layout, caption, audio, source and final-media checks for future work.
+The separate [reference audit](docs/DOCKER_SHORT_BENCHMARK_REVIEW.md) records
+the supplied video's strengths, limitations and attachment review. The reviewed
+`.agents/skills/viral-short-form/` provides optional craft references; canonical
+production narration still uses `yt-script`. The active
 [benchmark plan](design_doc/docker-short-benchmark.md) tracks the finished-video
 acceptance work separately from unfinished publishing tasks 6–7.
 
-The [finished local Short](artifacts/benchmark/docker-short/final/docker-short.mp4)
-is ready for review. [Reusable benchmark source](examples/docker-short-benchmark/README.md)
-includes the exact accepted narration, topic data, local voice/alignment and
-renderer, plus final-byte verification commands. Technical/visual checks passed;
+The [revised local Short](artifacts/benchmark/docker-short/final/docker-short.mp4)
+has an original synthesized music bed configured in its topic JSON, speech
+ducking, action effects and a two-pass loudness mix. [Reusable benchmark
+source](examples/docker-short-benchmark/README.md) includes the original
+Codex-written narration and operator-directed follow revision, topic data,
+local voice/alignment, music provenance and final-byte
+verification commands. Its encoded video passed technical and visual checks;
 subjective listening acceptance is pending. This benchmark renderer is not yet
 part of the production worker. Generated media remains local and ignored by Git.
