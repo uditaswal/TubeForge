@@ -1,6 +1,7 @@
 .git
 .venv
 .venv312
+.venv-benchmark
 .deps
 .pytest_cache
 .tmp
@@ -25,6 +26,7 @@ build
 dist
 models/*.onnx
 models/*.bin
+models/*.onnx.json
 preview*.mp4
 final-*.mp4
 :memory:.ses

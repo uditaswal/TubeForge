@@ -9,6 +9,8 @@ The operator approved the [bounded-AI local-production plan](../design_doc/tubef
 
 **Next action:** plan Phase 1 implementation against the existing contracts and acceptance evidence, then implement and verify that phase before proceeding to reusable local production. Keep the 15-minute render, 30-minute local-production and 800 MiB cgroup targets visible but non-blocking until the operator enables enforcement.
 
+Repository hygiene update (13 October): the downloaded Piper `.onnx.json` sidecar was removed from Git's index while retained locally; model weights and sidecars are now ignored together. A tracked-file audit found no committed logs, generated videos, databases or model weights. The broad `design_doc/*` ignore was removed so future source documents remain visible. This housekeeping does not advance the five production phases.
+
 `docs/STATUS.md` is the authoritative current-status record. Historical work
 evidence belongs in `AUTONOMOUS_PROGRESS.md`; historical overnight planning is
 retained under `docs/overnight/`.
