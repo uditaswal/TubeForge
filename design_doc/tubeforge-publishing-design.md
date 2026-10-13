@@ -2,7 +2,7 @@
 
 Revised 11 October 2026 • Prepared for Udit • Living implementation plan
 
-**Improve generated-video quality first, then connect reviewed videos to the shared publishing path.** Add explicit storyboards, relevant media and scene repair to TubeForge's existing pipeline. Adapt selected donor workflows rather than importing another application or adding another agent framework. The [fine-grained order](tubeforge-implementation-order.md) puts stream clipping second last and Next.js migration last.
+**Improve generated-video quality first, then connect reviewed videos to the shared publishing path.** Add explicit storyboards, relevant media and scene repair to TubeForge's existing pipeline. Adapt selected donor workflows rather than importing another application or adding another agent framework. The [fine-grained order](tubeforge-implementation-order.md) puts stream clipping second last and Next.js migration last. [Section 10](#10-bounded-ai-planning-and-repeatable-local-production--approved-direction) records the newer approved production direction; it is a plan, not an implemented capability.
 
 This replaces the 4 October publishing proposal. It preserves folder backlog, manual upload, exact account selection, daily IST slots, metadata presets, deduplication and safe archival. The updated `tubeforge-dashboard.html` is the interactive UI reference, including production and scene repair. This revision adds a source-level reuse map, a practical video-quality contract and a frontend/Python implementation handoff.
 
@@ -383,4 +383,228 @@ UI reference: [tubeforge-dashboard.html](tubeforge-dashboard.html).
 
 ### Current user priority: Docker Short benchmark
 
-The separate [Docker benchmark plan](docker-short-benchmark.md) records the user’s newer finished-video quality objective. Its local final is rendered and technical/visual checks passed; listening/comparison acceptance is pending. It does not complete numbered tasks 6–7 or integrate the benchmark renderer into production. Task 6 has stale-identity API protection with two focused tests passing and a live HTTP 409 stale-script check, but still needs the new child’s exact preview/final acceptance. The authorized temporary review account/session was removed. See docs/STATUS.md for the current blocker and next actions.
+The separate [Docker benchmark plan](docker-short-benchmark.md) records the finished-video quality objective. Its local final passed technical and visual checks; the operator confirmed the revised spoken follow line is audible. Overall superiority to the Claude reference was not established by direct comparative review. It does not complete numbered tasks 6–7 or integrate the benchmark renderer into production. Task 6 has stale-identity API protection with two focused tests passing and a live HTTP 409 stale-script check, but still needs the new child’s exact preview/final acceptance. The authorized temporary review account/session was removed. See docs/STATUS.md for the current blocker and next actions.
+
+## 10. Bounded AI planning and repeatable local production — approved direction
+
+This section retains the approved direction in full. It adds a future production milestone to the existing publishing roadmap; prior task evidence, approvals, and external publication gates remain in the sections above. Work on one phase at a time and record its acceptance before starting the next.
+
+### 1. Direction and safe content preparation
+
+Preserve the existing pipeline. AI prepares and reviews structured content; reusable local components produce videos without per-topic coding or agent supervision.
+
+**Initial scope:** English, 30–55-second technical, history and politics Shorts.
+
+**Flow:** topic/channel settings → evidence → reviewed script and scenes → local production → finished-video review.
+
+#### Source isolation
+
+Complete before Phase 2:
+
+- Treat retrieved and supplied source material as untrusted data.
+- Pass it in escaped, delimited structured fields, separately from application instructions and operator preferences.
+- Restrict writer/reviewer capabilities: no shell execution, filesystem mutation or publication.
+- Use strict declarative schemas. Reject executable directives, unexpected fields and instruction-like payloads attempting to control the application.
+- Allow legitimate narrated commands and quotations only as inert content in designated fields.
+- Test injection through source text, metadata, role delimiters and tool-use requests.
+
+Schema checks cannot detect every injection; isolation, restricted capabilities and independent review provide separate safeguards.
+
+Resolve sources in order: supplied material → authoritative channel sources → web discovery. Supplement unless **“Use only my sources”** is selected. Preserve snapshots, dates, hashes and claim references.
+
+#### AI budgets and independent review
+
+Per generation cycle:
+
+- Maximum two writer calls, including one repair.
+- Maximum two reviewer calls, including review of the repair.
+- Maximum two research rounds and eight retained sources.
+
+Repairs share the original research budget. Counters survive retries and deployments. Exhaustion blocks with findings and requires an explicit operator decision before another cycle.
+
+The reviewer receives fresh context containing only the brief, package, source snapshots and rubric. Prefer a different already-authorized model; otherwise disclose same-model use. Review every factual claim against its source snapshot.
+
+Explicitly load canonical yt-script resources for writing and revisions. Editorial rules remain in skills.
+
+### 2. Local media, captions and quality
+
+Extend existing content and video-plan contracts. AI supplies declarative scenes; local code handles voice, alignment, captions, animation, music and encoding.
+
+Support terminals, process diagrams, comparisons, timelines, source-backed maps/charts, archival media and closing cards. Never execute generated code or arbitrary shell/FFmpeg instructions.
+
+#### Speech mappings and reveal anchors
+
+Persist:
+
+1. Approved narration/display text.
+2. Explicit TTS-normalized speech text.
+3. Tokens aligned to actual audio.
+
+Maintain versioned many-to-many mappings between display-token IDs and spoken spans. Handle numbers, versions, symbols and pronunciation overrides explicitly.
+
+Reveal anchors reference a section, display-token span, narration hash and boundary. Resolve timestamps through the mapping and alignment. Ambiguous mappings block; revisions invalidate affected mappings and anchors.
+
+#### Explicit caption styles
+
+Offer two labelled styles:
+
+- **Verbatim captions — default:** preserve spoken wording. Split at word boundaries; never silently paraphrase or truncate.
+- **Editorial captions:** permit approved concise labels, including replacements for oversized identifiers. Clearly identify these as non-verbatim.
+
+Normal captions use one line, at most three words and 28 visible characters.
+
+For oversized content, show the full identifier or command in a readable scene layout. Editorial mode may use a shorter approved caption label mapped to the entire spoken span. Verbatim mode requires a compliant exact representation or a narration/layout revision; otherwise block for correction.
+
+Store caption labels and mappings before content approval. Do not introduce editorial substitutions after approval.
+
+#### Alignment execution and retry policy
+
+Distinguish:
+
+- **Transient execution failure:** retry the same configuration.
+- **Repairable alignment result:** permit one alternate, predefined local alignment configuration against unchanged speech text/audio.
+- **Ambiguous mapping:** block immediately.
+
+Allow at most four alignment executions overall, with at most three execution attempts per configuration. Persist both counters.
+
+After execution failures, retry delays are **30, 60 and 120 seconds**, according to the number of retries already scheduled.
+
+Switching to the alternate configuration after a repairable result needs **no backoff**. Schedule it as immediately eligible, release ownership/resources, then reacquire through the normal queue. It counts toward the four-execution maximum.
+
+A failed alternate result or exhausted allowance blocks. No estimated-timing substitution.
+
+TTS and transient music retrieval allow three attempts with 30/60-second backoff. Missing models, invalid selected assets or absent rights/provenance block. Omit music only when explicitly permitted.
+
+All waiting happens through durable scheduling after releasing job ownership and the heavy-work slot. No worker sleeps while holding a lease or render slot.
+
+#### Technical and timing checks
+
+| Measurement | Requirement |
+|---|---|
+| Output | 1080×1920, 30 fps, H.264/AAC, 30–55 seconds |
+| Captions | Readable, within safe areas, no unintended clipping/overlap |
+| Encoded audio | −15 to −13 LUFS; true peak ≤−1.0 dBTP |
+| Normalization target | −14 LUFS; −1.5 dBTP |
+| Integrity | Full decode and accepted content/asset hashes match |
+
+**Routine caption validation:** validate token coverage, mapping consistency, monotonic timings, audio bounds and aligner failure/confidence signals. Failed structural or alignment checks follow the repair/block policy above.
+
+Without an independent reference, report **“Caption timing: unverified independently.”** This alone neither blocks automatic rendering nor forces an additional review checkpoint.
+
+The numerical drift requirement—p95 ≤150 ms and maximum ≤300 ms for absolute onset/end error—is an **acceptance-test gate against independent annotations**, not an asserted pass for every routine job. Routine estimates must identify their method and limitations.
+
+#### Creative acceptance rubric
+
+Acceptance videos require:
+
+- Readability at a 360×640 playback representation without zoom.
+- Scene changes/reveals tied to narration and a clear teaching purpose.
+- Demonstrations that show actions/results, relationships or meaningful comparisons.
+- Review of every speech gap over 700 ms; unexplained dead time fails.
+- Full encoded-video viewing and listening against the approved reference.
+- Recorded observations on pacing, voice/music balance, clarity and ending.
+- Contact sheets, relevant timecodes, measurements and explicit pass/fail findings.
+
+Technical checks alone do not establish creative acceptance.
+
+### 3. Diagnostics, compatibility and revisions
+
+#### Performance targets: enforcement disabled
+
+| Metric | Reporting target |
+|---|---|
+| Prepared-media render and validation | ≤15 minutes |
+| Complete local production, including TTS/alignment/assets/mixing | ≤30 minutes |
+| Whole-worker cgroup peak | ≤800 MiB under the existing 1 GiB limit |
+
+Exceedances are warnings while enforcement is disabled. Actual OOM and invalid outputs remain failures.
+
+Report submission-to-ready wall time separately, breaking out research, model calls, queues, human waits, retries and downloads. Identify hardware and cold/warm runs.
+
+Use kernel `memory.peak` as authoritative, including page cache. One-second sampling supports attribution only. Label shared/container-lifetime measurements when per-job isolation is unavailable.
+
+Each job exposes diagnostics and downloadable JSONL/summary files covering stage timings, CPU, memory, I/O, cache hits, model usage, retries, quality results and enforcement settings.
+
+#### Runtime compatibility
+
+Persist an execution manifest with immutable image/dependency identity, renderer/templates, normalization, schemas, voice/model/font checksums, alignment and production profiles.
+
+Retain images/assets referenced by active jobs. Never overwrite pinned assets in place.
+
+Initially resume only with a matching runtime or an explicitly tested compatibility declaration. Otherwise block the checkpoint; offer restoration of the retained runtime or a new revision under the current runtime.
+
+Preserve approved bytes. Behavior-changing conversions require new revisions and affected approvals.
+
+Test matching/incompatible deployments, interrupted jobs, missing assets, lossless adapters and approval invalidation.
+
+#### Partial rebuilds
+
+| Change | Rebuild and approval impact |
+|---|---|
+| Narration/normalization/pronunciation | TTS, alignment, anchors, timed scenes, mix/render; content and video review |
+| Voice/model | Audio and timing-dependent outputs; video review |
+| Alignment configuration | Alignment, reveals/captions, timed scenes, mix/render; video review |
+| Scene content/layout/assets | Affected scenes/render; scene-plan and video review |
+| Caption layout | Captions/render; video review |
+| Editorial caption wording | Content review plus captions/render and video review |
+| Music/mix | Mix/render; video review |
+| Renderer/profile/fonts | Affected visuals/render; video review |
+| Sources/claim evidence | Content review; media rebuild only if accepted content changes |
+
+Preserve unaffected artifacts and historical approvals. Current approvals must identify exact revision/artifact identities.
+
+### 4. Operator workflow, readiness and retention
+
+Support full review, script-only, video-only and automatic-render modes. Publication approval remains separate.
+
+Keep generation readiness and creative review as separate dashboard fields:
+
+- **Automatic-render:** becomes **“Ready — creative review not performed”** after required technical checks pass.
+- **Script-only:** becomes ready after the approved content is rendered; finished-video creative review remains unperformed.
+- **Full/video-only:** waits at finished-video review before becoming ready.
+- Independently unverified caption timing remains visibly labelled in every applicable mode.
+
+“Ready” means a technically valid artifact is available. It must never imply human creative approval.
+
+Revisions remain possible at either checkpoint and after completion. Invalidate affected approvals and rebuild only dependencies.
+
+#### Retention
+
+For newly managed artifacts:
+
+- Failed partial renders: seven days.
+- Inactive intermediate media: fourteen days.
+- Detailed diagnostics: thirty days.
+- Source snapshots: while active, then 180 days after completion.
+- Compact approval/hash/acceptance summaries: retained with the job.
+- Approved finals: retained until operator cleanup.
+
+Protect active jobs and pinned acceptance evidence. Use an initial configurable 50 GiB generated-storage admission budget. Clean expired eligible files, then pause new generation if necessary; never silently delete protected artifacts.
+
+Record expiration and evidence availability. Inventory existing files before applying retention.
+
+#### Documentation and hygiene
+
+Consolidate into operator README, agent rules, one project plan/status record and the video rulebook. Archive history and preserve specialist references where needed.
+
+Keep skills tracked/packaged. Align Git/Docker ignores. Run `git ls-files -ci --exclude-standard` to expose tracked-ignore drift without automatically deleting or untracking files.
+
+Every **VERIFIED** item links to its acceptance report, checks and artifact identities.
+
+### 5. Delivery sequence and acceptance
+
+| Phase | Required evidence |
+|---|---|
+| 1. Consolidation and safety | Reconciled records, injection protections/tests, runtime/schema inventory, retention and measurement definitions |
+| 2. Local production | Fixed, manually approved Docker and distinct technical fixtures; technical/creative rubric, diagnostics, bounded repairs, compatibility and recovery |
+| 3. Content preparation | Verified generated packages replace fixture inputs; actual skill loading, independent claim review, bounded research and domain coverage |
+| 4. Reviews/revisions | Four modes in signed-in Studio; readiness labels, invalidation, stale-anchor rejection and lease-free backoff |
+| 5. Unattended generation acceptance | Tutorial, explainer, comparison, history and politics jobs finish without agent-written code or supervision; include the Git-command regression |
+
+**Phase 5 generation runs unattended. A person subsequently watches and listens to the completed acceptance videos.** The phase becomes VERIFIED only after that inspection passes the rulebook rubric and evidence is linked. This acceptance exercise does not impose mandatory human inspection on every future automatic-render job.
+
+Performance exceedances remain visible warnings while enforcement is disabled.
+
+Future work: disabled local-AI-imagery option, additional languages with language-specific acceptance, long-form and publishing work; stream clipping second-last; broad dashboard/Next.js migration last.
+
+Use **NOT STARTED, IMPLEMENTED, VERIFIED and BLOCKED** accurately. This direction was approved for documentation on 13 October 2026. Implementation remains **NOT STARTED** until its first phase begins.

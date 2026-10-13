@@ -3,6 +3,12 @@
 Last reviewed: 2026-10-13
 Release target: R1 — Reliable Local Studio
 
+## Approved production direction — documentation only
+
+The operator approved the [bounded-AI local-production plan](../design_doc/tubeforge-publishing-design.md#10-bounded-ai-planning-and-repeatable-local-production--approved-direction) on 13 October 2026. Its five implementation phases are **NOT STARTED**. The existing Docker benchmark is local evidence, not proof that the production worker implements the new plan. The first phase is documentation consolidation, source/prompt isolation, runtime/schema inventory, retention design and measurement definitions. This entry records direction; it does not revise the historical task 1–7 acceptance states or authorize publication.
+
+**Next action:** plan Phase 1 implementation against the existing contracts and acceptance evidence, then implement and verify that phase before proceeding to reusable local production. Keep the 15-minute render, 30-minute local-production and 800 MiB cgroup targets visible but non-blocking until the operator enables enforcement.
+
 `docs/STATUS.md` is the authoritative current-status record. Historical work
 evidence belongs in `AUTONOMOUS_PROGRESS.md`; historical overnight planning is
 retained under `docs/overnight/`.
@@ -158,8 +164,8 @@ Local deployment: existing migrations applied after online backup; schema
 
 ## Next five tasks
 
-1. Record any further operator feedback on the finished benchmark; keep overall superiority to the Claude reference unclaimed without a direct comparative review.
-2. Verify task 6: stale approvals cannot authorize a changed revision, including the signed-in dashboard flow.
-3. Produce and inspect a second distinct topic under the same profile for task 7.
-4. Bridge exact approved generated artifacts into the canonical library for task 8, without automatic publication.
-5. Resume task 9 local manual upload and Compose review using existing delivery APIs; keep live platform acceptance separate.
+1. Plan Phase 1 against the existing architecture and evidence; retain historical records during consolidation.
+2. Define and test source isolation before reusable production work; treat source text as untrusted data.
+3. Inventory in-flight schemas, renderer/runtime dependencies and compatibility requirements.
+4. Define diagnostic measurement methods and protected-evidence retention before enabling cleanup.
+5. After Phase 1 acceptance, prepare manually approved fixtures for Phase 2. Resume existing publishing tasks 6–9 separately after this production priority; their evidence and blockers above remain unchanged.
