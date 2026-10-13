@@ -24,12 +24,9 @@ data/
 autonomous_logs/
 models/*.onnx
 models/*.bin
+# Downloaded Piper voice configuration accompanies its ignored ONNX model.
+models/*.onnx.json
 issues.md
-design_doc/*
-!design_doc/tubeforge-publishing-design.md
-!design_doc/tubeforge-implementation-order.md
-!design_doc/tubeforge-dashboard.html
-!design_doc/docker-short-benchmark.md
 
 # Generated acceptance media; retain and inspect locally, but do not commit it.
 artifacts/smoke/

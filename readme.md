@@ -224,6 +224,11 @@ image installs the lightweight `kokoro-onnx` runtime; download model assets
 only from the configured trusted release and verify a local synthesis before
 using them for production jobs.
 
+The Piper fallback also needs the matching `en_US-lessac-medium.onnx` model
+and `en_US-lessac-medium.onnx.json` sidecar in `./models/`, as configured in
+`config/production.yaml`. Both are local downloads ignored by Git; a fresh
+checkout must provision the pair before using Piper.
+
 ## Source-grounded writer
 
 Production scripts must use **Codex CLI** or **Claude**. A local LLM is not an

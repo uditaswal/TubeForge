@@ -103,6 +103,8 @@ local databases, logs, virtual environments, build/test output, credentials,
 and editor/OS files.
 
 - Use `git check-ignore -v <path>` to verify a new ignore rule when practical.
+- Use `git ls-files -ci --exclude-standard` to reveal tracked files that match
+  ignore rules; review each result before removing it from the index.
 - Do not use broad ignore rules that hide source, migrations, fixtures, or
   intentionally versioned configuration.
 - Never remove already tracked files merely to make an ignore rule take effect;
