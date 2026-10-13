@@ -192,7 +192,7 @@ The supplied, reviewed `.agents/skills/viral-short-form/` is optional creative
 reference material. Its promotional text and unverified platform-performance
 claims do not override this contract. Keep `.agents/skills/yt-script/` as the
 sole production narration skill; the benchmark guide is
-`docs/DOCKER_SHORT_BENCHMARK_GUIDE.md`.
+`docs/SHORT_FORM_VIDEO_RULEBOOK.md`.
 
 Use the installed project skills in `.agents/skills/` for relevant TubeForge
 content tasks. Read the selected SKILL.md and required resources first; review

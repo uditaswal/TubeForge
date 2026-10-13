@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import hashlib
+import importlib.metadata
 import json
 import math
 import re
@@ -50,7 +51,7 @@ def text(draw, xy, value, size, color=WHITE, *, anchor='mm', mono=False, max_wid
     if f.getlength(value) > max_width:
         raise ValueError(f'Text exceeds safe width ({size}px): {value}')
     bounds = draw.textbbox(xy, value, font=f, anchor=anchor)
-    if value.strip() and not (70 <= bounds[0] and bounds[2] <= 932 and 210 <= bounds[1] and bounds[3] <= 1490):
+    if value.strip() and not (60 <= bounds[0] and bounds[2] <= 930 and 210 <= bounds[1] and bounds[3] <= 1490):
         raise ValueError(f'Text outside portrait safe area: {value!r}: {bounds}')
     draw.text(xy, value, font=f, fill=color, anchor=anchor)
 
@@ -135,6 +136,7 @@ def prepare(args):
     if not 30 <= cursor <= 55:
         raise ValueError(f'Runtime outside benchmark bounds: {cursor}')
     result = {'source_identity': identity, 'title': topic['title'], 'duration': cursor,
+              'cta': topic.get('cta'),
               'alignment': 'Whisper base.en cross-attention DTW on supplied transcript', 'scenes': timeline}
     voice = np.zeros(math.ceil(cursor * SR), np.float32)
     for offset, samples in voices:
@@ -143,7 +145,7 @@ def prepare(args):
     sf.write(root / 'narration.wav', voice, SR, subtype='PCM_24')
     refine_alignment(aligner, voice, result, root)
     (root / 'timeline.json').write_text(json.dumps(result, indent=2) + '\n')
-    mix_audio(root, result, voice)
+    mix_audio(root, result, voice, topic['music'])
     print(f'Ready: {cursor:.3f}s; exact source {identity}', flush=True)
 
 
@@ -187,28 +189,78 @@ def refine_alignment(aligner, voice, timeline, root):
                 continue
             changes.append({'word': group['word'], 'original': [group['start'], group['end']], 'refined': [start, group['end']]})
             group.update(start=start, refinement='exact contiguous ASR match; measured end retained')
+    split_groups = []
+    replacements = {}
+    for i, group in enumerate(groups):
+        if not (group.get('joined_zero_duration') or '—' in group['word']):
+            continue
+        parts = [part for part in re.split(r'(?<=—)|\s+', group['word']) if part]
+        indices = [j for j, owner in enumerate(owners) if owner == i]
+        mapped = [matching[j] for j in indices if j in matching]
+        if len(parts) != len(indices) or len(mapped) != len(indices):
+            continue
+        candidates = [targets[j] for j in mapped]
+        if (mapped != list(range(mapped[0], mapped[-1] + 1)) or
+                any(w['end'] <= w['start'] for w in candidates) or
+                candidates[0]['start'] < group['start'] - .05 or
+                candidates[-1]['end'] > group['end'] + .05):
+            continue
+        replacements[id(group)] = [
+            {'word': part, 'start': w['start'], 'end': w['end'],
+             'probability': round(float(w['probability']), 4), 'refinement': 'exact matched ASR word'}
+            for part, w in zip(parts, candidates, strict=True)]
+        split_groups.append(group['word'])
+    for scene in timeline['scenes']:
+        scene['words'] = [part for group in scene['words'] for part in replacements.get(id(group), [group])]
     timeline['alignment_refinements'] = changes
+    timeline['alignment_splits'] = split_groups
     timeline['alignment'] += '; sentence boundaries cross-checked with exact ASR word matches'
     print(f'Audio cross-check refined {len(changes)} caption groups', flush=True)
 
 
-def mix_audio(root, timeline, voice):
-    # Original low-key pulse and action accents, with an explicit speech duck.
+def synth_music(count, config):
+    """Original pad, bass and eighth-note plucks; no sampled recording."""
+    if not config['enabled']:
+        return np.zeros(count, np.float32)
+    bpm, level, duck = float(config['bpm']), float(config['level']), float(config['duck'])
+    progression = config['progression']
+    if not (60 <= bpm <= 180 and 0 < level <= .2 and 0 <= duck <= .85 and progression):
+        raise ValueError('Invalid music configuration')
+    if any(not (0 <= root <= 127 and len(notes) == 3 and all(0 <= note <= 127 for note in notes))
+           for root, notes in progression):
+        raise ValueError('Invalid music progression')
+    music = np.zeros(count, np.float32)
+    beat, bar = 60 / bpm, 4 * 60 / bpm
+    def hz(midi):
+        return 440 * 2 ** ((midi - 69) / 12)
+    for index, start_seconds in enumerate(np.arange(0, count / SR, bar)):
+        start = round(start_seconds * SR)
+        n = min(round(bar * SR), count - start)
+        t = np.arange(n, dtype=np.float32) / SR
+        root, notes = progression[index % len(progression)]
+        envelope = np.minimum(t / .4, 1) * np.clip((bar - t) / .5, 0, 1)
+        pad = sum(np.sin(2 * np.pi * hz(note + 12) * t) +
+                  .4 * np.sin(2 * np.pi * hz(note + 12) * 2.003 * t) for note in notes) / 3
+        bass = np.sin(2 * np.pi * hz(root - 12) * t) * .9
+        music[start:start + n] += ((pad + bass) * .25 * envelope).astype(np.float32)
+        for eighth in range(8):
+            pluck_start = start + round(eighth * beat * SR / 2)
+            pluck_n = min(round(.35 * SR), count - pluck_start)
+            if pluck_n <= 0:
+                continue
+            x = np.arange(pluck_n, dtype=np.float32) / SR
+            pluck = np.sin(2 * np.pi * hz(notes[eighth % 3] + 12) * x) * np.exp(-9 * x) * .28
+            music[pluck_start:pluck_start + pluck_n] += pluck.astype(np.float32)
+    seconds = np.arange(count, dtype=np.float32) / SR
+    music *= np.minimum(seconds / 1.0, 1) * np.minimum((count / SR - seconds) / 1.2, 1)
+    return music * (level / max(float(np.max(np.abs(music))), 1e-6))
+
+
+def mix_audio(root, timeline, voice, music_config):
+    # Original synthesized accompaniment and action accents, with speech ducking.
     n = len(voice)
-    bed, fx = np.zeros(n, np.float32), np.zeros(n, np.float32)
+    bed, fx = synth_music(n, music_config), np.zeros(n, np.float32)
     rng = np.random.default_rng(20261012)
-    bpm, chord_seconds = 96, 5.0
-    notes = [(50, 57, 65), (46, 53, 62), (48, 55, 64), (45, 52, 60)]
-    for bar, start_time in enumerate(np.arange(0, n / SR, chord_seconds)):
-        start = round(start_time * SR)
-        count = min(round(chord_seconds * SR), n - start)
-        t = np.arange(count) / SR
-        env = np.minimum(t / .6, 1) * np.minimum((chord_seconds - t) / .8, 1)
-        chord = sum(np.sin(2 * np.pi * (440 * 2 ** ((m - 69) / 12)) * t) for m in notes[bar % 4]) / 3
-        bed[start:start + count] += (chord * env * .033).astype(np.float32)
-    for beat in np.arange(0, n / SR, 60 / bpm):
-        start = round(beat * SR); count = min(int(.12 * SR), n - start); t = np.arange(count) / SR
-        bed[start:start + count] += (np.sin(2 * np.pi * 95 * t) * np.exp(-t * 34) * .024).astype(np.float32)
     for i, scene in enumerate(timeline['scenes']):
         if i:
             start = max(0, round((scene['start'] - .035) * SR)); count = min(round(.18 * SR), n - start)
@@ -225,17 +277,35 @@ def mix_audio(root, timeline, voice):
     block = 480
     levels = np.array([np.sqrt(np.mean(voice[i:i + block] ** 2)) for i in range(0, n, block)])
     smooth = np.convolve(levels, np.ones(15) / 15, mode='same')
-    duck = np.interp(np.arange(n) / block, np.arange(len(smooth)), 1 - .70 * np.clip(smooth / .08, 0, 1))
-    end_fade = np.minimum(np.arange(n) / (SR * .25), 1) * np.minimum(np.arange(n)[::-1] / (SR * .55), 1)
     voice_gain = .83 / max(float(np.max(np.abs(voice))), .001)
-    mix = voice * voice_gain + bed * duck * end_fade + fx
+    duck = np.interp(np.arange(n) / block, np.arange(len(smooth)),
+                     1 - float(music_config['duck']) * np.clip(smooth / .08, 0, 1))
+    ducked_bed = bed * duck
+    sf.write(root / 'music-bed.wav', bed, SR, subtype='PCM_24')
+    sf.write(root / 'music-ducked.wav', ducked_bed, SR, subtype='PCM_24')
+    sf.write(root / 'effects.wav', fx, SR, subtype='PCM_24')
+    mix = voice * voice_gain + ducked_bed + fx
     sf.write(root / 'mix-raw.wav', mix, SR, subtype='PCM_24')
+    dependencies = {}
+    for name in ('numpy', 'soundfile', 'kokoro-onnx'):
+        metadata = importlib.metadata.metadata(name)
+        dependencies[name] = {'version': importlib.metadata.version(name),
+                              'license_expression': metadata.get('License-Expression'),
+                              'license': metadata.get('License')}
+    (root / 'music-provenance.json').write_text(json.dumps({
+        'origin': 'Original synthesized pad, bass and eighth-note plucks in produce.py; no sampled track',
+        'configuration': music_config, 'music_bed_sha256': digest(root / 'music-bed.wav'),
+        'music_ducked_sha256': digest(root / 'music-ducked.wav'),
+        'effects_sha256': digest(root / 'effects.wav'), 'dependencies': dependencies,
+        'voice_model': 'Locally provisioned Kokoro v1.0 INT8; verify model and voice terms before publication',
+        'font': 'System DejaVu Sans and Mono; verify font terms before distribution',
+    }, indent=2) + '\n')
     first = run(['ffmpeg', '-hide_banner', '-i', str(root / 'mix-raw.wav'), '-af',
-                 'loudnorm=I=-15.5:TP=-1.7:LRA=9:print_format=json', '-f', 'null', '-'])
+                 'loudnorm=I=-14:TP=-1.5:LRA=9:print_format=json', '-f', 'null', '-'])
     match = re.findall(r'\{\s*"input_i".*?\}', first.stderr, re.S)
     measured = json.loads(match[-1])
     (root / 'mix-loudness-pass1.json').write_text(json.dumps(measured, indent=2))
-    filt = 'loudnorm=I=-15.5:TP=-1.7:LRA=9:linear=true:' + ':'.join(
+    filt = 'loudnorm=I=-14:TP=-1.5:LRA=9:linear=true:' + ':'.join(
         f'{key}={measured[value]}' for key, value in [('measured_I','input_i'), ('measured_TP','input_tp'),
         ('measured_LRA','input_lra'), ('measured_thresh','input_thresh'), ('offset','target_offset')])
     run(['ffmpeg', '-y', '-v', 'error', '-i', str(root / 'mix-raw.wav'), '-af', filt, '-ar', str(SR), str(root / 'mix.wav')])
@@ -255,7 +325,7 @@ def caption_chunks(words):
     for word in words:
         value = word['word'].upper()
         candidate = ' '.join([w['word'].upper() for w in current] + [value])
-        if current and (sum(len(w['word'].split()) for w in current) + len(word['word'].split()) > 3 or font(68).getlength(candidate) > 820 or
+        if current and (sum(len(w['word'].split()) for w in current) + len(word['word'].split()) > 3 or font(84).getlength(candidate) > 760 or
                         re.search(r'[.!?,;:]$', current[-1]['word']) or
                         word['start'] - current[-1]['end'] > .18):
             chunks.append(current); current = []
@@ -280,7 +350,7 @@ class Renderer:
         index = max(i for i, s in enumerate(scenes) if t >= s['start'])
         scene = scenes[index]; local = t - scene['start']; kind = scene['kind']
         im = self.background.copy(); d = ImageDraw.Draw(im)
-        # Important information stays in x=72..930, y=220..1460.
+        # Important information stays in x=60..930, y=210..1490.
         d.line((74, 232, 926, 232), fill='#25364d', width=7)
         d.line((74, 232, 74 + 852 * min(t / self.timeline['duration'], 1), 232), fill=CYAN, width=7)
         text(d, (500, 292), scene['label'], 28, CYAN)
@@ -297,15 +367,10 @@ class Renderer:
         else:
             text(d, (500, 380), scene['heading'], 76)
             text(d, (500, 456), scene['subheading'], 28, MUTED)
-            save_word = next((w for w in scene['words'] if w['word'].lower().startswith('save')), None)
-            recap = kind == 'rm' and save_word and t >= save_word['start'] - .12
-            if recap:
-                for j, command in enumerate(['docker run …', 'docker ps', 'docker logs demo', 'docker stop demo', 'docker rm demo']):
-                    y = 602 + j * 103
-                    d.rounded_rectangle((84, y - 38, 926, y + 42), 15, fill=PANEL)
-                    text(d, (122, y), str(j + 1), 30, CYAN, anchor='lm')
-                    text(d, (190, y), command, 44, anchor='lm', mono=True, max_width=716)
-                text(d, (500, 1183), 'SAVE YOUR FIRST WORKFLOW', 37, GREEN)
+            follow_word = next((w for w in scene['words'] if w['word'].lower().startswith('follow')), None)
+            cta_active = kind == 'rm' and follow_word and t >= follow_word['start'] - .12
+            if cta_active:
+                self.cta_card(d, t - follow_word['start'] + .12)
             else:
                 self.terminal(d, scene, local)
                 state_color = GREEN if scene['state'] == 'RUNNING' else AMBER if scene['state'] == 'STOPPED' else MUTED
@@ -315,6 +380,22 @@ class Renderer:
                 text(d, (500, 1204), 'demo  /  ' + state, 36, state_color)
         self.captions(d, index, t)
         return im
+
+    def cta_card(self, d, elapsed):
+        config = self.timeline.get('cta')
+        if not config or len(config.get('chips', [])) != 3:
+            raise ValueError('Closing CTA requires three chips and a headline')
+        d.rounded_rectangle((85, 565, 925, 1125), 26, fill='#0a121e', outline='#304058', width=2)
+        for index, label in enumerate(config['chips']):
+            if elapsed < .1 + index * .28:
+                continue
+            x = 124 + index * 244
+            d.rounded_rectangle((x, 670, x + 210, 754), 17, fill='#183c46', outline=CYAN, width=2)
+            text(d, (x + 105, 712), label, 31, WHITE, max_width=188)
+        if elapsed >= .05:
+            text(d, (500, 905), config['headline'], 64, CYAN, max_width=790)
+        if elapsed >= .3:
+            text(d, (500, 1005), config['subline'], 38, WHITE, max_width=790)
 
     def terminal(self, d, scene, local):
         kind = scene['kind']
@@ -375,18 +456,16 @@ class Renderer:
         for chunk in self.chunks[index]:
             if chunk[0]['start'] - .025 <= t < chunk[-1]['end'] + .055:
                 values = [w['word'].upper() for w in chunk]
-                size = 68
+                size = 84
                 value = ' '.join(values)
-                while font(size).getlength(value) > 820 and size > 50:
-                    size -= 2
                 width = font(size).getlength(value)
-                if width > 820:
+                if width > 760:
                     raise ValueError('Caption cannot fit safe area')
-                x = 500 - width / 2
+                x = 490 - width / 2
                 d.rounded_rectangle((x - 22, 1321, x + width + 22, 1441), 20, fill='#080e19')
                 for w, word in zip(chunk, values, strict=True):
                     color = AMBER if w['start'] - .015 <= t < w['end'] + .015 else WHITE
-                    text(d, (x, 1380), word, size, color, anchor='lm', max_width=820)
+                    text(d, (x, 1380), word, size, color, anchor='lm', max_width=760)
                     x += font(size).getlength(word + ' ')
                 break
 

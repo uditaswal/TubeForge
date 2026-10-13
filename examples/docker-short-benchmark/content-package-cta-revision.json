@@ -1,0 +1,409 @@
+{
+  "schema_version": "1.0",
+  "request": {
+    "channel_identity": "default",
+    "channel_voice_profile": "Clear, practical and conversational. Address the viewer directly; use complete sentences, explain unfamiliar terms, avoid hype, unsupported claims and invented personal experience.",
+    "topic": "The only Docker commands you need to get started",
+    "angle": "A complete beginner workflow for one disposable practice container: run, inspect with ps and logs, stop, then remove. Scope the minimum set to this first-container exercise, not all Docker work.",
+    "target_duration_seconds": 45,
+    "language": "en",
+    "audience": "Beginners who have Docker installed and running and want their first useful terminal workflow",
+    "sources": [
+      {
+        "source_id": "docker-run",
+        "url": "https://docs.docker.com/reference/cli/docker/container/run/",
+        "title": "Docker container run",
+        "author": null,
+        "retrieved_at": null,
+        "content_sha256": null,
+        "excerpt": "docker run creates and starts a new container from an image, pulling the image when it is missing. --name assigns a custom container name. -d runs it in the background. The documented example is docker run --name test -d nginx:alpine. The same name can be used in later commands. Changing test to demo is an illustrative chosen name."
+      },
+      {
+        "source_id": "docker-ps",
+        "url": "https://docs.docker.com/reference/cli/docker/container/ls/",
+        "title": "Docker container ls",
+        "author": null,
+        "retrieved_at": null,
+        "content_sha256": null,
+        "excerpt": "docker ps is an alias for docker container ls. It lists running containers by default; docker ps -a also includes stopped containers. Output includes image, status and name."
+      },
+      {
+        "source_id": "docker-logs",
+        "url": "https://docs.docker.com/reference/cli/docker/container/logs/",
+        "title": "Docker container logs",
+        "author": null,
+        "retrieved_at": null,
+        "content_sha256": null,
+        "excerpt": "docker logs CONTAINER retrieves the logs present at execution time. The command displays the container standard output and standard error; --follow streams new output. The illustrative command docker logs demo reads the named practice container logs."
+      },
+      {
+        "source_id": "docker-stop",
+        "url": "https://docs.docker.com/reference/cli/docker/container/stop/",
+        "title": "Docker container stop",
+        "author": null,
+        "retrieved_at": null,
+        "content_sha256": null,
+        "excerpt": "docker stop CONTAINER stops a running container. The main process receives a termination signal, followed by a kill signal if it does not exit in the timeout. docker stop demo stops the named practice container. A stopped container still exists."
+      },
+      {
+        "source_id": "docker-rm",
+        "url": "https://docs.docker.com/reference/cli/docker/container/rm/",
+        "title": "Docker container rm",
+        "author": null,
+        "retrieved_at": null,
+        "content_sha256": null,
+        "excerpt": "docker rm CONTAINER removes containers. Stop a running container before ordinary removal; the documentation demonstrates docker stop test followed by docker rm test. docker rm demo removes the stopped practice container. It does not remove the image; deleting a container discards its writable layer, so this demonstration is for a disposable practice container."
+      }
+    ],
+    "prompt_version": "m6-content-v6",
+    "notes": [
+      "Write 100–115 spoken words for a brisk but clear 40–50 second Short, using six sections.",
+      "Use exactly this display sequence: docker run --name demo -d nginx:alpine; docker ps; docker logs demo; docker stop demo; docker rm demo. Keep demo consistent.",
+      "Start with an immediate specific hook, then mention Docker already installed. Explain run creates/starts, -d means background, ps checks running, logs reads output, stop stops and rm removes the stopped practice container.",
+      "Do not claim a published web page: no ports are exposed in this exercise. Do not add pull, exec, build, compose or unrelated commands.",
+      "Spoken narration should explain meaning rather than dictate every punctuation mark. Put exact commands in scene visual elements. Make the viewer able to follow the workflow visually.",
+      "Operator revision: end with one brief follow-for-more ask, replacing the earlier save/try ask.",
+      "Visuals will use large animated terminal text and explicit running/stopped/removed state cards. On-screen terminal output must be identified as edited or abbreviated if not exact captured output.",
+      "Creative revision after attempt one: the rhetorical question opening and 127 words felt formal and padded. Use a direct punchy hook, not a how-do-you question. Suggested direction: Stop memorizing Docker commands—run your first container with these five. Keep a hook candidate that the first sentence matches exactly.",
+      "Target 105–115 spoken words. Cut phrases such as when you are finished inspecting it, standard output and standard error already recorded, and that is the full first-container workflow. Explain logs as what the app prints.",
+      "End with one short follow-for-more ask."
+    ],
+    "review_mode": "manual",
+    "captions_enabled": true,
+    "music_track": null,
+    "visual_style": "animated-terminal",
+    "visual_source": "generated",
+    "voice_id": "af_bella",
+    "mcp_servers": [],
+    "production_mode": "generated",
+    "source_url": null,
+    "clip_count": 1,
+    "preset_name": "shorts",
+    "aspect_ratio": "9:16"
+  },
+  "claims": [
+    {
+      "claim_id": "claim-01",
+      "text": "The exercise uses five commands to run, inspect, stop, and remove one disposable practice container.",
+      "source_ids": [
+        "docker-run",
+        "docker-ps",
+        "docker-logs",
+        "docker-stop",
+        "docker-rm"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    },
+    {
+      "claim_id": "claim-02",
+      "text": "docker run creates and starts a container; --name assigns the name demo, and -d runs it in the background.",
+      "source_ids": [
+        "docker-run"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    },
+    {
+      "claim_id": "claim-03",
+      "text": "docker ps lists running containers and displays information including image, status, and name.",
+      "source_ids": [
+        "docker-ps"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    },
+    {
+      "claim_id": "claim-04",
+      "text": "docker logs demo retrieves output recorded from the named container.",
+      "source_ids": [
+        "docker-logs"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    },
+    {
+      "claim_id": "claim-05",
+      "text": "docker stop demo stops the running container, which continues to exist after it stops.",
+      "source_ids": [
+        "docker-stop"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    },
+    {
+      "claim_id": "claim-06",
+      "text": "docker rm demo removes the stopped practice container without removing its image.",
+      "source_ids": [
+        "docker-rm"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    }
+  ],
+  "script_sections": [
+    {
+      "section_id": "section-01",
+      "narration": "Stop memorizing Docker commands—run your first container with these five.",
+      "scene_id": "scene-01",
+      "claim_ids": [
+        "claim-01"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-02",
+      "narration": "With Docker installed and running, create and start a container named demo. The detached flag runs it in the background.",
+      "scene_id": "scene-02",
+      "claim_ids": [
+        "claim-02"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-03",
+      "narration": "Next, use docker ps to check that demo is running. Its row shows the image, status, and container name.",
+      "scene_id": "scene-03",
+      "claim_ids": [
+        "claim-03"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-04",
+      "narration": "Then read docker logs demo. Logs show what the app prints, so you can inspect its recorded output.",
+      "scene_id": "scene-04",
+      "claim_ids": [
+        "claim-04"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-05",
+      "narration": "Stop the practice container with docker stop demo. Stopping ends the process, but the container still exists until you remove it.",
+      "scene_id": "scene-05",
+      "claim_ids": [
+        "claim-05"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-06",
+      "narration": "Finally, use docker rm demo to remove the stopped container, while leaving the image in place. Follow for more practical Docker lessons.",
+      "scene_id": "scene-06",
+      "claim_ids": [
+        "claim-06"
+      ],
+      "contains_factual_claims": true
+    }
+  ],
+  "scene_plans": [
+    {
+      "scene_id": "scene-01",
+      "visual_type": "Animated terminal checklist",
+      "search_queries": [
+        "Docker terminal workflow",
+        "Docker beginner commands"
+      ],
+      "on_screen_text": "Your first 5 Docker commands",
+      "fallback_visual": "Large five-step Docker workflow card with the first command highlighted.",
+      "visual_subject": "A five-step terminal workflow for the container named demo.",
+      "visual_purpose": "Preview the exact five-command workflow and establish the immediate payoff.",
+      "composition": "Vertical title card above a five-step command stack, with the first step highlighted.",
+      "visual_elements": [
+        "docker run --name demo -d nginx:alpine",
+        "docker ps",
+        "docker logs demo",
+        "docker stop demo"
+      ]
+    },
+    {
+      "scene_id": "scene-02",
+      "visual_type": "Animated terminal and state card",
+      "search_queries": [
+        "docker run nginx alpine",
+        "Docker detached container"
+      ],
+      "on_screen_text": "Docker installed + running",
+      "fallback_visual": "Command card with Docker ready badge and demo running state.",
+      "visual_subject": "The demo container changing from absent to running.",
+      "visual_purpose": "Show that run creates and starts demo while the detached flag leaves it running in the background.",
+      "composition": "Large command centered in a vertical terminal; prerequisite badge above and running state card below.",
+      "visual_elements": [
+        "Docker: installed + running",
+        "docker run --name demo -d nginx:alpine",
+        "demo: running"
+      ]
+    },
+    {
+      "scene_id": "scene-03",
+      "visual_type": "Terminal output explainer",
+      "search_queries": [
+        "docker ps running containers",
+        "Docker container status"
+      ],
+      "on_screen_text": "Check what is running",
+      "fallback_visual": "docker ps card beside an abbreviated running-container row.",
+      "visual_subject": "An abbreviated docker ps row for demo.",
+      "visual_purpose": "Connect docker ps with checking the running container's image, status, and name.",
+      "composition": "The command appears at the top; an abbreviated results row expands below with three labeled fields.",
+      "visual_elements": [
+        "docker ps",
+        "Edited output: nginx:alpine | running | demo",
+        "demo: running"
+      ]
+    },
+    {
+      "scene_id": "scene-04",
+      "visual_type": "Animated log viewer",
+      "search_queries": [
+        "docker logs container output",
+        "docker logs demo"
+      ],
+      "on_screen_text": "Read what the app prints",
+      "fallback_visual": "docker logs demo with a clearly labeled abbreviated output panel.",
+      "visual_subject": "Recorded output from the demo container.",
+      "visual_purpose": "Demonstrate that logs retrieves the output recorded from the demo container.",
+      "composition": "The command fills the upper third while abbreviated app output scrolls beneath it.",
+      "visual_elements": [
+        "docker logs demo",
+        "Edited output: app log lines",
+        "demo: running"
+      ]
+    },
+    {
+      "scene_id": "scene-05",
+      "visual_type": "Terminal state transition",
+      "search_queries": [
+        "docker stop container",
+        "Docker stopped container"
+      ],
+      "on_screen_text": "Running → stopped",
+      "fallback_visual": "docker stop demo between running and stopped state cards.",
+      "visual_subject": "The demo container transitioning from running to stopped.",
+      "visual_purpose": "Show that stopping ends the running process while the container continues to exist.",
+      "composition": "The stop command slides in, followed by a state card changing from running to stopped.",
+      "visual_elements": [
+        "docker stop demo",
+        "demo: running",
+        "demo: stopped"
+      ]
+    },
+    {
+      "scene_id": "scene-06",
+      "visual_type": "Cleanup state transition",
+      "search_queries": [
+        "docker rm stopped container",
+        "Docker remove container"
+      ],
+      "on_screen_text": "Follow for more practical Docker lessons",
+      "fallback_visual": "docker rm demo, then a follow card with the retained image noted before the closing line.",
+      "visual_subject": "The stopped demo container being removed while its image remains.",
+      "visual_purpose": "Show removal of the stopped practice container, preservation of its image, and the spoken follow CTA.",
+      "composition": "The removal command and state transition appear first; a final follow card replaces the terminal when the closing line begins.",
+      "visual_elements": [
+        "docker rm demo",
+        "demo: stopped → removed",
+        "Follow for more practical Docker lessons"
+      ]
+    }
+  ],
+  "metadata": {
+    "title_options": [
+      "5 Docker Commands for Your First Container",
+      "Run Your First Docker Container in 5 Commands",
+      "Docker for Beginners: Your First 5 Commands",
+      "First Docker Container: Run to Cleanup",
+      "The 5-Command Docker Beginner Workflow",
+      "Start Docker with One Practice Container",
+      "Docker Container Basics in 5 Commands",
+      "Run, Check, Stop, and Remove a Docker Container",
+      "Your First Useful Docker Terminal Workflow",
+      "Learn Docker with One Disposable Container"
+    ],
+    "description": "Learn five Docker commands for a first container workflow: run nginx:alpine, check it with docker ps, read its logs, stop it, and remove it.\nFollow one disposable practice container named demo from creation through cleanup. Docker must already be installed and running; no ports are exposed in this exercise.",
+    "tags": [
+      "Docker",
+      "Docker tutorial",
+      "Docker for beginners",
+      "docker run",
+      "docker ps",
+      "docker logs",
+      "docker stop",
+      "docker rm",
+      "nginx alpine",
+      "container basics",
+      "Docker CLI"
+    ],
+    "chapters": [
+      {
+        "section_id": "section-01",
+        "label": "Five-command workflow"
+      },
+      {
+        "section_id": "section-02",
+        "label": "Run the container"
+      },
+      {
+        "section_id": "section-03",
+        "label": "Check its state"
+      },
+      {
+        "section_id": "section-04",
+        "label": "Read its logs"
+      },
+      {
+        "section_id": "section-05",
+        "label": "Stop the container"
+      },
+      {
+        "section_id": "section-06",
+        "label": "Remove and recap"
+      }
+    ]
+  },
+  "thumbnail_brief": {
+    "text_options": [
+      "FIRST FIVE",
+      "RUN TO REMOVE",
+      "DOCKER STARTER"
+    ],
+    "visual_direction": "Use a dark terminal background, one bright command line, and three stacked state cards for running, stopped, and removed. Keep the selected two-word text large and separate from title wording.",
+    "accessibility_description": "A vertical terminal graphic shows the container demo moving through running, stopped, and removed states, with large high-contrast text reading FIRST FIVE."
+  },
+  "hook_options": [
+    "Stop memorizing Docker commands—run your first container with these five.",
+    "Run, inspect, stop, and remove your first Docker container with five commands.",
+    "If Docker is already running, these five commands complete your first container workflow.",
+    "Here are the five Docker commands that take one practice container from start to cleanup.",
+    "Start with one disposable Docker container and learn the five commands that manage its lifecycle."
+  ],
+  "clip_candidates": [
+    {
+      "clip_id": "clip-01",
+      "section_ids": [
+        "section-01",
+        "section-02",
+        "section-03",
+        "section-04",
+        "section-05",
+        "section-06"
+      ],
+      "hook": "Stop memorizing Docker commands—run your first container with these five.",
+      "rationale": "A self-contained beginner workflow showing five commands and the container state changing from created to running, stopped, and removed.",
+      "target_duration_seconds": 45
+    }
+  ]
+}
