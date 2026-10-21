@@ -6,7 +6,9 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator, model_serializer
+
+from tubeforge.rendering.shorts.schema import ShortsTopic
 
 
 class DomainModel(BaseModel):
@@ -45,7 +47,7 @@ class ContentRequest(DomainModel):
     channel_voice_profile: str = Field(default="Clear, practical and conversational. Address the viewer directly; use complete sentences, explain unfamiliar terms, avoid hype, unsupported claims and invented personal experience.", min_length=1, max_length=4000)
     topic: str = Field(min_length=1, max_length=500)
     angle: str = Field(min_length=1, max_length=1_000)
-    target_duration_seconds: int = Field(ge=30, le=7_200)
+    target_duration_seconds: int = Field(ge=25, le=7_200)
     language: str = Field(min_length=2, max_length=35)
     audience: str = Field(min_length=1, max_length=200)
     sources: tuple[SourceReference, ...] = Field(min_length=1, max_length=100)
@@ -72,6 +74,11 @@ class ContentRequest(DomainModel):
 
     @model_validator(mode="after")
     def require_unique_source_ids(self) -> ContentRequest:
+        if self.prompt_version == "m6-content-v8":
+            if self.aspect_ratio != "9:16" or not 25 <= self.target_duration_seconds <= 45:
+                raise ValueError("reference Shorts require 9:16 and a 25–45 second target")
+        elif self.target_duration_seconds < 30:
+            raise ValueError("legacy requests require at least 30 seconds")
         _require_unique_ids(self.sources, "source_id")
         if any(not note.strip() for note in self.notes):
             raise ValueError("notes must not contain blank values")
@@ -84,9 +91,23 @@ class ContentRequest(DomainModel):
         return self
 
 
+def generation_request_content(request: ContentRequest) -> ContentRequest:
+    """Strip v7 capture-only fields before sending semantic input to a writer."""
+    if request.prompt_version not in {"m6-content-v7", "m6-content-v8"}:
+        return request
+    sources = tuple(source.model_copy(update={"retrieved_at": None, "content_sha256": None}) for source in request.sources)
+    return request.model_copy(update={"sources": sources})
+
+
 def generation_request_key_payload(request: ContentRequest) -> dict[str, object]:
-    """Keep legacy default-profile drafts on their existing durable allowance."""
-    value = request.model_dump(mode="json")
+    """Return semantic request inputs, excluding v7 source-capture metadata.
+
+    Capture timestamps and excerpt hashes belong to the source_packet evidence
+    artifact. The exact source text and citation remain part of generation
+    identity, while adding provenance during ingestion must not cause a cache
+    miss for the same reviewed request.
+    """
+    value = generation_request_content(request).model_dump(mode="json")
     if request.prompt_version in {"m6-content-v1", "m6-content-v2", "m6-content-v3", "m6-content-v4"} and request.channel_identity == "default" and request.channel_voice_profile == ContentRequest.model_fields["channel_voice_profile"].default:
         value.pop("channel_identity")
         value.pop("channel_voice_profile")
@@ -137,6 +158,59 @@ class ScriptSection(DomainModel):
         return self
 
 
+class TerminalRevealCues(DomainModel):
+    """Local spoken-word positions; timestamps are resolved after TTS."""
+
+    command_start_word_index: int = Field(ge=0)
+    command_end_word_index: int = Field(ge=0)
+    output_word_index: int = Field(ge=0)
+    secondary_word_index: int = Field(ge=0)
+    third_word_index: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def require_order(self) -> TerminalRevealCues:
+        if not (self.command_start_word_index <= self.command_end_word_index < self.output_word_index < self.secondary_word_index):
+            raise ValueError("terminal reveal word indices must be ordered")
+        if self.third_word_index is not None and self.third_word_index <= self.secondary_word_index:
+            raise ValueError("terminal third reveal must follow the second")
+        return self
+
+
+class CardMotionKind(StrEnum):
+    HOOK = "hook"
+    CLOSE = "close"
+
+
+class CardRevealCues(DomainModel):
+    """Three ordered content reveals anchored to local spoken-word positions."""
+
+    kind: CardMotionKind
+    first_word_index: int = Field(ge=0)
+    second_word_index: int = Field(ge=0)
+    third_word_index: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def require_order(self) -> CardRevealCues:
+        if not (self.first_word_index < self.second_word_index < self.third_word_index):
+            raise ValueError("card reveal word indices must be ordered")
+        return self
+
+
+class TeachingRevealCues(DomainModel):
+    """Three spoken-word anchors for a non-terminal teaching layout."""
+
+    first_word_index: int = Field(ge=0)
+    second_word_index: int = Field(ge=0)
+    third_word_index: int = Field(ge=0)
+    comparison_panels_first: bool = False
+
+    @model_validator(mode="after")
+    def require_order(self) -> TeachingRevealCues:
+        if not (self.first_word_index < self.second_word_index < self.third_word_index):
+            raise ValueError("teaching reveal word indices must be ordered")
+        return self
+
+
 class ScenePlan(DomainModel):
     scene_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     visual_type: str = Field(min_length=1, max_length=100)
@@ -147,12 +221,34 @@ class ScenePlan(DomainModel):
     visual_purpose: str | None = Field(default=None, min_length=1, max_length=300)
     composition: str | None = Field(default=None, min_length=1, max_length=200)
     visual_elements: tuple[str, ...] = Field(default=(), max_length=4)
+    terminal_cues: TerminalRevealCues | None = None
+    card_cues: CardRevealCues | None = None
+    teaching_cues: TeachingRevealCues | None = None
 
     @model_validator(mode="after")
     def require_short_visual_elements(self) -> ScenePlan:
         if any(not item.strip() or len(item) > 80 for item in self.visual_elements):
             raise ValueError("visual elements must be nonblank and at most 80 characters")
+        _validate_explicit_layout(self.visual_type, self.visual_elements, self.on_screen_text)
+        if self.terminal_cues is not None and (self.visual_type != "terminal" or len(self.visual_elements) < 2):
+            raise ValueError("terminal reveal cues require a terminal scene with two display elements")
+        if self.terminal_cues is not None and self.terminal_cues.third_word_index is not None and len(self.visual_elements) != 3:
+            raise ValueError("terminal third reveal requires a third display element")
+        if self.card_cues is not None and (self.visual_type not in {"comparison", "flow_diagram", "timeline"} or len(self.visual_elements) != 3 or self.terminal_cues is not None):
+            raise ValueError("card reveal cues require a comparison, flow diagram, or timeline scene with three display elements")
+        if self.teaching_cues is not None and (self.visual_type not in {"flow_diagram", "comparison", "timeline", "source_card"} or len(self.visual_elements) != 3 or self.terminal_cues is not None or self.card_cues is not None):
+            raise ValueError("teaching reveal cues require three non-terminal elements and no other motion cues")
+        if self.teaching_cues is not None and self.teaching_cues.comparison_panels_first and self.visual_type != "comparison":
+            raise ValueError("comparison panel reveal order requires a comparison scene")
         return self
+
+
+def _validate_explicit_layout(kind: str, elements: tuple[str, ...], on_screen_text: str | None) -> None:
+    """Keep new layout IDs lossless while leaving legacy prose scene types intact."""
+    if kind in {"flow_diagram", "comparison", "timeline", "source_card"} and len(elements) != 3:
+        raise ValueError(f"{kind} layout requires exactly three visual elements")
+    if kind == "terminal" and (not on_screen_text or not on_screen_text.strip() or len(elements) > 3):
+        raise ValueError("terminal layout requires a command and at most three output elements")
 
 
 class Chapter(DomainModel):
@@ -163,6 +259,7 @@ class Chapter(DomainModel):
 class VideoMetadata(DomainModel):
     title_options: tuple[str, ...] = Field(min_length=1, max_length=10)
     description: str = Field(min_length=1, max_length=10_000)
+    call_to_action: str | None = Field(default=None, min_length=1, max_length=300)
     tags: tuple[str, ...] = Field(default=(), max_length=30)
     chapters: tuple[Chapter, ...] = Field(default=())
 
@@ -193,9 +290,19 @@ class ContentPackage(DomainModel):
     thumbnail_brief: ThumbnailBrief
     hook_options: tuple[str, ...] = Field(default=(), max_length=5)
     clip_candidates: tuple[ClipCandidate, ...] = Field(default=(), max_length=8)
+    reference_short: ShortsTopic | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_serialization(self, handler):
+        value = handler(self)
+        if self.reference_short is None:
+            value.pop("reference_short", None)
+        return value
 
     @model_validator(mode="after")
     def validate_references(self) -> ContentPackage:
+        if (self.request.prompt_version == "m6-content-v8") != (self.reference_short is not None):
+            raise ValueError("reference scene data is required only for v8 requests")
         _require_unique_ids(self.claims, "claim_id")
         _require_unique_ids(self.script_sections, "section_id")
         _require_unique_ids(self.scene_plans, "scene_id")
@@ -218,6 +325,25 @@ class ContentPackage(DomainModel):
             positions = [section_positions[section_id] for section_id in clip.section_ids]
             if positions != list(range(min(positions), max(positions) + 1)):
                 raise ValueError(f"clip {clip.clip_id!r} must contain contiguous script sections")
+        if self.reference_short is not None:
+            topic = self.reference_short
+            if [s.scene_id for s in topic.scenes] != [s.scene_id for s in self.script_sections]:
+                raise ValueError("reference scenes must match ordered narration")
+            if [s.vo for s in topic.scenes] != [s.narration for s in self.script_sections]:
+                raise ValueError("reference speech differs from canonical narration")
+            references = {s.source_id: s for s in self.request.sources}
+            for source in topic.sources:
+                approved = references.get(source.source_id)
+                if approved is None or source.url != approved.url:
+                    raise ValueError("reference visual cites an unapproved source URL")
+                name = (approved.author or approved.title)[:42]
+                if source.name != name:
+                    raise ValueError("reference source label differs from trusted attribution")
+            claims = {c.claim_id: c for c in self.claims}
+            for scene, section in zip(topic.scenes, self.script_sections, strict=True):
+                cited = {source for claim_id in section.claim_ids for source in claims[claim_id].source_ids}
+                if set(scene.source_ids) != cited:
+                    raise ValueError("reference visual sources differ from narrated claims")
         return self
 
 
@@ -327,6 +453,7 @@ class MediaSearchRequest(DomainModel):
             raise ValueError("media search queries must be nonblank and bounded")
         if any("youtube.com" in query.casefold() or "youtu.be" in query.casefold() for query in self.queries):
             raise ValueError("media searches must not target YouTube videos")
+        _validate_explicit_layout(self.visual_type, self.visual_elements, self.on_screen_text)
         return self
 
 

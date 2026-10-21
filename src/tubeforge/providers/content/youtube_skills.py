@@ -9,14 +9,25 @@ from pathlib import Path
 
 from tubeforge.core.errors import ProviderValidationError
 
-SKILL_TEMPLATE = "m6-content-v6"
-SKILL_TEMPLATES = {"m6-content-v5", SKILL_TEMPLATE}
+SKILL_TEMPLATE = "m6-content-v7"
+SKILL_TEMPLATES = {"m6-content-v5", "m6-content-v6", SKILL_TEMPLATE, "m6-content-v8"}
 DEFAULT_VOICE = "Clear, practical and conversational. Address the viewer directly; use complete sentences, explain unfamiliar terms, avoid hype, unsupported claims and invented personal experience."
-RESOURCES = {
+LEGACY_RESOURCES = {
     "yt-script": ("SKILL.md", "automation.md", "hooks.json", "hookscore.py"),
     "yt-package": ("SKILL.md", "title.py"),
     "yt-seo": ("SKILL.md",),
 }
+PRODUCTION_RESOURCES = {
+    **LEGACY_RESOURCES,
+    "om-short-production": ("SKILL.md",),
+    "om-storyboard": ("SKILL.md",),
+}
+RESOURCES = PRODUCTION_RESOURCES
+
+
+def resource_set_for(template_version: str) -> dict[str, tuple[str, ...]]:
+    """Keep old cached prompt identities stable while enriching new v7 jobs."""
+    return PRODUCTION_RESOURCES if template_version in {SKILL_TEMPLATE, "m6-content-v8"} else LEGACY_RESOURCES
 
 
 def resource_root() -> Path:
@@ -27,11 +38,12 @@ def resource_root() -> Path:
     return Path(__file__).resolve().parents[4] / ".agents" / "skills"
 
 
-def load_resources(root: Path | None = None) -> tuple[str, dict[str, str]]:
+def load_resources(root: Path | None = None, *, template_version: str = SKILL_TEMPLATE) -> tuple[str, dict[str, str]]:
     root = root or resource_root()
+    resources_for_prompt = resource_set_for(template_version)
     blocks, hashes = [], {}
     try:
-        for skill, files in RESOURCES.items():
+        for skill, files in resources_for_prompt.items():
             for filename in files:
                 path = root / skill / filename
                 data = path.read_bytes()
@@ -56,9 +68,9 @@ def _tool(root: Path, skill: str, filename: str):
     return module
 
 
-def preflight(root: Path | None = None) -> dict[str, str]:
+def preflight(root: Path | None = None, *, template_version: str = SKILL_TEMPLATE) -> dict[str, str]:
     root = root or resource_root()
-    _, hashes = load_resources(root)
+    _, hashes = load_resources(root, template_version=template_version)
     try:
         hook = _tool(root, "yt-script", "hookscore.py")
         title = _tool(root, "yt-package", "title.py")
@@ -72,7 +84,7 @@ def preflight(root: Path | None = None) -> dict[str, str]:
 def evaluate(package, root: Path | None = None) -> dict[str, object]:
     """Execute supplied tools, preserve the chosen narration, expose alternatives."""
     root = root or resource_root()
-    hashes = preflight(root)
+    hashes = preflight(root, template_version=package.request.prompt_version)
     try:
         candidates = package.hook_options
         if len(candidates) != 5 or len(set(candidates)) != 5 or any(not text.strip() or len(text) > 500 for text in candidates):
@@ -116,20 +128,13 @@ def voice_for(config, channel: str | None = None) -> tuple[str, str]:
 
 
 def select_hook(package):
-    """Score first, select within the strongest suitable candidates, then review."""
+    """Score hook candidates while leaving all creative bytes under Codex control."""
     report = evaluate(package)
     limit = 18 if package.request.aspect_ratio == "9:16" else 24
     eligible = [row for row in report['hooks'] if len(re.findall(r"\b\w+\b", row['hook'])) <= limit and re.search(r"[.!?…]$", row['hook'].strip())]
     if not eligible:
         raise ProviderValidationError("No hook candidate fits the selected format's immediate opening")
     finalists = eligible[:2]
-    selected = next((row for row in finalists if row['selected']), finalists[0])
     original = report['selected_hook']
-    if selected['hook'] != original:
-        section = package.script_sections[0]
-        narration = selected['hook'] + section.narration.strip()[len(original):]
-        section = section.model_copy(update={'narration': narration})
-        package = package.model_copy(update={'script_sections': (section, *package.script_sections[1:])})
-        report = evaluate(package)
-    report['hook_selection'] = {'model_choice': original, 'selected': selected['hook'], 'finalists': [row['hook'] for row in finalists], 'rule': 'Preserve model suitability choice among the two highest-scoring format-compatible hooks; otherwise select the highest.'}
+    report['hook_selection'] = {'model_choice': original, 'selected': original, 'finalists': [row['hook'] for row in finalists], 'model_choice_is_finalist': any(row['hook'] == original for row in finalists), 'rule': 'Codex chooses the hook and writes the matching opening; Python reports heuristic scores without rewriting narration.'}
     return package, report

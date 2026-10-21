@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "retrieval_mode": "reviewed_official_excerpt_candidate",
+  "sources": [
+    {
+      "source_id": "git-status",
+      "url": "https://git-scm.com/docs/git-status",
+      "title": "Git status reference",
+      "author": "Git project",
+      "retrieved_at": "2026-10-13T06:11:58.198766+00:00",
+      "content_sha256": null,
+      "excerpt": "git status reports staged changes for the next commit, unstaged working-tree changes, and untracked files."
+    },
+    {
+      "source_id": "git-add",
+      "url": "https://git-scm.com/docs/git-add",
+      "title": "Git add reference",
+      "author": "Git project",
+      "retrieved_at": "2026-10-13T06:11:58.198766+00:00",
+      "content_sha256": null,
+      "excerpt": "git add followed by a path adds that file’s current contents to the index, the staging area used to prepare the next commit."
+    },
+    {
+      "source_id": "git-diff",
+      "url": "https://git-scm.com/docs/git-diff",
+      "title": "Git diff reference",
+      "author": "Git project",
+      "retrieved_at": "2026-10-13T06:11:58.198766+00:00",
+      "content_sha256": null,
+      "excerpt": "git diff --cached shows changes staged for the next commit compared with HEAD; --staged is a synonym."
+    },
+    {
+      "source_id": "git-commit",
+      "url": "https://git-scm.com/docs/git-commit",
+      "title": "Git commit reference",
+      "author": "Git project",
+      "retrieved_at": "2026-10-13T06:11:58.198766+00:00",
+      "content_sha256": null,
+      "excerpt": "git commit with a message records the current index contents as a new commit. In its basic form, it does not include unstaged working-tree changes."
+    }
+  ]
+}

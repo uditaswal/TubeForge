@@ -11,6 +11,10 @@ class RetryableProviderError(ProviderError):
     """A transient failure that can safely resume at the current stage."""
 
 
+class RepairableAlignmentResult(RetryableProviderError):
+    """A structurally matching alignment with a degenerate word boundary."""
+
+
 class ProviderValidationError(ProviderError):
     """An invalid provider result that needs operator correction."""
 

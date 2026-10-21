@@ -9,7 +9,7 @@ from typing import Callable
 from tubeforge.core.config import CodexProviderConfig
 from tubeforge.core.errors import InsufficientSourcesError, ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.repositories import CachedGeneration, GenerationCacheRepository, GenerationExhausted
-from tubeforge.domain.contracts import ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest
+from tubeforge.domain.contracts import ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest, generation_request_content
 from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse
 from tubeforge.providers.content.prompts import build_content_prompt, normalize_content_request, validate_video_package
 
@@ -27,14 +27,29 @@ class HostRunnerContentProvider:
         self.last_provenance: dict[str, object] | None = None
         self.last_usage: dict[str, object] | None = None
 
+    def research_sources(self, request: ContentRequest) -> dict:
+        """Typed research operation; no narration cache or approval mutation."""
+        def call(operation):
+            message = GenerateShortsScriptRequest(operation=operation, request=generation_request_content(request))
+            response = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), message.model_dump_json().encode(), self.config.socket_timeout_seconds))
+            if not response.ok or response.result is None:
+                raise ProviderValidationError(response.failure.message if response.failure else "research runner returned no result")
+            return response.result
+        readiness = call("PreflightContentV1")
+        if "ResearchSourcesV1" not in readiness.provenance.get("operations", []):
+            raise ProviderValidationError("Host runner needs the research update installed before topic research can run")
+        return call("ResearchSourcesV1").model_dump(mode="json")
+
     def generate_package(self, request: ContentRequest) -> ContentPackage:
         # Reject an unsupported prompt before reserving or charging a model call.
         prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
+        host_request = generation_request_content(request)
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
+        from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES
         if request.prompt_version in SKILL_TEMPLATES:
-            hashes = preflight()
+            hashes = preflight(template_version=request.prompt_version)
             try:
-                readiness = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), GenerateShortsScriptRequest(operation="PreflightContentV1", request=request).model_dump_json().encode(), self.config.socket_timeout_seconds))
+                readiness = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), GenerateShortsScriptRequest(operation="PreflightContentV1", request=host_request).model_dump_json().encode(), self.config.socket_timeout_seconds))
             except Exception as error:
                 raise ProviderValidationError(f"Host skill preflight failed before invocation: {error}") from error
             if not readiness.ok or readiness.result is None or readiness.result.provenance.get("resource_hashes") != hashes:
@@ -44,9 +59,9 @@ class HostRunnerContentProvider:
                 from tubeforge.providers.content.prompts import prompt_evidence
                 if readiness.result.provenance.get("prompt_sha256") != prompt_evidence(prompt)["prompt_sha256"]:
                     raise ProviderValidationError("Host skill preflight failed before invocation: assembled prompt differs; redeploy host wheel")
-        if request.prompt_version == "m6-content-v6":
-            from tubeforge.providers.content.output import require_source_excerpts
-            require_source_excerpts(request)
+            if request.prompt_version in CONTENT_ENVELOPE_TEMPLATES:
+                from tubeforge.providers.content.output import require_source_excerpts
+                require_source_excerpts(request)
         now = self._now()
         cached = self.cache.reserve_or_get(request, self.provider_name, self.config.model, request.prompt_version, now=now, reservation_seconds=self.config.reservation_seconds)
         if isinstance(cached, CachedGeneration):
@@ -63,7 +78,7 @@ class HostRunnerContentProvider:
             raise ProviderValidationError("TubeForge's two-attempt limit for this exact source packet is exhausted; operator review is required")
         response = None
         try:
-            response = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), GenerateShortsScriptRequest(request=request).model_dump_json().encode(), self.config.socket_timeout_seconds))
+            response = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), GenerateShortsScriptRequest(request=host_request).model_dump_json().encode(), self.config.socket_timeout_seconds))
             if not response.ok or response.failure:
                 failure = response.failure
                 code = failure.code if failure else "invalid_output"

@@ -14,7 +14,7 @@ class GenerateShortsScriptRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    operation: str = Field(default="GenerateShortsScriptV1", pattern=r"^(GenerateShortsScriptV1|PreflightContentV1)$")
+    operation: str = Field(default="GenerateShortsScriptV1", pattern=r"^(GenerateShortsScriptV1|PreflightContentV1|ResearchSourcesV1)$")
     request: ContentRequest
 
 

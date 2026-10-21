@@ -1,0 +1,14 @@
+{
+  "name": "Chill Beat (CC0 acceptance fixture)",
+  "filename": "chill-beat.ogg",
+  "source_url": "https://commons.wikimedia.org/w/index.php?title=File:Chill_Beat.ogg&oldid=1197694828",
+  "download_url": "https://upload.wikimedia.org/wikipedia/commons/9/9f/Chill_Beat.ogg",
+  "license_name": "CC0 1.0 Universal Public Domain Dedication",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "attribution_required": false,
+  "attribution": "",
+  "publishing_allowed": true,
+  "sha1": "edbbad17278357fb54c3a91f9a4efe90f1dcefa7",
+  "sha256": "0ebeaac7ed3e8fab0beb2a707d7e2eb048d673583d32d9dccba9a2be9f8e075b",
+  "source_note": "Wikimedia Commons snapshot states own work by Maddy and CC0; audio bytes must match its published SHA-1. Local test use does not authorize publishing the resulting video."
+}

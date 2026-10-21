@@ -1,8 +1,10 @@
 # Documentation index
 
 - [Operator setup and local workflow](../readme.md)
-- [Current release status and blockers](STATUS.md)
+- [Current release status, stages and blockers](../design_doc/tubeforge-publishing-design.md#11-current-release-status-and-next-action)
 - [Development contract](../AGENTS.md)
+- [Video production rulebook](SHORT_FORM_VIDEO_RULEBOOK.md)
+- [Reference benchmark audit](DOCKER_SHORT_BENCHMARK_REVIEW.md)
 - [Append-only validation evidence](../AUTONOMOUS_PROGRESS.md)
 - [Repository hygiene plan and acceptance](REPOSITORY_HYGIENE.md)
 
@@ -15,7 +17,8 @@
 
 ## Planning and design
 
-- [Publishing and dashboard implementation plan](../design_doc/tubeforge-publishing-design.md)
+- [Project plan and publishing design](../design_doc/tubeforge-publishing-design.md)
+- [Status preserved before consolidation](STATUS-2026-10-13-archive.md)
 - [Proposed fine-grained implementation order](../design_doc/tubeforge-implementation-order.md)
 - [Earlier publishing inventory and delivery evidence](planning/publishing-delivery-plan.md)
 - [Product backlog](planning/product-backlog.md)
@@ -28,5 +31,6 @@
 - [yt-script implementation and verification report](YT_SCRIPT_AUTOMATION_REPORT.md)
 
 The planning documents capture proposals and supplied briefs; they are not
-proof of implemented behavior. `STATUS.md` owns current status. `overnight/`
-contains historical autonomous-session records; runtime logs stay ignored.
+proof of implemented behavior. The project plan owns current status;
+`STATUS.md` redirects there and the dated copy preserves its former content.
+`overnight/` contains historical autonomous-session records; runtime logs stay ignored.

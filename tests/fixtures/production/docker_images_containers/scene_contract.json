@@ -1,0 +1,94 @@
+{
+  "schema_version": "1.0",
+  "package_sha256": "68e711a27e121355e24605a4f4b7af696be47407540aaa61bb67af1fa831ffdc",
+  "source_packet_sha256": "38264502217c7543c5b6f497d62ca49d471071aabe52cbd5f44d473fc3ddf89c",
+  "script_gate_identity": "68e711a27e121355e24605a4f4b7af696be47407540aaa61bb67af1fa831ffdc",
+  "scenes": [
+    {
+      "scene_id": "scene-1",
+      "layout": "flow_diagram",
+      "heading": "1 IMAGE → 2 CONTAINERS",
+      "display_elements": [
+        "nginx:alpine",
+        "web-a",
+        "web-b"
+      ],
+      "source_ids": [
+        "docker-image",
+        "docker-container",
+        "docker-run-cli"
+      ]
+    },
+    {
+      "scene_id": "scene-2",
+      "layout": "comparison",
+      "heading": "IMAGE ≠ CONTAINER",
+      "display_elements": [
+        "IMAGE: reusable package",
+        "files • binaries • libraries • configuration",
+        "CONTAINER: isolated process"
+      ],
+      "source_ids": [
+        "docker-image",
+        "docker-container",
+        "docker-run-cli"
+      ]
+    },
+    {
+      "scene_id": "scene-3",
+      "layout": "terminal",
+      "heading": "START WEB-A",
+      "display_elements": [
+        "NAMES: web-a",
+        "IMAGE: nginx:alpine"
+      ],
+      "source_ids": [
+        "docker-run-cli"
+      ],
+      "command": "docker run --name web-a -d nginx:alpine"
+    },
+    {
+      "scene_id": "scene-4",
+      "layout": "terminal",
+      "heading": "START WEB-B",
+      "display_elements": [
+        "NAMES: web-b",
+        "web-a ≠ web-b"
+      ],
+      "source_ids": [
+        "docker-run-cli",
+        "docker-container"
+      ],
+      "command": "docker run --name web-b -d nginx:alpine"
+    },
+    {
+      "scene_id": "scene-5",
+      "layout": "terminal",
+      "heading": "CHECK BOTH CONTAINERS",
+      "display_elements": [
+        "IMAGE | STATUS | NAMES",
+        "nginx:alpine | Up | web-a",
+        "nginx:alpine | Up | web-b"
+      ],
+      "source_ids": [
+        "docker-container",
+        "docker-run-cli"
+      ],
+      "command": "docker ps"
+    },
+    {
+      "scene_id": "scene-6",
+      "layout": "comparison",
+      "heading": "REMOVED → UNSTORED CHANGES DISAPPEAR",
+      "display_elements": [
+        "IMAGE: reusable",
+        "CONTAINER: separate state",
+        "removed + unstored → disappears"
+      ],
+      "source_ids": [
+        "docker-image",
+        "docker-overview"
+      ]
+    }
+  ]
+}

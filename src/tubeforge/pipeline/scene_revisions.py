@@ -49,7 +49,7 @@ def create_scene_revision(
     if section_index is None:
         raise ValueError("scene has no narration section")
     scene_fields = {key: value for key, value in changes.items() if key in {
-        "visual_subject", "visual_purpose", "composition", "on_screen_text", "visual_elements",
+        "visual_type", "visual_subject", "visual_purpose", "composition", "on_screen_text", "visual_elements",
     }}
     narration = changes.get("narration")
     scene = ScenePlan.model_validate({**source.scene_plans[scene_index].model_dump(mode="json"), **scene_fields})

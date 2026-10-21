@@ -310,6 +310,7 @@ class JobRepository:
             if record is None:
                 return None
             record.state, record.resume_state, record.failure_message = state.value, (resume_state.value if resume_state else None), failure_message
+            record.next_retry_at = None
             record.updated_at = now
             session.flush()
             return _job_from_record(record)
@@ -352,7 +353,75 @@ class JobRepository:
             if record is None:
                 raise KeyError(f"job not found: {job_id}")
             record.state, record.resume_state, record.failure_message = state.value, (resume_state.value if resume_state else None), failure_message
+            record.next_retry_at = None
             record.updated_at = datetime.now(UTC)
+            session.flush()
+            return _job_from_record(record)
+
+    def retry_approved_asset_validation(self, job_id: str, *, package_identity: str, actor: str) -> PipelineJob:
+        """Requeue a failed asset-stage validation with its exact approved script.
+
+        The caller must verify registered checkpoint files before invoking this
+        method. The transaction rechecks state, ownership, checkpoint records and
+        the immutable script approval before restoring the asset-stage cursor.
+        """
+        now = datetime.now(UTC)
+        with self._session_factory.begin() as session:
+            record = session.get(PipelineJobRecord, job_id)
+            if record is None:
+                raise KeyError(f"job not found: {job_id}")
+            refresh = record.state == JobState.PREVIEW_READY.value
+            retry = record.state == JobState.FAILED_VALIDATION.value and record.resume_state in {JobState.ASSET_ACQUISITION.value, JobState.PREVIEW_RENDERING.value}
+            if not (refresh or retry) or record.claim_owner is not None:
+                raise ValueError("only unclaimed approved media checkpoints can be retried")
+            if refresh and session.scalar(select(ApprovalRecord).where(
+                ApprovalRecord.job_id == job_id,
+                ApprovalRecord.gate == ApprovalGate.PREVIEW.value,
+                ApprovalRecord.status == ApprovalStatus.APPROVED.value,
+            )) is not None:
+                raise ValueError("an approved preview requires its own revision workflow")
+            if not refresh and record.resume_state == JobState.PREVIEW_RENDERING.value and session.scalar(select(ArtifactRecord).where(
+                ArtifactRecord.job_id == job_id,
+                ArtifactRecord.stage == JobState.PREVIEW_RENDERING.value,
+                ArtifactRecord.name == "preview",
+            )) is not None:
+                raise ValueError("an existing preview requires its own review/revision workflow")
+            package = session.scalar(select(ArtifactRecord).where(
+                ArtifactRecord.job_id == job_id,
+                ArtifactRecord.stage == JobState.CONTENT_GENERATING.value,
+                ArtifactRecord.name == "content_package",
+            ))
+            packet = session.scalar(select(ArtifactRecord).where(
+                ArtifactRecord.job_id == job_id,
+                ArtifactRecord.stage == JobState.CONTENT_GENERATING.value,
+                ArtifactRecord.name == "source_packet",
+            ))
+            approval = session.scalar(select(ApprovalRecord).where(
+                ApprovalRecord.job_id == job_id,
+                ApprovalRecord.gate == ApprovalGate.SCRIPT.value,
+                ApprovalRecord.status == ApprovalStatus.APPROVED.value,
+                ApprovalRecord.reviewed_identity == package_identity,
+            ))
+            if package is None or package.checksum_sha256 != package_identity or packet is None or approval is None:
+                raise ValueError("exact approved script and source checkpoints are required")
+            from_state = record.state
+            record.state = JobState.ASSET_ACQUISITION.value
+            record.resume_state = None
+            record.failure_message = None
+            record.next_retry_at = None
+            record.updated_at = now
+            session.add(JobEventRecord(
+                job_id=job_id,
+                event_type="validation_retry_requested",
+                details_json=json.dumps({
+                    "actor": actor,
+                    "from_state": from_state,
+                    "resume_state": JobState.ASSET_ACQUISITION.value,
+                    "reviewed_script_identity": package_identity,
+                    "source_packet_checksum": packet.checksum_sha256,
+                }, sort_keys=True),
+                created_at=now,
+            ))
             session.flush()
             return _job_from_record(record)
 

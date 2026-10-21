@@ -24,6 +24,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      piper-tts:
+        condition: service_healthy
     ports:
       # The one documented developer dashboard URL is loopback-only:
       # http://127.0.0.1:62065
@@ -37,6 +39,7 @@ services:
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
+      TUBEFORGE_PIPER_SERVER_URL: http://piper-tts:5000
       TUBEFORGE_ACCOUNT_ENCRYPTION_KEY: ${TUBEFORGE_ACCOUNT_ENCRYPTION_KEY:-}
       TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID: ${TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID:-}
       TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET: ${TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET:-}
@@ -51,6 +54,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      piper-tts:
+        condition: service_healthy
     volumes:
       - ./src:/app/src:ro
       - ./.agents/skills:/app/.agents/skills:ro
@@ -62,8 +67,31 @@ services:
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
+      TUBEFORGE_PIPER_SERVER_URL: http://piper-tts:5000
     restart: unless-stopped
     mem_limit: 1g
+
+  piper-tts:
+    build: .
+    user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
+    command: ["python", "-m", "tubeforge.tts_server"]
+    expose: ["5000"]
+    volumes:
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+      - ./models:/app/models:ro
+    environment:
+      TUBEFORGE_CONFIG: /app/config/production.yaml
+      PYTHONPATH: /app/src
+      TUBEFORGE_PIPER_LISTEN_HOST: 0.0.0.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    mem_limit: 768m
 
   publisher-worker:
     profiles: ["publishing"]

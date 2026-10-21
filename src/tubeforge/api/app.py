@@ -33,6 +33,7 @@ from tubeforge.scheduling.service import next_run
 from tubeforge.providers.content.prompts import validate_video_package
 from tubeforge.pipeline.manual_publish import ManualPublishService
 from tubeforge.pipeline.scene_revisions import StaleSceneRevision, create_scene_revision
+from tubeforge.pipeline.diagnostics import summarize_stage_events
 from tubeforge.pipeline.delivery_queue import DeliveryQueue
 from tubeforge.pipeline.publishing_assets import PublishingAssetRegistry, READY_STATES
 from tubeforge.db.models import DeliveryAttemptRecord, PublishingAssetRecord, SocialAccountRecord
@@ -51,6 +52,11 @@ class ApprovalRequest(BaseModel):
     reviewed_identity: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class RetryApprovedValidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_script_identity: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class ScriptRevisionRequest(BaseModel):
     """Operator-authored narration changes for a script awaiting review."""
 
@@ -66,6 +72,7 @@ class SceneRevisionRequest(BaseModel):
     scene_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     expected_content_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     narration: str | None = Field(default=None, min_length=1, max_length=12_000)
+    visual_type: str | None = Field(default=None, min_length=1, max_length=100)
     visual_subject: str | None = Field(default=None, min_length=1, max_length=200)
     visual_purpose: str | None = Field(default=None, min_length=1, max_length=300)
     composition: str | None = Field(default=None, min_length=1, max_length=200)
@@ -83,6 +90,8 @@ class VideoBriefRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=500)
     notes: tuple[str, ...] = Field(min_length=1, max_length=30)
+    angle: str | None = Field(default=None, max_length=4_000)
+    sources: tuple[SourceReference, ...] | None = Field(default=None, min_length=1, max_length=8)
     preset: str | None = Field(default=None, max_length=100)
     duration_seconds: int | None = Field(default=None, ge=30, le=7_200)
     captions_enabled: bool | None = None
@@ -195,21 +204,31 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="rights-safe stock is not enabled in this TubeForge configuration")
     if value.visual_source == "generated" and settings.pipeline.media.provider == "wikimedia":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="local generated scene art is not enabled in this TubeForge configuration")
-    sources = [SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title="Operator-approved source notes", excerpt="\n".join(notes))]
-    if value.source_url:
-        if not value.source_title or not value.source_title.strip() or not value.source_excerpt or not value.source_excerpt.strip():
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source URL requires a source title and approved excerpt")
-        try:
-            sources.append(SourceReference(source_id="approved-source-1", url=value.source_url, title=value.source_title.strip(), excerpt=value.source_excerpt.strip()))
-        except ValueError as error:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source URL must be an absolute HTTP(S) URL") from error
-    elif value.source_title or value.source_excerpt:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source title and excerpt require a source URL")
+    if value.sources is not None:
+        if value.source_url or value.source_title or value.source_excerpt:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="use either the multi-source packet or the single source fields, not both")
+        source_ids = [source.source_id for source in value.sources]
+        if len(set(source_ids)) != len(source_ids):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="approved source packet must have unique source IDs")
+        if any(not source.title.strip() or not source.excerpt or not source.excerpt.strip() for source in value.sources):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="each approved source needs a title and exact excerpt")
+        sources = list(value.sources)
+    else:
+        sources = [SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title=("Brief notes (unverified)" if settings.pipeline.sources.research_enabled else "Operator-approved source notes"), excerpt="\n".join(notes))]
+        if value.source_url:
+            if not value.source_title or not value.source_title.strip() or not value.source_excerpt or not value.source_excerpt.strip():
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source URL requires a source title and approved excerpt")
+            try:
+                sources.append(SourceReference(source_id="approved-source-1", url=value.source_url, title=value.source_title.strip(), excerpt=value.source_excerpt.strip()))
+            except ValueError as error:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source URL must be an absolute HTTP(S) URL") from error
+        elif value.source_title or value.source_excerpt:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source title and excerpt require a source URL")
     from tubeforge.providers.content.youtube_skills import voice_for
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     return ContentRequest(
         channel_identity=channel, channel_voice_profile=profile,
-        topic=value.title, angle="\n".join(notes), target_duration_seconds=duration,
+        topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
         language="en", audience=value.audience, prompt_version=settings.pipeline.codex.prompt_template_version,
         sources=tuple(sources),
         notes=notes, review_mode=value.review_mode or preset.review_mode,
@@ -251,16 +270,57 @@ def _job_payload(job: object) -> dict[str, object]:
         "state": job.state,
         "failure_message": job.failure_message,
         "blocked_reason": "insufficient_sources" if (job.failure_message or "").startswith("insufficient_sources:") else None,
+        "attempt_count": job.attempt_count,
+        "next_retry_at": _as_ist(job.next_retry_at) if job.next_retry_at is not None else None,
         "created_at": _as_ist(job.created_at),
     }
+
+
+def _artifact_file_matches(artifact: object) -> bool:
+    try:
+        digest = hashlib.sha256()
+        with Path(artifact.path).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest() == artifact.checksum_sha256
+    except OSError:
+        return False
+
+
+def _can_retry_approved_asset_validation(runtime: Runtime, job: object) -> tuple[bool, str | None]:
+    refresh = job.state is JobState.PREVIEW_READY
+    retry = job.state is JobState.FAILED_VALIDATION and job.resume_state in {JobState.ASSET_ACQUISITION, JobState.PREVIEW_RENDERING}
+    if not (refresh or retry) or job.claim_owner is not None:
+        return False, None
+    if refresh and runtime.approvals.approved(job.id, ApprovalGate.PREVIEW) is not None:
+        return False, None
+    if not refresh and job.resume_state is JobState.PREVIEW_RENDERING and runtime.artifacts.get(job.id, JobState.PREVIEW_RENDERING, "preview") is not None:
+        return False, None
+    package = runtime.artifacts.get(job.id, JobState.CONTENT_GENERATING, "content_package")
+    packet = runtime.artifacts.get(job.id, JobState.CONTENT_GENERATING, "source_packet")
+    if package is None or packet is None or not _artifact_file_matches(package) or not _artifact_file_matches(packet):
+        return False, None
+    if runtime.approvals.approved(job.id, ApprovalGate.SCRIPT, reviewed_identity=package.checksum_sha256) is None:
+        return False, None
+    try:
+        from tubeforge.pipeline.scene_contracts import compile_scene_contract
+
+        compile_scene_contract(
+            Path(package.path).read_bytes(),
+            Path(packet.path).read_bytes(),
+            accepted_script_identity=package.checksum_sha256,
+        )
+    except (OSError, ValueError, ValidationError):
+        return False, None
+    return True, package.checksum_sha256
 
 
 DASHBOARD_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TubeForge Studio</title><style>
-:root{color-scheme:dark;--bg:#080d1a;--panel:#111a2e;--muted:#8ea0bd;--line:#253451;--cyan:#5ee8ff;--good:#70e1a1;--warn:#ffd36a;--bad:#ff8492}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#162544,#080d1a 45%);color:#f3f7ff;font:15px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}.shell{max-width:1180px;margin:auto;padding:22px 16px 48px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:22px}.brand{font-size:22px;font-weight:800;letter-spacing:-.5px}.brand i{font-style:normal;color:var(--cyan)}.sub{color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:minmax(270px,350px) 1fr;gap:18px}.panel,.job{background:linear-gradient(145deg,#131f37,#0e1729);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 32px #0003}.panel{padding:18px}h1,h2,h3,p{margin:0}h2{font-size:17px}label{display:block;margin:13px 0 0;color:#cbd7eb;font-size:13px}input:not([type=checkbox]),textarea,select,button{font:inherit;width:100%;margin-top:5px;border-radius:9px;border:1px solid #31415f;padding:10px;background:#0a1222;color:#f5f8ff}textarea{min-height:106px;resize:vertical}input[type=checkbox]{accent-color:var(--cyan)}button{border:0;background:linear-gradient(100deg,#53d6f1,#8099ff);color:#07111e;font-weight:800;cursor:pointer}button.secondary{background:#223452;color:#eaf4ff;border:1px solid #3b5076}button.danger{background:#4b2634;color:#ffdce1;border:1px solid #864454}button.small{width:auto;margin:0;padding:7px 10px;font-size:12px}.checkbox{display:flex;gap:8px;align-items:center;margin-top:15px}.checkbox input{width:auto}.toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}.toolbar select{width:auto;margin:0;padding:7px}.jobs{display:grid;gap:11px}.job{padding:15px;overflow-wrap:anywhere}.jobhead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.title{font-weight:800;font-size:16px}.badge{display:inline-flex;align-items:center;border-radius:99px;padding:4px 8px;background:#223654;color:#b7ebff;font-size:11px;font-weight:800;white-space:nowrap}.badge.failed{background:#4a2631;color:#ffc0c8}.badge.ready{background:#1c4038;color:#adf4ce}.muted{color:var(--muted);font-size:13px}.failure{margin-top:10px;border-left:3px solid var(--bad);padding:8px 10px;background:#2b1720;color:#ffdce1;border-radius:6px;font-size:13px}.actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px}.empty,.loading,.error{padding:25px;text-align:center;color:var(--muted)}.error{color:#ffc0c8}.notice{min-height:20px;margin-top:10px;color:var(--good);font-size:13px}dialog{width:min(680px,calc(100% - 24px));max-height:86vh;color:#f4f7ff;background:#101a2d;border:1px solid #3b4d70;border-radius:16px;padding:0;box-shadow:0 24px 80px #000b}dialog::backdrop{background:#020714bb}.modal-head{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:15px 16px;border-bottom:1px solid var(--line)}.modal-body{padding:16px;overflow:auto;max-height:70vh}.close{width:auto;background:transparent;color:#dbe8ff;font-size:20px;padding:0 6px}.video{width:100%;border-radius:10px;background:#000}.timeline{display:grid;gap:11px}.event{border-left:2px solid #406392;padding-left:10px}.event-time{color:var(--muted);font-size:12px}.event-type{font-weight:750}.event-detail{font-size:13px;color:#cbd7eb;white-space:pre-wrap;overflow-wrap:anywhere}@media(max-width:780px){.shell{padding:14px 12px}.grid{grid-template-columns:1fr}.top{align-items:flex-start}.panel{padding:15px}.jobhead{flex-direction:column}.badge{white-space:normal}.toolbar{align-items:flex-start;flex-direction:column}.toolbar select{width:100%}}</style></head>
-<body><main class="shell"><header class="top"><div><div class="brand">Tube<i>Forge</i> Studio</div><div class="sub">Local video creation, review, and activity</div></div><div class="sub" id="connection">Connecting…</div></header><div class="grid"><section class="panel"><h2>New generation</h2><p class="sub">Give a title and the key points. You stay in control of review.</p><form id="createForm"><label>Title<input name="title" maxlength="500" required placeholder="e.g. Bare minimum for software engineers"></label><label>Notes<textarea name="notes" required placeholder="One point per line"></textarea></label><label>Duration<input name="duration_seconds" type="number" value="60" min="30" max="7200" required></label><label>Review mode<select name="review_mode"><option value="manual">Manual review</option><option value="auto">Automatic render</option></select></label><label class="checkbox"><input name="captions_enabled" type="checkbox" checked> Include captions</label><button type="submit">Create video</button><div class="notice" id="notice" role="status"></div></form></section><section><div class="toolbar"><div><h2>Generations</h2><div class="sub">Updates in place every 4 seconds</div></div><select id="filter" aria-label="Filter generations"><option value="all">All generations</option><option value="active">In progress</option><option value="needs_review">Needs review</option><option value="failed">Failed</option><option value="complete">Video ready</option></select></div><div id="jobs" class="jobs"><div class="loading">Loading generations…</div></div></section></div></main><dialog id="videoDialog" aria-labelledby="videoTitle"><div class="modal-head"><h2 id="videoTitle">Video</h2><button class="close" type="button" data-close="videoDialog" aria-label="Close video">×</button></div><div class="modal-body"><video id="player" class="video" controls preload="metadata" playsinline></video></div></dialog><dialog id="activityDialog" aria-labelledby="activityTitle"><div class="modal-head"><h2 id="activityTitle">Activity</h2><button class="close" type="button" data-close="activityDialog" aria-label="Close activity">×</button></div><div class="modal-body"><div id="timeline" class="timeline"><div class="loading">Loading activity…</div></div></div></dialog><script>
-const jobsRoot=document.querySelector('#jobs'),filter=document.querySelector('#filter'),notice=document.querySelector('#notice'),cards=new Map();const esc=v=>String(v??'');const ready=s=>['preview_ready','final_ready','publication_approval_required','publication_ready','published'].includes(s),failed=s=>s.startsWith('failed_');const needs=s=>['script_approval_required','preview_ready','publication_approval_required'].includes(s);function matches(j){return filter.value==='all'||filter.value==='active'&&(!ready(j.state)&&!failed(j.state)&&!needs(j.state))||filter.value==='needs_review'&&needs(j.state)||filter.value==='failed'&&failed(j.state)||filter.value==='complete'&&j.artifacts.includes('final')}function badgeClass(j){return failed(j.state)?'failed':j.artifacts.includes('final')?'ready':''}function button(label,cls,fn){let b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=fn;return b}function renderCard(card,j){card.replaceChildren();card.className='job';let head=document.createElement('div');head.className='jobhead';let name=document.createElement('div');name.className='title';name.textContent=j.topic;let badge=document.createElement('span');badge.className='badge '+badgeClass(j);badge.textContent=j.blocked_reason==='insufficient_sources'?'Blocked: insufficient sources':j.state.replaceAll('_',' ');head.append(name,badge);card.append(head);if(j.failure_message){let msg=document.createElement('div');msg.className='failure';msg.textContent=j.failure_message;card.append(msg)}let meta=document.createElement('div');meta.className='muted';meta.textContent=`${j.artifacts.length} saved artifacts · ${j.event_count} activity events`;card.append(meta);let actions=document.createElement('div');actions.className='actions';if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')));for(const clip of j.artifacts.filter(name=>name.startsWith('clip_')))actions.append(button(clip.replace('_',' '),'secondary',()=>openVideo(j,clip,clip.replace('_',' '))));actions.append(button('Activity','secondary',()=>openActivity(j)));if(j.state==='script_approval_required')actions.append(button('Approve script','',()=>approve(j.id,'script')));if(j.state==='preview_ready')actions.append(button('Approve preview','',()=>approve(j.id,'preview')));if(j.deletable)actions.append(button('Delete','danger',()=>removeJob(j.id)));card.append(actions)}async function refresh(){try{let r=await fetch('/api/jobs');if(!r.ok)throw Error('Could not load generations');let data=await r.json(),visible=data.filter(matches),seen=new Set;for(const job of visible){let card=cards.get(job.id);if(!card){card=document.createElement('article');cards.set(job.id,card);jobsRoot.append(card)}renderCard(card,job);seen.add(job.id)}for(const [id,card]of cards)if(!seen.has(id)){card.remove();cards.delete(id)}if(!visible.length)jobsRoot.innerHTML='<div class="empty">No matching generations yet.</div>';else if(jobsRoot.querySelector('.empty'))jobsRoot.querySelector('.empty').remove();document.querySelector('#connection').textContent='Dashboard connected'}catch(e){if(!cards.size)jobsRoot.innerHTML='<div class="error">Unable to load generations. Retrying…</div>';document.querySelector('#connection').textContent='Reconnecting…'}}async function openVideo(job,name,label){let dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');document.querySelector('#videoTitle').textContent=`${label}: ${job.topic}`;player.pause();player.removeAttribute('src');player.load();player.src=`/api/jobs/${job.id}/artifacts/${name}`;player.autoplay=false;dialog.showModal()}async function openActivity(job){let dialog=document.querySelector('#activityDialog'),timeline=document.querySelector('#timeline');document.querySelector('#activityTitle').textContent=`Activity: ${job.topic}`;timeline.replaceChildren(Object.assign(document.createElement('div'),{className:'loading',textContent:'Loading activity…'}));dialog.showModal();let r=await fetch(`/api/jobs/${job.id}/events`);let events=await r.json();timeline.replaceChildren();if(!events.length){timeline.textContent='No activity was recorded before the dashboard timeline was enabled.';return}for(const event of events){let node=document.createElement('div');node.className='event';let type=document.createElement('div');type.className='event-type';type.textContent=event.event_type.replaceAll('_',' ');let time=document.createElement('div');time.className='event-time';time.textContent=new Date(event.created_at).toLocaleString();let detail=document.createElement('div');detail.className='event-detail';detail.textContent=Object.entries(event.details).map(([k,v])=>`${k}: ${typeof v==='string'?v:JSON.stringify(v)}`).join('\n');node.append(type,time,detail);timeline.append(node)}}async function approve(id,gate){let r=await fetch(`/api/jobs/${id}/approvals/${gate}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:'approved',actor:'local-dashboard'})});if(!r.ok)alert(await r.text());refresh()}async function removeJob(id){if(confirm('Delete this local generation and its saved files?')){let r=await fetch(`/api/jobs/${id}`,{method:'DELETE'});if(!r.ok)alert(await r.text());refresh()}}document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{let d=document.querySelector('#'+b.dataset.close);if(d.id==='videoDialog'){let p=document.querySelector('#player');p.pause();p.removeAttribute('src');p.load()}d.close()});document.querySelector('#createForm').onsubmit=async e=>{e.preventDefault();let d=new FormData(e.currentTarget),body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled')};let r=await fetch('/api/videos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok){notice.textContent='Could not create video: '+await r.text();return}notice.textContent='Generation created. It will appear in the list shortly.';e.currentTarget.reset();e.currentTarget.querySelector('[name=duration_seconds]').value=60;e.currentTarget.querySelector('[name=captions_enabled]').checked=true;refresh()};filter.onchange=refresh;refresh();setInterval(refresh,4000);</script></body></html>"""
+:root{color-scheme:dark;--bg:#080d1a;--panel:#111a2e;--muted:#8ea0bd;--line:#253451;--cyan:#5ee8ff;--good:#70e1a1;--warn:#ffd36a;--bad:#ff8492}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#162544,#080d1a 45%);color:#f3f7ff;font:15px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}.shell{max-width:1180px;margin:auto;padding:22px 16px 48px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:22px}.brand{font-size:22px;font-weight:800;letter-spacing:-.5px}.brand i{font-style:normal;color:var(--cyan)}.sub{color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:minmax(270px,350px) 1fr;gap:18px}.panel,.job{background:linear-gradient(145deg,#131f37,#0e1729);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 32px #0003}.panel{padding:18px}h1,h2,h3,p{margin:0}h2{font-size:17px}label{display:block;margin:13px 0 0;color:#cbd7eb;font-size:13px}input:not([type=checkbox]),textarea,select,button{font:inherit;width:100%;margin-top:5px;border-radius:9px;border:1px solid #31415f;padding:10px;background:#0a1222;color:#f5f8ff}textarea{min-height:106px;resize:vertical}input[type=checkbox]{accent-color:var(--cyan)}button{border:0;background:linear-gradient(100deg,#53d6f1,#8099ff);color:#07111e;font-weight:800;cursor:pointer}button.secondary{background:#223452;color:#eaf4ff;border:1px solid #3b5076}button.danger{background:#4b2634;color:#ffdce1;border:1px solid #864454}button.small{width:auto;margin:0;padding:7px 10px;font-size:12px}.checkbox{display:flex;gap:8px;align-items:center;margin-top:15px}.checkbox input{width:auto}.toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}.toolbar select{width:auto;margin:0;padding:7px}.jobs{display:grid;gap:11px}.job{padding:15px;overflow-wrap:anywhere}.jobhead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.title{font-weight:800;font-size:16px}.badge{display:inline-flex;align-items:center;border-radius:99px;padding:4px 8px;background:#223654;color:#b7ebff;font-size:11px;font-weight:800;white-space:nowrap}.badge.failed{background:#4a2631;color:#ffc0c8}.badge.ready{background:#1c4038;color:#adf4ce}.badge.pending{background:#4a3c1d;color:#ffe5a1}.muted{color:var(--muted);font-size:13px}.failure{margin-top:10px;border-left:3px solid var(--bad);padding:8px 10px;background:#2b1720;color:#ffdce1;border-radius:6px;font-size:13px}.failure.pending{border-color:var(--warn);background:#2b2617;color:#ffecad}.actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px}.empty,.loading,.error{padding:25px;text-align:center;color:var(--muted)}.error{color:#ffc0c8}.notice{min-height:20px;margin-top:10px;color:var(--good);font-size:13px}dialog{width:min(680px,calc(100% - 24px));max-height:86vh;color:#f4f7ff;background:#101a2d;border:1px solid #3b4d70;border-radius:16px;padding:0;box-shadow:0 24px 80px #000b}dialog::backdrop{background:#020714bb}.modal-head{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:15px 16px;border-bottom:1px solid var(--line)}.modal-body{padding:16px;overflow:auto;max-height:70vh}.close{width:auto;background:transparent;color:#dbe8ff;font-size:20px;padding:0 6px}.video{width:100%;border-radius:10px;background:#000}.timeline{display:grid;gap:11px}.event{border-left:2px solid #406392;padding-left:10px}.event-time{color:var(--muted);font-size:12px}.event-type{font-weight:750}.event-detail{font-size:13px;color:#cbd7eb;white-space:pre-wrap;overflow-wrap:anywhere}@media(max-width:780px){.shell{padding:14px 12px}.grid{grid-template-columns:1fr}.top{align-items:flex-start}.panel{padding:15px}.jobhead{flex-direction:column}.badge{white-space:normal}.toolbar{align-items:flex-start;flex-direction:column}.toolbar select{width:100%}}</style></head>
+<body><main class="shell"><header class="top"><div><div class="brand">Tube<i>Forge</i> Studio</div><div class="sub">Local video creation, review, and activity</div></div><div class="sub" id="connection">Connecting…</div></header><div class="grid"><section class="panel"><h2>New generation</h2><p class="sub">Give a title and the key points. You stay in control of review.</p><form id="createForm"><label>Title<input name="title" maxlength="500" required placeholder="e.g. Bare minimum for software engineers"></label><label>Notes<textarea name="notes" required placeholder="One point per line"></textarea></label><label>Target duration (seconds)<input name="duration_seconds" type="number" value="60" min="30" max="7200" required></label><label>Review mode<select name="review_mode"><option value="manual">Manual review</option><option value="auto">Automatic render</option></select></label><label class="checkbox"><input name="captions_enabled" type="checkbox" checked> Include captions</label><button type="submit">Create video</button><div class="notice" id="notice" role="status"></div></form></section><section><div class="toolbar"><div><h2>Generations</h2><div class="sub">Updates in place every 4 seconds</div></div><select id="filter" aria-label="Filter generations"><option value="all">All generations</option><option value="active">In progress</option><option value="needs_review">Needs review</option><option value="failed">Failed</option><option value="complete">Video ready</option></select></div><div id="jobs" class="jobs"><div class="loading">Loading generations…</div></div></section></div></main><dialog id="videoDialog" aria-labelledby="videoTitle"><div class="modal-head"><h2 id="videoTitle">Video</h2><button class="close" type="button" data-close="videoDialog" aria-label="Close video">×</button></div><div class="modal-body"><video id="player" class="video" controls preload="metadata" playsinline></video></div></dialog><dialog id="activityDialog" aria-labelledby="activityTitle"><div class="modal-head"><h2 id="activityTitle">Activity</h2><button class="close" type="button" data-close="activityDialog" aria-label="Close activity">×</button></div><div class="modal-body"><div id="timeline" class="timeline"><div class="loading">Loading activity…</div></div></div></dialog><script>
+const jobsRoot=document.querySelector('#jobs'),filter=document.querySelector('#filter'),notice=document.querySelector('#notice'),cards=new Map();const esc=v=>String(v??'');const ready=s=>['preview_ready','final_ready','publication_approval_required','publication_ready','published'].includes(s),failed=s=>['failed_validation','failed_exhausted'].includes(s);const needs=s=>['script_approval_required','preview_ready','publication_approval_required'].includes(s);function matches(j){return filter.value==='all'||filter.value==='active'&&(!ready(j.state)&&!failed(j.state)&&!needs(j.state))||filter.value==='needs_review'&&needs(j.state)||filter.value==='failed'&&failed(j.state)||filter.value==='complete'&&j.artifacts.includes('final')}function badgeClass(j){return j.state==='failed_retryable'?'pending':failed(j.state)?'failed':j.artifacts.includes('final')?'ready':''}function button(label,cls,fn){let b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=fn;return b}function renderCard(card,j){card.replaceChildren();card.className='job';let head=document.createElement('div');head.className='jobhead';let name=document.createElement('div');name.className='title';name.textContent=j.topic;let badge=document.createElement('span');badge.className='badge '+badgeClass(j);badge.textContent=j.blocked_reason==='insufficient_sources'?'Blocked: insufficient sources':j.state==='failed_retryable'?(j.next_retry_at?'Retry scheduled':'Retry pending'):j.state.replaceAll('_',' ');head.append(name,badge);card.append(head);if(j.failure_message){let msg=document.createElement('div');msg.className='failure'+(j.state==='failed_retryable'?' pending':'');msg.textContent=j.failure_message;card.append(msg)}let meta=document.createElement('div');meta.className='muted';meta.textContent=`${j.artifacts.length} saved artifacts · ${j.event_count} activity events`;if(j.state==='failed_retryable'&&j.next_retry_at)meta.textContent+=` · Next attempt ${new Date(j.next_retry_at).toLocaleString()} (attempt ${j.attempt_count})`;card.append(meta);let actions=document.createElement('div');actions.className='actions';if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')));for(const clip of j.artifacts.filter(name=>name.startsWith('clip_')))actions.append(button(clip.replace('_',' '),'secondary',()=>openVideo(j,clip,clip.replace('_',' '))));actions.append(button('Activity','secondary',()=>openActivity(j)));if(j.state==='script_approval_required')actions.append(button('Approve script','',()=>approve(j.id,'script')));if(j.state==='preview_ready')actions.append(button('Approve preview','',()=>approve(j.id,'preview')));if(j.can_retry_validation)actions.append(button('Retry approved media stages','secondary',()=>retryValidation(j)));if(j.deletable)actions.append(button('Delete','danger',()=>removeJob(j.id)));card.append(actions)}async function refresh(){try{let r=await fetch('/api/jobs');if(!r.ok)throw Error('Could not load generations');let data=await r.json(),visible=data.filter(matches),seen=new Set;for(const job of visible){let card=cards.get(job.id);if(!card){card=document.createElement('article');cards.set(job.id,card);jobsRoot.append(card)}renderCard(card,job);seen.add(job.id)}for(const [id,card]of cards)if(!seen.has(id)){card.remove();cards.delete(id)}if(!visible.length)jobsRoot.innerHTML='<div class="empty">No matching generations yet.</div>';else if(jobsRoot.querySelector('.empty'))jobsRoot.querySelector('.empty').remove();document.querySelector('#connection').textContent='Dashboard connected'}catch(e){if(!cards.size)jobsRoot.innerHTML='<div class="error">Unable to load generations. Retrying…</div>';document.querySelector('#connection').textContent='Reconnecting…'}}async function openVideo(job,name,label){let dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');document.querySelector('#videoTitle').textContent=`${label}: ${job.topic}`;player.pause();player.removeAttribute('src');player.load();player.src=`/api/jobs/${job.id}/artifacts/${name}`;player.autoplay=false;dialog.showModal()}async function openActivity(job){let dialog=document.querySelector('#activityDialog'),timeline=document.querySelector('#timeline');document.querySelector('#activityTitle').textContent=`Activity: ${job.topic}`;timeline.replaceChildren(Object.assign(document.createElement('div'),{className:'loading',textContent:'Loading activity…'}));dialog.showModal();let r=await fetch(`/api/jobs/${job.id}/events`);let events=await r.json();timeline.replaceChildren();let diagnostic=document.createElement('div');diagnostic.className='event';diagnostic.textContent='Diagnostics loading…';timeline.append(diagnostic);try{let response=await fetch(`/api/jobs/${job.id}/diagnostics`);if(!response.ok)throw Error('unavailable');let report=await response.json();let stages=Object.entries(report.stage_metrics).map(([stage,value])=>`${stage}: ${(value.elapsed_ms/1000).toFixed(1)}s across ${value.executions} execution(s), cgroup lifetime peak ${value.cgroup_peak_bytes==null?'unavailable':(value.cgroup_peak_bytes/1048576).toFixed(0)+' MiB'}`).join(' · ');diagnostic.textContent=(stages||'No measured stages yet.')+(report.failure_reason?' · Failure: '+report.failure_reason:'');let note=document.createElement('div');note.className='sub';note.textContent=report.memory_note;diagnostic.append(note);let download=document.createElement('a');download.href=`/api/jobs/${job.id}/diagnostics.jsonl`;download.textContent='Download diagnostics JSONL';diagnostic.append(download)}catch(_){diagnostic.textContent='Diagnostics unavailable; activity remains visible.'}if(!events.length){timeline.append(Object.assign(document.createElement('div'),{textContent:'No activity was recorded before the dashboard timeline was enabled.'}));return}for(const event of events){let node=document.createElement('div');node.className='event';let type=document.createElement('div');type.className='event-type';type.textContent=event.event_type.replaceAll('_',' ');let time=document.createElement('div');time.className='event-time';time.textContent=new Date(event.created_at).toLocaleString();let detail=document.createElement('div');detail.className='event-detail';detail.textContent=Object.entries(event.details).map(([k,v])=>`${k}: ${typeof v==='string'?v:JSON.stringify(v)}`).join('\n');node.append(type,time,detail);timeline.append(node)}}async function retryValidation(job){if(!window.confirm('Retry local media stages from the saved, approved script and source packet? This resumes local media work; it will not regenerate narration.'))return;notice.textContent='Requesting checkpoint recovery…';const response=await fetch(`/api/jobs/${job.id}/retry-validation`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({expected_script_identity:job.retry_script_identity})});if(!response.ok){notice.textContent='Recovery was not queued: '+await response.text();await refresh();return}notice.textContent='Approved checkpoint queued at asset acquisition.';await refresh()}async function approve(id,gate){let r=await fetch(`/api/jobs/${id}/approvals/${gate}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:'approved',actor:'local-dashboard'})});if(!r.ok)alert(await r.text());refresh()}async function removeJob(id){if(confirm('Delete this local generation and its saved files?')){let r=await fetch(`/api/jobs/${id}`,{method:'DELETE'});if(!r.ok)alert(await r.text());refresh()}}document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{let d=document.querySelector('#'+b.dataset.close);if(d.id==='videoDialog'){let p=document.querySelector('#player');p.pause();p.removeAttribute('src');p.load()}d.close()});document.querySelector('#createForm').onsubmit=async e=>{e.preventDefault();let d=new FormData(e.currentTarget),body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled')};let r=await fetch('/api/videos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok){notice.textContent='Could not create video: '+await r.text();return}notice.textContent='Generation created. It will appear in the list shortly.';e.currentTarget.reset();e.currentTarget.querySelector('[name=duration_seconds]').value=60;e.currentTarget.querySelector('[name=captions_enabled]').checked=true;refresh()};filter.onchange=refresh;refresh();setInterval(refresh,4000);</script></body></html>"""
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -791,18 +851,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           loadChoices();loadDrafts();loadWorkerState();setInterval(loadWorkerState,20000);
         })();
         </script>"""
-        reviewer_controls = """<dialog id="scriptDialog" aria-labelledby="scriptTitle"><div class="modal-head"><h2 id="scriptTitle">Review script and sources</h2><button class="close" type="button" id="scriptClose" aria-label="Close script">×</button></div><form id="scriptForm"><div class="modal-body"><p class="sub">Review the exact source packet and narration. Saving creates a new exact script revision and requires a fresh approval.</p><h3>Approved sources</h3><div id="scriptSources"></div><h3>Scenes, packaging and skill checks</h3><pre id="skillReview" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre><h3>Narration</h3><div id="scriptSections"></div><label>Codex revision instruction<textarea id="codexInstruction" placeholder="e.g. Make the hook sharper, use a practical senior-engineer tone, and keep all claims accurate."></textarea></label><button id="copyCodexPrompt" class="secondary" type="button">Copy Codex prompt</button><div id="scriptNotice" class="notice"></div><div class="actions"><button class="small secondary" type="button" id="scriptCancel">Cancel</button><button class="small" type="submit">Save revision</button></div></div></form></dialog><script>
+        reviewer_controls = """<dialog id="scriptDialog" aria-labelledby="scriptTitle"><div class="modal-head"><h2 id="scriptTitle">Review script and sources</h2><button class="close" type="button" id="scriptClose" aria-label="Close script">×</button></div><form id="scriptForm"><div class="modal-body"><p class="sub">Review the exact source packet and narration. Saving creates a new exact script revision and requires a fresh approval.</p><h3>Approved sources</h3><div id="scriptSources"></div><h3>Hook and title checks</h3><div id="creativeChecks" aria-live="polite"></div><details><summary>Scene, packaging and technical details</summary><pre id="skillReview" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details><h3>Narration</h3><div id="scriptSections"></div><label>Codex revision instruction<textarea id="codexInstruction" placeholder="e.g. Make the hook sharper, use a practical senior-engineer tone, and keep all claims accurate."></textarea></label><button id="copyCodexPrompt" class="secondary" type="button">Copy Codex prompt</button><div id="scriptNotice" class="notice"></div><div class="actions"><button class="small secondary" type="button" id="scriptCancel">Cancel</button><button class="small" type="submit">Save revision</button></div></div></form></dialog><script>
         (() => {
           let currentJob=null, currentPackage=null, scriptEditable=false;
-          const dialog=document.querySelector('#scriptDialog'), sections=document.querySelector('#scriptSections'), sources=document.querySelector('#scriptSources'), scriptNotice=document.querySelector('#scriptNotice');
+          const dialog=document.querySelector('#scriptDialog'), sections=document.querySelector('#scriptSections'), sources=document.querySelector('#scriptSources'), creativeChecks=document.querySelector('#creativeChecks'), scriptNotice=document.querySelector('#scriptNotice');
           document.addEventListener('click', event=>{const button=event.target.closest('button');if(button&&(button.textContent==='Approve script'||button.textContent==='Approve preview')&&!button.disabled){button.disabled=true;button.textContent='Saving approval…';}},true);
           const makeButton=(label, cls, handler)=>{const b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=handler;return b;};
+          const textNode=(parent,tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;node.textContent=text;parent.append(node);return node;};
+          function renderCreativeChecks(pkg,checks){
+            creativeChecks.replaceChildren();
+            textNode(creativeChecks,'p','sub','Hook and title scores are heuristic review signals, not predictions of views. They do not replace source or creative review.');
+            if(!checks||!Array.isArray(checks.hooks)||!Array.isArray(checks.titles)){
+              textNode(creativeChecks,'p','failure pending',checks?.reason||'Automated creative checks are unavailable. Review the hook and packaging manually; no approval was applied.');
+              return;
+            }
+            const hookTitle=textNode(creativeChecks,'h4','','Hook options');hookTitle.style.margin='12px 0 4px';
+            const hooks=document.createElement('ol');hooks.className='creative-list';creativeChecks.append(hooks);
+            const chosen=pkg.script_sections?.[0]?.narration?.match(/^.*?[.!?…](?:\\s|$)/)?.[0]?.trim();
+            const selectedIndex=checks.hooks.findIndex(item=>item.selected||item.hook===chosen);
+            checks.hooks.forEach((item,index)=>{
+              const row=textNode(hooks,'li','creative-row','');
+              textNode(row,'span','creative-score',`${item.verdict}/100 · ${item.band||'unrated'}`);
+              textNode(row,'span','',`${item.selected||item.hook===chosen?'Selected opening · ':''}${item.hook}`);
+              if(index===selectedIndex&&selectedIndex>1)textNode(row,'p','sub','This selected opening ranks below the two highest heuristic scores.');
+            });
+            const thumbnailOptions=pkg.thumbnail_brief?.text_options||[];
+            textNode(creativeChecks,'p','sub',thumbnailOptions.length?`No title/thumbnail pair is selected. Title scores below compare against the first thumbnail option: “${thumbnailOptions[0]}”. Other thumbnail text options: ${thumbnailOptions.slice(1).map(value=>`“${value}”`).join(', ')||'none'}.`:'No thumbnail text options are available, so review the title choices manually.');
+            const titleTitle=textNode(creativeChecks,'h4','','Top title checks');titleTitle.style.margin='12px 0 4px';
+            const sortedTitles=[...checks.titles].sort((a,b)=>(b.score||0)-(a.score||0));
+            const showTitle=(parent,item,index)=>{
+              const row=textNode(parent,'li','creative-row','');
+              textNode(row,'span','creative-score',`${item.score}/100`);
+              textNode(row,'span','',`${item.title} · ${item.chars} characters`);
+              const issues=Array.isArray(item.issues)?item.issues:[];
+              if(issues.length){const list=document.createElement('ul');list.className='sub';issues.slice(0,2).forEach(issue=>textNode(list,'li','',Array.isArray(issue)?`${issue[0]}: ${issue[1]}`:String(issue)));row.append(list);}
+            };
+            const topTitles=document.createElement('ol');topTitles.className='creative-list';sortedTitles.slice(0,3).forEach((item,index)=>showTitle(topTitles,item,index));creativeChecks.append(topTitles);
+            if(sortedTitles.length>3){const more=document.createElement('details');textNode(more,'summary','','Show all title checks');const all=document.createElement('ol');all.className='creative-list';sortedTitles.slice(3).forEach((item,index)=>showTitle(all,item,index+3));more.append(all);creativeChecks.append(more);}
+          }
           async function review(jobId, editable){
             document.querySelector('#skillReview').textContent='';
-            currentJob=jobId; scriptNotice.textContent='Loading script…'; sections.replaceChildren(); sources.replaceChildren(); dialog.showModal();
+            currentJob=jobId; scriptNotice.textContent='Loading script…'; sections.replaceChildren(); sources.replaceChildren(); creativeChecks.replaceChildren(); dialog.showModal();
             const response=await fetch(`/api/jobs/${jobId}/script`);
             if(!response.ok){scriptNotice.textContent='Could not load script: '+await response.text();return;}
-            scriptEditable=Boolean(editable); const reviewData=await response.json();currentPackage=reviewData.package;document.querySelector('#skillReview').textContent=JSON.stringify({channel:currentPackage.request.channel_identity,voice:currentPackage.request.channel_voice_profile,scenes:currentPackage.scene_plans,metadata:currentPackage.metadata,thumbnail:currentPackage.thumbnail_brief,skill_checks:reviewData.skill_checks},null,2); scriptNotice.textContent=scriptEditable?'Review the sources and narration, then save or approve it.':'This saved script and its source packet are read-only because this generation has already moved past script review.';
+            scriptEditable=Boolean(editable); const reviewData=await response.json();currentPackage=reviewData.package;renderCreativeChecks(currentPackage,reviewData.skill_checks);document.querySelector('#skillReview').textContent=JSON.stringify({channel:currentPackage.request.channel_identity,voice:currentPackage.request.channel_voice_profile,scenes:currentPackage.scene_plans,metadata:currentPackage.metadata,thumbnail:currentPackage.thumbnail_brief,skill_checks:reviewData.skill_checks},null,2); scriptNotice.textContent=scriptEditable?'Review the sources, creative checks and narration, then save or approve it.':'This saved script and its source packet are read-only because this generation has already moved past script review.';
             currentPackage.request.sources.forEach(source=>{const card=document.createElement('div');card.className='event';const title=document.createElement('div');title.className='event-type';title.textContent=source.title;const link=document.createElement('a');link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=source.url;const excerpt=document.createElement('div');excerpt.className='event-detail';excerpt.textContent=source.excerpt||'No excerpt was stored.';card.append(title,link,excerpt);if(source.content_sha256){const checksum=document.createElement('div');checksum.className='sub';checksum.textContent='SHA-256 '+source.content_sha256;card.append(checksum);}sources.append(card);});
             currentPackage.script_sections.forEach((section,index)=>{const label=document.createElement('label');label.textContent=`Section ${index+1}`;const area=document.createElement('textarea');area.className='script-narration';area.value=section.narration;area.dataset.index=index;area.disabled=!scriptEditable;area.style.minHeight='130px';label.append(area);sections.append(label);});
             document.querySelector('#scriptForm button[type="submit"]').hidden=!scriptEditable;
@@ -825,7 +917,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         })();
         </script>"""
         reviewer_controls += SCENE_CONTROLS
-        return DASHBOARD_HTML.replace("Give a title and the key points.", "Give a title, approved source notes, and optionally one cited source.").replace("<label>Notes<textarea name=\"notes\" required placeholder=\"One point per line\"></textarea></label>", "<label>Approved source notes<textarea name=\"notes\" required placeholder=\"One source-backed point per line\"></textarea></label><label>Source URL (optional)<input name=\"source_url\" type=\"url\" maxlength=\"2000\" placeholder=\"https://…\"></label><label>Source title<input name=\"source_title\" maxlength=\"500\" placeholder=\"Required with a source URL\"></label><label>Approved source excerpt<textarea name=\"source_excerpt\" maxlength=\"24000\" placeholder=\"Paste the exact supporting passage; pages are not silently scraped\"></textarea></label>").replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')").replace("cards.set(job.id,card);jobsRoot.append(card)", "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)").replace("captions_enabled:d.has('captions_enabled')};let r", "captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null,source_url:d.get('source_url')||null,source_title:d.get('source_title')||null,source_excerpt:d.get('source_excerpt')||null};let r").replace("if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')))", "if(j.artifacts.includes('final'))actions.append(button('Watch video','',()=>openVideo(j,'final','Final video')));else if(j.artifacts.includes('preview'))actions.append(button('Watch preview','secondary',()=>openVideo(j,'preview','Preview')))").replace("${j.artifacts.length} saved artifacts · ${j.event_count} activity events", "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}").replace("const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}", "").replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + "</body>")
+        dashboard = DASHBOARD_HTML.replace(
+            "</style>",
+            ".creative-list{margin:6px 0 14px;padding-inline-start:1.4rem}.creative-row{padding:7px 2px 10px;overflow-wrap:anywhere;border-bottom:1px solid var(--line)}.creative-score{display:inline-block;margin-right:8px;padding:2px 7px;border-radius:999px;background:#223654;color:#b7ebff;font-size:12px;font-weight:700}.creative-row ul{margin:5px 0 0;padding-inline-start:1.2rem}.creative-row li+li{margin-top:3px}#creativeChecks{overflow-wrap:anywhere}#scriptDialog details summary{cursor:pointer}@media(max-width:600px){.creative-row{padding-inline-start:2px}}"
+            "</style>",
+            1,
+        )
+        research_enabled = application_settings.pipeline.sources.research_enabled
+        dashboard = dashboard.replace(
+            "Give a title and the key points.",
+            ("Give a title and brief notes. Codex researches primary sources before writing; unsupported angles are qualified. Supplied source packets keep their exact evidence."
+             if research_enabled else "Give a title, brief notes, and approved sources. You approve the exact script and preview before rendering."),
+        )
+        dashboard = dashboard.replace(
+            '<label>Notes<textarea name="notes" required placeholder="One point per line"></textarea></label>',
+            '<label>Brief notes / key points<textarea name="notes" required placeholder="One point per line"></textarea></label>'
+            '<label>Source URL (optional)<input name="source_url" type="url" maxlength="2000" placeholder="https://…"></label>'
+            '<label>Source title<input name="source_title" maxlength="500" placeholder="Required with a source URL"></label>'
+            '<label>Approved source excerpt<textarea name="source_excerpt" maxlength="24000" placeholder="Paste the exact supporting passage; pages are not silently scraped"></textarea></label>',
+        )
+        source_fields = """<label>Audience<input name="audience" maxlength="200" required value="general"></label>
+        <label>Creative angle<textarea name="angle" maxlength="4000" placeholder="What should the viewer understand or be able to do?"></textarea><span class="sub">This guides the story. It stays separate from source evidence.</span></label>
+        <details class="source-packet"><summary>Use multiple approved sources</summary><p class="sub">Provide one to eight source objects with unique source_id, title, URL, and exact excerpt. The source IDs and text are part of the saved request identity.</p><label>Approved source packet (JSON)<textarea name="source_packet_json" rows="8" spellcheck="false" aria-describedby="sourcePacketHelp" placeholder='[{"source_id":"docs-image","title":"Official documentation","url":"https://example.com/topic","excerpt":"Paste the exact approved passage here."}]'></textarea></label><p class="sub" id="sourcePacketHelp">When this packet is supplied, Brief notes remain writing direction and are not added as a source. Leave the single-source URL fields empty.</p></details>"""
+        dashboard = dashboard.replace(
+            "</label><label>Target duration (seconds)",
+            "</label>" + source_fields + "<label>Target duration (seconds)",
+        )
+        dashboard = dashboard.replace(
+            "textarea{min-height:106px;resize:vertical}",
+            "textarea{min-height:106px;resize:vertical}details.source-packet{margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}details.source-packet summary{color:#cbd7eb;cursor:pointer;font-size:13px;font-weight:700}details.source-packet .sub{margin-top:7px}",
+        )
+        dashboard = dashboard.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')")
+        dashboard = dashboard.replace(
+            "cards.set(job.id,card);jobsRoot.append(card)",
+            "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)",
+        )
+        old_brief_submit = r"let d=new FormData(e.currentTarget),body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled')};let r=await fetch('/api/videos'"
+        new_brief_submit = r"let d=new FormData(e.currentTarget),sourceText=String(d.get('source_packet_json')||'').trim(),sources=null;if(sourceText){try{sources=JSON.parse(sourceText);if(!Array.isArray(sources)||sources.length<1||sources.length>8)throw new Error();}catch(_){notice.textContent='Enter one to eight approved sources as a valid JSON array.';return;}}let body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),angle:String(d.get('angle')||'').trim()||null,audience:String(d.get('audience')||'general').trim()||'general',sources,duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null,source_url:d.get('source_url')||null,source_title:d.get('source_title')||null,source_excerpt:d.get('source_excerpt')||null};let r=await fetch('/api/videos'"
+        assert dashboard.count(old_brief_submit) == 1, dashboard.count(old_brief_submit)
+        dashboard = dashboard.replace(old_brief_submit, new_brief_submit)
+        dashboard = dashboard.replace(
+            "if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')))",
+            "if(j.artifacts.includes('final'))actions.append(button('Watch video','',()=>openVideo(j,'final','Final video')));else if(j.artifacts.includes('preview'))actions.append(button('Watch preview','secondary',()=>openVideo(j,'preview','Preview')))",
+        )
+        dashboard = dashboard.replace(
+            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events",
+            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
+        )
+        dashboard = dashboard.replace(
+            "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
+            "",
+        )
+        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -834,16 +977,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/jobs", tags=["jobs"])
     def list_jobs() -> list[dict[str, object]]:
         deletable = {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY, JobState.PUBLICATION_APPROVAL_REQUIRED, JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.FAILED_EXHAUSTED, JobState.CANCELLED}
-        return [
-            {
+        payloads = []
+        for job in runtime.jobs.list_recent():
+            can_retry_validation, retry_identity = _can_retry_approved_asset_validation(runtime, job)
+            payloads.append({
                 **_job_payload(job), "topic": job.request.topic,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
                 "event_count": len(runtime.events.list_for_job(job.id)),
                 "deletable": job.claim_owner is None and job.state in deletable,
                 "artifact_cleanup_eligible": job.claim_owner is None and job.state is JobState.PUBLISHED,
-            }
-            for job in runtime.jobs.list_recent()
-        ]
+                "can_retry_validation": can_retry_validation,
+                "retry_script_identity": retry_identity,
+            })
+        return payloads
+
+    @app.post("/api/jobs/{job_id}/retry-validation", tags=["jobs"])
+    def retry_approved_validation(job_id: str, decision: RetryApprovedValidationRequest, request: Request) -> dict[str, object]:
+        """Resume only an intact, exact-approved asset checkpoint after validation code is repaired."""
+        try:
+            job = runtime.jobs.get(job_id)
+            can_retry, identity = _can_retry_approved_asset_validation(runtime, job)
+            if not can_retry or identity is None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="job is not eligible for approved asset-checkpoint recovery")
+            if decision.expected_script_identity != identity:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="approved script identity changed; reload Studio before retrying")
+            auth_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
+            actor = f"admin:{auth_session.user_id}" if auth_session is not None else "local-dashboard"
+            resumed = runtime.jobs.retry_approved_asset_validation(
+                job_id, package_identity=identity, actor=actor,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        return {"job_id": job_id, "state": resumed.state.value, "resumed_from": JobState.ASSET_ACQUISITION.value, "script_identity": identity}
 
     @app.get("/api/content-profiles", tags=["videos"])
     def content_profiles() -> dict[str, object]:
@@ -860,8 +1027,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for voice in pipeline.kokoro.voices
             if pipeline.kokoro.enabled and pipeline.voice_provider in {"kokoro", "hybrid"}
         ]
-        if pipeline.voice_provider in {"piper", "hybrid"}:
-            options.append({"id": "piper", "label": "Piper reliable fallback", "provider": "piper"})
+        if pipeline.voice_provider in {"piper", "piper-http", "hybrid"}:
+            label = "Piper local voice" if pipeline.voice_provider == "piper-http" else "Piper reliable fallback"
+            options.append({"id": "piper", "label": label, "provider": pipeline.voice_provider})
         return options
 
     @app.get("/api/presets", tags=["videos"])
@@ -960,6 +1128,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"id": event.id, "event_type": event.event_type, "details": event.details, "created_at": _as_ist(event.created_at)}
             for event in runtime.events.list_for_job(job_id)
         ]
+
+    @app.get("/api/jobs/{job_id}/diagnostics", tags=["jobs"])
+    def get_job_diagnostics(job_id: str) -> dict[str, object]:
+        try:
+            job = runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        events = runtime.events.list_for_job(job_id, limit=2_000)
+        return {"job_id": job_id, **summarize_stage_events(events, attempt_count=job.attempt_count, failure_message=job.failure_message)}
+
+    @app.get("/api/jobs/{job_id}/diagnostics.jsonl", tags=["jobs"])
+    def download_job_diagnostics(job_id: str) -> Response:
+        try:
+            runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        rows = [
+            json.dumps({"event_type": event.event_type, "created_at": _as_ist(event.created_at).isoformat(), **event.details}, sort_keys=True)
+            for event in runtime.events.list_for_job(job_id, limit=2_000)
+            if event.event_type in {"stage_started", "stage_execution", "job_retry_scheduled", "job_error", "job_claimed", "job_claim_released"}
+        ]
+        return Response("\n".join(rows) + ("\n" if rows else ""), media_type="application/x-ndjson", headers={"Content-Disposition": f'attachment; filename="{job_id}-diagnostics.jsonl"'})
 
     @app.get("/api/jobs/{job_id}", tags=["jobs"])
     def get_job(job_id: str) -> dict[str, object]:

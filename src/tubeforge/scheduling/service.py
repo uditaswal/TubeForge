@@ -10,6 +10,7 @@ from croniter import croniter
 
 from tubeforge.db.repositories import Schedule, ScheduleRepository, Topic, TopicRepository
 from tubeforge.domain.contracts import ContentRequest, SourceReference
+from tubeforge.domain.video_duration import SHORTS_MAX_DURATION_SECONDS, SHORTS_MIN_DURATION_SECONDS
 
 
 def next_run(cron: str, timezone: str, after: datetime) -> datetime:
@@ -28,8 +29,8 @@ def request_from_topic(topic: Topic, schedule: Schedule, codex_config=None) -> C
     channel, profile = voice_for(config, options.get("channel_identity"))
     aspect = str(options.get("aspect_ratio", "16:9"))
     duration = int(options.get("duration_seconds", 45 if aspect == "9:16" else 60))
-    if aspect == "9:16" and not 30 <= duration <= 55:
-        raise ValueError("scheduled Shorts require 30–55 seconds")
+    if aspect == "9:16" and not SHORTS_MIN_DURATION_SECONDS <= duration <= SHORTS_MAX_DURATION_SECONDS:
+        raise ValueError(f"scheduled Shorts require {SHORTS_MIN_DURATION_SECONDS}–{SHORTS_MAX_DURATION_SECONDS} seconds")
     return ContentRequest(
         channel_identity=channel, channel_voice_profile=profile, aspect_ratio=aspect,
         preset_name=str(options.get("preset_name", "shorts" if aspect == "9:16" else "default")),

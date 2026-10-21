@@ -114,7 +114,8 @@ def validate_shorts_visual_manifest(manifest: dict[str, object]) -> dict[str, ob
     if len(generated) != len(scenes):
         raise ProviderValidationError("Shorts generated visual set mixes incompatible production styles")
     checksums: set[str] = set()
-    styles: set[str] = set()
+    palettes: set[str] = set()
+    style_versions: set[str] = set()
     for item in generated:
         candidate = item["candidate"]
         validation = item.get("validation")
@@ -130,12 +131,15 @@ def validate_shorts_visual_manifest(manifest: dict[str, object]) -> dict[str, ob
         style_parts = source_version.split(":")
         if len(style_parts) != 3 or style_parts[0] not in SUPPORTED_STORYBOARD_STYLES:
             raise ProviderValidationError("Shorts generated visual style metadata is missing")
-        styles.add(":".join(style_parts[:2]))
-    if len(styles) != 1:
+        style_versions.add(style_parts[0])
+        palettes.add(style_parts[1])
+    if len(palettes) != 1:
         raise ProviderValidationError("Shorts generated visuals do not share one reference palette")
+    palette = next(iter(palettes))
     return {
         "version": SHORTS_VISUAL_QUALITY_VERSION,
-        "profile": next(iter(styles)),
+        "profile": f"{next(iter(style_versions)) if len(style_versions) == 1 else 'mixed'}:{palette}",
+        "style_versions": sorted(style_versions),
         "passed": True,
         "scene_count": len(generated),
         "unique_scene_count": len(checksums),

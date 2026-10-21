@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import math
+import hashlib
 import re
 import struct
+import subprocess
 import wave
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
-from tubeforge.core.errors import ProviderValidationError
+from tubeforge.core.errors import ProviderCancellation, ProviderValidationError, RepairableAlignmentResult, RetryableProviderError
 
 
 _WORD = re.compile(r"[^\W_]+(?:[’'-][^\W_]+)*", re.UNICODE)
@@ -110,7 +113,198 @@ class LocalWordAligner:
         return tuple(value[0] for value in struct.iter_unpack(f"<{code}", payload[:usable]))
 
 
-def verify_word_alignment(words: tuple[WordTiming, ...], *, final_duration: float, tolerance: float) -> dict[str, object]:
+def map_spoken_words(
+    *,
+    approved_text: str,
+    recognized: tuple[tuple[str, float, float, float], ...],
+    phrase_id: str,
+    section_id: str,
+    phrase_start_seconds: float,
+    phrase_end_seconds: float,
+    ordinal_start: int,
+    minimum_probability: float = 0.4,
+) -> tuple[WordTiming, ...]:
+    """Map recognized speech to approved display words without rewriting either.
+
+    A display token such as ``working-tree`` may span two contiguous spoken
+    tokens. Other substitutions, omissions, and ambiguous pronunciations
+    fail closed; the approved script must supply an explicit reviewed mapping
+    before such speech can receive production timestamps.
+    """
+    approved = tuple(_WORD.findall(approved_text))
+    if not approved or not recognized:
+        raise ProviderValidationError("audio-grounded alignment has no words")
+    cursor = 0
+    result: list[WordTiming] = []
+    previous_end = phrase_start_seconds
+    for offset, display in enumerate(approved):
+        target = re.sub(r"[^\w]", "", display.casefold(), flags=re.UNICODE)
+        if not target:
+            raise ProviderValidationError("approved display token is empty")
+        start: float | None = None
+        assembled = ""
+        end = previous_end
+        while assembled != target:
+            if cursor >= len(recognized):
+                raise ProviderValidationError("recognized speech omits an approved word")
+            spoken, local_start, local_end, probability = recognized[cursor]
+            token = re.sub(r"[^\w]", "", spoken.casefold(), flags=re.UNICODE)
+            if not token or probability < minimum_probability or local_end <= local_start:
+                raise ProviderValidationError("recognized speech has an ambiguous word")
+            if start is None:
+                start = phrase_start_seconds + local_start
+            end = phrase_start_seconds + local_end
+            assembled += token
+            if not target.startswith(assembled):
+                raise ProviderValidationError("recognized speech differs from approved narration")
+            cursor += 1
+        if start is None or start < previous_end - 0.025 or end > phrase_end_seconds + 0.025:
+            raise ProviderValidationError("recognized word timing is outside its approved phrase")
+        result.append(WordTiming(display, phrase_id, section_id, ordinal_start + offset, max(start, previous_end), end))
+        previous_end = end
+    if cursor != len(recognized):
+        raise ProviderValidationError("recognized speech contains words outside approved narration")
+    return tuple(result)
+
+
+def alignment_model_sha256(model_path: Path) -> str:
+    """Hash the exact local model, configuration, vocabulary and tokenizer."""
+    digest = hashlib.sha256()
+    for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"):
+        path = model_path / name
+        if not path.is_file():
+            raise ProviderValidationError(f"audio-grounded alignment model is missing {name}")
+        digest.update(name.encode("ascii") + b"\0")
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _clause_spans(audio: object, text: str) -> tuple[tuple[float, float, str], ...]:
+    """Split at approved punctuation only when the waveform has a matching pause."""
+    import numpy as np
+
+    duration = len(audio) / 16_000  # type: ignore[arg-type]
+    clauses = tuple(part.strip() for part in re.split(r"(?<=[,;:])\s+", text) if part.strip())
+    if len(clauses) < 2:
+        return ((0.0, duration, text),)
+    windows = [audio[index : index + 320] for index in range(0, len(audio), 320)]  # type: ignore[arg-type]
+    energy = [float(np.sqrt(np.mean(window * window))) for window in windows if len(window)]
+    threshold = max(0.002, max(energy, default=0.0) * 0.025)
+    quiet: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, value in enumerate([*energy, threshold + 1]):
+        if value < threshold and start is None:
+            start = index
+        elif value >= threshold and start is not None:
+            if index - start >= 6 and start * 0.02 >= 0.15 and index * 0.02 <= duration - 0.15:
+                quiet.append((start, index))
+            start = None
+    weights = [max(1, len(_WORD.findall(clause))) for clause in clauses]
+    total = sum(weights)
+    boundaries: list[float] = []
+    used: set[int] = set()
+    for position in range(1, len(clauses)):
+        expected = duration * sum(weights[:position]) / total
+        candidates = [(abs((lo + hi) * 0.01 - expected), index, (lo + hi) * 0.01) for index, (lo, hi) in enumerate(quiet) if index not in used]
+        if not candidates:
+            return ((0.0, duration, text),)
+        distance, index, boundary = min(candidates)
+        if distance > 0.7 or (boundaries and boundary <= boundaries[-1]):
+            return ((0.0, duration, text),)
+        boundaries.append(boundary)
+        used.add(index)
+    edges = (0.0, *boundaries, duration)
+    return tuple((edges[index], edges[index + 1], clause) for index, clause in enumerate(clauses))
+
+
+class LocalWhisperDTWAligner:
+    """Optional transcript-constrained timing with model and speech bytes pinned."""
+
+    provider = "whisper-base-en-dtw-v1"
+
+    def __init__(self, *, model_path: Path, model_sha256: str, ffmpeg_executable: str = "ffmpeg") -> None:
+        if alignment_model_sha256(model_path) != model_sha256:
+            raise ProviderValidationError("audio-grounded alignment model bytes differ from the pinned SHA-256")
+        try:
+            from faster_whisper import WhisperModel
+            from faster_whisper.tokenizer import Tokenizer
+            import faster_whisper
+        except ImportError as error:
+            raise ProviderValidationError("faster-whisper alignment dependency is unavailable") from error
+        if faster_whisper.__version__ != "1.2.1":
+            raise ProviderValidationError("audio-grounded alignment requires faster-whisper 1.2.1")
+        self.model = WhisperModel(str(model_path), device="cpu", compute_type="int8", cpu_threads=4, local_files_only=True)
+        self.tokenizer = Tokenizer(self.model.hf_tokenizer, self.model.model.is_multilingual, task="transcribe", language="en")
+        self.model_sha256 = model_sha256
+        self.ffmpeg_executable = ffmpeg_executable
+
+    def align(
+        self, *, audio_path: Path, text: str, phrase_id: str, section_id: str,
+        phrase_start_seconds: float, phrase_end_seconds: float, ordinal_start: int,
+        cancellation_requested: Callable[[], bool] | None = None,
+        configuration: str = "primary",
+    ) -> tuple[WordTiming, ...]:
+        if configuration not in {"primary", "normalized-overlap-v1"}:
+            raise ProviderValidationError("unsupported audio-grounded alignment configuration")
+        if cancellation_requested is not None and cancellation_requested():
+            raise ProviderCancellation("cancelled before audio-grounded alignment decode")
+        try:
+            decoded = subprocess.run(
+                [self.ffmpeg_executable, "-v", "error", "-i", str(audio_path), "-ar", "16000", "-ac", "1", "-f", "f32le", "pipe:1"],
+                check=True, capture_output=True, timeout=60,
+            ).stdout
+        except subprocess.TimeoutExpired as error:
+            raise RetryableProviderError("audio-grounded alignment decode timed out") from error
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise ProviderValidationError("audio-grounded alignment could not decode approved narration") from error
+        if cancellation_requested is not None and cancellation_requested():
+            raise ProviderCancellation("cancelled after audio-grounded alignment decode")
+        try:
+            import numpy as np
+            from faster_whisper.audio import pad_or_trim
+            audio = np.frombuffer(decoded, dtype="<f4").copy()
+            if not 0 < len(audio) <= 30 * 16_000:
+                raise ProviderValidationError("audio-grounded alignment requires a 0–30 second phrase")
+            spoken: list[tuple[str, float, float, float]] = []
+            for low, high, clause in _clause_spans(audio, text):
+                if cancellation_requested is not None and cancellation_requested():
+                    raise ProviderCancellation("cancelled before audio-grounded alignment clause")
+                decode_low = max(0.0, low - 0.35) if configuration == "normalized-overlap-v1" else low
+                decode_high = min(len(audio) / 16_000, high + 0.35) if configuration == "normalized-overlap-v1" else high
+                chunk = audio[round(decode_low * 16_000) : round(decode_high * 16_000)]
+                features = self.model.feature_extractor(chunk)
+                frames = min(features.shape[-1] - 1, round(len(chunk) / 160))
+                if frames < 1:
+                    raise ProviderValidationError("audio-grounded alignment found an empty clause")
+                encoded = self.model.encode(pad_or_trim(features[:, :frames]))
+                alignment_text = clause.replace("’", "'") if configuration == "normalized-overlap-v1" else clause
+                measured = self.model.find_alignment(self.tokenizer, [self.tokenizer.encode(alignment_text)], encoded, [frames])[0]
+                if cancellation_requested is not None and cancellation_requested():
+                    raise ProviderCancellation("cancelled after audio-grounded alignment clause")
+                for word in measured:
+                    if any(character.isalnum() for character in word["word"]):
+                        spoken.append((word["word"].strip(), decode_low + float(word["start"]), decode_low + float(word["end"]), float(word["probability"])))
+        except (ProviderValidationError, ProviderCancellation, RetryableProviderError):
+            raise
+        except RuntimeError as error:
+            raise RetryableProviderError("audio-grounded alignment model execution failed") from error
+        except Exception as error:
+            raise ProviderValidationError("audio-grounded alignment execution failed") from error
+        if configuration == "primary" and any(end <= start for _, start, end, _ in spoken):
+            normalized = lambda value: re.sub(r"[^\w]", "", value.casefold(), flags=re.UNICODE)
+            approved = tuple(_WORD.findall(text))
+            if "".join(normalized(value) for value, *_ in spoken) == "".join(normalized(value) for value in approved):
+                raise RepairableAlignmentResult("audio-grounded alignment found a repairable zero-duration word")
+        return map_spoken_words(
+            approved_text=text, recognized=tuple(spoken), phrase_id=phrase_id, section_id=section_id,
+            phrase_start_seconds=phrase_start_seconds, phrase_end_seconds=phrase_end_seconds,
+            ordinal_start=ordinal_start, minimum_probability=0.0,
+        )
+
+
+def verify_word_alignment(words: tuple[WordTiming, ...], *, final_duration: float, tolerance: float, require_last_word_end: bool = True) -> dict[str, object]:
     if not words:
         raise ProviderValidationError("word alignment is empty")
     previous = 0.0
@@ -122,8 +316,10 @@ def verify_word_alignment(words: tuple[WordTiming, ...], *, final_duration: floa
         previous = word.end_seconds
     if words[0].start_seconds > 3.0:
         raise ProviderValidationError("Shorts hook does not begin within the first three seconds")
-    if abs(words[-1].end_seconds - final_duration) > tolerance:
+    if require_last_word_end and abs(words[-1].end_seconds - final_duration) > tolerance:
         raise ProviderValidationError("word alignment does not end with final narration")
+    if not require_last_word_end and final_duration - words[-1].end_seconds > 1.0:
+        raise ProviderValidationError("audio-grounded alignment leaves excessive uncaptioned narration")
     return {
         "word_count": len(words),
         "first_word_seconds": words[0].start_seconds,

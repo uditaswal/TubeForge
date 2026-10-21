@@ -21,6 +21,8 @@ class KokoroVoiceProvider:
     def __init__(self, settings: KokoroProviderConfig) -> None:
         self.settings = settings
         self.calls = 0
+        self._pipeline = None
+        self._pipeline_identity = None
 
     def synthesize(self, request: VoiceRequest) -> VoiceResult:
         text = normalize_narration_text(request.text)
@@ -28,7 +30,14 @@ class KokoroVoiceProvider:
             raise ProviderValidationError("Kokoro narration text is empty")
         if request.voice_id not in self.settings.voices:
             raise ProviderValidationError(f"unsupported Kokoro voice: {request.voice_id}")
-        key = hashlib.sha256(json.dumps({"text": text, "voice": request.voice_id, "provider": self.provider_name, "version": self.settings.adapter_version}, sort_keys=True).encode()).hexdigest()
+        model, voices = self._required_models()
+        def digest(path):
+            with path.open("rb") as stream:
+                return hashlib.file_digest(stream, "sha256").hexdigest()
+        model_identity = (digest(model), digest(voices))
+        key = hashlib.sha256(json.dumps({"text": text, "voice": request.voice_id, "provider": self.provider_name,
+                                        "version": self.settings.adapter_version, "model": model_identity,
+                                        "speed": 1.0, "language": "en-us"}, sort_keys=True).encode()).hexdigest()
         destination = Path(request.output_path) if request.output_path else self._path(self.settings.cache_root) / request.voice_id / f"{key}.wav"
         if self._valid_wave(destination):
             return self._result(destination)
@@ -39,9 +48,10 @@ class KokoroVoiceProvider:
             raise RetryableProviderError("Kokoro ONNX runtime is not installed") from error
         try:
             self.calls += 1
-            model, voices = self._required_models()
-            pipeline = Kokoro(str(model), str(voices))
-            samples, sample_rate = pipeline.create(text, voice=request.voice_id, speed=1.0, lang="en-us")
+            if self._pipeline_identity != model_identity:
+                self._pipeline = Kokoro(str(model), str(voices))
+                self._pipeline_identity = model_identity
+            samples, sample_rate = self._pipeline.create(text, voice=request.voice_id, speed=1.0, lang="en-us")
             if sample_rate != self.settings.sample_rate:
                 raise ProviderValidationError(f"Kokoro returned unexpected sample rate: {sample_rate}")
             chunks = [float(value) for value in samples]

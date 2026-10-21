@@ -1,15 +1,14 @@
 # TubeForge Shorts workflow
 
 This record defines the product decisions and validation gates for good-quality
-YouTube Shorts. It complements `docs/STATUS.md`, which remains the authoritative
-statement of current release status.
+YouTube Shorts. It complements `docs/STATUS.md`, while the current release status is in `design_doc/tubeforge-publishing-design.md`.
 
 ## Output contract
 
 - The dashboard exposes a dedicated **YouTube Short (9:16)** preset alongside
   the unchanged widescreen workflow.
-- Duration is constrained to 30–55 seconds, with 45 seconds as the default.
-- Preview output is 540×960. Final output is 1080×1920 at 30 fps, H.264/AAC.
+- The requested writing target is 30–120 seconds, with 45 seconds as the default. Measured narration and final video must be 30–120 seconds; target deviation is diagnostic, not a rejection.
+- Preview output is 540×960. Final output is 1080×1920 at 30 fps, H.264/AAC with 48 kHz audio.
 - The opening narration must begin inside the first three seconds.
 - No visual camera hold may exceed three seconds.
 - Word-highlight captions use the generated narration audio as their local
@@ -43,6 +42,12 @@ sentence of at most 18 words, complete sentences, and a concrete final CTA.
 Rejected drafts are not cached and may be regenerated twice with the bounded
 local validator result.
 
+Final Shorts captions require at least 84 px with word highlighting, matching
+the rulebook's phone-first caption target. A smaller custom final setting is
+rejected; preview and long-form profiles remain configurable. The renderer
+identity is `shorts-final-v4`, so a render with the older 80 px default cannot
+be reused under the new final profile.
+
 Generated Shorts frames use local FFmpeg storyboard graphics at native
 1080×1920. Each scene carries an approved subject, purpose, composition and
 display elements; old packages use search-query fallback labels that require
@@ -53,7 +58,21 @@ resolution, unique scene bytes and one palette identity. Those technical checks
 do not prove the diagrams teach the narration; inspect the contact sheet.
 Portrait stock must be at least 720×1280; unsuitable stock falls back before
 acquisition. The final gate also verifies camera variants, maximum hold time,
-and caption safe-area/line-width limits.
+and caption safe-area/line-width limits. Final captions anchor at x=490 with a
+470 px bottom margin so their full rendered bounds remain above the bottom
+controls and clear of the right-side action rail.
+
+### Real-media pipeline smoke
+
+The opt-in `tests/test_captured_shorts_smoke.py` verifies media execution with
+source-controlled test packages, never production narration. To exercise the
+local Piper server, set `TUBEFORGE_SMOKE_PIPER_MODEL` to the matching local ONNX
+model and `TUBEFORGE_SMOKE_PIPER_SERVER_URL` to its worker-reachable base URL.
+Set `TUBEFORGE_SMOKE_NORMALIZE_AUDIO=1` to require the encoded AAC gate; it
+checks −15 to −13 LUFS, true peak ≤−1 dBTP and 48 kHz, then saves ignored
+preview/final artifacts under `data/artifacts/stage22_fixture_smoke/`. Fixture
+approvals in this isolated database are technical test setup, not operator
+approval for a production job.
 
 Music comes only from the approved local catalog. Dashboard uploads require a
 decodable audio file, source URL, actual licence and terms URL, attribution
@@ -88,7 +107,7 @@ pinned `@openai/codex@0.149.0` runtime at
 | 1 | A private host runner accepts only a typed script request from the worker. | A UID 1000 worker connects through the Unix socket; another UID is rejected; the runner has no `/home/uditaswal`, project, Docker socket, or arbitrary command/path mount. Retain systemd status and socket-mode evidence. | Producing a script or rendering a video. |
 | 2 | One reviewed, source-grounded Short script comes from Codex CLI. | Retain the exact source packet, returned package, claims, usage events, validator result, and manual claim/creative review. | Rendering or publication. |
 | 4 | Creator Studio reflects the persisted review/render/delete workflow. | Signed-in browser evidence for every operator action and refresh. | Live YouTube publication. |
-| 5 | The finished Short is handed off with regression and runtime evidence. | Full suite, health check, real 30–55s portrait artifact inspection, and updated status/progress records. | Enabling YouTube publishing. |
+| 5 | The finished Short is handed off with regression and runtime evidence. | Full suite, health check, real 30–120s portrait artifact inspection, and updated status/progress records. | Enabling YouTube publishing. |
 
 The runner protocol has one generation request: `GenerateShortsScriptV1`, plus
 read-only `PreflightContentV1`, which validates resources/runtime without calling

@@ -1,26 +1,34 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import subprocess
+import time
+import wave
 
 import pytest
 
 from tubeforge.core.config import PreviewRenderConfig, ShortsFinalRenderConfig
-from tubeforge.core.errors import ProviderValidationError
+from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
+from tubeforge.pipeline.alignment import WordTiming
+from tubeforge.pipeline.captions import render_highlighted_ass
 from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, TimelineSegment, build_timeline, parse_frame_rate
+from tubeforge.rendering.loudness import LoudnessCancelled, second_pass_filter, validate_encoded
 
 
 class StaticProbe:
-    def __init__(self, frame_rate: str = "30000/1001", *, video_codec: str = "h264", audio_codec: str = "aac") -> None:
+    def __init__(self, frame_rate: str = "30000/1001", *, video_codec: str = "h264", audio_codec: str = "aac", sample_rate: int = 48_000) -> None:
         self.frame_rate = frame_rate
         self.video_codec = video_codec
         self.audio_codec = audio_codec
+        self.sample_rate = sample_rate
 
     def inspect(self, path: Path) -> dict[str, object]:
         return {
             "format": {"duration": "1.0"},
             "streams": [
                 {"codec_type": "video", "codec_name": self.video_codec, "width": 854, "height": 480, "avg_frame_rate": self.frame_rate},
-                {"codec_type": "audio", "codec_name": self.audio_codec, "sample_rate": "44100", "channels": 2},
+                {"codec_type": "audio", "codec_name": self.audio_codec, "sample_rate": str(self.sample_rate), "channels": 2},
             ],
         }
 
@@ -106,6 +114,12 @@ def test_validation_rejects_nonfinite_container_duration(tmp_path: Path) -> None
         PreviewRenderer(PreviewRenderConfig(), probe=NonfiniteProbe()).validate(output, 1.0)
 
 
+def test_validation_rejects_unexpected_audio_sample_rate(tmp_path: Path) -> None:
+    output = tmp_path / "preview.mp4"; output.write_bytes(b"video")
+    with pytest.raises(ProviderValidationError, match="expected_sample_rate=48000"):
+        PreviewRenderer(PreviewRenderConfig(), probe=StaticProbe(sample_rate=96_000)).validate(output, 1.0)
+
+
 def test_timeline_rejects_nonfinite_persisted_timing() -> None:
     class Package:
         script_sections = ()
@@ -145,6 +159,63 @@ def test_renderer_template_version_changes_identity(tmp_path: Path) -> None:
     segments = (TimelineSegment("scene", "section", 0, 1, asset, "a" * 64, "image"),)
     config = PreviewRenderConfig()
     assert PreviewRenderer(config, template_version="one").identity(segments, narration, captions) != PreviewRenderer(config, template_version="two").identity(segments, narration, captions)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is required for process diagnostics")
+def test_ffmpeg_failure_preserves_bounded_stderr_tail(tmp_path: Path) -> None:
+    renderer = PreviewRenderer(PreviewRenderConfig(minimum_free_bytes=1))
+    missing = tmp_path / "missing-input.mp4"
+    with pytest.raises(RetryableProviderError, match="FFmpeg preview render failed") as error:
+        renderer._run_command(
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", str(missing), "-f", "null", "-"],
+            cancellation_requested=None,
+            deadline=time.monotonic() + 10,
+        )
+    assert "No such file or directory" in str(error.value)
+
+
+def test_loudness_opt_in_changes_render_identity_and_finish_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    asset = tmp_path / "asset.png"; asset.write_bytes(b"asset")
+    narration = tmp_path / "narration.wav"; narration.write_bytes(b"narration")
+    captions = tmp_path / "captions.ass"; captions.write_text("[Script Info]\n", encoding="utf-8")
+    segments = (TimelineSegment("scene", "section", 0, 1, asset, "a" * 64, "image"),)
+    standard = PreviewRenderer(ShortsFinalRenderConfig())
+    normalized = PreviewRenderer(ShortsFinalRenderConfig(audio_normalization_enabled=True))
+    assert standard.identity(segments, narration, captions) != normalized.identity(segments, narration, captions)
+    normalized_identity = normalized.identity(segments, narration, captions)
+    monkeypatch.setattr("tubeforge.rendering.preview.LOUDNESS_VERSION", "loudness-test-version")
+    assert normalized.identity(segments, narration, captions) != normalized_identity
+    command = normalized._bounded_finish_command(tmp_path / "list.txt", narration, captions, tmp_path / "out.mp4", 1, None, "loudnorm=I=-13.5")
+    graph = command[command.index("-filter_complex") + 1]
+    assert "[1:a]loudnorm=I=-13.5,apad=pad_dur=10[outa]" in graph
+    assert command[command.index("-ar") + 1] == "48000"
+
+
+def test_encoded_loudness_gate_rejects_unbounded_peak() -> None:
+    measured = {"input_i": -14.4, "input_tp": -1.2}
+    validate_encoded(measured)
+    assert "measured_I=-16.0" in second_pass_filter({"input_i": -16.0, "input_tp": 0.0, "input_lra": 2.0, "input_thresh": -26.0, "target_offset": 1.0})
+    assert "alimiter=limit=0.77:level=false" in second_pass_filter({"input_i": -16.0, "input_tp": 0.0, "input_lra": 2.0, "input_thresh": -26.0, "target_offset": 1.0})
+    with pytest.raises(ProviderValidationError, match="outside the Shorts loudness gate"):
+        validate_encoded({"input_i": -14.4, "input_tp": -0.9})
+
+
+def test_cancelled_music_analysis_never_promotes_a_render(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    asset = tmp_path / "asset.png"; asset.write_bytes(b"asset")
+    narration = tmp_path / "narration.wav"; narration.write_bytes(b"speech")
+    captions = tmp_path / "captions.ass"; captions.write_text("[Script Info]\n", encoding="utf-8")
+    music = tmp_path / "music.wav"; music.write_bytes(b"music")
+    output = tmp_path / "preview.mp4"
+
+    def cancel_analysis(*_args, **_kwargs):
+        raise LoudnessCancelled("loudness analysis cancelled")
+
+    monkeypatch.setattr("tubeforge.rendering.preview.analyze_music_mix", cancel_analysis)
+    renderer = PreviewRenderer(PreviewRenderConfig(audio_normalization_enabled=True, minimum_free_bytes=1))
+    with pytest.raises(PreviewRenderCancelled, match="loudness analysis cancelled"):
+        renderer.render((TimelineSegment("scene", "section", 0, 1, asset, "a" * 64, "image"),), narration, captions, output, music=music)
+    assert not output.exists()
+    assert not (tmp_path / "preview.part.mp4").exists()
 
 
 def test_image_motion_can_be_disabled_without_changing_video_asset_handling(tmp_path: Path) -> None:
@@ -207,3 +278,72 @@ def test_bounded_render_cancellation_removes_segments_and_partial_output(tmp_pat
     assert not (tmp_path / "final.mp4").exists()
     assert not (tmp_path / "final.part.mp4").exists()
     assert not list(tmp_path.glob("final.part.segments-*"))
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="FFmpeg is required for the real timeline render")
+def test_bounded_render_preserves_scene_pauses_and_late_caption_cues(tmp_path: Path) -> None:
+    """A concat may be shorter than speech; the gap and final cue must survive encoding."""
+    assets = []
+    for name, color in (("first", "red"), ("second", "blue")):
+        asset = tmp_path / f"{name}.png"
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c={color}:s=1080x1920", "-frames:v", "1", str(asset)],
+            check=True, capture_output=True, timeout=30,
+        )
+        assets.append(asset)
+
+    narration = tmp_path / "narration.wav"
+    with wave.open(str(narration), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(48_000)
+        output.writeframes(bytes(int(2 * 48_000 * 2.5)))
+
+    words = (
+        WordTiming("PAUSE", "pause", "section-1", 0, 1.10, 1.25),
+        WordTiming("CUE", "pause", "section-1", 1, 1.25, 1.40),
+        WordTiming("FINAL", "final", "section-2", 2, 2.10, 2.25),
+        WordTiming("CUE", "final", "section-2", 3, 2.25, 2.45),
+    )
+    captions = tmp_path / "captions.ass"
+    captions.write_text(
+        render_highlighted_ass(words, width=1080, height=1920, font_size=84, margin_vertical=470, margin_horizontal=96, center_x=490, words_per_cue=2),
+        encoding="utf-8",
+    )
+    segments = (
+        TimelineSegment("scene-1", "section-1", 0.0, 1.0, assets[0], "a" * 64, "image"),
+        TimelineSegment("scene-2", "section-2", 1.5, 2.5, assets[1], "b" * 64, "image"),
+    )
+    output = tmp_path / "timeline.mp4"
+    renderer = PreviewRenderer(ShortsFinalRenderConfig(image_motion_enabled=False, threads=1, minimum_free_bytes=1, timeout_seconds=120))
+    padded_segment = tmp_path / "first-with-pause.mp4"
+    subprocess.run(renderer._bounded_segment_command(0, segments[0], 30, padded_segment, tail_pad_frames=15), check=True, capture_output=True, timeout=60)
+    segment_info = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(padded_segment)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    assert float(segment_info.stdout) == pytest.approx(1.5, abs=0.04)
+    renderer.render(segments, narration, captions, output)
+
+    def pixel_from(path: Path, seconds: float | None = None, x: int = 540, y: int = 900) -> tuple[int, int, int]:
+        filters = f"crop=2:2:{x}:{y},format=rgb24" if seconds is None else f"select='gte(t,{seconds:.3f})',crop=2:2:{x}:{y},format=rgb24"
+        result = subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-vf", filters, "-frames:v", "1", "-f", "rawvideo", "-"],
+            check=True, capture_output=True, timeout=30,
+        )
+        assert len(result.stdout) == 12
+        return tuple(result.stdout[:3])  # type: ignore[return-value]
+
+    first_color = pixel_from(assets[0])
+    second_color = pixel_from(assets[1])
+    during_pause = pixel_from(output, 1.25)
+    after_pause = pixel_from(output, 1.75)
+    distance = lambda left, right: sum((a - b) ** 2 for a, b in zip(left, right, strict=True))
+    assert distance(during_pause, first_color) < distance(during_pause, second_color)
+    assert distance(after_pause, second_color) < distance(after_pause, first_color)
+
+    cue = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(output), "-vf", "select='gte(t,2.20)',crop=800:180:90:1330,format=gray", "-frames:v", "1", "-f", "rawvideo", "-"],
+        check=True, capture_output=True, timeout=30,
+    )
+    assert sum(value > 120 for value in cue.stdout) > 100

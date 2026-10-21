@@ -13,11 +13,10 @@ OAuth applications and credentials.
 
 ## Current status
 
-See [docs/STATUS.md](docs/STATUS.md) for the authoritative release state,
-validation evidence, blockers, and next tasks. See
+See the [current project plan and release status](design_doc/tubeforge-publishing-design.md#11-current-release-status-and-next-action)
+for validation evidence, blockers, and next tasks. See
 [AUTONOMOUS_PROGRESS.md](AUTONOMOUS_PROGRESS.md) for the append-only work log.
-The [publishing and dashboard implementation plan](design_doc/tubeforge-publishing-design.md)
-defines the forward work and acceptance checks. The [earlier delivery plan](docs/planning/publishing-delivery-plan.md)
+The same project plan defines forward work and acceptance checks. The [earlier delivery plan](docs/planning/publishing-delivery-plan.md)
 retains inventory and acceptance evidence. The [dashboard prototype](design_doc/tubeforge-dashboard.html)
 is illustrative; it is not the current Creator Studio interface.
 
@@ -29,15 +28,15 @@ is illustrative; it is not the current Creator Studio interface.
   deterministic/fake adapters support offline testing.
 - Local FFmpeg rendering with paced four-direction camera motion, native
   portrait storyboard graphics or rights-safe public-domain/CC0 Wikimedia stock,
-  selectable Kokoro narration with a reliable Piper
-  fallback, highlighted captions, licensed/ducked background music, final-artifact quality
+  configurable local narration, word-highlight captions, licensed/ducked
+  background music, final-artifact quality
   checks, publication metadata/thumbnail preparation, and source clips.
 - Dashboard authentication, audited approvals/activity, topic queue, schedules,
   encrypted social-account credential envelopes, and durable dispatch receipts.
 
 Some capabilities are intentionally incomplete: live Meta publishing and
 authenticated live YouTube smoke validation.
-See `docs/STATUS.md` before relying on them.
+See the current project plan before relying on them.
 
 ## Local development
 
@@ -59,7 +58,25 @@ and uses SQLite. Select another configuration with `TUBEFORGE_CONFIG`.
 
 ## Local services
 
-Compose starts migration, web, worker, and scheduler services:
+Run TubeForge as native processes from the repository root with the project
+environment active. The production configuration keeps database, model,
+artifact, and cache paths relative to this checkout. Start each process in its
+own terminal after installing the Piper model and running migrations; set the
+configuration variable in every terminal:
+
+```bash
+TUBEFORGE_CONFIG=config/production.yaml alembic upgrade head
+TUBEFORGE_CONFIG=config/production.yaml python -m tubeforge.tts_server
+TUBEFORGE_CONFIG=config/production.yaml uvicorn tubeforge.main:app --host 127.0.0.1 --port 62065
+TUBEFORGE_CONFIG=config/production.yaml python -m tubeforge.workers.main
+TUBEFORGE_CONFIG=config/production.yaml python -m tubeforge.scheduling.main
+```
+
+Keep the Piper endpoint private. Production authentication uses secure cookies,
+so put the dashboard behind a trusted HTTPS proxy for remote access.
+
+Compose is an optional reference deployment for the same services; it is not
+required by the application runtime:
 
 ```bash
 docker compose up --build
@@ -134,9 +151,8 @@ returns to the pending queue; one with a remote ID returns to read-only
 verification. A saved session without a remote ID stays uncertain and requires
 the inspect action above. Other destinations retain their own results.
 
-Supply these environment variables to the Compose web service through a
-protected local deployment secret source (the project `.env` path is ignored
-by Git):
+Supply these environment variables to the web process through a protected
+local deployment secret source (the project `.env` path is ignored by Git):
 
 - `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY` — a stable Fernet key kept outside the
   database, with a separate recoverable backup.
@@ -156,15 +172,17 @@ through that older path without remote validation appear as **verification
 required** until reconnected. Instagram connection is not yet available, so
 Instagram draft selection is not yet an operator-ready flow.
 
-### Create a dashboard login account in Docker
+### Create a dashboard login account
 
-Run this in the Debian server's SSH terminal while the Compose web service is
-running:
+From the repository root with the project environment active, create the first
+administrator against the configured local database:
 
 ```bash
-cd /home/uditaswal/docker/tubeforge/Youtube_Video_Producer
-sudo docker compose exec web tubeforge create-admin --username operator
+TUBEFORGE_CONFIG=config/production.yaml tubeforge create-admin --username operator
 ```
+
+For the optional Compose reference deployment, use
+`docker compose exec web tubeforge create-admin --username operator`.
 
 Replace `operator` with your preferred username (3–100 characters). Enter a
 password of at least 12 characters at the hidden prompt. Then sign in to
@@ -174,22 +192,20 @@ separate from the dedicated Codex service account and its ChatGPT login.
 The command creates an account; it does not reset an existing password. If it
 reports `administrator already exists`, use the existing credentials or choose
 a different username to create another administrator. Accounts persist in the
-Compose-mounted database across container restarts; recreating containers does
-not require recreating your account. Do not put passwords in documentation or
+configured database across service restarts. Do not put passwords in documentation or
 pass them on the command line.
 
 ### Private remote access with Tailscale
 
-When TubeForge runs on a Debian home server, keep Compose bound to loopback and
-use Tailscale Serve for remote access from devices in the same Tailnet. This
-does not open a LAN or public dashboard port. Run the following on the Debian
+When TubeForge runs on a Debian home server, keep its dashboard listener bound
+to loopback and use Tailscale Serve for remote access from devices in the same
+Tailnet. This does not open a LAN or public dashboard port. Run the following on the Debian
 server, from the repository root, after installing and signing in to
 Tailscale:
 
 ```bash
 sudo systemctl enable --now tailscaled
 sudo tailscale up
-sudo docker compose up -d --build
 sudo tailscale serve --https=443 http://127.0.0.1:62065
 tailscale serve status
 ```
@@ -200,15 +216,16 @@ cookies, so do not replace this with an insecure HTTP proxy. Verify the
 deployment before use with `curl -fsS http://127.0.0.1:62065/healthz` on the
 server; it must return `{"status":"ok","database":"ok"}`. If no
 administrator exists yet, create one interactively with
-`sudo docker compose exec web tubeforge create-admin --username <name>`.
+`TUBEFORGE_CONFIG=config/production.yaml tubeforge create-admin --username <name>`.
 
 ## Local narrator voices
 
-Creator Studio offers three natural, free local Kokoro voices (`af_bella`,
-`af_sarah`, and `am_michael`) plus **Piper reliable fallback**. The selected
-voice is stored with the generation job. If a selected Kokoro synthesis cannot
-run, TubeForge automatically produces that phrase with Piper rather than
-failing the job.
+Production uses the configured Piper voice through a private local HTTP
+service. The service loads the ONNX model once; the worker sends phrase text,
+then validates and caches the returned WAV against the configured voice and
+model hashes. This avoids starting a Piper process for every phrase and uses
+no hosted speech API. Kokoro remains an optional local provider when explicitly
+selected in configuration.
 
 Choose a voice in **New generation** and use **Preview voice** to hear the
 same local provider before creating a job. The first request stores a stable
@@ -217,26 +234,26 @@ file without synthesizing again. A preview reports an error when its
 model/runtime is not available; it does not contact a hosted text-to-speech
 service.
 
-Kokoro uses an ONNX model and a voice pack mounted from `./models/`; they are
-intentionally ignored by Git. Production expects
-`kokoro-v1.0.int8.onnx` and `voices-v1.0.bin` in that directory. The Docker
-image installs the lightweight `kokoro-onnx` runtime; download model assets
-only from the configured trusted release and verify a local synthesis before
-using them for production jobs.
-
-The Piper fallback also needs the matching `en_US-lessac-medium.onnx` model
-and `en_US-lessac-medium.onnx.json` sidecar in `./models/`, as configured in
-`config/production.yaml`. Both are local downloads ignored by Git; a fresh
-checkout must provision the pair before using Piper.
+The Piper service needs the matching `en_US-lessac-medium.onnx` model and
+`en_US-lessac-medium.onnx.json` sidecar configured in `config/production.yaml`.
+Model files are operator-supplied and ignored by Git. `pipeline.piper.server_url`
+defaults to loopback; set `TUBEFORGE_PIPER_SERVER_URL` to the private address
+used by a deployment. The synthesis service binds to `127.0.0.1:5000` by
+default. The optional Compose reference overrides its bind to the private
+project network and publishes no host port. Keep the unauthenticated synthesis
+endpoint on a trusted private network and never expose it publicly.
 
 ## Source-grounded writer
 
-Production scripts must use **Codex CLI** or **Claude**. A local LLM is not an
-approved production script provider and must not be used for generation,
+This production pipeline uses **Codex** for creative decisions. A local LLM is
+not an approved production script provider and must not be used for generation,
 automatic retries, or quality acceptance unless the operator explicitly
 approves it for that specific run. Production script generation uses the
 restricted host-side Codex runner over `/run/tubeforge-codex/codex.sock`; it
 uses only the dedicated `tubeforge-codex` account and its private `CODEX_HOME`.
+Source excerpts and brief fields are treated as data. Known role-spoofing or
+instruction-override text is rejected before reserving a Codex attempt; the
+job shows a validation failure in Studio so the source can be corrected.
 It invokes only the root-owned pinned `@openai/codex@0.149.0` runtime at
 `/opt/tubeforge-codex-runner/codex-runtime`; it never uses the operator's NVM
 tree or Codex authentication. Ollama is not configured or
@@ -258,7 +275,59 @@ review, Creator Studio shows the exact saved sources above the narration. The
 writer must use only those excerpts, and typed claims retain their source IDs
 and human-review flags.
 
+New Generation also accepts a separate **Creative angle** and **Audience**.
+For a reviewed multi-source brief, open **Use multiple approved sources** and
+paste an ordered JSON array of one to eight objects containing unique
+`source_id`, `title`, `url`, and exact `excerpt` fields. With that packet,
+**Brief notes** are writing direction and are not converted into an extra
+source; leave the legacy single-source URL/title/excerpt fields blank. The
+ordered source IDs and exact excerpts are part of the request identity, so
+editing either creates a different generation request. Captured timestamps and
+excerpt hashes are retained in the source-packet checkpoint for provenance but
+do not change the v7 generation key for identical source text.
+
+With `pipeline.sources.research_enabled: true` (production configuration), a v7
+brief containing only notes first uses the host Codex runner's `ResearchSourcesV1`
+operation. You supply the topic and angle; Codex checks the premise with live web
+search and selects two or three primary pages. Local Python fetches public HTTPS
+text (no private hosts or redirects), keeps at most 5,000 characters per page,
+across a 10,000-character total packet budget, and saves URLs, retrieval times and content hashes. Pages with fewer than 200 readable characters are excluded with a recorded reason; at least two distinct substantive pages must remain. Brief notes are hypotheses,
+not factual evidence; narration must qualify unsupported claims. Explicit source
+packets keep their existing exact-source behavior and are not silently replaced.
+
+Research uses the existing Codex model with one invocation per exact brief,
+an eight-minute limit and a prompt budget of at most six searches. Search count
+is recorded, not enforced as a tool-call quota. Successful research results are
+cached under the host runner's `research-cache/`; the worker saves `source_research`
+and `source_packet` checkpoints and shows research start/completion in Activity.
+This adds one model call before writing, not model-driven media execution.
+Fetch failure blocks before narration; restarting reuses the saved research result.
+The existing two-attempt script allowance still applies to the researched packet.
+The host runner wheel must be updated with the worker; an older host fails
+preflight before a research invocation. Existing approved/failed jobs are not
+rewritten or automatically requeued by enabling research.
+
+For new `m6-content-v7` jobs, TubeForge captures each approved excerpt with its
+source ID, capture time and SHA-256 of the exact text before the writer runs.
+The packet and effective request are saved as checkpoints, so retries use the
+same evidence even if channel configuration changes. When no supplied excerpt
+exists, `pipeline.sources.channel_approved` may provide per-channel source
+references with approved excerpts in local configuration. With neither, the
+job is blocked for insufficient sources before a model or TTS call. Optional
+allowlisted HTTPS retrieval remains disabled by default; it is a separate
+fallback for references without excerpts. For supplied-source jobs, broad web discovery is not used; notes-only research is the separate bounded path above.
+Existing jobs keep their saved source packets and approvals.
+
 Creator Studio uses the configured Codex content prompt version for new jobs.
+For envelope-based generation, Codex returns creative content without echoing
+the input request. Python attaches the exact trusted request before validating
+claims and source references. Conflicting legacy request echoes are rejected.
+This reduces output tokens and prevents copied-source drift; it does not change
+source evidence, acceptance gates, or the two-attempt allowance.
+
+Structured generation constrains scene layouts and their compatible reveal cues for
+both widescreen and Shorts. Descriptive visual direction belongs in composition,
+not the renderer layout ID; unused motion cues must be null.
 Generation prompts state the same narration word limits checked on output.
 A 60-second widescreen script requires 90–240 narration words, with a writing
 target of about 162. Prompt changes must be deployed to the host runner, not
@@ -288,8 +357,22 @@ Each video in Creator Studio has a **Visuals** choice:
   display text and explanatory visual elements next to narration. FFmpeg draws
   terminal, package, branch, comparison or sequence layouts from those reviewed
   fields at 1080×1920 for Shorts. Terminal scenes display the approved command
-  and concise output in a dedicated terminal pane; commands too long to remain
-  legible fail asset generation for revision. A complete asset-stage manifest and contact
+  and concise output in a dedicated terminal pane; longer approved commands
+  wrap to two lines, while content that still cannot fit fails for revision.
+  Explicit scene layout IDs currently
+  support `terminal`, `flow_diagram`, `comparison`, `timeline` and `source_card`.
+  These are reusable layouts filled from each job's scene plan; no video script
+  is stored in the renderer. Explicit-layout packages require all scenes to use
+  supported IDs and are bound to the exact script gate and source packet.
+  When an accepted scene plan includes spoken-word reveal cues, the local
+  renderer can reveal hook/close choices, terminal actions, flow branches,
+  comparisons, timelines and source details during the matching narration.
+  Comparison scenes can show both side panels before their consequence bar;
+  that order is part of the approved scene data and render identity. Scenes
+  without cues retain their earlier rendering path. Captured test packages
+  prove these layouts; automatic production writing of the cues remains a
+  separate acceptance stage in the [project plan](design_doc/tubeforge-publishing-design.md).
+  A closing scene without a factual claim may have no source citation. A complete asset-stage manifest and contact
   sheet record scene order, hashes and rights information. Existing approved
   scripts without the new fields use search terms as fallback labels and need
   visual review. FFmpeg adds paced camera moves and crisp cuts.
@@ -305,16 +388,28 @@ Each video in Creator Studio has a **Visuals** choice:
 Creator Studio displays generation and activity timestamps in India Standard
 Time (IST), regardless of the browser's own timezone.
 
+Open a job's **Activity** view to see recorded stage durations and download its
+diagnostic JSONL. The signed-in API also exposes `/api/jobs/{job_id}/diagnostics`
+and `/api/jobs/{job_id}/diagnostics.jsonl`. Measurements begin with jobs run by
+the updated worker; older jobs may show no measured stages. The reported
+`memory.peak` includes page cache and spans the container's lifetime, so its
+stage readings are attribution snapshots rather than isolated per-job peaks.
+Performance targets are currently advisory. The diagnostic retains retry count
+and the job's current failure reason without treating a scheduled retry as a
+completed stage.
+
 TubeForge does not scrape or reuse Google Image results. Google is a search
 engine, not a licence/provenance provider, so its results cannot safely pass
 the pipeline's reuse checks. Every selected visual is checksummed, retained in
 the job's asset manifest, and revalidated before rendering or resuming.
 
-For Shorts, the visual gate rejects non-portrait or undersized stock, mixed
-generated styles, missing palette identity, repeated scene bytes, repetitive
+For Shorts, the visual gate rejects non-portrait or undersized stock, unsupported
+graphics versions or mixed palettes, missing palette identity, repeated scene bytes, repetitive
 camera motion, visual holds over three seconds, and captions outside the
 configured safe area. Landscape stock which cannot meet the portrait source
 floor falls back to the local storyboard graphics provider before it can be used.
+Saved scenes may use different supported graphics versions when they share one
+palette; the quality report lists the versions used.
 
 ## Licensed background music
 
@@ -332,21 +427,58 @@ at 16% level, side-chain ducks it under speech, limits the combined output, and
 records the exact track checksum and licence in the render manifest. Required
 attribution is appended to publication metadata before approval.
 
+Production Shorts preview and final set `audio_normalization_enabled` on. The
+renderer analyzes the narration or approved music mix, applies a measured
+second-pass normalization targeting −13.5 LUFS / −2.5 dBTP plus a limiter to both preview and final, then checks the encoded
+AAC against −15 to −13 LUFS and a true peak no higher than −1.0 dBTP before
+promoting the artifact. The pre/post measurements and processing version are
+stored in the preview/final manifest. A real local-Piper fixture smoke passed
+at −14.74 LUFS, −2.14 dBTP and 48 kHz after the encoded-AAC gate. Full
+production-job listening, independent caption timing and live-job validation
+remain pending.
+An isolated CC0 music acceptance fixture and its source/rights record are kept
+under `tests/fixtures/production/music/`; the downloaded audio stays in ignored
+`data/` and is never bundled into the application image.
+
 ## YouTube Shorts workflow
 
 Choose **YouTube Short (9:16)** in **New generation** to use the dedicated
-portrait workflow. The preset accepts 30–55 seconds and defaults to 45 seconds.
+portrait workflow. The preset accepts a 30–120-second writing target and defaults to 45 seconds. For portrait jobs, the measured narration and final video must be 30–120 seconds; a difference from the requested target is recorded rather than rejected.
 It preserves the existing widescreen preset rather than changing its behavior.
 
 Shorts previews are rendered at 540×960. Approved finals are rendered at
-1080×1920, 30 fps with H.264 video and AAC audio. A local waveform aligner
-binds every approved narration word to its generated WAV before captions are
-rendered. The final quality gate verifies that alignment against the assembled
+1080×1920, 30 fps with H.264 video and AAC audio. The production profile uses
+the original local waveform aligner to place approved words within each
+generated WAV; those word positions are estimates, and an independent encoded
+audio audit found they do not yet meet the planned timing target. The experimental
+`whisper-base-en-dtw-v1` provider requires a locally pinned English model and
+the optional `alignment` package; it aligns the approved transcript to actual
+speech and blocks collapsed or ambiguous boundaries. It is not installed or
+enabled in the production image while its one-scene gate is unverified. The
+experimental provider records each full alignment execution against the exact
+script, narration and model identity. Decode timeouts and transient model
+execution faults enter the worker's lease-free retry queue with 30/60/120-second
+backoff. If the approved tokens match but the primary alignment collapses a
+word to zero duration, one predefined `normalized-overlap-v1` configuration
+is immediately eligible on the same script/audio/model. It normalizes Unicode
+apostrophes in the alignment prompt and extends measured clause windows by
+0.35 seconds; the approved display words never change. At most three executions
+per configuration and four overall are recorded. The immediate switch does not
+advance the transient-failure backoff count: its first later recoverable fault
+waits 30 seconds. This special schedule applies only during voice alignment.
+Invalid audio, missing model
+files, token ambiguity and a failed alternate block without estimated-timing
+substitution. Studio shows scheduled retries with the next attempt time;
+exhausted attempts remain failed and cannot produce an approved final. This
+alternate mapped one isolated accepted Git phrase, but the optional provider
+remains disabled until independent word timing and a full-job gate pass. The
+final quality gate checks structural alignment against the assembled
 audio, rejects a first word after three seconds, rejects visual holds over
 three seconds, and validates portrait caption margins and line widths.
 
-Shorts use large uppercase ASS captions near the lower-middle safe area. The
-currently spoken word is yellow and surrounding words remain white. Scene
+Shorts use large uppercase ASS captions near the lower-middle safe area,
+anchored at x=490 with a 470 px bottom margin to clear the action rail and
+bottom controls. The currently spoken word is yellow and surrounding words remain white. Scene
 holds are deterministically divided into shorter camera moves, so a long
 narration scene does not become one static shot. Source-grounded production
 writing, the fixed portrait visual system, and licensed music decisions are
@@ -355,7 +487,7 @@ recorded in
 
 ## Shorts production standard
 
-TubeForge’s Shorts workflow targets a complete 30–55 second video exported at
+TubeForge’s Shorts workflow accepts a complete 30–120 second video exported at
 1080×1920 (9:16). Production scripts use Codex CLI or Claude. Local LLMs are
 not production script providers unless the operator approves one for a
 specific run.
@@ -363,7 +495,11 @@ specific run.
 The production Shorts final profile uses H.264 CRF 18. Memory-bounded renders
 encode temporary scene clips at CRF 14 before the captioned final pass, reducing
 compression of small text across the two encodes. `video_crf` is configurable
-per render profile; lower values increase quality and file size.
+per render profile; lower values increase quality and file size. Shorts finals
+require at least 84 px word-highlight captions, matching the phone-first
+minimum in `docs/SHORT_FORM_VIDEO_RULEBOOK.md`; invalid smaller overrides fail
+configuration validation. Final AAC is encoded and verified at 48 kHz. Preview
+and long-form caption sizing remain separate.
 
 A Short is ready for review only after a real video has been rendered and
 manually inspected for:
@@ -410,9 +546,9 @@ source code, migrations, fixtures, or intentionally versioned configuration.
 
 ## YouTube content skills
 
-All eleven skills live once under `.agents/skills/`: yt-script, yt-package,
-yt-seo, yt-shorts, yt-plan, yt-chapters, yt-edit, yt-retention, yt-viral,
-yt-audit and yt-comment. Read a skill before invoking it in Codex (for example,
+The eleven canonical YouTube content skills live once under `.agents/skills/`:
+yt-script, yt-package, yt-seo, yt-shorts, yt-plan, yt-chapters, yt-edit,
+yt-retention, yt-viral, yt-audit and yt-comment. Read a skill before invoking it in Codex (for example,
 `$yt-script` or `$yt-package`). Supporting scripts resolve their own resources
 against their folder; application code does the same, independently of its
 working directory. Python 3.12/3.13 runs the standard-library scoring tools:
@@ -439,6 +575,15 @@ missing fields and production panels inside narration fail validation; raw Codex
 replies are never used as speech. Only ordered `script_sections[].narration`
 feeds TTS. v6 rejects malformed packages without model repair calls.
 
+For an unclaimed `failed_validation` job paused at asset acquisition or initial preview rendering (before any preview exists), or a ready preview with no preview approval,
+Studio may show **Retry approved media stages** only when the exact script approval
+still matches and the saved content/source checkpoints pass their hashes and the
+current scene-contract validator. The action requires the signed-in dashboard
+session and CSRF token, records an audit event, and resumes from asset acquisition;
+it does not regenerate narration or change the approval. Other validation
+failures, missing/corrupt checkpoints, and stale approvals remain failed and
+require correction before a new job or retry can proceed.
+
 During script review, “Copy Codex prompt” prepares an explicit skill-loaded
 revision brief with the exact current package, full source context, format and
 voice. This prepares a prompt for an operator's external Codex session; it does
@@ -447,13 +592,16 @@ array, enter each section, save the revision, then approve its new exact identit
 Unsupported revisions must be rejected rather than pasted into narration.
 
 The Studio's “Revise one scene” action opens the saved storyboard and that
-scene's narration and visual direction. Saving creates a separate job paused at
-script review; the original video and its approvals remain unchanged. Review
-and approve the child's exact script before its worker rebuild, then inspect
-and approve its new preview. Unchanged accepted scene assets and phrase audio
-are reused only after their hashes and request identities are revalidated.
+scene's narration, visual layout and direction. The layout selector supports
+flow diagrams, comparisons, timelines, source cards and terminal scenes;
+compatible word-anchored reveal cues stay attached to the revised layout.
+Saving creates a separate job paused at script review; the original video and
+its approvals remain unchanged. Review and approve the child's exact script
+before its worker rebuild, then inspect and approve its new preview. Unchanged
+accepted scene assets and phrase audio are reused only after their hashes and
+request identities are revalidated.
 This scene-revision flow is currently **IMPLEMENTED**; its real production
-artifact acceptance is tracked in `docs/STATUS.md`.
+artifact acceptance is tracked in the current project plan.
 
 Every submitted generation/repair prompt records its SHA256, resource hashes,
 automation mode and skill identifier in invocation provenance. Deploy the rebuilt
@@ -462,33 +610,40 @@ refuses a resource mismatch before generating. Changing prompt versions does
 not authorize resetting or reusing exhausted source packets.
 
 
-The configured `m6-content-v6` generation path embeds **yt-script**, its 21
-hook formulas and scoring implementation, **yt-package** and its title checker,
-and **yt-seo** in each actual Codex generation prompt. These resources are
+The configured `m6-content-v7` path embeds the canonical **yt-script** skill,
+**om-short-production**, **om-storyboard**, **yt-package** and its title
+checker, and **yt-seo** in each Codex prompt. Python validates the selected
+Codex hook and reports heuristic hook scores; it never rewrites narration.
+For vertical Shorts, the prompt requires a sharp opening, six ordered scenes,
+an exact hook shown on frame one, word-anchored visual reveals, display-ready
+labels, and a final CTA whose exact words appear in narration and the closing
+scene. Python
+compiles the bounded JSON scene contract into the existing animated graphics,
+caption, audio and render stages. **om-video-quality** remains the required
+post-render inspection standard; production readiness is not claimed until a
+real final video passes it. These resources are
 included in the deployment wheel under `tubeforge/content_skills/`. The isolated
 host account receives instructions through the fixed prompt; it needs neither
 this checkout nor the developer's home or interactive skill discovery. Compose
 also mounts the canonical skills read-only for worker/web source deployments.
 The fixed Codex CLI provider, model, source grounding, two-invocation limit,
 eight-minute timeout, review gates and publishing policies remain in effect.
-Older prompt versions remain readable for existing jobs; every new generation and repair invocation explicitly embeds the updated
-yt-script skill, including legacy prompt templates. A new prompt version does not authorize reusing exhausted packets.
-Current v6 output must provide a subject, purpose, composition and visual
-elements for every scene; incomplete storyboards fail validation before asset
-acquisition. The canonical automation skill asks for display-ready,
-source-supported visual labels rather than placeholders; the renderer places
-those labels into diagrams. Existing approved older packages remain readable.
+Older prompt versions and their resource hashes remain readable for existing
+jobs. A prompt version change does not authorize reusing exhausted source
+packets. Incomplete scene contracts fail validation before asset acquisition.
 
-- **yt-script:** five candidate hooks, narration, scene visual directions and
-  on-screen text. Application Python executes the included hook scorer before
-  selecting among the top two format-compatible candidates. It preserves the
-  model's source-appropriate choice if it is a finalist; otherwise it uses the
-  highest-scoring eligible candidate. Only the opening sentence changes.
+- **yt-script:** five hook candidates, Codex-selected spoken hook, narration,
+  scene visual directions and on-screen text. Python runs the hook scorer as a
+  review signal without replacing Codex's selected hook or narration.
 - **yt-package:** ten coordinated title options, thumbnail text of at most
   three words, visual brief and accessibility description. Application Python
   executes the title checker for every title against the selected thumbnail.
-  The model's first title remains the proposed publication title; warnings are
-  visible during review rather than treated as performance predictions.
+  The script-review dialog shows the top three title checks against the first
+  thumbnail text option, with the remaining checks available in an expandable
+  list. It also shows all hook scores, marks the selected opening, and states
+  that no title/thumbnail pair has been selected. The model's first title
+  remains the proposed publication title; these warnings are review signals,
+  not performance predictions or approvals.
 - **yt-seo:** a search-facing description, appropriate hashtags in that
   description and at most fifteen relevant tags. It cannot invent resource
   links or chapter timestamps. Chapters retain the application's supported
@@ -513,7 +668,7 @@ Profiles are project-managed, non-secret application configuration in
 ```yaml
 pipeline:
   codex:
-    prompt_template_version: m6-content-v6
+    prompt_template_version: m6-content-v7
     default_channel_identity: engineering
     voice_profiles:
       default: "Clear, practical and conversational; no hype or invented experience."
@@ -530,7 +685,7 @@ Channel identities do not connect OAuth accounts or authorize publication.
 
 In Creator Studio, select **Channel voice profile**, format and duration,
 enter approved source notes (and an exact excerpt for an optional source URL),
-and create a generation. Shorts remain 9:16, 30–55 seconds, with an immediate
+and create a generation. Shorts remain 9:16, 30–120 seconds, with an immediate
 hook and concise payoff. Widescreen jobs retain their requested long-form
 format/duration. **Review script and sources** shows narration, scenes, title
 and thumbnail options, metadata and real hook/title reports. Inspect grounding
@@ -594,9 +749,17 @@ application dependencies, supplied data and authorization. Skills provide
 content instructions and supporting tools, not those integrations.
 
 See [the integration plan](docs/YOUTUBE_SKILLS_PLAN.md) and
-[status](docs/STATUS.md) for current acceptance evidence and next actions.
+[current project status](design_doc/tubeforge-publishing-design.md#11-current-release-status-and-next-action) for acceptance evidence and next actions.
 
 ## Repository layout and local artifacts
+
+For a read-only inventory before any artifact-retention change, run
+`PYTHONPATH=src python3 -m tubeforge.pipeline.retention_inventory` from the
+repository root. It reports local artifact/cache sizes and protects all
+pre-existing files; `cleanup_candidates` is zero until managed retention and
+ownership checks are implemented. Host cgroup memory may be unavailable.
+Inside the worker, the reported `memory.peak` covers the container's lifetime,
+not an individual video.
 
 Project content skills and their referenced tools live in `.agents/skills/`
 and are versioned with the application. See [the documentation index](docs/README.md)
@@ -617,7 +780,11 @@ jars or generated acceptance output.
 The [topic-independent short-form rulebook](docs/SHORT_FORM_VIDEO_RULEBOOK.md)
 sets the layout, caption, audio, source and final-media checks for future work.
 The separate [reference audit](docs/DOCKER_SHORT_BENCHMARK_REVIEW.md) records
-the supplied video's strengths, limitations and attachment review. The reviewed
+the supplied video's strengths, limitations and attachment review.
+`.agents/skills/om-short-production/` makes the project production standard
+reusable as a production-readiness skill. It applies after `yt-script` accepts
+narration and before/alongside storyboard and rendering work; it does not write
+replacement narration or alter approvals. The reviewed
 `.agents/skills/viral-short-form/` provides optional craft references; canonical
 production narration still uses `yt-script`. The active
 [benchmark plan](design_doc/docker-short-benchmark.md) tracks the finished-video
@@ -632,3 +799,18 @@ local voice/alignment, music provenance and final-byte
 verification commands. Its encoded video passed technical and visual checks;
 subjective listening acceptance is pending. This benchmark renderer is not yet
 part of the production worker. Generated media remains local and ignored by Git.
+
+The newer [Claude pipeline profile](docs/CLAUDE_PIPELINE_REVIEW.md) is being
+integrated in `tubeforge.rendering.shorts`. Its semantic templates, local speech
+preparation, alignment, music and encoder are native Python components. Install
+their optional dependencies with `pip install -e '.[dev,reference-renderer,kokoro,alignment]'`
+in the project virtual environment; model weights remain local configuration.
+The profile targets 25–45 seconds, 1080×1920 finals and 720×1280 drafts. It is
+**not yet available as a verified dashboard workflow**; see the current plan for
+integration and real-video acceptance. Existing approved jobs keep their original
+contracts. Updated narration/production skills require rebuilding and checking
+the host runner wheel before using them in an isolated deployed runner.
+
+Animated landscape scenes receive local word timing and native 16:9 layouts. The default waveform timing remains an estimate requiring listening review; it is not independently measured word alignment.
+
+Ready, unapproved previews can use the same media-stage refresh after a renderer repair; approved previews require the revision workflow. Animated landscape captions use short word-timed ASS chunks below the diagrams. Production preview and final profiles both normalize audio and measure the encoded result.

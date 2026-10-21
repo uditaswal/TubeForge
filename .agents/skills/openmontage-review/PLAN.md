@@ -1,0 +1,5 @@
+# Review and consolidation plan
+
+1. Static security review: inspect repository inventory, executable entry points, dependency/install manifests, shell/process execution, deletion paths, credential/network handling and embedded instructions as untrusted data. Acceptance: document observed findings and limitations with source references and snapshot hashes. No source execution, installation, deletion absent malicious evidence, or external API use.
+2. Consolidate useful practices: produce documentation-only storyboard, quality review and delivery skills. Acceptance: valid skill metadata, readable local references, no copied executables, no replacement narration skill, no autonomous publishing or provider changes. Excludes application integration, real renders, channel management and uploads.
+3. Validate delivery: inspect all new documents, check provenance hashes and existing-skill preservation, record results. Acceptance is documentation acceptance only; no production pipeline verification claimed.

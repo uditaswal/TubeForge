@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from datetime import UTC, datetime, timedelta
 import hashlib
 import io
+import json
 import math
 import struct
 import wave
@@ -13,11 +15,13 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+import pytest
 
 from tubeforge.api.app import create_app
-from tubeforge.core.config import AppConfig, DatabaseConfig, FakeProviderConfig, Settings, VideoPresetConfig
+from tubeforge.core.config import AppConfig, AuthConfig, DatabaseConfig, FakeProviderConfig, Settings, VideoPresetConfig
 from tubeforge.db.repositories import Artifact
-from tubeforge.domain.states import JobState
+from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference
+from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.providers.fake import FakeContentProvider, FakeVoiceProvider
 from tubeforge.providers.content.prompts import build_content_prompt
 
@@ -59,6 +63,13 @@ def test_private_job_api_creates_and_records_an_approval(tmp_path: Path) -> None
         assert created.status_code == 201
         job_id = created.json()["id"]
         assert client.get(f"/api/jobs/{job_id}").json()["state"] == "topic_created"
+        diagnostics = client.get(f"/api/jobs/{job_id}/diagnostics")
+        assert diagnostics.status_code == 200
+        assert diagnostics.json()["stage_metrics"] == {}
+        assert diagnostics.json()["performance_enforcement"] == "disabled"
+        download = client.get(f"/api/jobs/{job_id}/diagnostics.jsonl")
+        assert download.status_code == 200
+        assert "attachment" in download.headers["content-disposition"]
         # Script approvals are bound to durable content bytes; a newly created
         # job has no script to review until the worker has checkpointed one.
         package = tmp_path / "content-package.json"
@@ -90,12 +101,134 @@ def test_private_job_api_creates_and_records_an_approval(tmp_path: Path) -> None
         assert client.get("/api/jobs/missing").status_code == 404
 
 
+@pytest.mark.parametrize("failed_stage", [JobState.ASSET_ACQUISITION, JobState.PREVIEW_RENDERING])
+def test_signed_in_studio_retries_only_intact_exact_approved_asset_checkpoint(tmp_path: Path, failed_stage: JobState) -> None:
+    database_path = tmp_path / "validation-retry.db"
+    _migrate(database_path)
+    settings = Settings(
+        app=AppConfig(name="TubeForge test", environment="test"),
+        database=DatabaseConfig(url=f"sqlite:///{database_path}"),
+        auth=AuthConfig(enabled=True),
+    )
+    fixture = Path(__file__).parent / "fixtures" / "production" / "docker_images_containers"
+    package_bytes = (fixture / "content_package.json").read_bytes()
+    packet_bytes = (fixture / "source_packet.json").read_bytes()
+    package = ContentPackage.model_validate_json(package_bytes)
+    package_identity = hashlib.sha256(package_bytes).hexdigest()
+
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("retry-operator", "correct-horse-battery-staple")
+        assert client.post("/login", json={"username": "retry-operator", "password": "correct-horse-battery-staple"}).status_code == 200
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+
+        def failed_approved_job(job_id: str, *, damage_packet: bool = False) -> tuple[str, Path]:
+            runtime.jobs.create(job_id, package.request)
+            package_path, packet_path = tmp_path / f"{job_id}-package.json", tmp_path / f"{job_id}-source.json"
+            package_path.write_bytes(package_bytes)
+            packet_path.write_bytes(packet_bytes)
+            runtime.artifacts.save(Artifact(job_id, JobState.CONTENT_GENERATING, "content_package", str(package_path), package_identity, {}))
+            runtime.artifacts.save(Artifact(job_id, JobState.CONTENT_GENERATING, "source_packet", str(packet_path), hashlib.sha256(packet_bytes).hexdigest(), {}))
+            response = client.post(f"/api/jobs/{job_id}/approvals/script", json={"status": "approved", "actor": "test-operator"})
+            assert response.status_code == 200
+            runtime.jobs.update_state(job_id, JobState.FAILED_VALIDATION, failed_stage, "scene contract validation failed")
+            if damage_packet:
+                packet_path.write_bytes(packet_bytes + b"tampered")
+            return package_identity, packet_path
+
+        expected_identity, _ = failed_approved_job("retry-valid-checkpoint")
+        listed = {item["id"]: item for item in client.get("/api/jobs").json()}
+        assert listed["retry-valid-checkpoint"]["can_retry_validation"] is True
+        assert "Retry approved media stages" in client.get("/").text
+        stale = client.post("/api/jobs/retry-valid-checkpoint/retry-validation", json={"expected_script_identity": "0" * 64})
+        assert stale.status_code == 409
+        resumed = client.post("/api/jobs/retry-valid-checkpoint/retry-validation", json={"expected_script_identity": expected_identity})
+        assert resumed.status_code == 200
+        assert resumed.json()["state"] == JobState.ASSET_ACQUISITION.value
+        assert resumed.json()["script_identity"] == expected_identity
+        job = runtime.jobs.get("retry-valid-checkpoint")
+        assert job.claim_owner is None and job.resume_state is None and job.failure_message is None
+        assert runtime.approvals.approved(job.id, ApprovalGate.SCRIPT, reviewed_identity=expected_identity) is not None
+        event = runtime.events.list_for_job(job.id)[-1]
+        assert event.event_type == "validation_retry_requested"
+        assert event.details["reviewed_script_identity"] == expected_identity
+        claimed = runtime.jobs.claim_oldest_eligible("retry-worker-test", now=datetime.now(UTC), lease_seconds=30)
+        assert claimed is not None and claimed.id == job.id
+        assert claimed.state is JobState.ASSET_ACQUISITION and claimed.attempt_count == 0
+        runtime.jobs.release_claim(job.id, "retry-worker-test")
+
+        _, damaged_path = failed_approved_job("retry-damaged-checkpoint", damage_packet=True)
+        assert client.post("/api/jobs/retry-damaged-checkpoint/retry-validation", json={"expected_script_identity": expected_identity}).status_code == 409
+        damaged_listing = {item["id"]: item for item in client.get("/api/jobs").json()}
+        assert damaged_listing["retry-damaged-checkpoint"]["can_retry_validation"] is False
+        assert damaged_path.read_bytes() == packet_bytes + b"tampered"
+
+        failed_approved_job("retry-existing-preview")
+        runtime.jobs.update_state("retry-existing-preview", JobState.FAILED_VALIDATION, JobState.PREVIEW_RENDERING, "render failed")
+        preview_path = tmp_path / "existing-preview.mp4"
+        preview_path.write_bytes(b"retained preview")
+        runtime.artifacts.save(Artifact(
+            "retry-existing-preview", JobState.PREVIEW_RENDERING, "preview",
+            str(preview_path), hashlib.sha256(preview_path.read_bytes()).hexdigest(), {},
+        ))
+        assert client.post("/api/jobs/retry-existing-preview/retry-validation", json={
+            "expected_script_identity": expected_identity,
+        }).status_code == 409
+        with pytest.raises(ValueError, match="existing preview"):
+            runtime.jobs.retry_approved_asset_validation(
+                "retry-existing-preview", package_identity=expected_identity, actor="test",
+            )
+        runtime.jobs.update_state("retry-existing-preview", JobState.PREVIEW_READY)
+        assert client.post("/api/jobs/retry-existing-preview/retry-validation", json={
+            "expected_script_identity": expected_identity,
+        }).status_code == 200
+        runtime.jobs.update_state("retry-existing-preview", JobState.PREVIEW_READY)
+        runtime.approvals.record("preview-approved", "retry-existing-preview", ApprovalGate.PREVIEW,
+                                 actor="test-operator", reviewed_identity="f" * 64)
+        assert client.post("/api/jobs/retry-existing-preview/retry-validation", json={
+            "expected_script_identity": expected_identity,
+        }).status_code == 409
+        with pytest.raises(ValueError, match="approved preview"):
+            runtime.jobs.retry_approved_asset_validation(
+                "retry-existing-preview", package_identity=expected_identity, actor="test",
+            )
+
+
+def test_scheduled_alignment_retry_is_visible_as_pending_in_studio(tmp_path: Path) -> None:
+    database_path = tmp_path / "retry-studio.db"
+    _migrate(database_path)
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"), auth=AuthConfig(enabled=True))
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("retry-reviewer", "correct-horse-battery-staple")
+        assert client.get("/api/jobs").status_code == 401
+        assert client.post("/login", json={"username": "retry-reviewer", "password": "correct-horse-battery-staple"}).status_code == 200
+        job = runtime.jobs.create("alignment-retry-ui", ContentRequest(
+            topic="Git staging", angle="Short tutorial", target_duration_seconds=45, language="en-IN", audience="general", prompt_version="test-v1",
+            sources=(SourceReference(source_id="git", url="https://example.invalid/git", title="Git"),),
+        ))
+        now = datetime.now(UTC)
+        assert runtime.jobs.claim_oldest_eligible("retry-worker", now=now, lease_seconds=300).id == job.id
+        runtime.jobs.update_state(job.id, JobState.FAILED_RETRYABLE, resume_state=JobState.VOICE_GENERATION, failure_message="audio-grounded alignment model execution failed")
+        runtime.jobs.schedule_retry(job.id, "retry-worker", now=now, next_retry_at=now + timedelta(seconds=30), exhausted=False)
+
+        payload = client.get(f"/api/jobs/{job.id}").json()
+        assert payload["state"] == "failed_retryable"
+        assert payload["attempt_count"] == 1
+        assert payload["next_retry_at"].endswith("+05:30")
+        assert payload["failure_message"] == "audio-grounded alignment model execution failed"
+        listed = client.get("/api/jobs").json()
+        assert listed[0]["next_retry_at"] == payload["next_retry_at"]
+        dashboard = client.get("/").text
+        assert "Retry scheduled" in dashboard and "Next attempt" in dashboard
+
+
 def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> None:
     database_path = tmp_path / "brief.db"
     _migrate(database_path)
     settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"))
     settings.pipeline.media.provider = "hybrid"
-    settings.pipeline.video_generation.presets["shorts"] = VideoPresetConfig(duration_seconds=45, minimum_duration_seconds=30, maximum_duration_seconds=55, aspect_ratio="9:16")
+    settings.pipeline.video_generation.presets["shorts"] = VideoPresetConfig(duration_seconds=45, minimum_duration_seconds=30, maximum_duration_seconds=120, aspect_ratio="9:16")
     with TestClient(create_app(settings)) as client:
         response = client.post("/api/videos", json={"title": "Linux basics", "notes": ["Explain files", "Explain logs"], "source_url": "https://example.com/linux", "source_title": "Linux reference", "source_excerpt": "Files are organized in a hierarchy and logs record system events.", "captions_enabled": False, "review_mode": "auto", "mcp_servers": ["web"], "voice_id": "af_bella", "visual_source": "stock"})
         assert response.status_code == 201
@@ -144,6 +277,7 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert "Asia/Kolkata" in dashboard.text
         assert "presetSelect" in dashboard.text
         assert "Add licensed music" in dashboard.text
+        assert "Target duration (seconds)" in dashboard.text
         assert "musicUpload" in dashboard.text
         assert "/api/music" in dashboard.text
         presets = client.get("/api/presets").json()
@@ -152,7 +286,9 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert short.status_code == 201
         short_job = client.app.state.runtime.jobs.get(short.json()["id"])
         assert short_job.request.aspect_ratio == "9:16" and short_job.request.preset_name == "shorts"
-        rejected = client.post("/api/videos", json={"title": "Too long", "notes": ["No"], "preset": "shorts", "duration_seconds": 56})
+        longer = client.post("/api/videos", json={"title": "Longer Short", "notes": ["No"], "preset": "shorts", "duration_seconds": 120})
+        assert longer.status_code == 201
+        rejected = client.post("/api/videos", json={"title": "Too long", "notes": ["No"], "preset": "shorts", "duration_seconds": 121})
         assert rejected.status_code == 422
         incomplete_source = client.post("/api/videos", json={"title": "Missing source", "notes": ["A note"], "source_url": "https://example.com/source"})
         assert incomplete_source.status_code == 422
@@ -160,6 +296,75 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         # The dashboard must reject a preview request for a voice which is not
         # enabled in this runtime instead of pretending to play one.
         assert client.get("/api/voices/not-configured/preview").status_code == 404
+
+
+def test_studio_brief_preserves_separate_angle_and_exact_multi_source_cache_request(tmp_path: Path) -> None:
+    from tubeforge.db.repositories import GenerationCacheRepository
+    from tubeforge.providers.content.youtube_skills import DEFAULT_VOICE
+
+    database_path = tmp_path / "exact-source-brief.db"
+    _migrate(database_path)
+    settings = Settings(
+        app=AppConfig(name="TubeForge test", environment="test"),
+        database=DatabaseConfig(url=f"sqlite:///{database_path}"),
+        auth=AuthConfig(enabled=True, secure_cookies=False),
+    )
+    settings.pipeline.codex.prompt_template_version = "m6-content-v7"
+    settings.pipeline.video_generation.presets["shorts"] = VideoPresetConfig(
+        duration_seconds=45, minimum_duration_seconds=30, maximum_duration_seconds=120,
+        aspect_ratio="9:16", captions_enabled=True, review_mode="manual",
+    )
+    sources = [
+        {"source_id": "official-one", "url": "https://example.com/one", "title": "Official one", "excerpt": "Exact approved excerpt one."},
+        {"source_id": "official-two", "url": "https://example.com/two", "title": "Official two", "excerpt": "Exact approved excerpt two."},
+    ]
+    notes = ["Keep the named example literal.", "Label the displayed output as illustrative."]
+    angle = "Explain the distinction with one concrete example, then show why the distinction matters."
+    brief = {
+        "title": "Image versus container",
+        "notes": notes,
+        "angle": angle,
+        "audience": "new software developers",
+        "sources": sources,
+        "preset": "shorts",
+        "duration_seconds": 45,
+        "channel_identity": "default",
+        "review_mode": "manual",
+        "captions_enabled": True,
+        "visual_source": "generated",
+        "visual_style": "cinematic-tech",
+    }
+    app = create_app(settings)
+    with TestClient(app) as client:
+        app.state.runtime.auth.create_admin("operator", "a-long-test-password")
+        assert client.post("/login", json={"username": "operator", "password": "a-long-test-password"}).status_code == 200
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+        created = client.post("/api/videos", json=brief)
+        assert created.status_code == 201, created.text
+        job = client.app.state.runtime.jobs.get(created.json()["id"])
+        expected = ContentRequest(
+            channel_identity="default", channel_voice_profile=DEFAULT_VOICE,
+            topic="Image versus container", angle=angle, target_duration_seconds=45,
+            language="en", audience="new software developers", prompt_version="m6-content-v7",
+            sources=tuple(SourceReference.model_validate(source) for source in sources),
+            notes=tuple(notes), review_mode="manual", captions_enabled=True,
+            visual_style="cinematic-tech", visual_source="generated", preset_name="shorts",
+            aspect_ratio="9:16",
+        )
+        assert job.request == expected
+        cache = GenerationCacheRepository(client.app.state.runtime.database.session_factory)
+        assert cache.cache_key(job.request, "host-codex-runner", settings.pipeline.codex.model, job.request.prompt_version) == cache.cache_key(expected, "host-codex-runner", settings.pipeline.codex.model, expected.prompt_version)
+
+        duplicate = client.post("/api/videos", json={**brief, "sources": [sources[0], {**sources[1], "source_id": sources[0]["source_id"]}]})
+        assert duplicate.status_code == 422 and "unique source IDs" in duplicate.text
+        missing_excerpt = client.post("/api/videos", json={**brief, "sources": [{**sources[0], "excerpt": " "}]})
+        assert missing_excerpt.status_code == 422 and "exact excerpt" in missing_excerpt.text
+        ambiguous = client.post("/api/videos", json={**brief, "source_url": "https://example.com/extra", "source_title": "Extra", "source_excerpt": "Extra evidence"})
+        assert ambiguous.status_code == 422 and "not both" in ambiguous.text
+
+        html = client.get("/").text
+        assert 'name="source_packet_json"' in html and 'name="angle"' in html and 'name="audience"' in html
+        assert "sourcePacketHelp" in html and "Enter one to eight approved sources as a valid JSON array." in html
 
 
 def test_voice_preview_is_synthesized_once_then_served_from_persistent_cache(tmp_path: Path) -> None:
@@ -236,6 +441,53 @@ def test_source_clip_api_accepts_a_short_source_without_breaking_job_contract(tm
         assert response.status_code == 201
         job = client.app.state.runtime.jobs.get(response.json()["id"])
         assert job.request.target_duration_seconds == 30
+
+
+def test_scene_revision_api_persists_layout_change_as_exact_child_draft(tmp_path: Path) -> None:
+    database_path = tmp_path / "scene-revision.db"
+    _migrate(database_path)
+    artifact_root = tmp_path / "artifacts"
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"))
+    settings.pipeline.voice.artifact_root = artifact_root
+    request = {
+        "topic": "Rain",
+        "angle": "A short explainer",
+        "target_duration_seconds": 45,
+        "language": "en",
+        "audience": "general",
+        "prompt_version": "test-v1",
+        "sources": [{"source_id": "rain", "url": "https://example.invalid/rain", "title": "Rain"}],
+    }
+    with TestClient(create_app(settings)) as client:
+        parent_id = client.post("/api/jobs", json=request).json()["id"]
+        runtime = client.app.state.runtime
+        parent = runtime.jobs.get(parent_id)
+        package = runtime.orchestrator.content.generate_package(parent.request)
+        content = json.dumps(package.model_dump(mode="json"), sort_keys=True).encode()
+        content_path = artifact_root / parent_id / "content_package.json"
+        content_path.parent.mkdir(parents=True, exist_ok=True)
+        content_path.write_bytes(content)
+        content_identity = hashlib.sha256(content).hexdigest()
+        runtime.artifacts.save(Artifact(parent_id, JobState.CONTENT_GENERATING, "content_package", str(content_path), content_identity, {}))
+        runtime.jobs.update_state(parent_id, JobState.SCRIPT_APPROVAL_REQUIRED)
+
+        revision = client.post(f"/api/jobs/{parent_id}/scene-revisions", json={
+            "scene_id": package.scene_plans[0].scene_id,
+            "expected_content_sha256": content_identity,
+            "visual_type": "flow_diagram",
+            "visual_elements": ["One image", "Container web-a", "Container web-b"],
+            "visual_subject": "One image branching to two named containers",
+            "actor": "test-operator",
+        })
+        assert revision.status_code == 201, revision.text
+        child_id = revision.json()["job_id"]
+        child_content = runtime.artifacts.get(child_id, JobState.CONTENT_GENERATING, "content_package")
+        child_package = ContentPackage.model_validate_json(Path(child_content.path).read_bytes())
+        assert child_content.checksum_sha256 == revision.json()["reviewed_identity"]
+        assert child_content.checksum_sha256 != content_identity
+        assert child_package.scene_plans[0].visual_type == "flow_diagram"
+        assert runtime.jobs.get(child_id).state is JobState.SCRIPT_APPROVAL_REQUIRED
+        assert runtime.artifacts.get(parent_id, JobState.CONTENT_GENERATING, "content_package").checksum_sha256 == content_identity
 
 
 def test_dashboard_deletes_only_paused_local_generations(tmp_path: Path) -> None:

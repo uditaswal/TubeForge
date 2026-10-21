@@ -80,6 +80,7 @@ def render_highlighted_ass(
     font_size: int,
     margin_vertical: int,
     margin_horizontal: int,
+    center_x: int | None = None,
     words_per_cue: int = 3,
     phrases: tuple[TimedPhrase, ...] | None = None,
 ) -> str:
@@ -99,38 +100,56 @@ def render_highlighted_ass(
     )
     rows = [header]
     caption_words = _caption_words(words, phrases)
-    for index, word in enumerate(caption_words):
-        phrase_start = index
-        while phrase_start and caption_words[phrase_start - 1].phrase_id == word.phrase_id:
-            phrase_start -= 1
-        group_start = phrase_start + ((index - phrase_start) // words_per_cue) * words_per_cue
-        group = caption_words[group_start : group_start + words_per_cue]
-        group = tuple(candidate for candidate in group if candidate.phrase_id == word.phrase_id)
-        rendered = []
-        for candidate in group:
-            value = _ass_escape(candidate.word.upper())
-            rendered.append(f"{{\\c&H0000D7FF&\\b1}}{value}{{\\rShorts}}" if candidate.ordinal == word.ordinal else value)
-        lengths = [len(candidate.word) for candidate in group]
-        if sum(lengths) + max(0, len(group) - 1) > 16 and len(rendered) > 1:
-            choices = []
-            for split_at in range(1, len(group)):
-                first = sum(lengths[:split_at]) + split_at - 1
-                second = sum(lengths[split_at:]) + len(group) - split_at - 1
-                choices.append((max(first, second), abs(first - second), split_at))
-            longest, _, split_at = min(choices)
-            if longest > 18:
-                raise ValueError("highlighted caption exceeds portrait line width")
-            cue_text = " ".join(rendered[:split_at]) + r"\N" + " ".join(rendered[split_at:])
-        else:
-            if sum(lengths) + max(0, len(group) - 1) > 18:
-                raise ValueError("highlighted caption exceeds portrait line width")
-            cue_text = " ".join(rendered)
-        rows.append(
-            "Dialogue: 0,"
-            f"{_ass_timestamp(word.start_seconds)},{_ass_timestamp(word.end_seconds)},"
-            f"Shorts,,{margin_horizontal},{margin_horizontal},{margin_vertical},,{cue_text}\n"
-        )
+    for group, split_at in _caption_groups(caption_words, words_per_cue):
+        for word in group:
+            rendered = []
+            for candidate in group:
+                value = _ass_escape(candidate.word.upper())
+                rendered.append(f"{{\\c&H0000D7FF&\\b1}}{value}{{\\rShorts}}" if candidate.ordinal == word.ordinal else value)
+            cue_text = " ".join(rendered) if split_at is None else " ".join(rendered[:split_at]) + r"\N" + " ".join(rendered[split_at:])
+            if center_x is not None:
+                cue_text += f"{{\\pos({center_x},{height - margin_vertical})}}"
+            rows.append(
+                "Dialogue: 0,"
+                f"{_ass_timestamp(word.start_seconds)},{_ass_timestamp(word.end_seconds)},"
+                f"Shorts,,{margin_horizontal},{margin_horizontal},{margin_vertical},,{cue_text}\n"
+            )
     return "".join(rows)
+
+
+def _caption_groups(words: tuple[WordTiming, ...], words_per_cue: int) -> tuple[tuple[tuple[WordTiming, ...], int | None], ...]:
+    """Pack complete spoken tokens into at most two portrait-safe lines."""
+    if words_per_cue < 1:
+        raise ValueError("caption words per cue must be positive")
+    groups: list[tuple[tuple[WordTiming, ...], int | None]] = []
+    cursor = 0
+    while cursor < len(words):
+        remaining = tuple(word for word in words[cursor : cursor + words_per_cue] if word.phrase_id == words[cursor].phrase_id)
+        chosen: tuple[tuple[WordTiming, ...], int | None] | None = None
+        for size in range(len(remaining), 0, -1):
+            group = remaining[:size]
+            lengths = [len(word.word) for word in group]
+            total = sum(lengths) + size - 1
+            if total <= 16:
+                chosen = (group, None)
+                break
+            candidates = []
+            for split in range(1, size):
+                left = sum(lengths[:split]) + split - 1
+                right = sum(lengths[split:]) + size - split - 1
+                if max(left, right) <= 18:
+                    candidates.append((max(left, right), abs(left - right), split))
+            if candidates:
+                chosen = (group, min(candidates)[2])
+                break
+            if total <= 18:
+                chosen = (group, None)
+                break
+        if chosen is None:
+            raise ValueError("highlighted caption token exceeds portrait line width")
+        groups.append(chosen)
+        cursor += len(chosen[0])
+    return tuple(groups)
 
 
 def _caption_words(words: tuple[WordTiming, ...], phrases: tuple[TimedPhrase, ...] | None) -> tuple[WordTiming, ...]:

@@ -1,0 +1,370 @@
+{
+  "schema_version": "1.0",
+  "request": {
+    "channel_identity": "default",
+    "channel_voice_profile": "Clear, practical and conversational. Address the viewer directly; use complete sentences, explain unfamiliar terms, avoid hype, unsupported claims and invented personal experience.",
+    "topic": "Git staging versus committing: choose what goes into one snapshot",
+    "angle": "Teach a beginner with two changed files to commit only one. Show status, stage a named example file, inspect the staged diff, commit, then check what remains. Explain the index/working-tree distinction. Use hypothetical labels only; do not imply Git was executed.",
+    "target_duration_seconds": 35,
+    "language": "en",
+    "audience": "new software developers learning Git",
+    "sources": [
+      {
+        "source_id": "git-status",
+        "url": "https://git-scm.com/docs/git-status",
+        "title": "Git status reference",
+        "author": "Git project",
+        "retrieved_at": "2026-10-13T06:11:58.198766Z",
+        "content_sha256": null,
+        "excerpt": "git status reports staged changes for the next commit, unstaged working-tree changes, and untracked files."
+      },
+      {
+        "source_id": "git-add",
+        "url": "https://git-scm.com/docs/git-add",
+        "title": "Git add reference",
+        "author": "Git project",
+        "retrieved_at": "2026-10-13T06:11:58.198766Z",
+        "content_sha256": null,
+        "excerpt": "git add followed by a path adds that file’s current contents to the index, the staging area used to prepare the next commit."
+      },
+      {
+        "source_id": "git-diff",
+        "url": "https://git-scm.com/docs/git-diff",
+        "title": "Git diff reference",
+        "author": "Git project",
+        "retrieved_at": "2026-10-13T06:11:58.198766Z",
+        "content_sha256": null,
+        "excerpt": "git diff --cached shows changes staged for the next commit compared with HEAD; --staged is a synonym."
+      },
+      {
+        "source_id": "git-commit",
+        "url": "https://git-scm.com/docs/git-commit",
+        "title": "Git commit reference",
+        "author": "Git project",
+        "retrieved_at": "2026-10-13T06:11:58.198766Z",
+        "content_sha256": null,
+        "excerpt": "git commit with a message records the current index contents as a new commit. In its basic form, it does not include unstaged working-tree changes."
+      }
+    ],
+    "prompt_version": "m6-content-v6",
+    "notes": [
+      "Use a hypothetical repository with app.py and notes.txt changed. The example paths are illustrative, not source facts or observed output.",
+      "Show git status, git add app.py, git diff --cached, git commit -m \"Update app\", and git status again as an intentional sequence. Do not fabricate command output, commit IDs, or an actual execution result.",
+      "Explain that staging app.py does not stage notes.txt and that the basic git commit form records the staged contents.",
+      "Use concrete visual contrast between working tree, index and commit. Reserve the bottom of the portrait frame for captions."
+    ],
+    "review_mode": "manual",
+    "captions_enabled": true,
+    "music_track": null,
+    "visual_style": "cinematic-tech",
+    "visual_source": "generated",
+    "voice_id": null,
+    "mcp_servers": [],
+    "production_mode": "generated",
+    "source_url": null,
+    "clip_count": 1,
+    "preset_name": "shorts",
+    "aspect_ratio": "9:16"
+  },
+  "claims": [
+    {
+      "claim_id": "claim-status",
+      "text": "git status reports changes staged for the next commit separately from unstaged working-tree changes.",
+      "source_ids": [
+        "git-status"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    },
+    {
+      "claim_id": "claim-add",
+      "text": "git add followed by a path adds that file's current contents to the index, which is the staging area for preparing the next commit.",
+      "source_ids": [
+        "git-add"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    },
+    {
+      "claim_id": "claim-diff",
+      "text": "git diff --cached shows changes staged for the next commit compared with HEAD.",
+      "source_ids": [
+        "git-diff"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    },
+    {
+      "claim_id": "claim-commit",
+      "text": "In its basic form, git commit with a message records the current index contents and excludes unstaged working-tree changes.",
+      "source_ids": [
+        "git-commit"
+      ],
+      "confidence": "high",
+      "review_status": "verified",
+      "human_review_required": false,
+      "time_sensitive": false
+    }
+  ],
+  "script_sections": [
+    {
+      "section_id": "section-01",
+      "narration": "Before you commit two changed files, choose exactly what Git records. Here is the safe sequence.",
+      "scene_id": "scene-01",
+      "claim_ids": [],
+      "contains_factual_claims": false
+    },
+    {
+      "section_id": "section-02",
+      "narration": "Start with git status. It separates changes staged for the next commit from unstaged working-tree changes.",
+      "scene_id": "scene-02",
+      "claim_ids": [
+        "claim-status"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-03",
+      "narration": "Now use git add app.py. This copies app.py’s current contents into the index, Git’s staging area; notes.txt stays unstaged.",
+      "scene_id": "scene-03",
+      "claim_ids": [
+        "claim-add"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-04",
+      "narration": "Check git diff --cached. It shows what the index currently holds for the next commit compared with HEAD.",
+      "scene_id": "scene-04",
+      "claim_ids": [
+        "claim-diff"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-05",
+      "narration": "Then run git commit -m “Update app”. In this basic form, Git records the index, not unstaged working-tree changes.",
+      "scene_id": "scene-05",
+      "claim_ids": [
+        "claim-commit"
+      ],
+      "contains_factual_claims": true
+    },
+    {
+      "section_id": "section-06",
+      "narration": "Finish with git status. You should inspect what remains: in this example, notes.txt is still outside the commit. Try this sequence before your next focused commit.",
+      "scene_id": "scene-06",
+      "claim_ids": [
+        "claim-status"
+      ],
+      "contains_factual_claims": true
+    }
+  ],
+  "scene_plans": [
+    {
+      "scene_id": "scene-01",
+      "visual_type": "Animated vertical state diagram",
+      "search_queries": [
+        "Git working tree index commit diagram",
+        "Git staging area beginner diagram"
+      ],
+      "on_screen_text": "Choose one file",
+      "fallback_visual": "Diagram showing app.py and notes.txt in the working tree, with the index and commit empty.",
+      "visual_subject": "A state diagram with app.py and notes.txt positioned in the working tree.",
+      "visual_purpose": "Introduce the hypothetical two-file situation and the three Git states viewers must distinguish.",
+      "composition": "Portrait three-column flow above the caption-safe bottom: working tree, index, and next commit.",
+      "visual_elements": [
+        "Working tree: app.py",
+        "Working tree: notes.txt",
+        "Index",
+        "Next commit"
+      ]
+    },
+    {
+      "scene_id": "scene-02",
+      "visual_type": "Command card with split-state diagram",
+      "search_queries": [
+        "git status staged unstaged diagram",
+        "Git status command terminal"
+      ],
+      "on_screen_text": "git status",
+      "fallback_visual": "Static terminal card for git status above labeled working-tree and index lanes.",
+      "visual_subject": "The git status command connected to separate staged and unstaged categories.",
+      "visual_purpose": "Explain that status distinguishes staged changes from unstaged working-tree changes.",
+      "composition": "Terminal command at the top; working-tree and index lanes beneath it, with captions reserved below.",
+      "visual_elements": [
+        "git status",
+        "Staged for next commit",
+        "Unstaged working-tree changes"
+      ]
+    },
+    {
+      "scene_id": "scene-03",
+      "visual_type": "Animated file-state transition",
+      "search_queries": [
+        "git add file staging area diagram",
+        "Git index app.py illustration"
+      ],
+      "on_screen_text": "git add app.py",
+      "fallback_visual": "Arrow moving app.py into the index while notes.txt stays in the working tree.",
+      "visual_subject": "An app.py file card moving into the index while notes.txt remains in the working tree.",
+      "visual_purpose": "Show that adding a named path stages that file's current contents without moving notes.txt.",
+      "composition": "app.py moves from the working-tree lane into the index; notes.txt remains stationary.",
+      "visual_elements": [
+        "git add app.py",
+        "app.py → Index",
+        "notes.txt → Working tree"
+      ]
+    },
+    {
+      "scene_id": "scene-04",
+      "visual_type": "Terminal and comparison diagram",
+      "search_queries": [
+        "git diff cached index HEAD diagram",
+        "Git staged diff illustration"
+      ],
+      "on_screen_text": "git diff --cached",
+      "fallback_visual": "Static staged-diff panel labeled git diff --cached, Index, and HEAD.",
+      "visual_subject": "A staged-diff inspection panel comparing the app.py index state with HEAD.",
+      "visual_purpose": "Explain that the cached diff previews staged changes against HEAD before committing.",
+      "composition": "The index expands into a focused staged-diff panel, with HEAD shown as the comparison point.",
+      "visual_elements": [
+        "git diff --cached",
+        "Index: app.py",
+        "Compare with HEAD"
+      ]
+    },
+    {
+      "scene_id": "scene-05",
+      "visual_type": "Animated snapshot diagram",
+      "search_queries": [
+        "git commit index snapshot diagram",
+        "Git staged contents commit illustration"
+      ],
+      "on_screen_text": "git commit -m \"Update app\"",
+      "fallback_visual": "Diagram showing app.py moving from the index into a commit and notes.txt remaining outside.",
+      "visual_subject": "The staged app.py contents becoming a commit while notes.txt remains outside it.",
+      "visual_purpose": "Show that the basic commit records the index rather than unstaged working-tree changes.",
+      "composition": "The index card flows into a commit snapshot while notes.txt stays in the working-tree lane.",
+      "visual_elements": [
+        "git commit -m \"Update app\"",
+        "Index: app.py",
+        "Commit: app.py",
+        "Working tree: notes.txt"
+      ]
+    },
+    {
+      "scene_id": "scene-06",
+      "visual_type": "Final-state command diagram",
+      "search_queries": [
+        "git status after commit diagram",
+        "Git remaining working tree changes"
+      ],
+      "on_screen_text": "git status",
+      "fallback_visual": "Static final-state diagram with app.py committed and notes.txt remaining in the working tree.",
+      "visual_subject": "A final state check separating committed app.py from the still-unstaged notes.txt.",
+      "visual_purpose": "Reinforce the payoff by checking the remaining working-tree state after the hypothetical commit.",
+      "composition": "Final portrait split: committed app.py above, remaining notes.txt below, and git status at the top.",
+      "visual_elements": [
+        "git status",
+        "Commit: app.py",
+        "Working tree: notes.txt",
+        "Inspect what remains"
+      ]
+    }
+  ],
+  "metadata": {
+    "title_options": [
+      "Git: Commit Only One Changed File",
+      "How to Commit One File in Git",
+      "Stage One File, Commit One File in Git",
+      "Git Staging vs Committing Explained",
+      "Choose What Goes Into a Git Commit",
+      "Commit app.py Without Committing notes.txt",
+      "Git Index vs Working Tree for Beginners",
+      "How Git Staging Controls Your Next Commit",
+      "Two Changed Files, One Git Commit",
+      "Use Git add to Commit Only One File"
+    ],
+    "description": "Learn how to commit only one changed file in Git by staging app.py, inspecting the staged diff, committing the index, and checking what remains.\n\nThis beginner example explains the difference between the working tree, staging area, and commit using git status, git add, git diff --cached, and git commit.",
+    "tags": [
+      "git",
+      "git staging",
+      "git commit",
+      "git add",
+      "git status",
+      "git diff cached",
+      "staging area",
+      "git index",
+      "working tree",
+      "version control",
+      "git tutorial",
+      "beginner git",
+      "software development"
+    ],
+    "chapters": [
+      {
+        "section_id": "section-01",
+        "label": "Choose one changed file"
+      },
+      {
+        "section_id": "section-02",
+        "label": "Check the current state"
+      },
+      {
+        "section_id": "section-03",
+        "label": "Stage app.py"
+      },
+      {
+        "section_id": "section-04",
+        "label": "Inspect the index"
+      },
+      {
+        "section_id": "section-05",
+        "label": "Commit staged contents"
+      },
+      {
+        "section_id": "section-06",
+        "label": "Check what remains"
+      }
+    ]
+  },
+  "thumbnail_brief": {
+    "text_options": [
+      "COMMIT ONE FILE",
+      "STAGE IT FIRST",
+      "CHOOSE THE SNAPSHOT"
+    ],
+    "visual_direction": "Use three high-contrast vertical zones labeled Working Tree, Index, and Commit. Highlight app.py moving forward in bright green while notes.txt remains muted; reserve the lower frame for captions.",
+    "accessibility_description": "A portrait diagram shows app.py moving from the working tree through the index into a commit while notes.txt remains behind."
+  },
+  "hook_options": [
+    "Two files changed, but you want only app.py in the next commit.",
+    "How do you commit app.py without also committing notes.txt?",
+    "You changed two files, but your next Git commit needs only one.",
+    "Want one changed file in your next commit while the other stays out?",
+    "Before you commit two changed files, choose exactly what Git records."
+  ],
+  "clip_candidates": [
+    {
+      "clip_id": "clip-01",
+      "section_ids": [
+        "section-01",
+        "section-02",
+        "section-03",
+        "section-04",
+        "section-05",
+        "section-06"
+      ],
+      "hook": "Two files changed, but you want only app.py in the next commit.",
+      "rationale": "A complete beginner-focused workflow showing how the index controls which changed file enters a commit.",
+      "target_duration_seconds": 35
+    }
+  ]
+}

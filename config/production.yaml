@@ -1,7 +1,7 @@
 app:
   name: "TubeForge"
   environment: "production"
-  bind_host: "0.0.0.0"
+  bind_host: "127.0.0.1"
   port: 8080
 auth:
   enabled: true
@@ -10,19 +10,19 @@ auth:
   login_attempt_limit: 5
   login_window_seconds: 300
 database:
-  url: "sqlite:////app/data/tubeforge.db"
+  url: "sqlite:///./data/tubeforge.db"
   busy_timeout_ms: 5000
 pipeline:
   # Production scripts cross only the host's restricted Unix-socket runner.
   content_provider: "codex"
-  voice_provider: "hybrid"
+  voice_provider: "piper-http"
   codex:
     model: "gpt-5.6-sol"
     socket_path: "/run/tubeforge-codex/codex.sock"
     socket_timeout_seconds: 490
     invocation_limit: 2
     reservation_seconds: 1200
-    prompt_template_version: "m6-content-v6"
+    prompt_template_version: "m6-content-v7"
   video_generation:
     default_preset: "default"
     presets:
@@ -43,7 +43,7 @@ pipeline:
       shorts:
         duration_seconds: 45
         minimum_duration_seconds: 30
-        maximum_duration_seconds: 55
+        maximum_duration_seconds: 120
         aspect_ratio: "9:16"
         captions_enabled: true
         music_track: null
@@ -59,33 +59,39 @@ pipeline:
         mcp_servers: []
     music_catalog: [] # Add approved free tracks with source/license URLs here.
   piper:
-    executable: "python" # Uses the Piper package bundled in the local media image.
+    server_url: "http://127.0.0.1:5000"
+    listen_host: "127.0.0.1"
+    listen_port: 5000
+    executable: "python" # Retained for optional direct local development.
     # Download a Piper voice and its matching .onnx.json sidecar into
     # ./models before selecting voice_provider: piper.
-    model_path: "/app/models/en_US-lessac-medium.onnx"
-    config_path: "/app/models/en_US-lessac-medium.onnx.json"
+    model_path: "./models/en_US-lessac-medium.onnx"
+    config_path: "./models/en_US-lessac-medium.onnx.json"
     voice_id: "en_US-lessac-medium"
-    cache_root: "/app/data/cache/tts"
+    cache_root: "./data/cache/tts"
   kokoro:
     enabled: true
     # These natural local English voices are selectable in Creator Studio.
     # The model is downloaded by the Kokoro runtime on its first use.
     voices: ["af_bella", "af_sarah", "am_michael"]
-    model_path: "/app/models/kokoro-v1.0.int8.onnx"
-    voices_path: "/app/models/voices-v1.0.bin"
-    cache_root: "/app/data/cache/kokoro"
+    model_path: "./models/kokoro-v1.0.int8.onnx"
+    voices_path: "./models/voices-v1.0.bin"
+    cache_root: "./data/cache/kokoro"
     sample_rate: 24000
   voice:
-    artifact_root: "/app/data/artifacts"
+    artifact_root: "./data/artifacts"
     ffmpeg_threads: 1
     ffmpeg_executable: "ffmpeg"
     ffprobe_executable: "ffprobe"
+    # Keep the existing timing method until the independent C3 acceptance gate.
+    alignment_provider: "local-waveform-v1"
   media:
     # Each job can select local generated art or rights-safe Wikimedia stock.
     # Google Image results are never used because they have no reuse proof.
     provider: "hybrid"
-    cache_root: "/app/data/cache/assets"
+    cache_root: "./data/cache/assets"
   sources:
+    research_enabled: true
     enabled: false # Enable only with a tight HTTPS host allowlist.
     allowed_hosts: []
   source_clips:
@@ -95,10 +101,16 @@ pipeline:
     min_clip_seconds: 15
     max_clip_seconds: 60
     padding_seconds: 3
+  preview:
+    audio_normalization_enabled: true
+  final:
+    audio_normalization_enabled: true
   shorts_preview:
     width: 540
     height: 960
     fps: 30
+    audio_sample_rate: 48000
+    audio_normalization_enabled: true
     caption_font_size: 46
     caption_margin_vertical: 180
     caption_margin_horizontal: 48
@@ -110,9 +122,12 @@ pipeline:
     height: 1920
     video_crf: 18
     fps: 30
-    caption_font_size: 80
-    caption_margin_vertical: 360
+    audio_sample_rate: 48000
+    audio_normalization_enabled: true
+    caption_font_size: 84
+    caption_margin_vertical: 470
     caption_margin_horizontal: 96
+    caption_center_x: 490
     word_highlight_captions: true
     scene_max_duration_seconds: 3.0
     minimum_free_bytes: 500000000

@@ -2,12 +2,23 @@
 
 Use this for future scripts, scene plans, renderer changes and review of vertical Shorts. The [reference audit](DOCKER_SHORT_BENCHMARK_REVIEW.md) holds attachment details and measured comparisons; this file contains reusable production rules. The canonical narration contract remains [yt-script automation](../.agents/skills/yt-script/automation.md).
 
+The newer `reference-short-v1` profile follows the [Claude pipeline review](CLAUDE_PIPELINE_REVIEW.md):
+25–45 seconds, 6–8 scenes, 8–15 spoken words per scene, 0.3–0.4-second speech
+tails, fixed semantic templates and a final spoken/visible follow CTA. Its
+encoded true-peak gate is **≤−1.5 dBTP**, stricter than the legacy gate below.
+Finals remain 1080×1920/30fps; drafts are 720×1280. Native local Kokoro INT8 is
+primary with local Piper fallback, one worker, real-audio alignment and logged
+estimated fallback. The CLI and dashboard must call the same library. Existing
+approved jobs retain their original versioned contract; a new profile is a new
+reviewed artifact, not a reinterpretation of old approval.
+
 ## Story and source
 
 - Promise one useful outcome. Make the hook readable on frame one and show a concrete action, example or payoff within three seconds. Give each scene one teaching purpose, then end with one brief ask that agrees with the spoken line. Do not claim measured retention without audience data.
 - Use the accepted structured content package as the single source of spoken words. Only ordered `script_sections[].narration` reaches TTS. Keep hook alternatives, scores, citations and directions in their own fields. Render the exact approved revision; a changed script needs new approval.
 - Ground copyable commands, figures, claims and outcomes in approved sources. Capture real output where feasible; otherwise label edited, abbreviated or illustrative output on screen. Color must not be the only way to understand a state change.
 - For terminal tutorials, type commands in sync with speech, hold completed lines long enough to read, and use roughly 48–54 px monospace on a 1080 px canvas. Reduce lines or wrap intentionally before shrinking. Other subjects need visuals that demonstrate the mechanism, not decorative cards.
+- A video made only from still cards, pan/zoom motion and timed captions fails creative acceptance even when every technical gate passes. At least one meaningful action or state reveal per teaching scene must track a spoken cue; terminal command entry, output highlighting, process-state changes and comparison reveals are examples. Judge the complete encoded video against the approved reference before calling the visual system reusable.
 
 ## Topic and scene data
 
@@ -39,8 +50,8 @@ Keep speech intelligible. Music should be audible in pauses and duck under words
 
 Synthesize music from original code or use a track with documented rights. Record the source or algorithm, track identity/hash, relevant dependency and voice-model terms, and required attribution in the artifact manifest. “Generated” does not by itself settle licensing. Record AI-voice disclosure needs for the publishing review; this guide does not authorize publication.
 
-Measure the mix, then use **two-pass** loudness normalization targeting about **−14 LUFS and −1.5 dBTP**. Measure the *encoded AAC MP4* again; accept −15 to −13 LUFS integrated and true peak at or below −1.0 dBTP. A peak or loudness pass cannot prove pleasant balance: review the voice, music and effects by ear.
+Render AAC audio at **48 kHz**. Measure the mix, then use **two-pass** loudness normalization targeting about **−14 LUFS and −2.5 dBTP** to leave headroom for AAC encoding. Measure the *encoded AAC MP4* again; accept −15 to −13 LUFS integrated and true peak at or below −1.0 dBTP. A peak or loudness pass cannot prove pleasant balance: review the voice, music and effects by ear.
 
 ## Final gate
 
-Use checked subprocess exit codes and atomic artifact promotion. Require 1080×1920, 30 fps, H.264/AAC, roughly 30–55 seconds for TubeForge Shorts, full FFmpeg decode, final loudness/peak, exact approved-script and asset hashes, and no clipped or overlapping text. Inspect the first frame, each scene change, finished on-screen actions, caption boundaries and last frame. Save an encoded contact sheet with safe-zone guides and inspect a full-size frame from each distinct layout. Report any listening or platform-preview check that remains unverified.
+Use checked subprocess exit codes and atomic artifact promotion. Require 1080×1920, 30 fps, H.264/AAC, 30–120 seconds for TubeForge Shorts, full FFmpeg decode, final loudness/peak, exact approved-script and asset hashes, and no clipped or overlapping text. Inspect the first frame, each scene change, finished on-screen actions, caption boundaries and last frame. Save an encoded contact sheet with safe-zone guides and inspect a full-size frame from each distinct layout. Report any listening or platform-preview check that remains unverified.

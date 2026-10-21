@@ -76,8 +76,11 @@ class WorkerService:
 
     def _schedule_retry(self, job: PipelineJob) -> PipelineJob:
         attempt = job.attempt_count + 1
-        exhausted = attempt >= self.config.max_attempts
-        delay = min(self.config.retry_base_seconds * (2 ** (attempt - 1)), self.config.retry_max_seconds)
+        policy_reader = getattr(self.orchestrator, "alignment_retry_policy", None)
+        alignment_policy = policy_reader(job) if callable(policy_reader) else None
+        immediate, cap, transient_count = alignment_policy if alignment_policy is not None else (False, self.config.max_attempts, attempt)
+        exhausted = attempt >= cap
+        delay = 0 if immediate else min(self.config.retry_base_seconds * (2 ** (max(1, transient_count) - 1)), self.config.retry_max_seconds)
         result = self.jobs.schedule_retry(job.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=delay), exhausted=exhausted)
         _event("job_retry_scheduled", job_id=job.id, attempt=attempt, delay_seconds=delay, exhausted=exhausted)
         self._record(job.id, "job_retry_scheduled", attempt=attempt, delay_seconds=delay, exhausted=exhausted)
