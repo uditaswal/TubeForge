@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "package_sha256": "eee9a9a450f6426e57766548c98c64f4029f9fba6273f3eb449b391aedd3b70d",
+  "source_packet_sha256": "ae075f88d09add3cbd39e766c1ab149e1738d2d0cc05ccd096f8f453337c9cdb",
+  "script_gate_identity": "eee9a9a450f6426e57766548c98c64f4029f9fba6273f3eb449b391aedd3b70d",
+  "scenes": [
+    {
+      "scene_id": "scene-01",
+      "layout": "comparison",
+      "heading": "EXAMPLE: TWO UNSTAGED",
+      "command": null,
+      "display_elements": [
+        "app.py unstaged",
+        "notes.txt unstaged",
+        "commit only app.py"
+      ],
+      "source_ids": []
+    },
+    {
+      "scene_id": "scene-02",
+      "layout": "source_card",
+      "heading": "GIT STATUS",
+      "command": null,
+      "display_elements": [
+        "Git status reference",
+        "Staged: next commit",
+        "Unstaged: working tree"
+      ],
+      "source_ids": [
+        "git-status"
+      ]
+    },
+    {
+      "scene_id": "scene-03",
+      "layout": "terminal",
+      "heading": "STAGE APP.PY",
+      "command": "git add app.py",
+      "display_elements": [
+        "app.py → index",
+        "notes.txt stays outside"
+      ],
+      "source_ids": [
+        "git-add"
+      ]
+    },
+    {
+      "scene_id": "scene-04",
+      "layout": "terminal",
+      "heading": "REVIEW THE INDEX",
+      "command": "git diff --cached",
+      "display_elements": [
+        "Review staged changes",
+        "Compare with HEAD"
+      ],
+      "source_ids": [
+        "git-diff"
+      ]
+    },
+    {
+      "scene_id": "scene-05",
+      "layout": "terminal",
+      "heading": "COMMIT THE INDEX",
+      "command": "git commit -m \"Update app\"",
+      "display_elements": [
+        "Index: app.py",
+        "Other edit: notes.txt"
+      ],
+      "source_ids": [
+        "git-commit"
+      ]
+    },
+    {
+      "scene_id": "scene-06",
+      "layout": "timeline",
+      "heading": "CHECK WHAT REMAINS",
+      "command": null,
+      "display_elements": [
+        "Run git status",
+        "Spot notes.txt",
+        "Plan the next commit"
+      ],
+      "source_ids": [
+        "git-status"
+      ]
+    }
+  ]
+}

@@ -17,8 +17,9 @@ from tubeforge.core.errors import ProviderValidationError
 from tubeforge.domain.contracts import AssetCandidate, MediaSearchRequest
 
 
-STYLE_VERSION = "portrait-storyboard-v10"
-SUPPORTED_STYLE_VERSIONS = frozenset({"portrait-storyboard-v9", STYLE_VERSION})
+STYLE_VERSION = "portrait-storyboard-v12"
+NEW_LAYOUT_STYLE_VERSION = "portrait-storyboard-v13"
+SUPPORTED_STYLE_VERSIONS = frozenset({"portrait-storyboard-v9", "portrait-storyboard-v10", "portrait-storyboard-v11", STYLE_VERSION, NEW_LAYOUT_STYLE_VERSION})
 PALETTE_ID = "midnight-cyan-violet-amber"
 _FONT = next(
     (path for path in (
@@ -45,7 +46,8 @@ class LocalMotionGraphicsProvider:
         self.calls += 1
         if not (request.visual_subject.strip() or request.on_screen_text.strip() or request.queries):
             raise ProviderValidationError(f"scene {request.scene_id} has no visual subject")
-        identity = json.dumps({"style": STYLE_VERSION, "request": request.model_dump(mode="json")}, sort_keys=True, ensure_ascii=False)
+        style_version = storyboard_style_for(request.visual_type)
+        identity = json.dumps({"style": style_version, "request": request.model_dump(mode="json")}, sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
         portrait = request.orientation == "portrait"
         width, height = (1080, 1920) if portrait else (1920, 1080)
@@ -72,7 +74,7 @@ class LocalMotionGraphicsProvider:
                 provider_asset_id=f"local-storyboard-{digest[:20]}",
                 source_url=f"https://example.invalid/local-storyboard/{digest[:16]}.png",
                 download_url=f"https://example.invalid/local-storyboard/{digest[:16]}.png",
-                source_version=f"{STYLE_VERSION}:{PALETTE_ID}:{digest[:16]}",
+                source_version=f"{style_version}:{PALETTE_ID}:{digest[:16]}",
                 local_path=str(path),
                 media_type="image",
                 width=width,
@@ -85,14 +87,27 @@ class LocalMotionGraphicsProvider:
         ]
 
 
-def _wrapped(value: str, *, width: int, lines: int) -> str:
-    """Keep text in the safe region while retaining its complete source in the manifest."""
+def storyboard_style_for(visual_type: str) -> str:
+    """Keep existing layout bytes/cache identities stable as new layouts arrive."""
+    return NEW_LAYOUT_STYLE_VERSION if visual_type in {"timeline", "source_card"} else STYLE_VERSION
+
+
+def _fit_heading(value: str, *, width: int, scale: float, base_size: int, lines: int) -> tuple[str, int]:
+    """Fit the complete approved heading in its safe region without ellipsis."""
     words = " ".join(value.split())
-    wrapped = textwrap.wrap(words, width=width, break_long_words=True, break_on_hyphens=False)
-    if len(wrapped) > lines:
-        wrapped = wrapped[:lines]
-        wrapped[-1] = wrapped[-1].rstrip(" .") + "…"
-    return "\n".join(wrapped)
+    for size in range(base_size, 33, -2):
+        char_limit = max(12, int(width * .80 / (size * scale * .56)))
+        wrapped = textwrap.wrap(words, width=char_limit, break_long_words=True, break_on_hyphens=False)
+        if len(wrapped) <= lines:
+            return "\n".join(wrapped), size
+    raise ProviderValidationError("scene heading is too long for the safe title region")
+
+
+def _terminal_outputs(command: str, elements: list[str]) -> list[str]:
+    """Avoid repeating a command that is also the first display element."""
+    if elements and " ".join(elements[0].split()) == " ".join(command.split()):
+        return elements[1:]
+    return elements
 
 
 def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: int) -> None:
@@ -103,7 +118,8 @@ def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: i
     portrait = height > width
     subject = request.visual_subject or request.queries[0]
     kind = (request.composition + " " + request.visual_type + " " + request.visual_subject).casefold()
-    terminal = any(word in kind for word in ("terminal", "code", "cli"))
+    explicit_layout = request.visual_type if request.visual_type in {"terminal", "flow_diagram", "comparison", "timeline", "source_card"} else None
+    terminal = explicit_layout == "terminal" or (explicit_layout is None and any(word in kind for word in ("terminal", "code", "cli")))
     heading = subject if terminal else (request.on_screen_text or subject)
     elements = list(request.visual_elements or request.queries[:3])
     if not elements:
@@ -112,13 +128,17 @@ def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: i
         temp = Path(temporary_dir)
         if os.name == "nt":
             shutil.copyfile(_FONT, temp / "font.ttf")
-        texts = [_wrapped(heading, width=24 if portrait else 38, lines=2), *elements]
+        scale = 1.0 if portrait else 1.25
+        heading_text, heading_size = _fit_heading(
+            heading, width=width, scale=scale, base_size=58 if portrait else 54,
+            lines=3 if portrait else 2,
+        )
+        texts = [heading_text, *elements]
         files: list[Path] = []
         for index, value in enumerate(texts):
             text_path = temp / f"field-{index}.txt"
             text_path.write_text(value, encoding="utf-8")
             files.append(text_path)
-        scale = 1.0 if portrait else 1.25
         filters = [
             f"drawbox=x={round(width*.10)}:y={round(height*.055)}:w={round(width*.18)}:h={max(6,round(9*scale))}:color=0x3fdcee:t=fill",
         ]
@@ -132,9 +152,9 @@ def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: i
                     f"fontcolor={color}:fontsize={max(20,round(size*scale))}:line_spacing={max(5,round(10*scale))}:"
                     f"x={round(width*x)}:y={round(height*y)}")
 
-        filters.append(text_filter(0, size=58 if portrait else 54, x=.10, y=.105, color="0x3fdcee"))
+        filters.append(text_filter(0, size=heading_size, x=.10, y=.085, color="0x3fdcee"))
         diagram: list[tuple[float, float, float, float, int]] = []
-        if not terminal and ("branch" in kind or "blueprint" in kind or "instance" in kind or "two" in kind) and "checklist" not in kind:
+        if explicit_layout == "flow_diagram" or (explicit_layout is None and not terminal and ("branch" in kind or "blueprint" in kind or "instance" in kind or "two" in kind) and "checklist" not in kind):
             offset = 1 if len(elements) >= 4 else 0
             filters.extend([box(.25,.28,.50,.12,"0x1c3050"),box(.495,.40,.01,.10,"0x3fdcee"),
                             box(.28,.495,.44,.006,"0x3fdcee"),box(.28,.495,.008,.06,"0x3fdcee"),box(.712,.495,.008,.06,"0x3fdcee"),
@@ -165,7 +185,7 @@ def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: i
             for x,color in ((.13,"0xfb9d78"),(.16,"0xfbbf24"),(.19,"0x3fdcee")):
                 filters.append(box(x,.263,.015,.009,color))
             filters.append(text_filter(command_index,size=command_size,x=.16,y=.335,color="0x3fdcee"))
-            output_lines = elements if request.on_screen_text else elements[1:]
+            output_lines = _terminal_outputs(command, elements)
             output_y = .46 if len(command_lines) == 1 else .51
             for i, output in enumerate(output_lines[:3]):
                 output = " ".join(output.split())
@@ -182,7 +202,7 @@ def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: i
                 output_index = len(files)
                 files.append(output_file)
                 filters.append(text_filter(output_index,size=size,x=.16,y=output_y+i*.07,color="0xf3f6fa"))
-        elif ("comparison" in kind or "contrast" in kind) and len(elements) == 3:
+        elif (explicit_layout == "comparison" or (explicit_layout is None and ("comparison" in kind or "contrast" in kind))) and len(elements) == 3:
             filters.extend([
                 box(.14,.26,.72,.28,"0x254669"),box(.16,.28,.68,.24,"0x111d32"),
                 box(.19,.30,.62,.08,"0x1c3050"),box(.19,.30,.012,.08,"0x7f6fee"),
@@ -191,6 +211,23 @@ def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: i
                 box(.14,.60,.72,.13,"0x1c3050"),box(.14,.60,.012,.13,"0x3fdcee"),
             ])
             diagram=[(.23,.32,.55,.07,0),(.25,.42,.51,.07,1),(.18,.64,.65,.07,2)]
+        elif explicit_layout == "timeline":
+            filters.extend([
+                box(.205,.275,.008,.38,"0x3fdcee"),
+                box(.18,.29,.055,.03,"0x7f6fee"),
+                box(.18,.46,.055,.03,"0x7f6fee"),
+                box(.18,.63,.055,.03,"0x7f6fee"),
+            ])
+            for y in (.27,.44,.61):
+                filters.extend([box(.27,y,.62,.11,"0x1c3050"),box(.27,y,.012,.11,"0x3fdcee")])
+            diagram=[(.31,.292,.54,.075,0),(.31,.462,.54,.075,1),(.31,.632,.54,.075,2)]
+        elif explicit_layout == "source_card":
+            filters.extend([
+                box(.12,.265,.76,.10,"0x27385e"),box(.12,.265,.012,.10,"0x7f6fee"),
+                box(.12,.39,.76,.20,"0x1c3050"),box(.12,.39,.012,.20,"0x3fdcee"),
+                box(.12,.615,.76,.10,"0x254669"),box(.12,.615,.012,.10,"0xfbbf24"),
+            ])
+            diagram=[(.16,.286,.68,.06,0),(.16,.435,.68,.11,1),(.16,.636,.68,.06,2)]
         elif ("package" in kind or "cutaway" in kind or "layer" in kind or "stack" in kind) and "split" not in kind:
             filters.extend([box(.13,.26,.74,.47,"0x254669"),box(.15,.28,.70,.43,"0x111d32")])
             for i in range(min(len(elements),4)):
@@ -211,10 +248,14 @@ def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: i
         for x,y,w,h,index in diagram:
             label = " ".join(elements[index].split())
             size = 39 if portrait else 31
-            if w < .5 or len(label) > 32:
+            if explicit_layout in {"timeline", "source_card"}:
+                size = 44 if portrait else 36
+            elif w < .5 or len(label) > 32:
                 size = 30 if portrait else 26
             while True:
-                char_limit = max(12, int(width*w/(size*scale*.56)))
+                # Uppercase labels and technical identifiers are wider than
+                # the average glyph; leave a deliberate horizontal margin.
+                char_limit = max(12, int(width*w/(size*scale*.68)))
                 line_limit = min(4, max(1, int(height*h/(size*scale*1.4))))
                 wrapped = textwrap.wrap(label, width=char_limit, break_long_words=True, break_on_hyphens=False)
                 if len(wrapped) <= line_limit or size <= 20:
@@ -236,4 +277,4 @@ def _render_frame(request: MediaSearchRequest, path: Path, width: int, height: i
         os.replace(output, path)
 
 
-__all__ = ["LocalMotionGraphicsProvider", "PALETTE_ID", "STYLE_VERSION", "SUPPORTED_STYLE_VERSIONS"]
+__all__ = ["LocalMotionGraphicsProvider", "PALETTE_ID", "STYLE_VERSION", "NEW_LAYOUT_STYLE_VERSION", "SUPPORTED_STYLE_VERSIONS", "storyboard_style_for"]

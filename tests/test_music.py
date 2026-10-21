@@ -42,6 +42,10 @@ def test_music_catalog_requires_real_publishable_terms_and_retains_provenance(tm
     assert Path(record.path).is_file()
     assert record.attribution_required and record.duration_seconds == pytest.approx(1.0, abs=0.02)
 
+    Path(record.path).write_bytes(b"tampered")
+    with pytest.raises(ProviderValidationError, match="unavailable"):
+        catalog.resolve("Quiet Circuit")
+
     with pytest.raises(ProviderValidationError, match="actual licence"):
         catalog.upload(
             name="Vague track",
@@ -53,6 +57,13 @@ def test_music_catalog_requires_real_publishable_terms_and_retains_provenance(tm
             attribution_required=False,
             attribution="",
             publishing_allowed=True,
+        )
+    with pytest.raises(ProviderValidationError, match="publishing use"):
+        catalog.upload(
+            name="Not cleared", filename="uncleared.wav", payload=_tone(),
+            source_url="https://creator.example/uncleared", license_name="CC BY 4.0",
+            license_url="https://creativecommons.org/licenses/by/4.0/",
+            attribution_required=False, attribution="", publishing_allowed=False,
         )
 
 
@@ -75,3 +86,16 @@ def test_renderer_ducks_quiet_music_beneath_narration(tmp_path: Path) -> None:
     assert "sidechaincompress=" in graph
     assert "amix=inputs=2:duration=first:normalize=0" in graph
     assert command.count("-stream_loop") == 1
+
+
+def test_normalized_music_graph_keeps_ducking_before_loudness_pass(tmp_path: Path) -> None:
+    renderer = PreviewRenderer(PreviewRenderConfig(audio_normalization_enabled=True))
+    asset = tmp_path / "asset.png"; asset.write_bytes(b"asset")
+    narration = tmp_path / "narration.wav"; narration.write_bytes(b"speech")
+    music = tmp_path / "music.wav"; music.write_bytes(b"music")
+    captions = tmp_path / "captions.ass"; captions.write_text("[Script Info]\n", encoding="utf-8")
+    scene = (TimelineSegment("scene", "section", 0, 1, asset, "a" * 64, "image"),)
+    command = renderer.command(scene, narration, captions, tmp_path / "out.mp4", music=music, audio_filter="loudnorm=I=-13.5")
+    graph = command[command.index("-filter_complex") + 1]
+    assert graph.index("sidechaincompress") < graph.index("amix=inputs=2") < graph.index("loudnorm=I=-13.5")
+    assert "alimiter=limit=0.95,loudnorm=I=-13.5,apad=pad_dur=10[outa]" in graph

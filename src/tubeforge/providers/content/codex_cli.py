@@ -18,7 +18,7 @@ from tubeforge.core.config import CodexProviderConfig
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.db.repositories import CachedGeneration, GenerationCacheRepository, GenerationExhausted
 from tubeforge.domain.contracts import ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest
-from tubeforge.providers.content.prompts import build_content_prompt, build_repair_prompt, normalize_content_request, validate_video_package
+from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES, build_content_prompt, build_repair_prompt, normalize_content_request, validate_video_package
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,15 +47,16 @@ class CodexCliContentProvider:
     def generate_package(self, request: ContentRequest) -> ContentPackage:
         prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
+        from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES
         if self.config.prompt_template_version in SKILL_TEMPLATES:
-            preflight()
+            preflight(template_version=self.config.prompt_template_version)
         if self.config.prompt_template_version == SKILL_TEMPLATE:
             from tubeforge.providers.content.output import require_source_excerpts
             require_source_excerpts(request)
         now = self._now()
         cached = self.cache.reserve_or_get(request, self.provider_name, self.config.model, request.prompt_version, now=now, reservation_seconds=self.config.reservation_seconds)
         if isinstance(cached, CachedGeneration):
-            if self.config.prompt_template_version in SKILL_TEMPLATES and cached.provenance.get("youtube_skills", {}).get("resource_hashes") != preflight():
+            if self.config.prompt_template_version in SKILL_TEMPLATES and cached.provenance.get("youtube_skills", {}).get("resource_hashes") != preflight(template_version=self.config.prompt_template_version):
                 raise ProviderValidationError("Cached generation uses different skill resources; review a new brief")
             package = self._validate_package(cached.package, request)
             self.last_provenance, self.last_usage = cached.provenance, cached.usage
@@ -71,9 +72,9 @@ class CodexCliContentProvider:
         try:
             prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
             raw, usage = self._invoke(prompt)
-            if self.config.prompt_template_version == SKILL_TEMPLATE:
+            if self.config.prompt_template_version in CONTENT_ENVELOPE_TEMPLATES:
                 from tubeforge.providers.content.output import unwrap_generation
-                raw = unwrap_generation(raw)
+                raw = unwrap_generation(raw, request=request)
             package = self._validate_or_repair(raw, request)
             package_json = package.model_dump(mode="json")
             provenance: dict[str, object] = {"cache_key": cached.cache_key, "generated_at": self._now().isoformat(), "model": self.config.model, "prompt_template_version": self.config.prompt_template_version, "prompt_version": request.prompt_version, "provider": self.provider_name}
@@ -107,8 +108,7 @@ class CodexCliContentProvider:
             root = Path(temporary)
             schema_path, output_path = root / "content-package.schema.json", root / "content-package.json"
             from tubeforge.host_codex_runner import codex_output_schema
-            from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE
-            schema_path.write_text(json.dumps(codex_output_schema(envelope=self.config.prompt_template_version == SKILL_TEMPLATE), sort_keys=True), encoding="utf-8")
+            schema_path.write_text(json.dumps(codex_output_schema(envelope=self.config.prompt_template_version in CONTENT_ENVELOPE_TEMPLATES, reference=self.config.prompt_template_version == "m6-content-v8"), sort_keys=True), encoding="utf-8")
             result = self._process_runner(self.build_cli_args(schema_path, output_path), prompt, output_path, self.config.timeout_seconds, self.config.max_output_bytes)
             diagnostics = _safe_diagnostic(result.stderr or result.stdout, self.config.max_diagnostic_bytes)
             if result.returncode != 0:
@@ -131,7 +131,7 @@ class CodexCliContentProvider:
             except ProviderValidationError:
                 raise
             except ValidationError as error:
-                if self.config.prompt_template_version == "m6-content-v6" or attempt >= self.config.repair_attempt_limit:
+                if self.config.prompt_template_version in CONTENT_ENVELOPE_TEMPLATES or attempt >= self.config.repair_attempt_limit:
                     raise ProviderValidationError("Codex output failed ContentPackage validation") from error
                 target = _repair_target(error, candidate)
                 if target is None:

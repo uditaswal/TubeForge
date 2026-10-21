@@ -17,26 +17,31 @@ from typing import Callable
 from pydantic import ValidationError
 
 from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, PublicationPreparationConfig, PublicationVerificationConfig, Settings, ShortsFinalRenderConfig, ShortsPreviewRenderConfig, SourceClipConfig, VoicePipelineConfig, YouTubePublishingConfig
-from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RemoteResourceMissingError, RetryableProviderError
+from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RemoteResourceMissingError, RepairableAlignmentResult, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
 from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobEventRepository, JobRepository, PipelineJob, PublicationRepository, SourceMedia, SourceMediaRepository
 from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, ContentRequest, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, SourceReference, VideoMetadata, VoiceRequest, video_plan_from_package
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import ASSET_VALIDATION_VERSION, AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, inspect_media, scene_request, select_candidate, validate_shorts_visual_manifest
-from tubeforge.pipeline.alignment import LocalWordAligner, WordTiming, verify_word_alignment
+from tubeforge.domain.video_duration import SHORTS_MAX_DURATION_SECONDS, SHORTS_MIN_DURATION_SECONDS, shorts_duration_allowed
+from tubeforge.pipeline.alignment import LocalWhisperDTWAligner, LocalWordAligner, WordTiming, verify_word_alignment
 from tubeforge.pipeline.captions import render_highlighted_ass, render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
 from tubeforge.pipeline.music import MusicCatalog
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
 from tubeforge.pipeline.quality import validate_final_artifact
 from tubeforge.pipeline.storyboard import render_contact_sheets, storyboard_manifest
-from tubeforge.providers.media.local_graphics import STYLE_VERSION as STORYBOARD_STYLE_VERSION
+from tubeforge.pipeline.scene_contracts import EXPLICIT_SCENE_LAYOUTS, ScriptBoundSceneContract, compile_scene_contract
+from tubeforge.providers.media.local_graphics import storyboard_style_for
 from tubeforge.pipeline.visual_router import VisualRouter
 from tubeforge.pipeline.variants import plan_variants
-from tubeforge.pipeline.sources import SourceIngestor, source_packet
+from tubeforge.pipeline.sources import SourceIngestor, resolve_source_packet, source_packet
+from tubeforge.providers.content.prompts import CONTENT_TEMPLATE_VERSION
+from tubeforge.pipeline.diagnostics import stage_clock, stage_measurement
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
-from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline, pace_segments
+from tubeforge.rendering.loudness import MUSIC_LOUDNESS_VERSION
+from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline, maximum_static_hold, pace_segments
 from tubeforge.clipping.analysis import Highlight, analyze_wav
 from tubeforge.clipping.render import extract_audio, probe as probe_clip, render_vertical
 from tubeforge.clipping.source import YtDlpSourceProvider
@@ -79,14 +84,16 @@ class PipelineOrchestrator:
         self.final_renderer = final_renderer or PreviewRenderer(final_config or FinalRenderConfig())
         self.shorts_preview_renderer = shorts_preview_renderer or PreviewRenderer(shorts_preview_config or ShortsPreviewRenderConfig())
         self.shorts_final_renderer = shorts_final_renderer or PreviewRenderer(shorts_final_config or ShortsFinalRenderConfig())
-        self.word_aligner = word_aligner or LocalWordAligner()
+        self.word_aligner = word_aligner or (LocalWordAligner() if self.voice_config.alignment_provider == "local-waveform-v1" else None)
         self.publication_config = publication_config or PublicationPreparationConfig()
         self.youtube_config = youtube_config or YouTubePublishingConfig()
         self.verification_config = verification_config or PublicationVerificationConfig()
         self.publications = PublicationRepository(artifacts._session_factory)
         self.asset_limits = asset_limits or AssetLimits(frozenset({"example.invalid", "upload.wikimedia.org", "commons.wikimedia.org"}), frozenset({"CC0-1.0", "CC BY 4.0", "CC BY-SA 4.0", "Public Domain"}))
         self.asset_acquirer = asset_acquirer or AssetAcquisitionService(AssetCacheRepository(artifacts._session_factory), AssetDownloader(artifact_root.parent / "cache" / "assets", self.asset_limits))
+        self.research_enabled = False
         self.source_ingestor = source_ingestor
+        self.channel_approved_sources: dict[str, tuple[SourceReference, ...]] = {}
         self.source_clips = source_clips or SourceClipConfig()
         self.source_provider = source_provider or YtDlpSourceProvider(self.source_clips.ytdlp_executable, self.source_clips.timeout_seconds)
         self.source_media = source_media or SourceMediaRepository(artifacts._session_factory)
@@ -120,6 +127,19 @@ class PipelineOrchestrator:
         finally:
             _ownership_check.reset(token)
 
+    def alignment_retry_policy(self, job: PipelineJob) -> tuple[bool, int, int] | None:
+        """Return switch, attempt cap and transient count for voice-stage retry."""
+        if self.voice_config.alignment_provider != "whisper-base-en-dtw-v1" or job.resume_state is not JobState.VOICE_GENERATION:
+            return None
+        history = self._load_json_artifact(job.id, JobState.VOICE_GENERATION, "alignment_executions")
+        if not isinstance(history, dict):
+            return None
+        alternate = history.get("next_configuration") == "alternate"
+        failures = history.get("transient_failures")
+        if type(failures) is not int or failures < 0:
+            return None
+        return bool(history.get("pending_alternate") and alternate), 4 if alternate else 3, failures
+
     def _run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None) -> PipelineJob:
         """Advance until an approval gate, terminal state, or classified failure."""
         while True:
@@ -138,7 +158,24 @@ class PipelineOrchestrator:
                 self._transition(job, target, operator_resolved=operator_resolved, authentication_restored=authentication_restored)
                 continue
             try:
-                self._run_stage(job, cancellation_requested)
+                started = stage_clock()
+                stage_error: Exception | None = None
+                self.events.append(job.id, "stage_started", stage=job.state.value, worker_retry_count=job.attempt_count)
+                try:
+                    self._run_stage(job, cancellation_requested)
+                except Exception as error:
+                    stage_error = error
+                    raise
+                finally:
+                    check = _ownership_check.get()
+                    if check is None or check():
+                        self.events.append(
+                            job.id, "stage_execution", stage=job.state.value,
+                            outcome="failed" if stage_error else "succeeded",
+                            failure_type=type(stage_error).__name__ if stage_error else None,
+                            worker_retry_count=job.attempt_count,
+                            **stage_measurement(started),
+                        )
             except PipelineOwnershipLost:
                 return self.jobs.get(job.id)
             except (PipelineCancellation, ProviderCancellation, AssetAcquisitionCancelled, PreviewRenderCancelled):
@@ -268,6 +305,27 @@ class PipelineOrchestrator:
             self._transition(job, JobState.ASSET_ACQUISITION, approvals=frozenset({ApprovalGate.SCRIPT})); return
         if job.state is JobState.ASSET_ACQUISITION:
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
+            scene_contract_checksum: str | None = None
+            if any(scene.visual_type in EXPLICIT_SCENE_LAYOUTS for scene in package.scene_plans):
+                script_artifact = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
+                source_artifact = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "source_packet")
+                script_gate_identity = script_artifact.checksum_sha256 if job.request.review_mode == "auto" else None
+                if job.request.review_mode == "manual":
+                    decision = self.approvals.approved(job.id, ApprovalGate.SCRIPT, reviewed_identity=script_artifact.checksum_sha256)
+                    script_gate_identity = decision.reviewed_identity if decision else None
+                try:
+                    scene_contract = compile_scene_contract(
+                        Path(script_artifact.path).read_bytes(), Path(source_artifact.path).read_bytes(),
+                        accepted_script_identity=script_gate_identity,
+                    )
+                except ValueError as error:
+                    raise ProviderValidationError(str(error)) from error
+                if scene_contract is None:
+                    raise ProviderValidationError("explicit scene layout contract was not created")
+                contract_value = scene_contract.model_dump(mode="json")
+                if self._load_json_artifact(job.id, JobState.ASSET_ACQUISITION, "scene_contract") != contract_value:
+                    self._replace_json(job.id, JobState.ASSET_ACQUISITION, "scene_contract", contract_value)
+                scene_contract_checksum = self._required_artifact(job.id, JobState.ASSET_ACQUISITION, "scene_contract").checksum_sha256
             manifest = self._load_json_artifact(job.id, JobState.ASSET_ACQUISITION, "asset_manifest") or {"scenes": {}}
             accepted = manifest["scenes"]
             for scene in package.scene_plans:
@@ -309,7 +367,7 @@ class PipelineOrchestrator:
             if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before contact sheet")
             visual_plan = video_plan_from_package(package, aspect_ratio=job.request.aspect_ratio)
             self._replace_json(job.id, JobState.CONTENT_GENERATING, "video_plan", visual_plan.model_dump(mode="json"))
-            visual_review = storyboard_manifest(package, visual_plan, accepted)
+            visual_review = storyboard_manifest(package, visual_plan, accepted, scene_contract_sha256=scene_contract_checksum)
             pages = render_contact_sheets(visual_review, self._artifact_path(job.id, "storyboard"))
             if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled after contact sheet")
             for index, page in enumerate(pages, 1):
@@ -321,12 +379,23 @@ class PipelineOrchestrator:
         if job.state is JobState.ASSETS_READY:
             self._transition(job, JobState.VOICE_GENERATION); return
         if job.state is JobState.VOICE_GENERATION:
+            if self.voice_config.alignment_provider == "whisper-base-en-dtw-v1" and not job.request.language.casefold().startswith("en"):
+                raise ProviderValidationError("pinned English audio alignment cannot process this job language")
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
             phrases = segment_content_package(package)
             if not phrases:
                 raise ProviderValidationError("approved script contains no narration phrases")
             self._replace_json(job.id, JobState.VOICE_GENERATION, "segmentation_manifest", {"phrases": [phrase.model_dump(mode="json") for phrase in phrases]})
             existing = self._load_json_artifact(job.id, JobState.VOICE_GENERATION, "voice_manifest") or {"voices": []}
+            alignment_contract = {"provider": self.voice_config.alignment_provider, "model_sha256": self.voice_config.alignment_model_sha256 if self.voice_config.alignment_provider != "local-waveform-v1" else None}
+            pinned = existing.get("alignment_contract")
+            if pinned is None and existing.get("voices"):
+                pinned = {"provider": "local-waveform-v1", "model_sha256": None}
+            if pinned is not None and pinned != alignment_contract:
+                raise ProviderValidationError("interrupted voice job requires its original alignment provider and model")
+            if self.word_aligner is None:
+                assert self.voice_config.alignment_model_path is not None and self.voice_config.alignment_model_sha256 is not None
+                self.word_aligner = LocalWhisperDTWAligner(model_path=self.voice_config.alignment_model_path, model_sha256=self.voice_config.alignment_model_sha256, ffmpeg_executable=str(self.voice_config.ffmpeg_executable))
             accepted = {item["phrase_id"]: item for item in existing.get("voices", [])}
             voice_id = job.request.voice_id or getattr(getattr(self.voice, "settings", None), "voice_id", "fake-voice")
             for phrase in phrases:
@@ -337,12 +406,12 @@ class PipelineOrchestrator:
                     response = self.voice.synthesize(VoiceRequest(text=phrase.text, language=job.request.language, voice_id=voice_id, section_id=phrase.section_id, phrase_id=phrase.phrase_id))
                     result = {**response.model_dump(mode="json"), "phrase_id": phrase.phrase_id, "section_id": phrase.section_id, "claim_ids": list(phrase.claim_ids), "text": phrase.text}
                     accepted[phrase.phrase_id] = result
-                    self._replace_json(job.id, JobState.VOICE_GENERATION, "voice_manifest", {"voices": [accepted[item.phrase_id] for item in phrases if item.phrase_id in accepted]})
+                    self._replace_json(job.id, JobState.VOICE_GENERATION, "voice_manifest", {"alignment_contract": alignment_contract, "voices": [accepted[item.phrase_id] for item in phrases if item.phrase_id in accepted]})
             measured = []
             for phrase in phrases:
                 item = accepted[phrase.phrase_id]
                 measured.append({**item, "duration_seconds": float(self.ffprobe.inspect(Path(str(item["artifact_path"]))) ["duration_seconds"])})
-            self._replace_json(job.id, JobState.VOICE_GENERATION, "voice_manifest", {"voices": measured})
+            self._replace_json(job.id, JobState.VOICE_GENERATION, "voice_manifest", {"alignment_contract": alignment_contract, "voices": measured})
             assembly_key = hashlib.sha256(json.dumps({"pause_seconds": self.voice_config.pause_seconds, "phrases": [(item["phrase_id"], item["checksum_sha256"]) for item in measured]}, sort_keys=True).encode()).hexdigest()
             narration = self._valid_artifact(job.id, JobState.VOICE_GENERATION, "narration")
             narration_path = self._artifact_path(job.id, "narration.wav")
@@ -357,17 +426,75 @@ class PipelineOrchestrator:
             if abs(final_duration - expected_duration) > self.voice_config.duration_tolerance_seconds:
                 raise ProviderValidationError("assembled narration duration exceeds configured tolerance")
             target_tolerance = max(self.voice_config.duration_tolerance_seconds, job.request.target_duration_seconds * self.voice_config.target_duration_tolerance_ratio)
-            if abs(final_duration - job.request.target_duration_seconds) > target_tolerance:
+            if job.request.aspect_ratio == "9:16" and not shorts_duration_allowed(final_duration):
+                raise ProviderValidationError(f"Shorts narration duration must be {SHORTS_MIN_DURATION_SECONDS}–{SHORTS_MAX_DURATION_SECONDS} seconds")
+            if job.request.aspect_ratio != "9:16" and abs(final_duration - job.request.target_duration_seconds) > target_tolerance:
                 raise ProviderValidationError("narration duration is outside the requested target tolerance")
             cues = timed_phrases(phrases, durations, self.voice_config.pause_seconds)
-            timing_map: dict[str, object] = {"final_duration_seconds": final_duration, "expected_duration_seconds": expected_duration, "target_duration_seconds": job.request.target_duration_seconds, "target_duration_tolerance_seconds": target_tolerance, "phrases": [{"phrase_id": cue.phrase.phrase_id, "section_id": cue.phrase.section_id, "start_seconds": cue.start_seconds, "end_seconds": cue.end_seconds, "duration_seconds": cue.end_seconds - cue.start_seconds} for cue in cues]}
-            if job.request.aspect_ratio == "9:16":
+            timing_map: dict[str, object] = {"final_duration_seconds": final_duration, "expected_duration_seconds": expected_duration, "target_duration_seconds": job.request.target_duration_seconds, "target_duration_tolerance_seconds": target_tolerance if job.request.aspect_ratio != "9:16" else None, "duration_policy": "shorts_30_to_120" if job.request.aspect_ratio == "9:16" else "target_tolerance", "phrases": [{"phrase_id": cue.phrase.phrase_id, "section_id": cue.phrase.section_id, "start_seconds": cue.start_seconds, "end_seconds": cue.end_seconds, "duration_seconds": cue.end_seconds - cue.start_seconds} for cue in cues]}
+            needs_word_timing = job.request.aspect_ratio == "9:16" or any(
+                scene.card_cues or scene.teaching_cues or scene.terminal_cues
+                for scene in package.scene_plans
+            )
+            if needs_word_timing:
+                alignment_configuration = "primary"
+                execution_history: dict[str, object] | None = None
+                if self.voice_config.alignment_provider == "whisper-base-en-dtw-v1":
+                    execution_inputs = {"alignment_contract": alignment_contract, "narration_sha256": narration.checksum_sha256, "content_sha256": self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package").checksum_sha256}
+                    execution_identity = hashlib.sha256(json.dumps(execution_inputs, sort_keys=True).encode()).hexdigest()
+                    history = self._load_json_artifact(job.id, JobState.VOICE_GENERATION, "alignment_executions")
+                    if history is not None and not isinstance(history, dict):
+                        raise ProviderValidationError("saved alignment execution history is invalid")
+                    if history is not None and history.get("input_identity") != execution_identity:
+                        raise ProviderValidationError("interrupted alignment requires its original script, audio and model")
+                    if history is not None and ("executions_by_configuration" not in history or "total_executions" not in history):
+                        raise ProviderValidationError("saved alignment execution counts are invalid")
+                    counts = history.get("executions_by_configuration", {}) if history is not None else {}
+                    if not isinstance(counts, dict) or (history is not None and set(counts) != {"primary", "alternate"}):
+                        raise ProviderValidationError("saved alignment execution counts are invalid")
+                    primary = counts.get("primary", 0)
+                    alternate = counts.get("alternate", 0)
+                    total = history.get("total_executions", 0) if history is not None else 0
+                    if any(type(value) is not int or value < 0 for value in (primary, alternate, total)) or total != primary + alternate:
+                        raise ProviderValidationError("saved alignment execution counts are invalid")
+                    transient_failures = history.get("transient_failures", total) if history is not None else 0
+                    if type(transient_failures) is not int or not 0 <= transient_failures <= total:
+                        raise ProviderValidationError("saved alignment transient failure count is invalid")
+                    alignment_configuration = history.get("next_configuration", "primary") if history is not None else "primary"
+                    if not isinstance(alignment_configuration, str) or alignment_configuration not in {"primary", "alternate"} or (alignment_configuration == "alternate" and primary == 0):
+                        raise ProviderValidationError("saved alignment configuration is invalid")
+                    selected_count = primary if alignment_configuration == "primary" else alternate
+                    if selected_count >= 3 or total >= 4:
+                        raise ProviderValidationError("audio-grounded alignment execution allowance is exhausted")
+                    execution_history = {"input_identity": execution_identity, **execution_inputs, "configuration": alignment_configuration, "next_configuration": alignment_configuration, "pending_alternate": False, "executions_by_configuration": {"primary": primary + int(alignment_configuration == "primary"), "alternate": alternate + int(alignment_configuration == "alternate")}, "total_executions": total + 1, "transient_failures": transient_failures}
+                    self._replace_json(job.id, JobState.VOICE_GENERATION, "alignment_executions", execution_history)
                 aligned: list[WordTiming] = []
                 for cue, item in zip(cues, measured, strict=True):
-                    aligned.extend(self.word_aligner.align(audio_path=Path(str(item["artifact_path"])), text=cue.phrase.text, phrase_id=cue.phrase.phrase_id, section_id=cue.phrase.section_id, phrase_start_seconds=cue.start_seconds, phrase_end_seconds=cue.end_seconds, ordinal_start=len(aligned)))
+                    if cancellation_requested is not None and cancellation_requested():
+                        raise PipelineCancellation("cancelled before phrase alignment")
+                    align_kwargs = {"audio_path": Path(str(item["artifact_path"])), "text": cue.phrase.text, "phrase_id": cue.phrase.phrase_id, "section_id": cue.phrase.section_id, "phrase_start_seconds": cue.start_seconds, "phrase_end_seconds": cue.end_seconds, "ordinal_start": len(aligned)}
+                    if isinstance(self.word_aligner, LocalWhisperDTWAligner):
+                        align_kwargs["cancellation_requested"] = cancellation_requested
+                        if alignment_configuration == "alternate":
+                            align_kwargs["configuration"] = "normalized-overlap-v1"
+                    try:
+                        aligned.extend(self.word_aligner.align(**align_kwargs))
+                    except RepairableAlignmentResult:
+                        if execution_history is None or alignment_configuration != "primary" or execution_history["executions_by_configuration"]["alternate"]:
+                            raise ProviderValidationError("alternate audio-grounded alignment also failed")
+                        execution_history = {**execution_history, "next_configuration": "alternate", "pending_alternate": True}
+                        self._replace_json(job.id, JobState.VOICE_GENERATION, "alignment_executions", execution_history)
+                        raise
+                    except RetryableProviderError:
+                        if execution_history is not None:
+                            execution_history = {**execution_history, "transient_failures": execution_history["transient_failures"] + 1}
+                            self._replace_json(job.id, JobState.VOICE_GENERATION, "alignment_executions", execution_history)
+                        raise
+                    if cancellation_requested is not None and cancellation_requested():
+                        raise PipelineCancellation("cancelled after phrase alignment")
                 words = tuple(aligned)
                 timing_map["words"] = [{"word": word.word, "phrase_id": word.phrase_id, "section_id": word.section_id, "ordinal": word.ordinal, "start_seconds": word.start_seconds, "end_seconds": word.end_seconds} for word in words]
-                timing_map["alignment"] = {"provider": "local-waveform-v1", **verify_word_alignment(words, final_duration=final_duration, tolerance=self.voice_config.duration_tolerance_seconds)}
+                timing_map["alignment"] = {**alignment_contract, "configuration": alignment_configuration, "independently_verified": False, **verify_word_alignment(words, final_duration=final_duration, tolerance=self.voice_config.duration_tolerance_seconds, require_last_word_end=self.voice_config.alignment_provider == "local-waveform-v1")}
             self._replace_json(job.id, JobState.VOICE_GENERATION, "timing_map", timing_map)
             self._transition(job, JobState.CAPTION_GENERATION); return
         if job.state is JobState.CAPTION_GENERATION:
@@ -382,7 +509,12 @@ class PipelineOrchestrator:
                     timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
                     words = tuple(WordTiming(**value) for value in timing.get("words", []))
                     profile = self.shorts_final_renderer.config
-                    vtt = render_highlighted_ass(words, width=profile.width, height=profile.height, font_size=profile.caption_font_size, margin_vertical=profile.caption_margin_vertical, margin_horizontal=profile.caption_margin_horizontal, phrases=cues)
+                    vtt = render_highlighted_ass(words, width=profile.width, height=profile.height, font_size=profile.caption_font_size, margin_vertical=profile.caption_margin_vertical, margin_horizontal=profile.caption_margin_horizontal, center_x=profile.caption_center_x, phrases=cues)
+                elif any(scene.card_cues or scene.teaching_cues for scene in package.scene_plans):
+                    timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
+                    words = tuple(WordTiming(**value) for value in timing.get("words", []))
+                    vtt = render_highlighted_ass(words, width=1920, height=1080, font_size=64,
+                        margin_vertical=65, margin_horizontal=100, center_x=960, phrases=cues)
                 else:
                     vtt = render_vtt(cues, self.voice_config.caption_line_length)
             else:
@@ -390,7 +522,7 @@ class PipelineOrchestrator:
                 # contracts remain stable; an empty WebVTT document burns no text.
                 srt, vtt = "", "WEBVTT\n\n"
             self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions_srt", "captions.srt", srt)
-            self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions", "captions.ass" if job.request.aspect_ratio == "9:16" and job.request.captions_enabled else "captions.vtt", vtt)
+            self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions", "captions.ass" if vtt.startswith("[Script Info]") else "captions.vtt", vtt)
             self._required_artifact(job.id, JobState.VOICE_GENERATION, "narration")
             self._required_artifact(job.id, JobState.CAPTION_GENERATION, "captions_srt")
             self._required_artifact(job.id, JobState.CAPTION_GENERATION, "captions")
@@ -597,10 +729,10 @@ class PipelineOrchestrator:
                 alignment = timing.get("alignment")
                 segments, *_ = self._render_inputs(job, renderer)
                 paced = pace_segments(segments, renderer.config.scene_max_duration_seconds)
-                maximum_hold = max((segment.duration_seconds for segment in paced), default=0.0)
-                motion_variants = tuple(renderer.motion_variant(index) for index, segment in enumerate(paced) if segment.media_type == "image")
-                if not 30 <= actual_duration <= 55:
-                    findings.append({"code": "shorts_duration", "severity": "error", "message": f"Shorts duration {actual_duration:.3f}s is outside 30–55 seconds"})
+                maximum_hold = maximum_static_hold(segments, renderer.config.scene_max_duration_seconds)
+                motion_variants = tuple(renderer.motion_variant(index) for index, segment in enumerate(paced) if segment.media_type == "image" and segment.animation is None)
+                if not shorts_duration_allowed(actual_duration):
+                    findings.append({"code": "shorts_duration", "severity": "error", "message": f"Shorts duration {actual_duration:.3f}s is outside {SHORTS_MIN_DURATION_SECONDS}–{SHORTS_MAX_DURATION_SECONDS} seconds"})
                 if not isinstance(alignment, dict) or not alignment.get("verified") or float(alignment.get("first_word_seconds", 99)) > 3:
                     findings.append({"code": "shorts_word_alignment", "severity": "error", "message": "word alignment is missing, unverified, or starts after the three-second hook window"})
                 if maximum_hold > renderer.config.scene_max_duration_seconds + 0.001:
@@ -613,6 +745,8 @@ class PipelineOrchestrator:
                 if captions and job.request.captions_enabled:
                     text = Path(captions.path).read_text(encoding="utf-8")
                     safe = f"PlayResX: {renderer.config.width}" in text and f"PlayResY: {renderer.config.height}" in text and f",{renderer.config.caption_margin_horizontal},{renderer.config.caption_margin_horizontal},{renderer.config.caption_margin_vertical},1" in text
+                    if renderer.config.caption_center_x is not None:
+                        safe = safe and f"\\pos({renderer.config.caption_center_x},{renderer.config.height - renderer.config.caption_margin_vertical})" in text
                     if not safe:
                         findings.append({"code": "shorts_caption_safe_area", "severity": "error", "message": "highlighted captions do not match the configured portrait safe area"})
                     for row in (line for line in text.splitlines() if line.startswith("Dialogue:")):
@@ -770,13 +904,31 @@ class PipelineOrchestrator:
         assets = self._required_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest").get("scenes")
         if not isinstance(assets, dict): raise ProviderValidationError("accepted asset manifest is invalid")
         if any(not self._accepted_asset_valid(value) for value in assets.values()): raise ProviderValidationError("accepted asset was modified or is unsafe")
-        segments = build_timeline(package, timing, assets, tolerance=renderer.config.sync_tolerance_seconds)
+        scene_contract = None
+        contract_artifact = None
+        if any(scene.visual_type in EXPLICIT_SCENE_LAYOUTS for scene in package.scene_plans):
+            contract_artifact = self._required_artifact(job.id, JobState.ASSET_ACQUISITION, "scene_contract")
+            source_artifact = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "source_packet")
+            approved_identity = content.checksum_sha256 if job.request.review_mode == "auto" else None
+            if job.request.review_mode == "manual":
+                decision = self.approvals.approved(job.id, ApprovalGate.SCRIPT, reviewed_identity=content.checksum_sha256)
+                approved_identity = decision.reviewed_identity if decision else None
+            try:
+                scene_contract = ScriptBoundSceneContract.model_validate_json(Path(contract_artifact.path).read_bytes())
+                scene_contract.validate_against(Path(content.path).read_bytes(), Path(source_artifact.path).read_bytes(), accepted_script_identity=approved_identity)
+            except ValueError as error:
+                raise ProviderValidationError(str(error)) from error
+        segments = build_timeline(package, timing, assets, tolerance=renderer.config.sync_tolerance_seconds, scene_contract=scene_contract)
         inputs = {"content": content.checksum_sha256, "timing_map": timing_artifact.checksum_sha256, "narration": narration.checksum_sha256, "captions": captions.checksum_sha256, "assets": [{"scene_id": segment.scene_id, "checksum_sha256": segment.asset_checksum} for segment in segments]}
+        if contract_artifact is not None:
+            inputs["scene_contract"] = contract_artifact.checksum_sha256
         if job.request.music_track:
             if self.music_catalog is None:
                 raise ProviderValidationError("music was selected but no approved catalog is configured")
             track = self.music_catalog.resolve(job.request.music_track)
             inputs["music"] = track.model_dump(mode="json")
+            if renderer.config.audio_normalization_enabled:
+                inputs["audio_mix_version"] = MUSIC_LOUDNESS_VERSION
         input_identity = hashlib.sha256(json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return segments, narration, captions, input_identity, inputs
 
@@ -903,12 +1055,37 @@ class PipelineOrchestrator:
         those references before the content adapter receives the request.
         """
         existing = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "effective_content_request")
+        if existing is None and self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "effective_content_request") is not None:
+            raise ProviderValidationError("saved effective source request is missing or has changed")
+        packet = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "source_packet")
+        if packet is None and self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "source_packet") is not None:
+            raise ProviderValidationError("saved source snapshot is missing or has changed")
         if existing is not None:
             return ContentRequest.model_validate(existing)
-
-        packet = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "source_packet")
         if packet is None:
-            if self.source_ingestor is None:
+            from tubeforge.providers.content.research import needs_research, ResearchResult, fetch_research_packet
+            if self.research_enabled and job.request.prompt_version == CONTENT_TEMPLATE_VERSION and needs_research(job.request):
+                research = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "source_research")
+                if research is None:
+                    if self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "source_research") is not None:
+                        raise ProviderValidationError("saved research result is missing or has changed")
+                    researcher = getattr(self.content, "research_sources", None)
+                    if researcher is None:
+                        raise ProviderValidationError("Automatic topic research requires the host Codex provider")
+                    self.events.append(job.id, "source_research_started", provider="host-codex-research")
+                    research = researcher(job.request)
+                    self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "source_research", research)
+                packet = fetch_research_packet(ResearchResult.model_validate(research["package"]))
+                self.events.append(job.id, "source_research_completed", source_count=len(packet["sources"]),
+                                   assessment=packet["research_assessment"])
+            elif job.request.prompt_version == CONTENT_TEMPLATE_VERSION:
+                packet = resolve_source_packet(
+                    job.request.sources,
+                    channel_approved=self.channel_approved_sources.get(job.request.channel_identity, ()),
+                    ingestor=self.source_ingestor,
+                    captured_at=job.created_at or datetime.now(UTC),
+                )
+            elif self.source_ingestor is None:
                 packet = {
                     "schema_version": "1.0",
                     "retrieval_mode": "operator_supplied",
@@ -929,7 +1106,14 @@ class PipelineOrchestrator:
         )
         if not references:
             raise ProviderValidationError("source packet contains no valid source references")
-        request = job.request.model_copy(update={"sources": references})
+        updates = {"sources": references}
+        if packet.get("retrieval_mode") == "codex_researched":
+            # The brief remains a hypothesis; model-written assessment is context,
+            # never an additional factual source or an operator approval.
+            assessment = "Research assessment (verify against sources): " + str(packet["research_assessment"])
+            updates["notes"] = ((*job.request.notes, assessment) if len(job.request.notes) < 30
+                                else (*job.request.notes[:-1], job.request.notes[-1] + "\n" + assessment))
+        request = job.request.model_copy(update=updates)
         self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "effective_content_request", request.model_dump(mode="json"))
         return request
 
@@ -962,7 +1146,9 @@ class PipelineOrchestrator:
             candidate = AssetCandidate.model_validate(candidate_data)
             if candidate.provider_asset_id.startswith("local-motion-"):
                 return False  # Rebuild abstract v1 graphics from the approved scene fields.
-            if candidate.provider_asset_id.startswith("local-storyboard-") and not str(candidate.source_version or "").startswith(STORYBOARD_STYLE_VERSION + ":"):
+            request_data = value.get("request")
+            expected_style = storyboard_style_for(str(request_data.get("visual_type"))) if isinstance(request_data, dict) else None
+            if candidate.provider_asset_id.startswith("local-storyboard-") and (expected_style is None or not str(candidate.source_version or "").startswith(expected_style + ":")):
                 return False  # A resumed asset stage must use the current graphics design.
             if not (
                 path.is_file()

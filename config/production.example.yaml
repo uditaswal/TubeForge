@@ -1,33 +1,34 @@
 app:
   name: "TubeForge"
   environment: "production"
-  bind_host: "0.0.0.0"
+  bind_host: "127.0.0.1"
   port: 8080
 database:
-  url: "sqlite:////app/data/tubeforge.db"
+  url: "sqlite:///./data/tubeforge.db"
   busy_timeout_ms: 5000
 pipeline:
   content_provider: "fake" # Test offline first. Production supports codex + piper together.
   voice_provider: "fake"
   codex:
-    prompt_template_version: "m6-content-v6"
+    prompt_template_version: "m6-content-v7"
     default_channel_identity: "default"
     voice_profiles: {} # Missing profiles use the documented built-in default.
   fake:
     enabled: true
-    artifact_root: "/app/data/fake-artifacts"
+    artifact_root: "./data/fake-artifacts"
     voice_id: "fake-voice"
     media_license: "CC0-1.0"
   voice:
-    artifact_root: "/app/data/artifacts"
+    artifact_root: "./data/artifacts"
     ffmpeg_threads: 1
     ffmpeg_executable: "ffmpeg"
     ffprobe_executable: "ffprobe"
   media:
     # Per-job selection between local generated art and rights-safe stock.
     provider: "hybrid"
-    cache_root: "/app/data/cache/assets"
+    cache_root: "./data/cache/assets"
   sources:
+    research_enabled: true
     enabled: false # Enable only with a tight HTTPS host allowlist.
     allowed_hosts: []
   youtube:

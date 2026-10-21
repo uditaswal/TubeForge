@@ -14,7 +14,9 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
+from tubeforge.core.errors import InsufficientSourcesError
 from tubeforge.domain.contracts import SourceReference
+from tubeforge.providers.content.prompts import reject_instruction_spoofing
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,22 +57,49 @@ class SourceSnapshot:
 
 
 class _TextExtractor(HTMLParser):
+    """Extract article text, including inert templates, without executing scripts."""
+
     def __init__(self) -> None:
         super().__init__()
         self.parts: list[str] = []
+        self.article_parts: list[str] = []
         self._ignored = 0
+        self._template = False
+        self._stack: list[tuple[str, bool]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() in {"script", "style", "noscript", "svg"}:
+        tag = tag.lower()
+        values = dict(attrs)
+        classes = set((values.get("class") or "").split())
+        article = tag == "article" or values.get("itemprop") == "articleBody" or bool(classes & {"post-content", "post-body", "w-richtext"})
+        if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+            self._stack.append((tag, article))
+        if tag == "script" and (values.get("type") or "").lower() in {"text/template", "text/x-template"}:
+            self._template = True
+        elif tag in {"script", "style", "noscript", "svg"}:
             self._ignored += 1
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() in {"script", "style", "noscript", "svg"} and self._ignored:
+        tag = tag.lower()
+        if tag == "script" and self._template:
+            self._template = False
+        elif tag in {"script", "style", "noscript", "svg"} and self._ignored:
             self._ignored -= 1
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index][0] == tag:
+                del self._stack[index:]
+                break
 
     def handle_data(self, data: str) -> None:
-        if not self._ignored:
-            self.parts.append(data)
+        if self._ignored:
+            return
+        if self._template:
+            nested = _TextExtractor()
+            nested.feed(data)
+            data = " ".join(nested.article_parts or nested.parts)
+        self.parts.append(data)
+        if any(article for _, article in self._stack):
+            self.article_parts.append(data)
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -116,7 +145,7 @@ class SourceIngestor:
         extractor = _TextExtractor()
         if content_type == "text/html":
             extractor.feed(raw)
-            raw = " ".join(extractor.parts)
+            raw = " ".join(extractor.article_parts or extractor.parts)
         excerpt = re.sub(r"\s+", " ", html.unescape(raw)).strip()[: self.max_chars]
         if not excerpt:
             raise ProviderValidationError("source contains no readable text")
@@ -144,3 +173,49 @@ def source_packet(sources: tuple[SourceSnapshot, ...]) -> dict[str, object]:
             values.append(source.as_dict())
             seen.add(source.content_sha256)
     return {"schema_version": "1.0", "sources": values}
+
+
+def approved_excerpt_snapshot(source: SourceReference, *, captured_at: datetime) -> dict[str, object]:
+    """Bind exactly the operator/channel-approved excerpt, not a mutable URL."""
+    if not source.excerpt or not source.excerpt.strip():
+        raise InsufficientSourcesError(f"Source {source.source_id} has no approved excerpt")
+    for field in ("title", "author", "excerpt"):
+        reject_instruction_spoofing(getattr(source, field), field=f"sources.{source.source_id}.{field}")
+    excerpt = source.excerpt.strip()
+    value = source.model_dump(mode="json")
+    value["excerpt"] = excerpt
+    value["content_sha256"] = hashlib.sha256(excerpt.encode("utf-8")).hexdigest()
+    value["captured_at"] = captured_at.isoformat()
+    value["snapshot_kind"] = "approved_excerpt"
+    value["untrusted"] = True
+    if source.content_sha256 and source.content_sha256 != value["content_sha256"]:
+        value["original_content_sha256"] = source.content_sha256
+    return value
+
+
+def resolve_source_packet(
+    supplied: tuple[SourceReference, ...], *, channel_approved: tuple[SourceReference, ...] = (),
+    ingestor: SourceIngestor | None = None, captured_at: datetime,
+) -> dict[str, object]:
+    """Prefer supplied excerpts, then approved channel excerpts, then opt-in retrieval."""
+    selected = tuple(source for source in supplied if source.excerpt and source.excerpt.strip())
+    mode = "operator_supplied"
+    if not selected:
+        selected = tuple(source for source in channel_approved if source.excerpt and source.excerpt.strip())
+        mode = "channel_approved"
+    if selected:
+        if len(selected) > 8:
+            selected = selected[:8]
+        entries = [approved_excerpt_snapshot(source, captured_at=captured_at) for source in selected]
+        if len({item["source_id"] for item in entries}) != len(entries):
+            raise ProviderValidationError("source packet has duplicate source IDs")
+        return {"schema_version": "1.1", "retrieval_mode": mode, "sources": entries}
+    if ingestor is None:
+        raise InsufficientSourcesError("Provide approved source excerpts or configure channel-approved sources before script generation")
+    candidates = supplied[:8] or channel_approved[:8]
+    if not candidates:
+        raise InsufficientSourcesError("No source references are available for bounded retrieval")
+    snapshots = tuple(ingestor.ingest(source) for source in candidates)
+    for item in snapshots:
+        reject_instruction_spoofing(item.excerpt, field=f"sources.{item.source_id}.excerpt")
+    return {"retrieval_mode": "fetched", **source_packet(snapshots)}

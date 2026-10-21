@@ -28,9 +28,15 @@ dependencies = [
 tubeforge = "tubeforge.cli:main"
 
 [project.optional-dependencies]
+reference-renderer = [
+  "Pillow>=11,<13",
+  "numpy>=2,<3",
+  "soundfile>=0.13,<1",
+]
 dev = [
   "httpx>=0.28,<1",
   "pytest>=8.3,<9",
+  "jsonschema>=4.23,<5",
 ]
 local-media = [
   # Provides the local ``piper`` CLI. Voice models remain operator-supplied
@@ -40,6 +46,10 @@ local-media = [
 kokoro = [
   # CPU-friendly ONNX runtime; model and voice-pack files stay operator-owned.
   "kokoro-onnx>=0.3.8,<1",
+]
+alignment = [
+  # Opt-in English audio-grounded timing; model assets remain operator-supplied.
+  "faster-whisper==1.2.1",
 ]
 
 [tool.hatch.build.targets.wheel]

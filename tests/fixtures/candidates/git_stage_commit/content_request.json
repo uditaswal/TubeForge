@@ -1,0 +1,66 @@
+{
+  "channel_identity": "default",
+  "channel_voice_profile": "Clear, practical and conversational. Address the viewer directly; use complete sentences, explain unfamiliar terms, avoid hype, unsupported claims and invented personal experience.",
+  "topic": "Git staging versus committing: choose what goes into one snapshot",
+  "angle": "Teach a beginner with two changed files to commit only one. Show status, stage a named example file, inspect the staged diff, commit, then check what remains. Explain the index/working-tree distinction. Use hypothetical labels only; do not imply Git was executed.",
+  "target_duration_seconds": 45,
+  "language": "en",
+  "audience": "new software developers learning Git",
+  "sources": [
+    {
+      "source_id": "git-status",
+      "url": "https://git-scm.com/docs/git-status",
+      "title": "Git status reference",
+      "author": "Git project",
+      "retrieved_at": "2026-10-13T06:11:58.198766+00:00",
+      "content_sha256": null,
+      "excerpt": "git status reports staged changes for the next commit, unstaged working-tree changes, and untracked files."
+    },
+    {
+      "source_id": "git-add",
+      "url": "https://git-scm.com/docs/git-add",
+      "title": "Git add reference",
+      "author": "Git project",
+      "retrieved_at": "2026-10-13T06:11:58.198766+00:00",
+      "content_sha256": null,
+      "excerpt": "git add followed by a path adds that file’s current contents to the index, the staging area used to prepare the next commit."
+    },
+    {
+      "source_id": "git-diff",
+      "url": "https://git-scm.com/docs/git-diff",
+      "title": "Git diff reference",
+      "author": "Git project",
+      "retrieved_at": "2026-10-13T06:11:58.198766+00:00",
+      "content_sha256": null,
+      "excerpt": "git diff --cached shows changes staged for the next commit compared with HEAD; --staged is a synonym."
+    },
+    {
+      "source_id": "git-commit",
+      "url": "https://git-scm.com/docs/git-commit",
+      "title": "Git commit reference",
+      "author": "Git project",
+      "retrieved_at": "2026-10-13T06:11:58.198766+00:00",
+      "content_sha256": null,
+      "excerpt": "git commit with a message records the current index contents as a new commit. In its basic form, it does not include unstaged working-tree changes."
+    }
+  ],
+  "prompt_version": "m6-content-v6",
+  "notes": [
+    "Use a hypothetical repository with app.py and notes.txt changed. The example paths are illustrative, not source facts or observed output.",
+    "Show git status, git add app.py, git diff --cached, git commit -m \"Update app\", and git status again as an intentional sequence. Do not fabricate command output, commit IDs, or an actual execution result.",
+    "Explain that staging app.py does not stage notes.txt and that the basic git commit form records the staged contents.",
+    "Use concrete visual contrast between working tree, index and commit. Reserve the bottom of the portrait frame for captions."
+  ],
+  "review_mode": "manual",
+  "captions_enabled": true,
+  "music_track": null,
+  "visual_style": "cinematic-tech",
+  "visual_source": "generated",
+  "voice_id": null,
+  "mcp_servers": [],
+  "production_mode": "generated",
+  "source_url": null,
+  "clip_count": 1,
+  "preset_name": "shorts",
+  "aspect_ratio": "9:16"
+}

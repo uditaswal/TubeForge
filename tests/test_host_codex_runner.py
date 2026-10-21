@@ -270,3 +270,37 @@ def test_unsupported_prompt_does_not_consume_a_generation_attempt(tmp_path: Path
             assert session.scalar(select(func.count()).select_from(GenerationCacheRecord)) == 0
     finally:
         database.dispose()
+
+
+@pytest.mark.parametrize("layout", ["flow_diagram", "comparison", "timeline", "source_card"])
+def test_generation_schema_rejects_illegal_teaching_combinations(layout: str) -> None:
+    from jsonschema import Draft202012Validator
+    from tubeforge.domain.contracts import ScenePlan
+
+    schema = runner.codex_output_schema(envelope=True)
+    validator = Draft202012Validator({"$ref": "#/$defs/ScenePlan", "$defs": schema["$defs"]})
+    scene = dict(scene_id="scene-1", visual_type=layout, search_queries=["example"],
+                 on_screen_text="Example", fallback_visual="diagram", visual_subject="example",
+                 visual_purpose="explain", composition="three states", visual_elements=["before", "action", "after"],
+                 terminal_cues=None, card_cues=None,
+                 teaching_cues=dict(first_word_index=0, second_word_index=3, third_word_index=6,
+                                    comparison_panels_first=False))
+    validator.validate(scene)
+    ScenePlan.model_validate(scene)
+    for changes in (
+        {"visual_type": "generated explanatory diagram"},
+        {"visual_type": "terminal"},
+        {"visual_elements": ["before", "after"]},
+        {"card_cues": dict(kind="hook", first_word_index=0, second_word_index=3, third_word_index=6)},
+    ):
+        assert list(validator.iter_errors({**scene, **changes}))
+    if layout != "comparison":
+        assert list(validator.iter_errors({**scene, "teaching_cues": {**scene["teaching_cues"], "comparison_panels_first": True}}))
+
+
+@pytest.mark.parametrize("aspect_ratio", ["16:9", "9:16"])
+def test_layout_instructions_apply_to_both_formats(aspect_ratio: str) -> None:
+    request = caption_timing_request().request.model_copy(update={"aspect_ratio": aspect_ratio, "prompt_version": "m6-content-v7"})
+    prompt = build_content_prompt(request, template_version="m6-content-v7", max_chars=60_000)
+    assert "visual_type is a renderer ID, never a prose description" in prompt
+    assert "Set unused motion cue fields to null" in prompt

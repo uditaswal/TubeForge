@@ -24,7 +24,7 @@ pipeline:
       shorts:
         duration_seconds: 45
         minimum_duration_seconds: 30
-        maximum_duration_seconds: 55
+        maximum_duration_seconds: 120
         aspect_ratio: "9:16"
         captions_enabled: true
         review_mode: "manual"
@@ -42,7 +42,7 @@ pipeline:
     max_diagnostic_bytes: 8192
     reservation_seconds: 1200
     repair_attempt_limit: 0
-    prompt_template_version: "m6-content-v6"
+    prompt_template_version: "m6-content-v7"
     max_prompt_chars: 60000
   piper:
     executable: "piper"
@@ -68,6 +68,7 @@ pipeline:
   voice:
     artifact_root: "./data/artifacts"
     ffmpeg_executable: "ffmpeg"
+    alignment_provider: "local-waveform-v1"
   preview:
     width: 854
     height: 480
@@ -76,6 +77,7 @@ pipeline:
     video_codec: "libx264"
     audio_codec: "aac"
     audio_bitrate: "128k"
+    audio_sample_rate: 48000
     threads: 1
     timeout_seconds: 900
     ffprobe_timeout_seconds: 30
@@ -93,6 +95,7 @@ pipeline:
     video_codec: "libx264"
     audio_codec: "aac"
     audio_bitrate: "160k"
+    audio_sample_rate: 48000
     threads: 1
     timeout_seconds: 1800
     ffprobe_timeout_seconds: 30
@@ -107,6 +110,7 @@ pipeline:
     width: 540
     height: 960
     fps: 30
+    audio_sample_rate: 48000
     caption_font_size: 46
     caption_margin_vertical: 180
     caption_margin_horizontal: 48
@@ -117,9 +121,11 @@ pipeline:
     height: 1920
     video_crf: 18
     fps: 30
-    caption_font_size: 80
-    caption_margin_vertical: 360
+    audio_sample_rate: 48000
+    caption_font_size: 84
+    caption_margin_vertical: 470
     caption_margin_horizontal: 96
+    caption_center_x: 490
     word_highlight_captions: true
     scene_max_duration_seconds: 3.0
   publication:

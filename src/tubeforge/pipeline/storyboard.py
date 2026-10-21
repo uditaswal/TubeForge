@@ -14,7 +14,7 @@ from tubeforge.core.errors import ProviderValidationError
 from tubeforge.domain.contracts import ContentPackage, VideoPlan
 
 
-def storyboard_manifest(package: ContentPackage, plan: VideoPlan, accepted: dict[str, object]) -> dict[str, object]:
+def storyboard_manifest(package: ContentPackage, plan: VideoPlan, accepted: dict[str, object], *, scene_contract_sha256: str | None = None) -> dict[str, object]:
     """Keep narration-to-visual intent, provenance, and asset bytes together."""
     planned = {scene.scene_id: scene for scene in plan.scenes}
     rows: list[dict[str, object]] = []
@@ -47,7 +47,7 @@ def storyboard_manifest(package: ContentPackage, plan: VideoPlan, accepted: dict
             "visual_route": item.get("visual_route"),
             "fallback": item.get("fallback"),
         })
-    return {"version": "storyboard-v1", "topic": plan.topic, "aspect_ratio": plan.aspect_ratio, "scenes": rows}
+    return {"version": "storyboard-v1", "topic": plan.topic, "aspect_ratio": plan.aspect_ratio, "scenes": rows, **({"scene_contract_sha256": scene_contract_sha256} if scene_contract_sha256 else {})}
 
 
 def render_contact_sheets(manifest: dict[str, object], output_root: Path, *, ffmpeg: str = "ffmpeg") -> list[Path]:

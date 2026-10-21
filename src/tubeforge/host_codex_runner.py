@@ -110,24 +110,80 @@ def cli_failure_detail(stdout: bytes, stderr: bytes) -> str:
     return _redact("; ".join(failures[-2:]) or stderr.decode(errors="replace") or f"CLI events: {event_types}")
 
 
-def codex_output_schema(*, envelope: bool = False) -> dict[str, object]:
+def codex_output_schema(*, envelope: bool = False, reference: bool = False) -> dict[str, object]:
     """Make the domain schema acceptable to Codex's strict structured output.
 
     Pydantic omits defaulted fields from ``required`` and emits string
     constraints unsupported by Codex (notably ``format: uri``). The immutable
-    request is supplied in full in the prompt, so the model can echo those
-    values; the domain validator still checks the result after generation.
+    request is supplied in full in the prompt. Envelope outputs omit it; the
+    application binds trusted inputs before validating generated content.
     """
     from tubeforge.providers.content.output import ContentGenerationResult
     schema = (ContentGenerationResult if envelope else ContentPackage).model_json_schema()
+    package_schema = schema["$defs"]["ContentPackage"] if envelope else schema
+    if not reference:
+        package_schema["properties"].pop("reference_short", None)
+    else:
+        if not envelope:
+            raise ValueError("reference output requires the trusted-request envelope")
+        package_schema["properties"]["reference_short"] = {"$ref": "#/$defs/ShortsTopic"}
+        package_schema["properties"].pop("scene_plans")
+        package_schema["required"].remove("scene_plans")
+        topic_schema = schema["$defs"]["ShortsTopic"]
+        for field in ("title", "sources"):
+            topic_schema["properties"].pop(field)
+            topic_schema["required"].remove(field)
+        for kind in ("Hook", "BigStat", "BeforeAfter", "Flow", "Checklist", "Terminal", "CTA"):
+            item = schema["$defs"][kind]
+            item["properties"].pop("vo")
+            item["required"].remove("vo")
     if envelope:
+        # The application binds immutable inputs; do not make the model copy
+        # long fetched excerpts or runtime settings into generated output.
+        schema["$defs"]["ContentPackage"]["properties"].pop("request")
+        schema["$defs"]["ContentPackage"]["required"].remove("request")
         # These are existing acceptance invariants, made visible to the CLI.
         schema["$defs"]["VideoMetadata"]["properties"]["title_options"]["minItems"] = 10
         schema["$defs"]["ContentPackage"]["properties"]["hook_options"]["minItems"] = 5
 
+    if envelope and not reference:
+        # Cross-field Pydantic validators are not represented by model_json_schema.
+        # Give the writer legal alternatives instead of letting it combine a
+        # free-text layout with motion cues that the renderer cannot execute.
+        import copy
+
+        scene = schema["$defs"]["ScenePlan"]
+        variants = []
+        for layout in ("terminal", "flow_diagram", "comparison", "timeline", "source_card"):
+            modes = [None, "terminal_cues"] if layout == "terminal" else [None, "teaching_cues"]
+            if layout in {"flow_diagram", "comparison", "timeline"}:
+                modes.append("card_cues")
+            for mode in modes:
+                variant = copy.deepcopy(scene)
+                props = variant["properties"]
+                props["visual_type"] = {"type": "string", "enum": [layout]}
+                props["visual_elements"]["minItems"] = 3
+                props["visual_elements"]["maxItems"] = 3
+                if layout == "terminal":
+                    props["on_screen_text"] = {"type": "string", "minLength": 1}
+                for cue in ("terminal_cues", "card_cues", "teaching_cues"):
+                    if cue != mode:
+                        props[cue] = {"type": "null"}
+                    else:
+                        props[cue] = next(item for item in props[cue]["anyOf"] if "$ref" in item)
+                if mode == "teaching_cues" and layout != "comparison":
+                    teaching = copy.deepcopy(schema["$defs"]["TeachingRevealCues"])
+                    teaching["properties"]["comparison_panels_first"] = {"type": "boolean", "enum": [False]}
+                    props[mode] = teaching
+                variants.append(variant)
+        schema["$defs"]["ScenePlan"] = {"anyOf": variants}
+
     def make_strict(value: object) -> None:
         if isinstance(value, dict):
             value.pop("default", None)
+            value.pop("discriminator", None)
+            if "oneOf" in value:
+                value["anyOf"] = value.pop("oneOf")
             # Keep the CLI-facing schema within the documented strict subset.
             # The Pydantic model remains the authoritative output validator.
             value.pop("minLength", None)
@@ -200,10 +256,10 @@ def consume_invocation(request: GenerateShortsScriptRequest, root: Path = RUNNER
         cursor = database.execute(
             "INSERT INTO invocations (request_hash, count) VALUES (?, 1) "
             "ON CONFLICT(request_hash) DO UPDATE SET count = count + 1 WHERE count < ?",
-            (digest, INVOCATION_LIMIT),
+            (digest, 1 if request.operation == "ResearchSourcesV1" else INVOCATION_LIMIT),
         )
         if cursor.rowcount != 1:
-            raise AllowanceExhaustedError("TubeForge's two-attempt limit for this exact source packet is exhausted")
+            raise AllowanceExhaustedError("Research attempt already consumed; revise the brief or inspect the saved research result" if request.operation == "ResearchSourcesV1" else "TubeForge's two-attempt limit for this exact source packet is exhausted")
 
 
 def bubblewrap_args(workspace: Path) -> list[str]:
@@ -235,12 +291,13 @@ def run_request(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROO
     workspace = schema_path.parent
     workspace.mkdir(mode=0o700, parents=True, exist_ok=False)
     try:
-        schema_path.write_text(json.dumps(codex_output_schema(envelope=request.request.prompt_version == "m6-content-v6"), sort_keys=True), encoding="utf-8")
+        from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES
+        schema_path.write_text(json.dumps(codex_output_schema(envelope=request.request.prompt_version in CONTENT_ENVELOPE_TEMPLATES, reference=request.request.prompt_version == "m6-content-v8"), sort_keys=True), encoding="utf-8")
         prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, preflight
-        skill_hashes = preflight() if request.request.prompt_version in SKILL_TEMPLATES else None
+        skill_hashes = preflight(template_version=request.request.prompt_version) if request.request.prompt_version in SKILL_TEMPLATES else None
         command = bubblewrap_args(workspace)
-        if request.request.prompt_version == "m6-content-v6":
+        if request.request.prompt_version in CONTENT_ENVELOPE_TEMPLATES:
             from tubeforge.providers.content.output import require_source_excerpts
             require_source_excerpts(request.request)
         consume_invocation(request, root)
@@ -254,9 +311,9 @@ def run_request(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROO
         if not output_path.is_file() or output_path.stat().st_size > MAX_OUTPUT_BYTES:
             raise ValueError("Codex CLI did not produce a bounded structured package")
         raw = json.loads(output_path.read_text(encoding="utf-8"))
-        if request.request.prompt_version == "m6-content-v6":
+        if request.request.prompt_version in CONTENT_ENVELOPE_TEMPLATES:
             from tubeforge.providers.content.output import unwrap_generation
-            raw = unwrap_generation(raw)
+            raw = unwrap_generation(raw, request=request.request)
         normalized, normalizations = normalize_fallback_visuals(raw)
         package = ContentPackage.model_validate(normalized)
         if normalize_content_request(package.request) != normalize_content_request(request.request):
@@ -288,6 +345,68 @@ def run_request(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROO
         shutil.rmtree(workspace, ignore_errors=True)
 
 
+def run_research(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROOT) -> HostRunnerSuccess:
+    """One cached research invocation per exact brief; no script allowance reset."""
+    from tubeforge.providers.content.research import ResearchResult, research_prompt
+    from tubeforge.domain.contracts import generation_request_key_payload
+    material = json.dumps(generation_request_key_payload(request.request), sort_keys=True).encode()
+    cache_path = root / "research-cache" / (hashlib.sha256(material).hexdigest() + ".json")
+    if cache_path.is_file():
+        return HostRunnerSuccess.model_validate_json(cache_path.read_text())
+    schema_path, output_path = fixed_paths(uuid4().hex, root)
+    workspace = schema_path.parent
+    workspace.mkdir(mode=0o700, parents=True, exist_ok=False)
+    try:
+        schema = ResearchResult.model_json_schema()
+        def strict(value):
+            if isinstance(value, dict):
+                for key in ("default", "minLength", "maxLength"):
+                    value.pop(key, None)
+                if value.get("type") == "object":
+                    value["required"] = list(value["properties"])
+                    value["additionalProperties"] = False
+                for child in value.values(): strict(child)
+            elif isinstance(value, list):
+                for child in value: strict(child)
+        strict(schema)
+        schema_path.write_text(json.dumps(schema))
+        command = bubblewrap_args(workspace)
+        command.insert(command.index("exec"), "--search")
+        prompt = research_prompt(request.request)
+        if len(prompt) > 60_000:
+            raise ValueError("research brief exceeds prompt limit")
+        consume_invocation(request, root)
+        started = time.monotonic()
+        completed = subprocess.run(command, input=prompt.encode(), stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, timeout=TIMEOUT_SECONDS, check=False)
+        if completed.returncode:
+            raise RuntimeError(f"Research CLI failed: {cli_failure_detail(completed.stdout, completed.stderr)}")
+        if not output_path.is_file() or output_path.stat().st_size > MAX_OUTPUT_BYTES:
+            raise ValueError("research output missing or oversized")
+        result = ResearchResult.model_validate_json(output_path.read_text())
+        usage, searches = {}, 0
+        for line in completed.stdout.splitlines():
+            try: event = json.loads(line)
+            except json.JSONDecodeError: continue
+            if isinstance(event, dict):
+                if isinstance(event.get("usage"), dict): usage = event["usage"]
+                if event.get("type") == "item.completed" and event.get("item", {}).get("type") == "web_search": searches += 1
+        if not searches:
+            raise ValueError("research did not record any completed web search; refusing unverified citations")
+        response = HostRunnerSuccess(package=result.model_dump(mode="json"), usage=usage,
+            provenance={"provider": "host-codex-research", "model": CODEX_MODEL,
+                        "web_searches": searches, "elapsed_seconds": round(time.monotonic()-started, 3),
+                        "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()})
+        cache_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = cache_path.with_suffix("." + uuid4().hex + ".tmp")
+        temporary.write_text(response.model_dump_json())
+        temporary.chmod(0o600)
+        os.replace(temporary, cache_path)
+        return response
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
 def inherited_socket() -> socket.socket:
     """Use only systemd's first passed listening FD."""
     if os.environ.get("LISTEN_PID") != str(os.getpid()) or os.environ.get("LISTEN_FDS") != "1":
@@ -311,7 +430,9 @@ def main() -> None:
                     evidence = prompt_evidence(prompt)
                     with tempfile.TemporaryDirectory(dir=RUNNER_ROOT) as workspace:
                         bubblewrap_args(Path(workspace))
-                    result = HostRunnerSuccess(package={}, provenance={"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True})
+                    result = HostRunnerSuccess(package={}, provenance={"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True, "operations": ["ResearchSourcesV1"]})
+                elif request.operation == "ResearchSourcesV1":
+                    result = run_research(request)
                 else:
                     result = run_request(request)
                 response = HostRunnerResponse(ok=True, result=result).model_dump_json().encode()

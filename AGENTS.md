@@ -4,23 +4,26 @@ You are developing TubeForge, an automated YouTube-video generation system.
 
 ## Project records
 
-For publishing/dashboard work, follow `design_doc/tubeforge-publishing-design.md`. Update its affected tasks, acceptance evidence and next action after each meaningful change; keep current release status in `docs/STATUS.md` and session evidence in `AUTONOMOUS_PROGRESS.md`.
+For publishing/dashboard work, follow `design_doc/tubeforge-publishing-design.md`. Update its affected stages, current release status, acceptance evidence and next action after each coherent stage; append session evidence to `AUTONOMOUS_PROGRESS.md`.
 
 These files have distinct purposes. Keep them consistent rather than copying
 the same status into each one:
 
 - `AGENTS.md` is the durable working contract: safety rules, required checks,
   and documentation-update rules. Do not put milestone history here.
-- `docs/STATUS.md` is the single source of truth for the *current* release,
-  milestone state, blockers, and next five tasks.
+- `design_doc/tubeforge-publishing-design.md` is the single current plan and
+  status record: architecture, ordered stages, release state, blockers and
+  next five actions. `docs/STATUS.md` redirects there; its full former content
+  is retained as a dated archive.
 - `AUTONOMOUS_PROGRESS.md` is an append-only evidence log. Each meaningful
   autonomous work session records its scope, validation commands/results,
   artifacts inspected, blocker (if any), and next action.
 - `readme.md` is the operator-facing product, setup, and local-operation guide.
   Update it whenever supported setup, configuration, or workflow changes.
+- `docs/SHORT_FORM_VIDEO_RULEBOOK.md` owns video quality and creative review.
 
 Do not claim a milestone is complete in `AUTONOMOUS_PROGRESS.md` unless its
-corresponding row is `DONE` in `docs/STATUS.md` with validation evidence.
+corresponding stage is **VERIFIED** in the project plan with linked validation evidence.
 
 ## Working policy
 
@@ -28,7 +31,8 @@ For requested implementation work:
 
 - Inspect the existing architecture before changing anything.
 - Implement the requested milestone completely.
-- Run relevant tests after every meaningful change.
+- Run relevant tests after a coherent stage of changes and before reporting its
+  acceptance; do not rerun the same suite after each small edit.
 - Diagnose failures and fix them rather than merely reporting them.
 - Do not claim completion until validation passes.
 - Preserve existing reliability guarantees including:
@@ -89,7 +93,7 @@ result or blocker, next acceptance test, and whether a user decision is needed.
 Before claiming a phase VERIFIED, run its required tests and inspect its real
 output. Test the signed-in dashboard when the phase changes an operator-facing
 workflow. Before claiming the full Shorts workflow complete, inspect one real
-30–55 second 1080×1920 video against the Shorts production standard in
+30–120 second 1080×1920 video against the Shorts production standard in
 `readme.md`, verify the signed-in dashboard flow, and update the status
 documentation.
 
@@ -177,8 +181,8 @@ Completion requires:
 3. the requested end-to-end smoke test passes
 4. produced artifacts are inspected/validated
 5. important findings are appended to `AUTONOMOUS_PROGRESS.md`
-6. `docs/STATUS.md` is updated with the current state, evidence, blocker, and
-   next action
+6. the project plan's current-status section is updated with the state,
+   evidence, blocker, and next action
 7. `readme.md` and the relevant operator documentation are updated when the
    externally visible setup or workflow changed
 8. `.gitignore` has been reviewed and updated when the change introduced
@@ -227,4 +231,43 @@ Insufficient-source results block before TTS and require operator correction.
 Scene plans also carry source-grounded visual subjects, purposes, compositions
 and display elements into the existing VideoPlan and asset stage. Keep the
 asset-stage storyboard manifest/contact sheets tied to accepted hashes, and
-inspect their teaching value before claiming creative acceptance.
+inspect their teaching value before claiming creative acceptance. Declarative
+scene layouts must remain topic-independent, compile only after the exact script
+gate, preserve legacy layout/checkpoint behavior, and record supported graphics
+versions and their shared palette for mixed-layout Shorts.
+Word-anchored reveal order and any layout variant belong to the accepted scene
+contract and render identity; a captured test-fixture approval is never an
+operator approval for a production job.
+
+`.agents/skills/om-short-production/` applies the project's topic-independent
+short-form production standard after narration acceptance. It must defer to the
+rulebook, preserve `yt-script` as the sole narration authority, and distinguish
+benchmark evidence from production acceptance.
+
+The newer reference-short-v1 profile follows docs/CLAUDE_PIPELINE_REVIEW.md:
+6–8 scenes, 8–15 spoken words each, 25–45 seconds, final 1080×1920/30fps,
+720×1280 drafts, one-line 84px captions and encoded true peak ≤−1.5 dBTP.
+Keep geometry in the shared rendering/shorts library, not model output. Run
+native local Kokoro and forced alignment sequentially to bound model memory;
+Piper and estimated alignment are explicit, recorded fallbacks. The canonical
+yt-script automation resource owns this profile's narration guidance. Changed
+skill resources require installed-wheel hash verification before host use.
+
+
+### Topic research before narration
+
+When production source research is enabled, notes-only v7 briefs use the typed
+host `ResearchSourcesV1` operation before narration. Treat topic/angle/notes as
+hypotheses, never approved factual evidence. Keep research separate from the
+canonical yt-script narration skill. Use live web-search evidence and public
+primary URLs; local Python captures bounded text and source hashes. Preserve
+explicit source packets and accepted checkpoints. Cache research, record usage
+and activity, enforce one research invocation per exact brief, and retain the
+separate two-attempt script limit. Never silently reset an exhausted allowance
+or turn a research assessment into a factual source or operator approval.
+
+Envelope-generation output must not ask the writer to echo immutable request/source
+text. Application code binds that trusted request before domain validation;
+conflicting legacy echoes and unknown source citations must still be rejected.
+
+Animated landscape card/teaching scenes must use native landscape composition and locally derived word timing; do not stretch portrait canvases or remove accepted cues to make a render pass. Preserve comparison reveal ordering and exact approved copy. Recovery from initial preview validation may reuse approved media checkpoints only before any preview artifact exists, with the same ownership, source-integrity and exact-script checks as asset recovery.

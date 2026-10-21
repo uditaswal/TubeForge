@@ -11,7 +11,7 @@ from tubeforge.core.config import FakeProviderConfig, MediaPipelineConfig
 from tubeforge.domain.contracts import MediaSearchRequest
 from tubeforge.providers.media.factory import create_media_provider
 from tubeforge.providers.media.wikimedia import WikimediaCommonsProvider
-from tubeforge.providers.media.local_graphics import PALETTE_ID, STYLE_VERSION
+from tubeforge.providers.media.local_graphics import NEW_LAYOUT_STYLE_VERSION, PALETTE_ID, STYLE_VERSION
 from tubeforge.pipeline.assets import validate_shorts_visual_manifest
 from tubeforge.core.errors import ProviderValidationError
 
@@ -66,6 +66,15 @@ def test_generated_shorts_art_is_full_hd_portrait_and_scene_specific(tmp_path) -
     for item in legacy["scenes"].values():
         item["candidate"]["source_version"] = item["candidate"]["source_version"].replace(STYLE_VERSION, "portrait-storyboard-v9")
     assert validate_shorts_visual_manifest(legacy)["passed"] is True
+
+    mixed = json.loads(json.dumps(manifest))
+    mixed["scenes"]["scene-2"]["candidate"]["source_version"] = mixed["scenes"]["scene-2"]["candidate"]["source_version"].replace(STYLE_VERSION, NEW_LAYOUT_STYLE_VERSION)
+    report = validate_shorts_visual_manifest(mixed)
+    assert report["profile"] == f"mixed:{PALETTE_ID}"
+    assert report["style_versions"] == [STYLE_VERSION, NEW_LAYOUT_STYLE_VERSION]
+    mixed["scenes"]["scene-2"]["candidate"]["source_version"] = mixed["scenes"]["scene-2"]["candidate"]["source_version"].replace(PALETTE_ID, "unrelated-palette")
+    with pytest.raises(ProviderValidationError, match="reference palette"):
+        validate_shorts_visual_manifest(mixed)
 
     manifest["scenes"]["scene-2"]["checksum_sha256"] = "a" * 64
     with pytest.raises(ProviderValidationError, match="distinct"):

@@ -1,0 +1,29 @@
+{
+  "scene-3": {
+    "display_elements": ["IMAGE: nginx:alpine", "NAMES: web-a"],
+    "terminal_cues": {
+      "command_start_word_index": 1,
+      "command_end_word_index": 7,
+      "output_word_index": 8,
+      "secondary_word_index": 10
+    }
+  },
+  "scene-4": {
+    "display_elements": ["IMAGE: nginx:alpine", "NAMES: web-b"],
+    "terminal_cues": {
+      "command_start_word_index": 1,
+      "command_end_word_index": 7,
+      "output_word_index": 8,
+      "secondary_word_index": 10
+    }
+  },
+  "scene-5": {
+    "terminal_cues": {
+      "command_start_word_index": 1,
+      "command_end_word_index": 2,
+      "output_word_index": 6,
+      "secondary_word_index": 10,
+      "third_word_index": 12
+    }
+  }
+}

@@ -91,6 +91,8 @@ def create_runtime(settings: Settings) -> Runtime:
     orchestrator.asset_limits = limits
     orchestrator.asset_acquirer = acquirer
     source_policy = settings.pipeline.sources
+    orchestrator.research_enabled = source_policy.research_enabled
+    orchestrator.channel_approved_sources = source_policy.channel_approved
     if source_policy.enabled:
         orchestrator.source_ingestor = SourceIngestor(
             frozenset(source_policy.allowed_hosts),

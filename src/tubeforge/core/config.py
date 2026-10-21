@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from tubeforge.domain.contracts import SourceReference
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -90,11 +91,13 @@ class SourceIngestionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    research_enabled: bool = False
     enabled: bool = False
     allowed_hosts: tuple[str, ...] = ()
     timeout_seconds: int = Field(default=20, ge=1, le=300)
     max_bytes: int = Field(default=2_000_000, ge=1_024, le=20_000_000)
     max_chars: int = Field(default=24_000, ge=1_000, le=24_000)
+    channel_approved: dict[str, tuple[SourceReference, ...]] = Field(default_factory=dict)
 
     @field_validator("allowed_hosts")
     @classmethod
@@ -108,6 +111,8 @@ class SourceIngestionConfig(BaseModel):
     def require_hosts_when_enabled(self) -> "SourceIngestionConfig":
         if self.enabled and not self.allowed_hosts:
             raise ValueError("source ingestion requires at least one allowed host when enabled")
+        if any(not channel.strip() or any(not source.excerpt or not source.excerpt.strip() for source in sources) for channel, sources in self.channel_approved.items()):
+            raise ValueError("channel-approved sources require a channel name and approved excerpts")
         return self
 
 
@@ -147,7 +152,7 @@ class CodexProviderConfig(BaseModel):
     repair_attempt_limit: int = Field(default=0, ge=0, le=5)
     voice_profiles: dict[str, str] = Field(default_factory=dict)
     default_channel_identity: str = Field(default="default", pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-    prompt_template_version: str = Field(default="m6-content-v4", min_length=1, max_length=100)
+    prompt_template_version: str = Field(default="m6-content-v7", min_length=1, max_length=100)
     max_prompt_chars: int = Field(default=60_000, ge=1_000, le=200_000)
     socket_path: Path = Path("/run/tubeforge-codex/codex.sock")
     socket_timeout_seconds: int = Field(default=490, ge=1, le=600)
@@ -215,6 +220,9 @@ class PiperProviderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     executable: Path | str = "piper"
+    server_url: str | None = None
+    listen_host: str = Field(default="127.0.0.1", min_length=1, max_length=255)
+    listen_port: int = Field(default=5000, ge=1, le=65_535)
     model_path: Path | None = None
     config_path: Path | None = None
     voice_id: str = Field(default="piper", min_length=1, max_length=200)
@@ -227,6 +235,18 @@ class PiperProviderConfig(BaseModel):
     threads: int = Field(default=1, ge=1, le=4)
     cache_root: Path = Path("./data/cache/tts")
     adapter_version: str = Field(default="m7-piper-v1", min_length=1, max_length=100)
+
+    @field_validator("server_url")
+    @classmethod
+    def validate_server_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from urllib.parse import urlsplit
+        normalized = value.strip().rstrip("/")
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("pipeline.piper.server_url must be an HTTP(S) base URL without credentials, query or fragment")
+        return normalized
 
 
 class KokoroProviderConfig(BaseModel):
@@ -268,6 +288,15 @@ class VoicePipelineConfig(BaseModel):
     # one-minute editorial request therefore accepts 42--78 seconds by
     # default; the final timing map still remains exact to the produced audio.
     target_duration_tolerance_ratio: float = Field(default=0.30, ge=0.01, le=0.50)
+    alignment_provider: str = Field(default="local-waveform-v1", pattern=r"^(local-waveform-v1|whisper-base-en-dtw-v1)$")
+    alignment_model_path: Path | None = None
+    alignment_model_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def require_pinned_audio_grounded_model(self) -> "VoicePipelineConfig":
+        if self.alignment_provider != "local-waveform-v1" and (self.alignment_model_path is None or self.alignment_model_sha256 is None):
+            raise ValueError("audio-grounded alignment requires a local model path and SHA-256 pin")
+        return self
 
 class RenderProfile(BaseModel):
     """Bounded deterministic profile for the low-resolution review render."""
@@ -282,6 +311,7 @@ class RenderProfile(BaseModel):
     video_crf: int = Field(default=23, ge=0, le=51)
     audio_codec: str = Field(default="aac", pattern=r"^[A-Za-z0-9_.-]+$")
     audio_bitrate: str = Field(default="128k", pattern=r"^[0-9]+[kKmM]$")
+    audio_sample_rate: int = Field(default=48_000, ge=22_050, le=96_000)
     threads: int = Field(default=1, ge=1, le=4)
     timeout_seconds: int = Field(default=900, ge=1, le=7200)
     ffprobe_timeout_seconds: int = Field(default=30, ge=1, le=300)
@@ -290,12 +320,14 @@ class RenderProfile(BaseModel):
     caption_font_size: int = Field(default=26, ge=12, le=96)
     caption_margin_vertical: int = Field(default=36, ge=0, le=800)
     caption_margin_horizontal: int = Field(default=40, ge=0, le=800)
+    caption_center_x: int | None = Field(default=None, ge=0, le=3840)
     word_highlight_captions: bool = False
     scene_max_duration_seconds: float = Field(default=7_200, ge=0.5, le=7_200)
     image_motion_enabled: bool = True
     image_motion_zoom: float = Field(default=1.08, ge=1.0, le=1.25)
     image_motion_overscan: float = Field(default=2.0, ge=1.0, le=2.0)
     bounded_memory: bool = False
+    audio_normalization_enabled: bool = False
     renderer_version: str = Field(default="m9-preview-v1", min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -345,15 +377,17 @@ class ShortsFinalRenderConfig(RenderProfile):
     height: int = 1920
     fps: int = 30
     audio_bitrate: str = "160k"
-    caption_font_size: int = 80
-    caption_margin_vertical: int = 360
+    audio_sample_rate: int = Field(default=48_000, ge=48_000, le=48_000)
+    caption_font_size: int = Field(default=84, ge=84, le=96)
+    caption_margin_vertical: int = 470
     caption_margin_horizontal: int = 96
+    caption_center_x: int = Field(default=490, ge=60, le=930)
     word_highlight_captions: bool = True
     scene_max_duration_seconds: float = 3.0
     image_motion_overscan: float = 1.25
     bounded_memory: bool = True
     minimum_free_bytes: int = 500_000_000
-    renderer_version: str = "shorts-final-v2"
+    renderer_version: str = "shorts-final-v4"
 
 
 class PublicationPreparationConfig(BaseModel):
@@ -522,7 +556,7 @@ class PipelineConfig(BaseModel):
     # deployments select the independent content and voice adapters below.
     provider: str | None = Field(default=None, pattern=r"^(fake|codex|piper)$")
     content_provider: str = Field(default="fake", pattern=r"^(fake|fixed|codex)$")
-    voice_provider: str = Field(default="fake", pattern=r"^(fake|piper|kokoro|hybrid)$")
+    voice_provider: str = Field(default="fake", pattern=r"^(fake|piper|piper-http|kokoro|hybrid)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
     piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
@@ -626,6 +660,17 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     if not isinstance(raw_config, dict):
         raise RuntimeError(f"configuration must be a YAML mapping: {selected_path}")
+    # The TTS endpoint is deployment-specific (loopback, a local service name,
+    # or another private address); keep it out of the production code path.
+    tts_endpoint = os.environ.get("TUBEFORGE_PIPER_SERVER_URL")
+    if tts_endpoint:
+        raw_config.setdefault("pipeline", {}).setdefault("piper", {})["server_url"] = tts_endpoint
+    tts_listen_host = os.environ.get("TUBEFORGE_PIPER_LISTEN_HOST")
+    if tts_listen_host:
+        raw_config.setdefault("pipeline", {}).setdefault("piper", {})["listen_host"] = tts_listen_host
+    tts_listen_port = os.environ.get("TUBEFORGE_PIPER_LISTEN_PORT")
+    if tts_listen_port:
+        raw_config.setdefault("pipeline", {}).setdefault("piper", {})["listen_port"] = tts_listen_port
     settings = Settings.model_validate(raw_config)
     validate_selected_provider(settings)
     return settings
@@ -637,7 +682,7 @@ def validate_selected_provider(settings: Settings) -> None:
     Content and voice providers are independent. In particular, validating
     Piper must not skip Codex validation for the real LLM-to-video topology.
     """
-    if settings.pipeline.voice_provider in {"piper", "hybrid"}:
+    if settings.pipeline.voice_provider in {"piper", "piper-http", "hybrid"}:
         piper = settings.pipeline.piper
         if piper.model_path is None:
             raise RuntimeError("pipeline.piper.model_path is required when pipeline.provider is piper")
@@ -646,7 +691,10 @@ def validate_selected_provider(settings: Settings) -> None:
             raise RuntimeError("pipeline.piper.model_path does not exist or is not a file")
         if piper.config_path is not None and not _resolve_path(piper.config_path).is_file():
             raise RuntimeError("pipeline.piper.config_path does not exist or is not a file")
-        _validate_executable(piper.executable, "pipeline.piper.executable")
+        if settings.pipeline.voice_provider != "piper-http":
+            _validate_executable(piper.executable, "pipeline.piper.executable")
+    if settings.pipeline.voice_provider == "piper-http" and not settings.pipeline.piper.server_url:
+        raise RuntimeError("pipeline.piper.server_url is required when pipeline.voice_provider is piper-http")
     if settings.pipeline.voice_provider == "kokoro":
         kokoro = settings.pipeline.kokoro
         if kokoro.model_path is None or not _resolve_path(kokoro.model_path).is_file():
