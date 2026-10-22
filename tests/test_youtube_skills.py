@@ -273,7 +273,7 @@ def test_signed_in_api_reviews_skill_reports_and_profile(tmp_path):
         assert 'heuristic review signals, not predictions of views' in html
         assert 'No title/thumbnail pair is selected' in html
         assert 'Show all title checks' in html
-        assert 'Saving schedule…' in html and 'channel_identity:channelSelect.value' in html
+        assert 'Saving schedule…' in html and 'channel_identity:voice.value' in html
         scheduled = client.post('/api/schedules', json={'name':'Engineering Shorts', 'cron':'0 9 * * *', 'options':{'channel_identity':'engineering', 'aspect_ratio':'9:16', 'duration_seconds':45}})
         assert scheduled.status_code == 201
         assert client.get('/api/schedules').json()[0]['options']['channel_identity'] == 'engineering'
