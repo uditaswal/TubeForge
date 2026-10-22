@@ -7,6 +7,8 @@ services:
     command: ["alembic", "upgrade", "head"]
     volumes:
       - ./src:/app/src:ro
+      # Migrations are mounted so a new revision applies without rebuilding the image.
+      - ./migrations:/app/migrations:ro
       - ./.agents/skills:/app/.agents/skills:ro
       - ./config:/app/config:ro
       - ./data:/app/data
