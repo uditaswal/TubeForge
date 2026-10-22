@@ -30,13 +30,17 @@ def test_channel_schedules_only_reserve_their_own_topics(tmp_path: Path) -> None
         tech = client.post("/api/topics", json={"title": "Virtual worlds", "account_id": tech_id}).json()
         assert [item["id"] for item in client.get("/api/topics", params={"account_id": tech_id}).json()] == [tech["id"]]
         assert [item["id"] for item in client.get("/api/topics", params={"account_id": history_id}).json()] == [history["id"]]
+        assert [item["id"] for item in client.get("/api/topics", params={"unassigned": True}).json()] == [legacy["id"]]
+        assert client.get("/api/topics", params={"account_id": tech_id, "unassigned": True}).status_code == 422
 
         invalid = client.post("/api/schedules", json={"name": "Wrong", "cron": "0 9 * * *", "account_id": tech_id, "options": {"destination_account_ids": [history_id]}})
         assert invalid.status_code == 422
+        legacy_schedule = client.post("/api/schedules", json={"name": "Legacy", "cron": "0 8 * * *"}).json()
         tech_schedule = client.post("/api/schedules", json={"name": "Tech daily", "cron": "0 9 * * *", "account_id": tech_id}).json()
         history_schedule = client.post("/api/schedules", json={"name": "History daily", "cron": "0 10 * * *", "account_id": history_id}).json()
         assert tech_schedule["account_id"] == tech_id
         assert [item["id"] for item in client.get("/api/schedules", params={"account_id": tech_id}).json()] == [tech_schedule["id"]]
+        assert [item["id"] for item in client.get("/api/schedules", params={"unassigned": True}).json()] == [legacy_schedule["id"]]
         first = client.post(f"/api/schedules/{tech_schedule['id']}/run").json()
         assert first["state"] == "created" and first["topic_id"] == tech["id"]
         assert [item["account_id"] for item in client.get(f"/api/jobs/{first['job_id']}/destination-intents").json()] == [tech_id]
@@ -45,7 +49,9 @@ def test_channel_schedules_only_reserve_their_own_topics(tmp_path: Path) -> None
         assert second["state"] == "created" and second["topic_id"] == history["id"]
         assert [item["account_id"] for item in client.get(f"/api/jobs/{second['job_id']}/destination-intents").json()] == [history_id]
         assert app.state.runtime.topics.get(legacy["id"]).status == "ready"
-        assert "Choose a channel" in client.get("/").text
+        dashboard = client.get("/").text
+        assert "Choose a channel" in dashboard
+        assert "Unassigned items" in dashboard
 
 
 def test_account_queue_migration_keeps_existing_items_unassigned(tmp_path: Path) -> None:
