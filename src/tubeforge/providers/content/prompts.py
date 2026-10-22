@@ -80,10 +80,19 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "or insufficient_sources with null package and a specific reason. "
             "This is the reference-short-v1 profile. Create 6–8 ordered script_sections and matching "
             "reference_short.scenes. Each narration contains 8–15 whitespace-separated spoken words; "
-            "aim for 68–80 words total (the local voice speaks about 2.1 words per second, and the whole video must stay under 45 seconds including 0.35-second scene tails). "
+            "aim for 78–92 words total and never more than 96 (the local voice speaks about 2.5 words per second, and the whole video must stay under 45 seconds including short scene tails). "
             "Use complete sentences, a specific first-sentence hook matching one of five distinct hook_options, "
-            "source-grounded escalation, concrete payoff and a final spoken Follow for more <topic> CTA. "
+            "source-grounded escalation, concrete payoff and a final CTA scene whose narration first throws a one-sided challenge viewers will argue with "
+            "(a pointed question or 'tell me I'm wrong'), then says Follow for more <topic>. "
             "Put that exact follow request in the final CTA headline and metadata.call_to_action. "
+            "STANCE: take one clear, hard side on the topic's real trade-off and defend it without hedging in the voice-over "
+            "(no 'might', 'some say', 'around', 'in one study' in narration; attribution lives in the on-screen source line). "
+            "Every factual claim must still come from the supplied sources; opinions must be framed as the video's verdict, never as facts; never insult people or groups. "
+            "PAYOFF: keep the hook's question open; the strongest number or twist (the big_stat scene, if any) lands in the second half of the video, "
+            "and the last line before the CTA lands a verdict that echoes the hook's words so the loop rewards a rewatch. "
+            "ANTI-SLOP: never use cliché phrasing (game-changer, here's the thing, dive in, the truth is, pays off, but what changed, unlock, "
+            "landscape, let that sink in, not just), ask at most two rhetorical questions before the CTA, do not start more than two scenes with So or But, "
+            "mix one 3–5-word punch sentence into every two scenes, and never make a heading repeat its scene's narration: headings add a label, number or fact the voice does not say. "
             "Choose fixed templates: hook first, cta last; middle scenes big_stat, before_after, flow, checklist or terminal. "
             "Make the first frame readable immediately: headline lines are short, not full narration paragraphs. "
             "Set icon on every scene to the best-matching name from: shield, bug, lock, gear, bolt, cloud, database, server, code, chip, clock, chart_up, chart_down, check, cross, warning, search, document, globe, user, rocket, star (or null); never invent names. "
@@ -97,7 +106,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Chain scenes with turns (but, so, until, then) so each scene answers the previous open question and opens the next. "
             "Speak to the viewer in second person, sentences of at most 12 words, one idea per scene, concrete nouns, no hedging filler; "
             "attribute briefly instead ('Google's data shows'). Escalate: hook, why it hits you, proof number, twist or limit ('but'), what to do, "
-            "a payoff line that echoes the hook, then the Follow for more CTA. Never invent facts to make a hook stronger. "
+            "a payoff line that echoes the hook, then the challenge + Follow for more CTA. Never invent facts to make a hook stronger. "
             "Phone-fit text budgets (the renderer rejects overflow): hook headline lines at most 14 characters each, "
             "chips at most 9 characters each when there are three chips (14 for two, 24 for one), big_stat/flow/checklist/before_after headings at most 26, big_stat labels at most 18, "
             "flow nodes, checklist items and before/after texts at most 26, terminal lines at most 30, "
@@ -115,8 +124,8 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Do not invent company migrations, benefits, causal explanations, command output or numbers. "
             "If evidence contradicts the proposed angle, qualify the angle and explain what is supported. "
             "Provide ten title_options, one coordinated thumbnail text of at most three words, description and tags. "
-            "Also write metadata.engagement_comment: one pinned-comment debate starter of at most 280 characters, a single sharp question "
-            "that forces viewers to pick a side on the video's real trade-off (for example 'Rust or C for new code: which one would you bet your job on?'). "
+            "Also write metadata.engagement_comment: one pinned-comment debate starter of at most 280 characters that states the strongest "
+            "counter-argument to the video's own verdict and ends in a question that forces viewers to pick a side (for example 'Strongest case for C: decades of tooling and audited code. Still betting on Rust?'). "
             "Make it provocative and opinionated but fair: take a side or frame a dilemma about the topic, never insult people, groups or languages' users, "
             "never state an unsupported fact, no links, @mentions or hashtags, and it must contain a question mark. "
             "\nREQUEST=" + encoded + _skill_contract(request)
@@ -182,12 +191,16 @@ def validate_video_package(package: ContentPackage, request: ContentRequest, *, 
             reject_instruction_spoofing(getattr(scene, field), field=f"scene_plans.{scene.scene_id}.{field}")
     if package.reference_short is not None:
         words = sum(len(section.narration.split()) for section in package.script_sections)
-        if words > 84:
-            raise ProviderValidationError(f"{provider_name} narration has {words} words; reference Shorts need at most 84 so the video stays under 45 seconds")
+        if words > 96:
+            raise ProviderValidationError(f"{provider_name} narration has {words} words; reference Shorts need at most 96 so the video stays under 45 seconds")
         from tubeforge.providers.content.youtube_skills import hook_gate
         weak = hook_gate(package)
         if weak:
             raise ProviderValidationError(f"{provider_name} {weak}")
+        from tubeforge.providers.content.craft import craft_problems
+        craft = craft_problems(package)
+        if craft:
+            raise ProviderValidationError(f"{provider_name} script craft needs repair: " + " | ".join(craft))
         # Fail closed before narration/TTS: every scene must fit the phone layout.
         # Report every offending scene at once so a writer can repair them in one pass.
         from tubeforge.rendering.shorts.layout import LayoutError, SceneRenderer

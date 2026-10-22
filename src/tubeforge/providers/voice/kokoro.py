@@ -37,7 +37,7 @@ class KokoroVoiceProvider:
         model_identity = (digest(model), digest(voices))
         key = hashlib.sha256(json.dumps({"text": text, "voice": request.voice_id, "provider": self.provider_name,
                                         "version": self.settings.adapter_version, "model": model_identity,
-                                        "speed": 1.0, "language": "en-us"}, sort_keys=True).encode()).hexdigest()
+                                        "speed": self.settings.speed, "language": "en-us"}, sort_keys=True).encode()).hexdigest()
         destination = Path(request.output_path) if request.output_path else self._path(self.settings.cache_root) / request.voice_id / f"{key}.wav"
         if self._valid_wave(destination):
             return self._result(destination)
@@ -51,7 +51,7 @@ class KokoroVoiceProvider:
             if self._pipeline_identity != model_identity:
                 self._pipeline = Kokoro(str(model), str(voices))
                 self._pipeline_identity = model_identity
-            samples, sample_rate = self._pipeline.create(text, voice=request.voice_id, speed=1.0, lang="en-us")
+            samples, sample_rate = self._pipeline.create(text, voice=request.voice_id, speed=self.settings.speed, lang="en-us")
             if sample_rate != self.settings.sample_rate:
                 raise ProviderValidationError(f"Kokoro returned unexpected sample rate: {sample_rate}")
             chunks = [float(value) for value in samples]

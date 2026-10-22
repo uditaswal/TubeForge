@@ -30,8 +30,32 @@ from .timeline import SceneTiming, Timeline, Word
 LOG = logging.getLogger(__name__)
 
 
+def compress_pauses(audio, sr, max_pause, threshold=.004, frame_seconds=.01):
+    """Shorten every internal silence longer than ``max_pause`` to exactly that length."""
+    frame = max(1, round(frame_seconds * sr))
+    count = len(audio) // frame
+    if count == 0:
+        return audio
+    quiet = np.abs(audio[:count * frame]).reshape(count, frame).max(axis=1) < threshold
+    keep, limit, index = [], max(1, round(max_pause / frame_seconds)), 0
+    while index < count:
+        end = index
+        while end < count and quiet[end] == quiet[index]:
+            end += 1
+        if quiet[index] and end - index > limit and index > 0 and end < count:
+            half = limit // 2
+            keep.append((index * frame, (index + half) * frame))
+            keep.append(((end - (limit - half)) * frame, end * frame))
+        else:
+            keep.append((index * frame, end * frame))
+        index = end
+    keep.append((count * frame, len(audio)))
+    return np.concatenate([audio[start:stop] for start, stop in keep])
+
+
 def synthesize(topic, settings, output, voice):
-    primary = KokoroVoiceProvider(settings.pipeline.kokoro)
+    pacing = settings.pipeline.reference_short
+    primary = KokoroVoiceProvider(settings.pipeline.kokoro.model_copy(update={"speed": pacing.voice_speed}))
     fallback = PiperVoiceProvider(settings.pipeline.piper)
     records = []
     for index, scene in enumerate(topic.scenes):
@@ -50,6 +74,7 @@ def synthesize(topic, settings, output, voice):
         if not len(active):
             raise ValueError("voice output is silent")
         audio = audio[max(0, active[0] - round(.04 * sr)):min(len(audio), active[-1] + round(.1 * sr))]
+        audio = compress_pauses(audio, sr, pacing.max_pause_seconds)
         path = output / f"voice-{index:02d}.wav"
         sf.write(path, audio, sr, subtype="PCM_16")
         records.append({"scene_id": scene.scene_id, "file": path.name, "sha256": file_hash(path),
@@ -58,7 +83,7 @@ def synthesize(topic, settings, output, voice):
     (output / "voice-manifest.json").write_text(json.dumps(records, indent=2) + "\n")
 
 
-def align(topic, output, model_path):
+def align(topic, output, model_path, tail=.18):
     records = json.loads((output / "voice-manifest.json").read_text())
     warning = None
     try:
@@ -102,7 +127,7 @@ def align(topic, output, model_path):
             raise ValueError("aligned tokenization does not map to exact scene narration")
         words = tuple(Word(cursor + w.start_seconds, cursor + w.end_seconds) for w in measured)
         voice_end = cursor + duration
-        end = voice_end + .35
+        end = voice_end + tail
         timings.append(SceneTiming(cursor, end, words, method, voice_end))
         # Local PCM resampling is deterministic and requires no remote service.
         resampled = np.interp(np.arange(round(duration * 48000)) * sr / 48000,
@@ -155,7 +180,7 @@ def main():
     if args.stage == "synthesize":
         synthesize(topic, load_settings(args.config), args.output, args.voice)
     else:
-        align(topic, args.output, args.alignment_model)
+        align(topic, args.output, args.alignment_model, load_settings(args.config).pipeline.reference_short.scene_tail_seconds)
 
 
 if __name__ == "__main__":

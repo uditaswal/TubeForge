@@ -277,6 +277,7 @@ class KokoroProviderConfig(BaseModel):
     sample_rate: int = Field(default=24_000, ge=8_000, le=96_000)
     max_output_bytes: int = Field(default=100_000_000, ge=1_024, le=2_000_000_000)
     adapter_version: str = Field(default="m24-kokoro-v1", min_length=1, max_length=100)
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
 
     @model_validator(mode="after")
     def require_distinct_voices(self) -> "KokoroProviderConfig":
@@ -580,6 +581,10 @@ class ReferenceShortConfig(BaseModel):
     ffprobe_executable: str = "ffprobe"
     # Wall-clock budget as a multiple of video length (raise on slow hardware).
     budget_realtime_factor: float = Field(default=12.0, ge=1.0, le=100.0)
+    # Pacing: Shorts narration should run ~165–185 wpm with almost no dead air.
+    voice_speed: float = Field(default=1.15, ge=0.8, le=1.4)
+    scene_tail_seconds: float = Field(default=0.18, ge=0.12, le=0.4)
+    max_pause_seconds: float = Field(default=0.15, ge=0.05, le=1.0)
 
 
 class PipelineConfig(BaseModel):

@@ -59,8 +59,8 @@ class Timeline:
             voice_end = cursor if timing.voice_end is None else timing.voice_end
             if not math.isfinite(voice_end) or cursor > voice_end + .05 or voice_end < timing.start:
                 raise ValueError("word timing exceeds actual voice audio")
-            if not .299 <= timing.end - voice_end <= .401:
-                raise ValueError("each scene requires a 0.3–0.4 second speech tail")
+            if not .119 <= timing.end - voice_end <= .401:
+                raise ValueError("each scene requires a 0.12–0.4 second speech tail")
             previous = timing.end
         if not 25 <= previous <= 45:
             raise ValueError("reference Shorts duration must be 25–45 seconds")
