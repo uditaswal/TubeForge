@@ -71,6 +71,12 @@ def craft_problems(package) -> list[str]:
         hits = [phrase for phrase in BANNED_PHRASES if f" {phrase} " in lowered]
         if hits:
             problems.append(f"hook_option {index} uses cliché phrasing {hits}")
+    options = list(package.hook_options)
+    if len(options) >= 3:
+        if sum(h.strip().endswith("?") for h in options) > 2:
+            problems.append("more than two hook_options end in a question mark; use different formulas (named story, paradox, verdict, number shock, stakes)")
+        if sum(" but " in f" {h.casefold()} " for h in options) > 2:
+            problems.append("more than two hook_options use 'but'; vary the structure")
     questions = [index for index, text in enumerate(spoken[:-1], 1) if "?" in text]
     if len(questions) > 2:
         problems.append(f"scenes {questions} all ask rhetorical questions; keep at most two before the CTA and make the rest statements")

@@ -59,6 +59,38 @@ def normalize_content_request(request: ContentRequest) -> dict[str, Any]:
     return _normalize(generation_request_key_payload(request))
 
 
+RECIPES = {
+    "case_study": "WHO did it (named company/person/product) -> the PROBLEM before -> HOW they did it -> the counterintuitive TWIST -> the COST or effort -> the NUMERIC PAYOFF -> your VERDICT -> challenge",
+    "myth_truth": "the popular MYTH stated as viewers believe it -> why it feels true -> the sourced fact that breaks it -> the number -> the surprising limit -> your VERDICT -> challenge",
+    "stop_doing": "the common habit viewers have -> what it really costs (sourced number) -> what the data says to do instead -> the twist or exception -> VERDICT -> challenge",
+    "versus": "option A vs option B named in the first scene -> what each side claims -> the sourced evidence for each -> the deciding number -> your VERDICT (pick one) -> challenge",
+    "nobody_tells_you": "the thing nobody mentions -> why it stays hidden -> the sourced proof -> what changes if you know it -> VERDICT -> challenge",
+    "before_after": "BEFORE state with a number -> what changed and who changed it -> AFTER state with a number -> the catch -> VERDICT -> challenge",
+}
+
+
+def writers_room_block(room: dict | None) -> str:
+    """Prompt block carrying the chosen thesis from the angle pass (empty when that pass did not run)."""
+    if not room:
+        return ""
+    recipe = RECIPES.get(str(room.get("recipe")), RECIPES["case_study"])
+    return (" WRITERS' ROOM BRIEF (an earlier pass chose this angle; build the whole script around it and keep its verdict): "
+            f"THESIS={room.get('thesis')!r}; STRONGEST PROOF={room.get('proof')!r}; TWIST={room.get('twist')!r}; WHY NOW={room.get('why_now')!r}. "
+            f"STRUCTURE ({room.get('recipe')}): {recipe}. Spread these beats across the scenes; the proof number lands in the second half. ")
+
+
+ANGLE_INSTRUCTIONS = (
+    "You are the head writer of a Shorts channel that takes hard stances on tech news. From the REQUEST's sources only "
+    "(never invent facts, quotes or numbers) propose exactly three candidate theses and choose the best. Each thesis has: "
+    "thesis = one verdict sentence of at most 20 words that viewers will argue with; proof = the single strongest sourced fact with its number "
+    "(at most 25 words, present in the sources); twist = a counterintuitive detail from the sources that breaks the obvious story; "
+    "why_now = what is new or fresh about it in at most 15 words; recipe = exactly one of " + ", ".join(RECIPES) + ". "
+    "Prefer named actors (company, person, product) and numbers from primary sources, and a twist that contradicts the hype. "
+    "chosen_index (0-2) is the thesis with the best mix of surprise, defensibility from the sources and potential for a comment fight. "
+    "Return only the structured output."
+)
+
+
 def narration_word_limits(request: ContentRequest) -> tuple[int, int]:
     """Keep the writer's instructions and acceptance bounds in agreement."""
     if request.prompt_version == "m6-content-v8":
@@ -68,7 +100,7 @@ def narration_word_limits(request: ContentRequest) -> tuple[int, int]:
     return max(30, round(request.target_duration_seconds * 1.5)), round(request.target_duration_seconds * 4.0)
 
 
-def build_content_prompt(request: ContentRequest, *, template_version: str, max_chars: int) -> str:
+def build_content_prompt(request: ContentRequest, *, template_version: str, max_chars: int, writers_room: dict | None = None) -> str:
     """Build the one-call prompt from typed request data only."""
     if template_version not in SUPPORTED_CONTENT_TEMPLATE_VERSIONS:
         raise ValueError(f"unsupported Codex content prompt template: {template_version}")
@@ -85,6 +117,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "source-grounded escalation, concrete payoff and a final CTA scene whose narration first throws a one-sided challenge viewers will argue with "
             "(a pointed question or 'tell me I'm wrong'), then says Follow for more <topic>. "
             "Put that exact follow request in the final CTA headline and metadata.call_to_action. "
+            "The narrator may state opinions in first person ('I'd bet on Rust', 'I think this is wrong') but never invent personal experience or insider access. "
             "STANCE: take one clear, hard side on the topic's real trade-off and defend it without hedging in the voice-over "
             "(no 'might', 'some say', 'around', 'in one study' in narration; attribution lives in the on-screen source line). "
             "Every factual claim must still come from the supplied sources; opinions must be framed as the video's verdict, never as facts; never insult people or groups. "
@@ -107,11 +140,11 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Make the first frame readable immediately: headline lines are short, not full narration paragraphs. "
             "Set icon on every scene to the best-matching name from: shield, bug, lock, gear, bolt, cloud, database, server, code, chip, clock, chart_up, chart_down, check, cross, warning, search, document, globe, user, rocket, star (or null); never invent names. "
             "SCRIPT CRAFT (this decides whether viewers stay; the opening hook is scored and weak hooks are rejected): "
-            "Scene 1's whole narration is the hook: at most 14 words, it says you/your within the first six words, "
-            "contains one concrete number, name or date taken from the sources, names a cost or risk to the viewer "
-            "(lose, cost, risk, waste, stop, before, never, fail) and leaves a question open (why, how, what, but, nobody, almost, except) "
-            "without answering it in the same sentence. Shape, not facts: 'Your team may be losing X to Y, and almost nobody checks.' "
-            "The five hook_options use five different formulas (statistic, mistake, contrarian flip, question, stakes) and each obeys those rules. "
+            "Scene 1's whole narration is the hook: at most 14 words, it contains one concrete number, name or date taken from the sources, "
+            "names a cost, risk or surprise, and leaves something open without answering it in the same sentence. "
+            "The five hook_options must use five genuinely different formulas, each in its own voice: a named story ('Microsoft rewrote Copilot's engine in Rust. One engineer.'), "
+            "a why-now paradox ('Rust is ten years old and nothing changed. So why did everyone switch this year?'), a hard verdict, a number shock, and a stakes line addressed to the viewer. "
+            "At most two of the five end in a question mark and at most two contain the word but. Pick as the opening the one you would stop scrolling for. "
             "Never open in report voice ('Researchers found', 'A study shows', 'X fell from A to B'). "
             "Chain scenes with turns (but, so, until, then) so each scene answers the previous open question and opens the next. "
             "Speak to the viewer in second person, sentences of at most 12 words, one idea per scene, concrete nouns, no hedging filler; "
@@ -139,7 +172,8 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "counter-argument to the video's own verdict and ends in a question that forces viewers to pick a side (for example 'Strongest case for C: decades of tooling and audited code. Still betting on Rust?'). "
             "Make it provocative and opinionated but fair: take a side or frame a dilemma about the topic, never insult people, groups or languages' users, "
             "never state an unsupported fact, no links, @mentions or hashtags, and it must contain a question mark. "
-            "\nREQUEST=" + encoded + _skill_contract(request)
+            + writers_room_block(writers_room)
+            + "\nREQUEST=" + encoded + _skill_contract(request)
         )
         if len(prompt) > max_chars:
             raise ValueError(f"assembled Codex prompt exceeds configured max_prompt_chars ({max_chars})")

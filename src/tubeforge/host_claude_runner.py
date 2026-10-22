@@ -26,6 +26,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from tubeforge.core.errors import InsufficientSourcesError, ProviderValidationError
 from tubeforge.domain.contracts import ContentPackage, generation_request_key_payload
 from tubeforge.host_codex_runner import (
@@ -34,7 +36,7 @@ from tubeforge.host_codex_runner import (
 )
 from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess
 from tubeforge.providers.content.prompts import (
-    CONTENT_ENVELOPE_TEMPLATES, build_content_prompt, normalize_content_request, prompt_evidence,
+    ANGLE_INSTRUCTIONS, CONTENT_ENVELOPE_TEMPLATES, RECIPES, build_content_prompt, normalize_content_request, prompt_evidence,
 )
 
 MAX_MESSAGE_BYTES = 65_536
@@ -134,6 +136,74 @@ Validation rules your output must satisfy (violations are rejected and cost an a
 """
 
 
+ANGLE_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["theses", "chosen_index"],
+    "properties": {
+        "chosen_index": {"type": "integer", "minimum": 0, "maximum": 2},
+        "theses": {"type": "array", "minItems": 3, "maxItems": 3, "items": {
+            "type": "object", "additionalProperties": False, "required": ["thesis", "proof", "twist", "why_now", "recipe"],
+            "properties": {"thesis": {"type": "string"}, "proof": {"type": "string"}, "twist": {"type": "string"}, "why_now": {"type": "string"},
+                           "recipe": {"type": "string", "enum": list(RECIPES)}}}},
+    },
+}
+EDITOR_INSTRUCTIONS = (
+    "You are the ruthless line editor of a Shorts channel. Below are the REQUEST and a DRAFT output that already passes validation. "
+    "Return the COMPLETE improved output in exactly the same schema. Edit for: (1) hook: judge the five hook_options on whether they stop a scroll in 1.5 seconds, "
+    "make sense with no context, are specific and sound like a person said them; make the best one (or a sharper rewrite of it, at most 14 words) the scene 1 narration and headline, "
+    "and make the five options genuinely different formulas; (2) rhythm: sentences at most 12 words, one 3-5 word punch line in every two scenes, never two scenes with the same opening word; "
+    "(3) cut every hedge and filler word from the voice-over ('might', 'around', 'some say', 'in one study'; attribution stays on screen); "
+    "(4) the biggest number or twist lands in the second half and the last line before the CTA echoes the hook; (5) the CTA keeps its one-sided challenge before 'Follow for more'. "
+    "Do not add or change any fact, number, claim_id, source_id, visual quote or reveal_words index meaning; keep every field valid; keep the narration within 78-92 words total. "
+    "If the draft is already strong, change little."
+)
+
+
+def writers_room_enabled() -> bool:
+    return os.environ.get("TUBEFORGE_WRITERS_ROOM", "1") != "0"
+
+
+def _add_usage(total: dict, usage: dict) -> None:
+    total["attempts"] += 1
+    total["total_cost_usd"] += float(usage.get("total_cost_usd") or 0)
+    for key in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
+        total[key] = int(total.get(key, 0)) + int(usage.get(key) or 0)
+
+
+def angle_pass(request, root, *, model, effort, usage_total) -> tuple[dict | None, dict]:
+    """Pick one hard, defensible thesis before drafting; any failure leaves the draft pass unchanged."""
+    note: dict = {"ran": False}
+    try:
+        consume_invocation(request, root, salt="angle", limit=1)
+        encoded = json.dumps(normalize_content_request(request.request), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        raw, usage = call_claude(ANGLE_INSTRUCTIONS + "\nREQUEST=" + encoded, ANGLE_SCHEMA, model=model, effort=effort)
+        _add_usage(usage_total, usage)
+        chosen = raw["theses"][int(raw["chosen_index"])]
+        note = {"ran": True, "chosen_index": raw["chosen_index"], "theses": raw["theses"]}
+        return chosen, note
+    except Exception as error:  # the writers' room is an improvement, never a reason to fail the job
+        note["error"] = f"{type(error).__name__}: {str(error)[:200]}"
+        print("angle pass skipped: " + note["error"], file=sys.stderr, flush=True)
+        return None, note
+
+
+def editor_pass(request, root, raw, *, model, effort, schema, version, usage_total):
+    """One edit call over a valid draft; keep the draft unless the edited output validates too."""
+    note: dict = {"applied": False}
+    try:
+        consume_invocation(request, root, salt="editor", limit=1)
+        encoded = json.dumps(normalize_content_request(request.request), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        task = EDITOR_INSTRUCTIONS + "\nREQUEST=" + encoded + "\nDRAFT=" + json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+        edited, usage = call_claude(task, schema, model=model, effort=effort)
+        _add_usage(usage_total, usage)
+        package, normalizations = _validate_once(edited, request, version)
+        note["applied"] = True
+        return package, normalizations, note
+    except Exception as error:
+        note["reason"] = f"{type(error).__name__}: {_concise(error) if isinstance(error, (ValidationError, ProviderValidationError)) else str(error)[:200]}"
+        print("editor pass rejected: " + note["reason"], file=sys.stderr, flush=True)
+        return None, None, note
+
+
 def _validate_once(raw, request, version):
     if version in CONTENT_ENVELOPE_TEMPLATES:
         from tubeforge.providers.content.output import unwrap_generation
@@ -160,14 +230,18 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
     model, effort = (model, None) if model else resolve_model(request)
     version = request.request.prompt_version
     schema = codex_output_schema(envelope=version in CONTENT_ENVELOPE_TEMPLATES, reference=version == "m6-content-v8", keep_lengths=True)
-    prompt = build_content_prompt(request.request, template_version=version, max_chars=60_000)
+    usage_total: dict[str, object] = {"attempts": 0, "total_cost_usd": 0.0}
+    room_notes: dict[str, object] = {}
+    room = None
+    if version == "m6-content-v8" and writers_room_enabled():
+        room, room_notes["angle"] = angle_pass(request, root, model=model, effort=effort, usage_total=usage_total)
+    prompt = build_content_prompt(request.request, template_version=version, max_chars=60_000, writers_room=room)
     from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, preflight
     skill_hashes = preflight(template_version=version) if version in SKILL_TEMPLATES else None
     if version in CONTENT_ENVELOPE_TEMPLATES:
         from tubeforge.providers.content.output import require_source_excerpts
         require_source_excerpts(request.request)
     started = time.monotonic()
-    usage_total: dict[str, object] = {"attempts": 0, "total_cost_usd": 0.0}
     invocations = [prompt_evidence(prompt)]
     task = prompt + RULES
     package = normalizations = None
@@ -196,6 +270,11 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
                     "\nReturn the complete corrected output, changing only what is needed to fix these errors.")
     if package is None:
         raise ProviderValidationError("Claude output failed validation twice: " + last_error)
+    if version == "m6-content-v8" and writers_room_enabled():
+        edited, edited_normalizations, room_notes["editor"] = editor_pass(
+            request, root, raw, model=model, effort=effort, schema=schema, version=version, usage_total=usage_total)
+        if edited is not None:
+            package, normalizations = edited, edited_normalizations
     provenance: dict[str, object] = {"provider": "host-claude-runner", "model": model, "effort": effort,
                                       "choice": request.request.script_model or DEFAULT_CHOICE,
                                       "generated_at": datetime.now(UTC).isoformat(),
@@ -208,6 +287,8 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
         except ProviderValidationError as error:
             raise RejectedContentError(str(error), HostRunnerSuccess(
                 package=package.model_dump(mode="json"), provenance=provenance, usage=usage_total)) from error
+    if room_notes:
+        provenance["writers_room"] = room_notes
     if normalizations:
         provenance["normalizations"] = normalizations
     return HostRunnerSuccess(package=package.model_dump(mode="json"), provenance=provenance, usage=usage_total)
