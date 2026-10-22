@@ -832,6 +832,11 @@ class PipelineOrchestrator:
         self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions", "captions-display.srt", srt)
         self._transition(job, JobState.VOICE_READY)
 
+    def _reference_timing(self, job: PipelineJob, package: ContentPackage) -> dict[str, object]:
+        """Legacy-shaped timing map for publication metadata; Shorts publish without chapters."""
+        timeline = reference_short.load_timeline(package.reference_short, self._reference_dir(job))
+        return {"final_duration_seconds": timeline.timings[-1].end, "phrases": []}
+
     def _reference_inputs(self, job: PipelineJob, package: ContentPackage) -> tuple[dict[str, object], str]:
         directory = self._reference_dir(job)
         content = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
@@ -908,7 +913,8 @@ class PipelineOrchestrator:
         final_manifest = self._required_json(job.id, JobState.FINAL_RENDERING, "final_manifest")
         content = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
         package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
-        timing = self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
+        reference = self._reference_package(job)
+        timing = self._reference_timing(job, reference) if reference is not None else self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
         metadata_inputs = {"content_identity": content.checksum_sha256, "final_render_identity": final_manifest.get("render_identity"), "generator": {"provider": "deterministic-local", "model": None}, "template_version": self.publication_config.metadata_template_version, "config": self.publication_config.model_dump(mode="json", include={"title_max_length", "description_max_length", "tag_max_count", "tag_max_length", "tag_payload_max_length", "metadata_template_version"}), "timing_identity": self._required_artifact(job.id, JobState.VOICE_GENERATION, "timing_map").checksum_sha256}
         music = None
         if job.request.music_track:
@@ -928,10 +934,15 @@ class PipelineOrchestrator:
                 data["validation"]["music_attribution"] = "included"
             self._replace_json(job.id, JobState.PUBLICATION_PREPARING, "metadata", {**data, "metadata_identity": metadata_identity, "provenance": {**metadata_inputs, "validation": data["validation"]}})
         metadata = self._required_json(job.id, JobState.PUBLICATION_PREPARING, "metadata")
-        assets = self._required_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest").get("scenes", {})
-        if not isinstance(assets, dict) or not assets or any(not self._accepted_asset_valid(value) for value in assets.values()):
-            raise ProviderValidationError("thumbnail requires currently approved source assets")
-        thumbnail_inputs = {"asset_identities": sorted(str(value["checksum_sha256"]) for value in assets.values()), "content_identity": content.checksum_sha256, "title": metadata["title"], "template_version": self.publication_config.thumbnail_template_version, "dimensions": [self.publication_config.thumbnail_width, self.publication_config.thumbnail_height], "renderer_version": "m12-local-png-v1"}
+        if reference is not None:
+            # Procedural scenes carry no acquired assets; bind the thumbnail to the exact final render instead.
+            asset_identities = [final.checksum_sha256]
+        else:
+            assets = self._required_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest").get("scenes", {})
+            if not isinstance(assets, dict) or not assets or any(not self._accepted_asset_valid(value) for value in assets.values()):
+                raise ProviderValidationError("thumbnail requires currently approved source assets")
+            asset_identities = sorted(str(value["checksum_sha256"]) for value in assets.values())
+        thumbnail_inputs = {"asset_identities": asset_identities, "content_identity": content.checksum_sha256, "title": metadata["title"], "template_version": self.publication_config.thumbnail_template_version, "dimensions": [self.publication_config.thumbnail_width, self.publication_config.thumbnail_height], "renderer_version": "m12-local-png-v1"}
         thumbnail_identity = publication_identity(thumbnail_inputs)
         thumbnail = self._valid_artifact(job.id, JobState.PUBLICATION_PREPARING, "thumbnail")
         thumbnail_manifest = self._load_json_artifact(job.id, JobState.PUBLICATION_PREPARING, "thumbnail_provenance")
