@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageDraw
 
 from .layout import CAPTION, HEIGHT, SAFE, WIDTH, SceneRenderer
+from .plates import CARD
 from .timeline import FrameState
 
 PAD = 60
@@ -70,8 +71,9 @@ class LRU(OrderedDict):
 
 
 class Animator:
-    def __init__(self, renderer: SceneRenderer, seed: int = 20261022):
+    def __init__(self, renderer: SceneRenderer, seed: int = 20261022, plates=None):
         self.renderer = renderer
+        self.plates = plates  # optional real-imagery plates (stock B-roll, source/code cards)
         self.bg = ambient_background()
         rng = random.Random(seed)
         self.dots = [(rng.uniform(40, WIDTH - 40), rng.uniform(0, HEIGHT + 300), rng.uniform(18, 46),
@@ -144,13 +146,27 @@ class Animator:
                 shifted.paste(content, (0, round((1 - k) * 60)))
                 shifted.putalpha(shifted.getchannel("A").point(lambda v: round(v * k)))
                 content = shifted
+        if self.plates is not None and st.index in self.renderer.cards:
+            card = self.plates.card(st.index, st.scene_t, st.scene_dur, st.since_reveal)
+            if card is not None:
+                e = ease_out_back(min(1.0, st.scene_t / .4))
+                k = .9 + .1 * e
+                size = (max(1, round(card.width * k)), max(1, round(card.height * k)))
+                piece = card.resize(size, Image.Resampling.BILINEAR) if k != 1 else card
+                if e < 1:
+                    piece = piece.copy()
+                    piece.putalpha(piece.getchannel("A").point(lambda v: round(v * min(1.0, e * 1.5))))
+                content = content.copy()
+                cx, cy = (CARD[0] + CARD[2]) // 2, (CARD[1] + CARD[3]) // 2
+                content.alpha_composite(piece, (round(cx - size[0] / 2), round(cy - size[1] / 2)))
         zoom = 1 + PUSH_IN * min(1.0, st.scene_t / max(st.scene_dur, .1))
         return content.transform(content.size, Image.Transform.AFFINE,
                                  (1 / zoom, 0, WIDTH / 2 * (1 - 1 / zoom), 0, 1 / zoom, 860 * (1 - 1 / zoom)),
                                  resample=Image.Resampling.BILINEAR)
 
     def frame(self, st: FrameState, t: float, rails: bool = False) -> Image.Image:
-        image = self.background(t)
+        stock = self.plates.background(st.index, st.scene_t, st.scene_dur) if self.plates is not None else None
+        image = stock if stock is not None else self.background(t)
         content = self.content(st)
         image.paste(content, (0, 0), content)
         caption = self.caption(st.index, st.chunk, st.active)

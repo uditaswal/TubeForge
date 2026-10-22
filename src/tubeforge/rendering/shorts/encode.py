@@ -59,7 +59,7 @@ def checked(command, *, deadline, cancelled):
 
 def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
            cancelled: Callable[[], bool] = lambda: False, budget_rtf=10.0, max_swap_growth_kib=524288, motion=True,
-           ffmpeg="ffmpeg", ffprobe="ffprobe"):
+           ffmpeg="ffmpeg", ffprobe="ffprobe", plates=None):
     """Promote only a fully decoded, measured video. Caller owns job fencing.
 
     The cancelled callback must also return True on ownership loss. Destination
@@ -74,12 +74,14 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
     animator = None
     if motion:
         from .motion import Animator
-        animator = Animator(timeline.renderer)
+        animator = Animator(timeline.renderer, plates=plates)
     report = {"schema_version": "reference-video-qa-v1", "passed": False,
               "topic_sha256": hashlib.sha256(timeline.topic.model_dump_json().encode()).hexdigest(),
               "audio_sha256": file_hash(audio), "layout": timeline.renderer.validate(),
               "alignment": [s.alignment for s in timeline.timings], "draft": draft,
-              "budget_realtime_factor": budget_rtf, "motion": motion}
+              "budget_realtime_factor": budget_rtf, "motion": motion,
+              "plates": {str(i): (plates.entry(i).get("kind"), (plates.entry(i).get("evidence") or {}).get("asset_id"))
+                         for i in range(len(timeline.topic.scenes)) if plates is not None and plates.entry(i)}}
     qa_path = destination.with_suffix(".qa.json")
     try:
         with tempfile.TemporaryDirectory(prefix="reference-render-", dir=destination.parent) as directory:
@@ -183,5 +185,7 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
         report["failure"] = {"type": type(error).__name__, "message": str(error)}
         raise
     finally:
+        if plates is not None:
+            plates.release()
         qa_path.write_text(json.dumps(report, indent=2) + "\n")
     return report

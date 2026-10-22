@@ -36,7 +36,7 @@ class SceneTiming:
 
 
 class Timeline:
-    def __init__(self, topic: ShortsTopic, timings: tuple[SceneTiming, ...]):
+    def __init__(self, topic: ShortsTopic, timings: tuple[SceneTiming, ...], cards: frozenset[int] = frozenset()):
         if len(topic.scenes) != len(timings):
             raise ValueError("timings must match every scene")
         previous = 0.0
@@ -67,7 +67,7 @@ class Timeline:
         if timings[-1].end - timings[-1].start < 2.5:
             raise ValueError("closing CTA needs at least 2.5 seconds")
         self.topic, self.timings, self.duration = topic, timings, previous
-        self.renderer = SceneRenderer(topic)
+        self.renderer = SceneRenderer(topic, cards)
         self.renderer.validate()
 
     def event(self, seconds: float):

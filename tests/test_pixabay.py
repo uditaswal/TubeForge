@@ -128,7 +128,10 @@ def test_best_prefers_portrait_and_skips_used(tmp_path):
     wide = StockAsset("video", "1", "p", "a", "t", "https://cdn.pixabay.com/1.mp4", 1920, 1080, 10)
     tall = StockAsset("video", "2", "p", "a", "t", "https://cdn.pixabay.com/2.mp4", 1080, 1920, 10)
     assert PixabayClient.best([wide, tall]).asset_id == "2"
+    assert PixabayClient.best([tall, wide]).asset_id == "2"
     assert PixabayClient.best([wide, tall], exclude={"2"}).asset_id == "1"
+    on_topic = StockAsset("video", "3", "p", "a", "server, room", "https://cdn.pixabay.com/3.mp4", 1280, 720, 10)
+    assert PixabayClient.best([tall, on_topic], query="server room").asset_id == "3"
     assert PixabayClient.best([], exclude=set()) is None
 
 
