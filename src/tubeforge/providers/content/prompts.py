@@ -88,6 +88,8 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "STANCE: take one clear, hard side on the topic's real trade-off and defend it without hedging in the voice-over "
             "(no 'might', 'some say', 'around', 'in one study' in narration; attribution lives in the on-screen source line). "
             "Every factual claim must still come from the supplied sources; opinions must be framed as the video's verdict, never as facts; never insult people or groups. "
+            "Every middle (teaching) scene must narrate at least one sourced claim and cite it, so put the verdict on top of a sourced fact "
+            "('Android's data says new code is the danger. Stop rewriting old C.'); unsourced opinion lines belong only in the hook or CTA scene. "
             "PAYOFF: keep the hook's question open; the strongest number or twist (the big_stat scene, if any) lands in the second half of the video, "
             "and the last line before the CTA lands a verdict that echoes the hook's words so the loop rewards a rewatch. "
             "ANTI-SLOP: never use cliché phrasing (game-changer, here's the thing, dive in, the truth is, pays off, but what changed, unlock, "

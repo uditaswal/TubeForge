@@ -126,11 +126,12 @@ class ShortsTopic(StrictModel):
         ids = {s.source_id for s in self.sources}
         if len(ids) != len(self.sources) or len({s.scene_id for s in self.scenes}) != len(self.scenes):
             raise ValueError("scene and source identities must be unique")
-        for scene in self.scenes:
+        for number, scene in enumerate(self.scenes, 1):
             if not set(scene.source_ids) <= ids:
-                raise ValueError("scene cites an unknown source")
+                raise ValueError(f"scene {number} cites an unknown source")
             if scene.template not in {"hook", "cta"} and not scene.source_ids:
-                raise ValueError("every teaching scene requires a source")
+                raise ValueError(f"every teaching scene requires a source: scene {number} ({scene.template}) has none; "
+                                 "give it a factual claim with a source, or move pure opinion into the hook or CTA scene")
             count = (len(scene.nodes) if isinstance(scene, Flow) else len(scene.items) if isinstance(scene, Checklist)
                      else len(scene.lines) if isinstance(scene, Terminal) else 2 if isinstance(scene, (BigStat, BeforeAfter))
                      else len(scene.chips) if isinstance(scene, CTA) else 1)

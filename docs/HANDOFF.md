@@ -63,7 +63,7 @@ Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 3. Content quality quick wins from `docs/REVIEW_2026-10-22_CONTENT_QUALITY.md` §9 step 1 (voice speed/gaps, anti-slop validator, late payoff, comment CTA, no duplicate text, fonts), then the writers' room (§3 S1–S3).
 4. Image layer beyond icons: Wikimedia/stock photo slot per scene (rights path exists in `providers/media/`), better fonts.
 5. Scheduler → private YouTube, then Instagram (hook gate/recipes are superseded by the content review's S1–S3).
-6. Codex (gpt-sol) host runner is the old wheel — its prompts lack the craft block/icons until redeployed, so the worker's new hook gate may reject Codex scripts: icons/phone-fit prompt text only reach Codex after the root redeploy
+6. **Codex v8 jobs now REQUIRE the host redeploy** (22 Oct): v8 prompts no longer embed the om-* skills, so the old wheel's preflight hashes differ from the worker's and the job stops before any model call. Codex (gpt-sol) host runner is the old wheel — its prompts lack the craft block/icons until redeployed, so the worker's new hook gate may reject Codex scripts: icons/phone-fit prompt text only reach Codex after the root redeploy
    (`docs/tubeforge-codex-runner-runtime.md`); Codex output is still validated by the worker (fit/word-count checks).
 
 ## UI follow-ups for the Codex UI branch (no UI was touched here)

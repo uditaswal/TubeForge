@@ -428,7 +428,7 @@ def main() -> None:
                 request = receive_request(connection)
                 if request.operation == "PreflightContentV1":
                     from tubeforge.providers.content.youtube_skills import preflight
-                    hashes = preflight()
+                    hashes = preflight(template_version=request.request.prompt_version)
                     prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
                     from tubeforge.providers.content.prompts import prompt_evidence
                     evidence = prompt_evidence(prompt)
