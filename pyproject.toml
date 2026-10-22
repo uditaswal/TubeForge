@@ -33,6 +33,7 @@ reference-renderer = [
   "numpy>=2,<3",
   "soundfile>=0.13,<1",
   "pygments>=2.17,<3",
+  "playwright>=1.45,<2",  # drives the system Chromium (no browser download) for source screenshots
 ]
 dev = [
   "httpx>=0.28,<1",

@@ -28,6 +28,31 @@ def _content(text: str) -> list[str]:
     return [word for word in _words(text) if word not in STOPWORDS]
 
 
+def visual_problems(package) -> list[str]:
+    """Real imagery: enough of it, never two plain template scenes in a row, quotes copied from the cited source."""
+    scenes = package.reference_short.scenes
+    problems: list[str] = []
+    kinds = [scene.visual.kind if scene.visual is not None else None for scene in scenes]
+    if sum(kind is not None for kind in kinds) < 4:
+        problems.append(f"only {sum(kind is not None for kind in kinds)} of {len(scenes)} scenes have a visual; give at least 4 scenes a stock, source or code visual")
+    if any(a is None and b is None for a, b in zip(kinds, kinds[1:])):
+        problems.append("two consecutive scenes have no visual; alternate so the viewer never sees two plain template scenes in a row")
+    if kinds.count("stock") > 3:
+        problems.append("more than 3 stock scenes; use source screenshots or code for scenes that prove a claim")
+    sources = {source.source_id: source for source in getattr(getattr(package, "request", None), "sources", ())}
+    for index, scene in enumerate(scenes, 1):
+        visual = scene.visual
+        if visual is not None and visual.kind == "source" and sources:
+            excerpts = " ".join(_norm(sources[s].excerpt) for s in scene.source_ids if s in sources)
+            if _norm(visual.quote) not in excerpts:
+                problems.append(f"scene {index} visual quote is not an exact passage of its cited source excerpt; copy the words verbatim")
+    return problems
+
+
+def _norm(text: str) -> str:
+    return " ".join(re.sub(r"[\u2018\u2019]", "'", re.sub(r"[\u201c\u201d]", '"', text)).casefold().split())
+
+
 def craft_problems(package) -> list[str]:
     """Return repair instructions for a reference package, or an empty list."""
     topic = package.reference_short
@@ -64,6 +89,7 @@ def craft_problems(package) -> list[str]:
     if not COMMENT_PROMPT.search(before_follow):
         problems.append("the CTA scene must open with a one-sided challenge viewers can answer in the comments "
                         "(a question or 'tell me I'm wrong') before the follow request")
+    problems += visual_problems(package)
     # One copy of the words: a heading that just repeats the narration adds nothing to the frame.
     for index, scene in enumerate(scenes[1:-1], 2):
         heading = _content(getattr(scene, "heading", ""))
