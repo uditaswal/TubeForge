@@ -138,3 +138,24 @@ def select_hook(package):
     original = report['selected_hook']
     report['hook_selection'] = {'model_choice': original, 'selected': original, 'finalists': [row['hook'] for row in finalists], 'model_choice_is_finalist': any(row['hook'] == original for row in finalists), 'rule': 'Codex chooses the hook and writes the matching opening; Python reports heuristic scores without rewriting narration.'}
     return package, report
+
+
+HOOK_MINIMUM = 58  # hookscore "WORKABLE" starts at 55; STRONG at 72
+
+
+def hook_gate(package, root: Path | None = None, minimum: int = HOOK_MINIMUM) -> str | None:
+    """Return a repair message when the opening sentence is a weak hook, else None.
+
+    Uses the canonical yt-script scorer (a heuristic signal, not a view prediction) and
+    names the two weakest properties with the scorer's own fix advice so a writer can
+    repair them deliberately instead of guessing.
+    """
+    hook = _tool(root or resource_root(), "yt-script", "hookscore.py")
+    opening = re.split(r"(?<=[.!?…])\s+", package.script_sections[0].narration.strip(), maxsplit=1)[0]
+    parts, verdict, _, _ = hook.score(opening)
+    if verdict >= minimum:
+        return None
+    weakest = sorted(parts, key=parts.get)[:2]
+    advice = "; ".join(f"{name} {parts[name]} ({hook.FIX[name]})" for name in weakest)
+    return (f"opening hook {opening!r} scores {verdict}/100 (needs at least {minimum}): {advice}. "
+            "Rewrite scene 1's narration (and the matching hook_option) as a stronger hook without inventing facts")

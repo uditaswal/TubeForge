@@ -177,6 +177,21 @@ class CodexProviderConfig(BaseModel):
         return value
 
 
+class ClaudeProviderConfig(CodexProviderConfig):
+    """Claude as an alternative script owner, behind its own user-level socket.
+
+    Same limits and request protocol as Codex; only the runner and model differ.
+    A job selects it with ``ContentRequest.script_owner == "claude"``.
+    """
+
+    enabled: bool = False
+    executable: str = Field(default="claude", min_length=1, max_length=4_096)
+    model: str = Field(default="claude-opus-5-5", min_length=1, max_length=200)
+    socket_path: Path = Path("/run/tubeforge-claude/claude.sock")
+    timeout_seconds: int = Field(default=900, ge=1, le=7_200)
+    socket_timeout_seconds: int = Field(default=590, ge=1, le=900)
+
+
 class OllamaProviderConfig(BaseModel):
     """Bounded settings for an opt-in local or LAN Ollama content adapter."""
 
@@ -524,6 +539,9 @@ class VideoPresetConfig(BaseModel):
     aspect_ratio: str = Field(default="16:9", pattern=r"^(16:9|9:16)$")
     minimum_duration_seconds: int = Field(default=30, ge=30, le=7_200)
     maximum_duration_seconds: int = Field(default=7_200, ge=30, le=7_200)
+    # Overrides pipeline.codex.prompt_template_version (e.g. "m6-content-v8" selects
+    # the reference-short-v1 scene profile and its shared renderer).
+    prompt_version: str | None = Field(default=None, min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def require_duration_within_preset_bounds(self) -> "VideoPresetConfig":
@@ -547,6 +565,23 @@ class VideoGenerationConfig(BaseModel):
             raise ValueError("video_generation.music_catalog track names must be unique")
         return self
 
+class ReferenceShortConfig(BaseModel):
+    """Settings for the shared reference-short-v1 renderer (``rendering/shorts``).
+
+    Used only by jobs whose package carries ``reference_short`` scenes (prompt
+    ``m6-content-v8``). Models run sequentially in child processes to bound RAM.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    alignment_model_path: Path | None = None
+    voice: str = Field(default="af_bella", min_length=1, max_length=200)
+    ffmpeg_executable: str = "ffmpeg"
+    ffprobe_executable: str = "ffprobe"
+    # Wall-clock budget as a multiple of video length (raise on slow hardware).
+    budget_realtime_factor: float = Field(default=12.0, ge=1.0, le=100.0)
+
+
 class PipelineConfig(BaseModel):
     """Safe provider selection and deterministic M7 voice settings."""
 
@@ -559,9 +594,11 @@ class PipelineConfig(BaseModel):
     voice_provider: str = Field(default="fake", pattern=r"^(fake|piper|piper-http|kokoro|hybrid)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
+    claude: ClaudeProviderConfig = Field(default_factory=ClaudeProviderConfig)
     piper: PiperProviderConfig = Field(default_factory=PiperProviderConfig)
     kokoro: KokoroProviderConfig = Field(default_factory=KokoroProviderConfig)
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
+    reference_short: ReferenceShortConfig = Field(default_factory=ReferenceShortConfig)
     preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
     final: FinalRenderConfig = Field(default_factory=FinalRenderConfig)
     shorts_preview: ShortsPreviewRenderConfig = Field(default_factory=ShortsPreviewRenderConfig)

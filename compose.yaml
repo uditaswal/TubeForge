@@ -69,7 +69,8 @@ services:
       PYTHONPATH: /app/src
       TUBEFORGE_PIPER_SERVER_URL: http://piper-tts:5000
     restart: unless-stopped
-    mem_limit: 1g
+    # Reference Shorts run Kokoro, Whisper alignment and the encoder sequentially.
+    mem_limit: 2g
 
   piper-tts:
     build: .

@@ -5,6 +5,10 @@ import re
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
+from .icons import ICON_NAMES
+
+IconName = Literal[ICON_NAMES]  # type: ignore[valid-type]
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -22,6 +26,8 @@ class Scene(StrictModel):
     caption: str = Field(min_length=1, max_length=400)
     source_ids: tuple[str, ...] = Field(default=(), max_length=3)
     reveal_words: tuple[int, ...] = Field(min_length=1, max_length=3)
+    # Optional badge from the fixed procedural icon set; never a file or URL.
+    icon: IconName | None = None
 
     @model_validator(mode="after")
     def narration_and_anchors(self):

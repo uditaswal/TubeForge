@@ -12,6 +12,8 @@ from functools import lru_cache
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from .icons import badge
+
 from .schema import ShortsTopic
 
 WIDTH, HEIGHT = 1080, 1920
@@ -139,9 +141,11 @@ class SceneRenderer:
         self._base_key = self._frame_key = None
         self._base = self._frame = None
 
-    def compose(self, index: int, revealed: int = 3):
+    def compose(self, index: int, revealed: int = 3, grow: float = 1.0, transparent: bool = False):
+        """Draw one scene. ``transparent`` omits the background so a motion layer
+        can composite it; ``grow`` (0..1) animates the newest big_stat figure."""
         scene = self.topic.scenes[index]
-        c = Canvas(background().copy())
+        c = Canvas(Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0)) if transparent else background().copy())
         count = len(self.topic.scenes)
         gap, span = 12, (850 - (count - 1) * 12) / count
         for j in range(count):
@@ -149,12 +153,19 @@ class SceneRenderer:
             c.mark(Mark(f"progress{j}", "progress", bounds))
             c.draw.rounded_rectangle(bounds, radius=3, fill=CYAN if j <= index else "#29374d")
         kind = scene.template
+        dy = 0
         if kind == "hook":
+            top, step = 520, 150
+            if scene.icon:
+                self.icon(c, scene.icon, (495, 380), 220)
+                top, step = 620, 135
             for j, line in enumerate(scene.headline):
-                c.text(f"headline{j}", line, (495, 500 + j * 150), size=126, minimum=84,
+                c.text(f"headline{j}", line, (495, top + j * step), size=126, minimum=84,
                        color=CYAN if j == len(scene.headline) - 1 else WHITE)
-            self.chips(c, scene.chips, 1050, len(scene.chips))
+            self.chips(c, scene.chips, top + step * len(scene.headline) + 20, len(scene.chips))
         elif kind == "cta":
+            if scene.icon:
+                self.icon(c, scene.icon, (495, 430), 200)
             self.chips(c, scene.chips, 620, revealed)
             # A longer follow request uses two deliberately composed lines.
             words = scene.headline.split()
@@ -164,46 +175,59 @@ class SceneRenderer:
                 c.text(f"cta{j}", line, (495, 850 + j * 100), size=76, minimum=54, color=CYAN)
             c.text("subline", scene.subline, (495, 1120), size=44)
         else:
-            c.text("heading", scene.heading, (495, 355), size=72, minimum=48)
+            if scene.icon:
+                self.icon(c, scene.icon, (495, 300), 140)
+                dy = 65
+            c.text("heading", scene.heading, (495, 355 + dy), size=72, minimum=48)
             if kind == "big_stat":
                 values = [(scene.before, scene.before_label), (scene.after, scene.after_label)]
                 scale = max(scene.before, scene.after, 1)
                 for j, (value, label) in enumerate(values):
+                    y = 560 + dy + j * 390
                     if j >= revealed:
+                        c.draw.rounded_rectangle((100, y + 120, 890, y + 148), radius=12, fill="#1b2840")
                         continue
-                    y = 560 + j * 390
+                    amount = grow if j == revealed - 1 else 1.0
+                    shown = value * amount
+                    text = f"{shown:.1f}".rstrip("0").rstrip(".") if amount < 1 and value != int(value) else f"{round(shown) if amount < 1 else value:g}"
                     c.text(f"label{j}", label, (495, y - 80), size=44, color=MUTED)
-                    c.text(f"number{j}", f"{value:g}{scene.unit}", (495, y + 20),
+                    c.text(f"number{j}", text + scene.unit, (495, y + 20),
                            size=154, minimum=100, color=AMBER if j == 0 else CYAN)
                     bounds = (100, y + 120, 890, y + 148)
                     c.mark(Mark(f"bar{j}", "graphic", bounds))
                     c.draw.rounded_rectangle(bounds, radius=12, fill="#26364d")
-                    if value:
-                        c.draw.rounded_rectangle((100, y + 120, 100 + 790 * value / scale, y + 148),
+                    if shown:
+                        c.draw.rounded_rectangle((100, y + 120, max(112, 100 + 790 * shown / scale), y + 148),
                                                  radius=10, fill=AMBER if j == 0 else CYAN)
                 if revealed > 1:
-                    c.arrow("change", 740, 790)
+                    c.arrow("change", 740 + dy, 790 + dy)
             elif kind in {"flow", "checklist", "before_after"}:
                 items = scene.nodes if kind == "flow" else scene.items if kind == "checklist" else (scene.before, scene.after)
+                # Fixed slots for the full set, centred in the content band, so
+                # a reveal never shifts neighbours and the frame is used well.
+                height, gap = 170, 76
+                block = len(items) * height + (len(items) - 1) * gap
+                top = round(820 - block / 2)
                 for j, value in enumerate(items):
-                    if j >= revealed:
+                    y = top + j * (height + gap)
+                    if j >= revealed:  # dim placeholder: the frame is never empty before a reveal
+                        c.draw.rounded_rectangle((90, y, 900, y + height), radius=24, outline="#25344d", width=2)
                         continue
-                    y = 550 + j * 225
                     key = f"item{j}"
-                    c.box(key, (90, y, 900, y + 155), outline=CYAN if j else "#536b87")
+                    c.box(key, (90, y, 900, y + height), outline=CYAN if j else "#536b87")
                     label = f"✓  {value}" if kind == "checklist" else value
-                    c.text(key + "text", label, (495, y + 78), size=60, minimum=40, width=760, parent=key)
+                    c.text(key + "text", label, (495, y + height // 2), size=66, minimum=40, width=760, parent=key)
                     if kind != "checklist" and j:
-                        c.arrow(f"arrow{j}", y - 57, y - 14)
+                        c.arrow(f"arrow{j}", y - gap + 10, y - 10)
             elif kind == "terminal":
-                c.box("terminal", (80, 510, 910, 1160), color="#0a121e", outline="#536b87")
-                c.text("evidence", scene.evidence_label, (495, 565), size=28, minimum=28,
+                c.box("terminal", (80, 510 + dy, 910, 1160 + dy), color="#0a121e", outline="#536b87")
+                c.text("evidence", scene.evidence_label, (495, 565 + dy), size=28, minimum=28,
                        color=MUTED, parent="terminal")
                 for j, line in enumerate(scene.lines):
                     if j >= revealed:
                         continue
                     prefix = "$ " if line.kind == "command" else ""
-                    c.text(f"line{j}", prefix + line.text, (495, 700 + j * 160), size=48,
+                    c.text(f"line{j}", prefix + line.text, (495, 700 + dy + j * 160), size=48,
                            minimum=40, width=770, mono=True, parent="terminal",
                            color=GREEN if line.kind == "output" else WHITE)
         sources = {source.source_id: source for source in self.topic.sources}
@@ -212,12 +236,20 @@ class SceneRenderer:
                    size=26, minimum=26, color=MUTED, role="source")
         return c
 
+    def icon(self, c, name, center, diameter):
+        x, y = center
+        bounds = (x - diameter / 2, y - diameter / 2, x + diameter / 2, y + diameter / 2)
+        c.mark(Mark("icon", "graphic", bounds))
+        sprite = badge(name, diameter)
+        c.image.alpha_composite(sprite, (round(bounds[0]), round(bounds[1]))) if c.image.mode == "RGBA" else c.image.paste(sprite, (round(bounds[0]), round(bounds[1])), sprite)
+
     def chips(self, c, labels, y, revealed):
         for j, label in enumerate(labels):
-            if j >= revealed:
-                continue
             width = (810 - 20 * (len(labels) - 1)) / len(labels)
             x = 90 + j * (width + 20)
+            if j >= revealed:
+                c.draw.rounded_rectangle((x, y, x + width, y + 100), radius=24, outline="#25344d", width=2)
+                continue
             key = f"chip{j}"
             c.box(key, (x, y, x + width, y + 100), color="#183c46")
             c.text(key + "text", label, (x + width / 2, y + 50), size=44, minimum=40,
@@ -230,7 +262,7 @@ class SceneRenderer:
         for j, word in enumerate(words):
             width = font(84).getlength(word)
             c.text(f"caption{j}", word, (x + width / 2, 1385), size=84, minimum=84,
-                   width=width + 14, color=CYAN if j == active else WHITE, role="caption", stroke=6)
+                   width=width + 30, color=CYAN if j == active else WHITE, role="caption", stroke=6)
             x += width + font(84).getlength(" ")
 
     def validate(self):

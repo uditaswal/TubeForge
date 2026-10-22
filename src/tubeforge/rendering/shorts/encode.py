@@ -58,7 +58,7 @@ def checked(command, *, deadline, cancelled):
 
 
 def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
-           cancelled: Callable[[], bool] = lambda: False, budget_rtf=10.0,
+           cancelled: Callable[[], bool] = lambda: False, budget_rtf=10.0, max_swap_growth_kib=524288, motion=True,
            ffmpeg="ffmpeg", ffprobe="ffprobe"):
     """Promote only a fully decoded, measured video. Caller owns job fencing.
 
@@ -71,11 +71,15 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
     started = time.monotonic()
     deadline = started + max(60, timeline.duration * budget_rtf)
     initial_swap = swap_used_kib()
+    animator = None
+    if motion:
+        from .motion import Animator
+        animator = Animator(timeline.renderer)
     report = {"schema_version": "reference-video-qa-v1", "passed": False,
               "topic_sha256": hashlib.sha256(timeline.topic.model_dump_json().encode()).hexdigest(),
               "audio_sha256": file_hash(audio), "layout": timeline.renderer.validate(),
               "alignment": [s.alignment for s in timeline.timings], "draft": draft,
-              "budget_realtime_factor": budget_rtf}
+              "budget_realtime_factor": budget_rtf, "motion": motion}
     qa_path = destination.with_suffix(".qa.json")
     try:
         with tempfile.TemporaryDirectory(prefix="reference-render-", dir=destination.parent) as directory:
@@ -101,15 +105,15 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
                         if time.monotonic() > deadline:
                             raise TimeoutError("render exceeded its local realtime budget")
                         current_swap = swap_used_kib()
-                        if current_swap > initial_swap:
+                        if current_swap - initial_swap > max_swap_growth_kib:
                             report.update(swap_growth_kib=current_swap - initial_swap,
                                           peak_process_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
                                           stopped_at_frame=frame_index)
                             raise MemoryError("host swap grew during render")
                         peak_rss = max(peak_rss, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-                        event = timeline.event(frame_index / 30)
-                        if event != previous_event:
-                            frame = timeline.renderer.frame(*event)
+                        event = (timeline.state(frame_index / 30), frame_index / 30) if animator else timeline.event(frame_index / 30)
+                        if animator is not None or event != previous_event:
+                            frame = animator.frame(*event) if animator else timeline.renderer.frame(*event)
                             if draft:
                                 frame = frame.resize((width, height), Image.Resampling.LANCZOS)
                             raw = frame.tobytes()
@@ -169,7 +173,7 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
                           swap_growth_kib=swap_used_kib() - initial_swap)
             if not -15 <= loudness["input_i"] <= -13 or loudness["input_tp"] > -1.5:
                 raise ValueError(f"encoded audio fails reference gate: {loudness}")
-            if report["swap_growth_kib"] > 0:
+            if report["swap_growth_kib"] > max_swap_growth_kib:
                 raise MemoryError("host swap grew during render")
             if cancelled():
                 raise RenderCancelled("ownership lost before local promotion")

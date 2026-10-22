@@ -110,7 +110,7 @@ def cli_failure_detail(stdout: bytes, stderr: bytes) -> str:
     return _redact("; ".join(failures[-2:]) or stderr.decode(errors="replace") or f"CLI events: {event_types}")
 
 
-def codex_output_schema(*, envelope: bool = False, reference: bool = False) -> dict[str, object]:
+def codex_output_schema(*, envelope: bool = False, reference: bool = False, keep_lengths: bool = False) -> dict[str, object]:
     """Make the domain schema acceptable to Codex's strict structured output.
 
     Pydantic omits defaulted fields from ``required`` and emits string
@@ -186,8 +186,9 @@ def codex_output_schema(*, envelope: bool = False, reference: bool = False) -> d
                 value["anyOf"] = value.pop("oneOf")
             # Keep the CLI-facing schema within the documented strict subset.
             # The Pydantic model remains the authoritative output validator.
-            value.pop("minLength", None)
-            value.pop("maxLength", None)
+            if not keep_lengths:
+                value.pop("minLength", None)
+                value.pop("maxLength", None)
             if value.get("format") not in {None, "date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid"}:
                 value.pop("format", None)
             if value.get("type") == "object":

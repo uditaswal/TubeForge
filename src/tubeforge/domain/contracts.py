@@ -71,6 +71,21 @@ class ContentRequest(DomainModel):
     clip_count: int = Field(default=1, ge=1, le=12)
     preset_name: str = Field(default="default", min_length=1, max_length=100)
     aspect_ratio: str = Field(default="16:9", pattern=r"^(16:9|9:16)$")
+    # Which AI writes the script for this job. The default is omitted from the
+    # serialized form so existing jobs, cache keys and host requests stay
+    # byte-identical; only a non-default owner changes them.
+    script_owner: str = Field(default="codex", pattern=r"^(codex|claude)$")
+    # Which model the owner runs (Claude only): "sonnet-medium" | "opus". None = owner default.
+    script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus)$")
+
+    @model_serializer(mode="wrap")
+    def omit_default_script_fields(self, handler):
+        value = handler(self)
+        if self.script_owner == "codex":
+            value.pop("script_owner", None)
+        if self.script_model is None:
+            value.pop("script_model", None)
+        return value
 
     @model_validator(mode="after")
     def require_unique_source_ids(self) -> ContentRequest:

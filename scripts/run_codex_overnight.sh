@@ -13,7 +13,7 @@ cd "$ROOT" || exit 1
 ROUNDS="${ROUNDS:-10}"
 
 LOG_DIR=".codex-overnight"
-MASTER_PROMPT="docs/overnight/MISSION.md"
+MASTER_PROMPT="docs/HANDOFF.md"
 
 mkdir -p "$LOG_DIR"
 
@@ -21,12 +21,8 @@ CONTINUE_PROMPT="
 Continue the TubeForge overnight mission.
 
 First read:
-- docs/overnight/MISSION.md
-- docs/overnight/MASTER_PLAN.md if present
-- docs/overnight/STATUS.md if present
-- docs/overnight/BLOCKERS.md if present
-- docs/overnight/TEST_RESULTS.md if present
-- AGENTS.md if present
+- docs/HANDOFF.md (current phase, next step, open decisions)
+- AGENTS.md
 
 Inspect the actual repository state and git diff.
 
@@ -41,10 +37,9 @@ For each milestone:
 2. add or update tests,
 3. run relevant tests,
 4. fix regressions,
-5. update docs/overnight/STATUS.md,
-6. update docs/overnight/BLOCKERS.md,
-7. update docs/overnight/TEST_RESULTS.md,
-8. continue to the next feasible milestone.
+5. update docs/HANDOFF.md (done / next step / blockers / last commit),
+6. commit at each green checkpoint,
+7. continue to the next feasible milestone.
 
 Do not stop merely because one milestone is complete.
 
@@ -60,7 +55,7 @@ If real credentials are required:
 Before ending this turn:
 - run relevant tests,
 - inspect git status,
-- update the overnight documentation,
+- update docs/HANDOFF.md,
 - leave the repository in a clean/resumable state.
 "
 

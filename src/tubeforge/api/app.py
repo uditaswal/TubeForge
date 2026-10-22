@@ -106,6 +106,14 @@ class VideoBriefRequest(BaseModel):
     channel_identity: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     source_title: str | None = Field(default=None, max_length=500)
     source_excerpt: str | None = Field(default=None, max_length=24_000)
+    script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
+    # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
+    script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus|gpt-sol)$")
+
+
+# id -> (script owner, Claude model choice). Sonnet is the default for testing.
+SCRIPT_MODELS = {"sonnet-medium": ("claude", "sonnet-medium"), "opus": ("claude", "opus"), "gpt-sol": ("codex", None)}
+DEFAULT_SCRIPT_MODEL = "sonnet-medium"
 
 
 class SourceClipRequest(BaseModel):
@@ -225,11 +233,19 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         elif value.source_title or value.source_excerpt:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source title and excerpt require a source URL")
     from tubeforge.providers.content.youtube_skills import voice_for
+    choice = value.script_model or ("gpt-sol" if value.script_owner == "codex" else DEFAULT_SCRIPT_MODEL)
+    if choice != "gpt-sol" and not settings.pipeline.claude.enabled:
+        if value.script_model is None and value.script_owner is None:
+            choice = "gpt-sol"  # Claude not configured: fall back to the Codex default
+        else:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Claude script writers are not enabled in this TubeForge configuration")
+    owner, claude_model = SCRIPT_MODELS[choice]
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     return ContentRequest(
+        script_owner=owner, script_model=claude_model,
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
-        language="en", audience=value.audience, prompt_version=settings.pipeline.codex.prompt_template_version,
+        language="en", audience=value.audience, prompt_version=preset.prompt_version or settings.pipeline.codex.prompt_template_version,
         sources=tuple(sources),
         notes=notes, review_mode=value.review_mode or preset.review_mode,
         captions_enabled=preset.captions_enabled if value.captions_enabled is None else value.captions_enabled,
@@ -730,8 +746,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const channelSelect=document.createElement('select');channelSelect.name='channel_identity';channelSelect.disabled=true;
           channelSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading profiles…'}));channelLabel.append(channelSelect);form.insertBefore(channelLabel,presetLabel);
           fetch('/api/content-profiles').then(async response=>{if(!response.ok)throw Error();const data=await response.json();channelSelect.replaceChildren();data.profiles.forEach(profile=>channelSelect.append(Object.assign(document.createElement('option'),{value:profile.identity,textContent:profile.identity+(profile.uses_default?' (default voice)':'')})));channelSelect.value=data.default_identity;channelSelect.disabled=false;}).catch(()=>{channelSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Configured default (profile list unavailable)'}));});
+          const ownerLabel=document.createElement('label');ownerLabel.textContent='Script writer (AI model)';
+          const ownerSelect=document.createElement('select');ownerSelect.name='script_model';ownerSelect.id='scriptModel';
+          ownerSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading models…'}));ownerLabel.append(ownerSelect);form.insertBefore(ownerLabel,presetLabel);
+          fetch('/api/content-profiles').then(r=>r.ok?r.json():null).then(data=>{if(!data||!data.script_models)return;ownerSelect.replaceChildren();data.script_models.forEach(o=>ownerSelect.append(Object.assign(document.createElement('option'),{value:o.id,textContent:o.label,disabled:!o.enabled})));ownerSelect.value=data.default_script_model;}).catch(()=>{ownerSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Server default'}));});
           const originalFetch=window.fetch;
-          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.channel_identity=channelSelect.value||null;body.music_track=document.querySelector('#musicSelect')?.value||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
+          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.script_model=ownerSelect.value||null;body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.channel_identity=channelSelect.value||null;body.music_track=document.querySelector('#musicSelect')?.value||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
           const panel = document.createElement('fieldset');
           panel.style.marginTop = '18px'; panel.style.border = '1px solid #31415f'; panel.style.borderRadius = '9px';
           panel.innerHTML = '<legend>Clip existing video / stream</legend><label>Source URL<input id="sourceClipUrl" type="url" placeholder="https://…"></label><label>Number of clips<input id="sourceClipCount" type="number" value="1" min="1" max="12"></label><label class="checkbox"><input id="sourceClipCaptions" type="checkbox"> Burn available captions</label><button id="sourceClipCreate" type="button" class="secondary">Create clip job</button>';
@@ -962,7 +982,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         dashboard = dashboard.replace(
             "${j.artifacts.length} saved artifacts · ${j.event_count} activity events",
-            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
+            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Script: ${j.script_model||j.script_owner||'codex'} · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
         )
         dashboard = dashboard.replace(
             "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
@@ -981,7 +1001,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for job in runtime.jobs.list_recent():
             can_retry_validation, retry_identity = _can_retry_approved_asset_validation(runtime, job)
             payloads.append({
-                **_job_payload(job), "topic": job.request.topic,
+                **_job_payload(job), "topic": job.request.topic, "script_owner": job.request.script_owner, "script_model": job.request.script_model,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
                 "event_count": len(runtime.events.list_for_job(job.id)),
                 "deletable": job.claim_owner is None and job.state in deletable,
@@ -1016,7 +1036,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def content_profiles() -> dict[str, object]:
         config = application_settings.pipeline.codex
         identities = sorted(set(config.voice_profiles) | {config.default_channel_identity})
-        return {"default_identity": config.default_channel_identity, "profiles": [{"identity": name, "uses_default": name not in config.voice_profiles} for name in identities]}
+        claude = application_settings.pipeline.claude
+        suffix = "" if claude.enabled else " — not enabled"
+        models = [
+            {"id": "sonnet-medium", "label": "Claude Sonnet 5.5 · medium effort (default)" + suffix, "enabled": claude.enabled},
+            {"id": "opus", "label": "Claude Opus 5.5 · high effort" + suffix, "enabled": claude.enabled},
+            {"id": "gpt-sol", "label": "Codex · " + config.model, "enabled": True},
+        ]
+        default_model = DEFAULT_SCRIPT_MODEL if claude.enabled else "gpt-sol"
+        return {"default_identity": config.default_channel_identity, "script_models": models, "default_script_model": default_model, "profiles": [{"identity": name, "uses_default": name not in config.voice_profiles} for name in identities]}
 
     @app.get("/api/voices", tags=["voices"])
     def list_voices() -> list[dict[str, str]]:
