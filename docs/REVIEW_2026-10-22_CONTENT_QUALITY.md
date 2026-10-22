@@ -211,6 +211,12 @@ Done: V5 (Pixabay stock + source screenshots, no Pexels), code cards (§ operato
 against the cited excerpt, visual gate (≥4 scenes, no two plain scenes in a row, ≤3 stock). Existing big_stat covers animated number charts.
 Open: SVG diagrams (V6), `versus` template (R6), line/cost-counter charts, beat-synced cuts, Claude frame review (V7).
 
+## 9c. Status of the writers' room (22 Oct, night)
+
+Done: S1 (angle pass + editor pass, Claude runner only), S2 in reduced form (the editor ranks the five hook_options; hookscore is a floor of 30
+because it penalised named-story hooks), S3 recipes (`RECIPES` in `providers/content/prompts.py`, six formats), S4 banned phrases, S5 late payoff, R3 first-person opinions,
+R4 paradox/named-story hook formulas, hook-variety gate. Open: swipe file (S6), a separate pairwise hook judge call, topic radar (T1), learning loop (T2).
+
 ## 10. Operator decisions (recorded 22 Oct 2026)
 
 - **Stock B-roll: Pixabay API key AVAILABLE (22 Oct, later the same day)** — stored only in the untracked `.env` as `TUBEFORGE_PIXABAY_API_KEY`; Pexels still unavailable. Earlier note: Neither is issuing API keys right now; V5(c) stays in the

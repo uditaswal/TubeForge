@@ -144,7 +144,7 @@ def select_hook(package):
     return package, report
 
 
-HOOK_MINIMUM = 45  # a floor only: the editor pass ranks hooks; hookscore rewards 'you' and risk words, which breeds one template
+HOOK_MINIMUM = 30  # a floor only: the editor pass ranks hooks; hookscore rewards "you" and risk words, which breeds one template and rejects named-story hooks
 
 
 def hook_gate(package, root: Path | None = None, minimum: int = HOOK_MINIMUM) -> str | None:
