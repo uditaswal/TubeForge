@@ -49,7 +49,10 @@ class HostRunnerContentProvider:
     def generate_package(self, request: ContentRequest) -> ContentPackage:
         self._require_owner(request)
         # Reject an unsupported prompt before reserving or charging a model call.
-        prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
+        try:
+            prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
+        except ValueError as error:  # an oversized request is a brief problem, not a transient failure to retry
+            raise ProviderValidationError(f"the brief and source excerpts are too large for one script prompt: {error}") from error
         host_request = generation_request_content(request)
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
         from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES
