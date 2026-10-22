@@ -43,7 +43,11 @@ FIND = """
       const rects = [...range.getClientRects()].filter(r => r.width > 2 && r.height > 2)
         .map(r => ({x: r.x + dx, y: r.y + dy, w: r.width, h: r.height}));
       if (!rects.length) continue;
-      return {rects, complete: n === words.length, words: n,
+      const anchor = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+      const holder = anchor.closest('p,li,blockquote,h1,h2,h3,h4,td,figcaption,dd') || anchor;
+      const hb = holder.getBoundingClientRect();
+      const block = {y: hb.y + dy, h: hb.height};
+      return {rects, block, complete: n === words.length, words: n,
               docHeight: document.documentElement.scrollHeight, docWidth: document.documentElement.clientWidth};
     }
   }
@@ -76,18 +80,21 @@ def _guard(cache: dict[str, bool]):
     return route
 
 
-def plan_clip(rects: list[dict], doc_width: float, doc_height: float) -> tuple[float, float, float, float]:
-    """Crop (x, y, w, h) in CSS pixels: the match plus context, shaped to the card's aspect ratio."""
-    left = min(r["x"] for r in rects)
-    right = max(r["x"] + r["w"] for r in rects)
+def plan_clip(rects: list[dict], doc_width: float, doc_height: float, block: dict | None = None) -> tuple[float, float, float, float]:
+    """Crop (x, y, w, h) in CSS pixels aligned to whole text: the paragraph holding the match when it fits
+    the card, otherwise the matched lines plus one line of context, so no line is cut in half."""
     top = min(r["y"] for r in rects)
     bottom = max(r["y"] + r["h"] for r in rects)
-    width = doc_width
-    x = min(max(0.0, (left + right) / 2 - width / 2), max(0.0, doc_width - width))
-    max_height = width * CARD_HEIGHT / CARD_WIDTH
-    height = min(max_height, max(bottom - top + 180, max_height * .55))
-    y = min(max(0.0, (top + bottom) / 2 - height / 2), max(0.0, doc_height - height))
-    return x, y, width, min(height, doc_height)
+    line = max(r["h"] for r in rects)
+    max_height = doc_width * CARD_HEIGHT / CARD_WIDTH
+    pad = 10.0
+    if block and block["h"] + 2 * pad <= max_height:
+        top, bottom = min(top, block["y"]), max(bottom, block["y"] + block["h"])
+    else:
+        top, bottom = top - 1.2 * line, bottom + 1.2 * line
+    top = max(0.0, top - pad)
+    bottom = min(doc_height, bottom + pad)
+    return 0.0, top, doc_width, min(max(bottom - top, 40.0), max_height, doc_height)
 
 
 def draw_highlight(image: Image.Image, rects: list[dict], clip: tuple[float, float, float, float]) -> Image.Image:
@@ -140,7 +147,7 @@ def make_capture(config: SourceCaptureConfig):
                     if not found:
                         return {"reason": "quote not found on the page"}
                     page.evaluate("getSelection().removeAllRanges()")  # the native selection from window.find must not show
-                    clip = plan_clip(found["rects"], found["docWidth"], found["docHeight"])
+                    clip = plan_clip(found["rects"], found["docWidth"], found["docHeight"], found.get("block"))
                     shot = page.screenshot(clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]}, full_page=True)
                 finally:
                     browser.close()

@@ -153,6 +153,8 @@ EDITOR_INSTRUCTIONS = (
     "and make the five options genuinely different formulas; (2) rhythm: sentences at most 12 words, put a 3-5 word punch sentence inside every second scene (each scene must still total 8-15 spoken words, so never leave a scene shorter than 8), never two scenes with the same opening word; "
     "(3) cut every hedge and filler word from the voice-over ('might', 'around', 'some say', 'in one study'; attribution stays on screen); "
     "(4) the biggest number or twist lands in the second half and the last line before the CTA echoes the hook; (5) the CTA keeps its one-sided challenge before 'Follow for more'. "
+    "(6) plain speech: replace insider jargon with everyday words, and write every money amount, size and multiplier in the narration and its caption as spoken words "
+    "('120 thousand dollars', '3.4 times', 'megabytes'; no $ symbol, no x multipliers, no MB or ms abbreviations, no thousands commas). "
     "Do not add or change any fact, number, claim_id, source_id, visual quote or reveal_words index meaning; keep every field valid; keep the narration within 78-92 words total. "
     "If the draft is already strong, change little."
 )
