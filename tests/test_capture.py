@@ -20,7 +20,13 @@ def test_plan_clip_aligns_to_the_paragraph_when_it_fits():
 def test_plan_clip_falls_back_to_matched_lines_for_tall_blocks():
     rects = [{"x": 40, "y": 830, "w": 450, "h": 26}, {"x": 40, "y": 856, "w": 450, "h": 26}]
     x, y, w, h = plan_clip(rects, 540, 5000, {"y": 100.0, "h": 2000.0})
-    assert 830 - 1.2 * 26 - 10 - 1e-6 <= y + 1e-6 and y <= 830 and y + h >= 882
+    assert y == 820.0 and y + h == 892.0  # exactly the matched lines plus 10 px padding
+
+
+def test_plan_clip_ignores_a_container_that_is_not_the_paragraph():
+    rects = [{"x": 40, "y": 830, "w": 450, "h": 26}]
+    x, y, w, h = plan_clip(rects, 540, 5000, {"y": 700.0, "h": 400.0})
+    assert y == 820.0 and h == 46.0
 
 
 def test_plan_clip_stays_inside_short_documents():

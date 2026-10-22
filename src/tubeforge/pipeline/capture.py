@@ -88,11 +88,12 @@ def plan_clip(rects: list[dict], doc_width: float, doc_height: float, block: dic
     line = max(r["h"] for r in rects)
     max_height = doc_width * CARD_HEIGHT / CARD_WIDTH
     pad = 10.0
-    if block and block["h"] + 2 * pad <= max_height:
-        top, bottom = min(top, block["y"]), max(bottom, block["y"] + block["h"])
-    else:
-        top, bottom = top - 1.2 * line, bottom + 1.2 * line
-    top = max(0.0, top - pad)
+    # Use the holding paragraph only when it really contains the match and is not a page-sized container.
+    paragraph = (block and block["y"] <= top + 1 and block["y"] + block["h"] >= bottom - 1
+                 and block["h"] + 2 * pad <= max_height and block["h"] <= max(3 * (bottom - top), 8 * line))
+    if paragraph:
+        top, bottom = block["y"], block["y"] + block["h"]
+    top = max(0.0, top - pad)  # otherwise: exactly the matched lines, so no neighbouring line is ever cut in half
     bottom = min(doc_height, bottom + pad)
     return 0.0, top, doc_width, min(max(bottom - top, 40.0), max_height, doc_height)
 
