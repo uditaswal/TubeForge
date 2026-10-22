@@ -96,7 +96,7 @@ Done today: `metadata.engagement_comment` (pinned debate question, reviewed with
 | A4 | **Voice choice + chain:** A/B `af_heart` (Kokoro's top-rated voice), `am_fenrir`/`am_puck` vs `af_bella`; optional style-vector blend (Kokoro supports mixing voices) for a unique channel voice. Add a light chain in FFmpeg: high-pass 80 Hz, gentle compression, +2–3 dB presence at 3–5 kHz, de-ess. | config + `audio.py` | S | Operator picks by ear from a 3-voice sample sheet |
 | A5 | **Real music library** instead of `synth_music`: 20–40 tracks tagged by mood/BPM from licences that allow YouTube + Instagram monetised use (Pixabay Music licence, YouTube Audio Library for YouTube-only, CC0/CC-BY with attribution via the existing `music_catalog` attribution path). Beat-detect locally (librosa, CPU) and snap scene cuts to beats. | `pipeline/music.py`, `audio.py` | M (+ operator curation) | Each track has stored licence evidence; cuts within 60 ms of a beat |
 | A6 | **SFX pack (CC0):** whoosh on transitions, pop on reveals, bass hit on the payoff stat, riser into the hook's first word, keyboard clicks on terminal scenes. Kenney.nl and Freesound CC0 sounds are free. | `audio.py` effects bus (exists) | S | ≤ −18 dB under voice; listening test |
-| A7 | **Your own voice (optional, free):** a human VO is the strongest anti-slop signal. Keep Kokoro for drafts; allow an operator-recorded WAV to replace narration before final (alignment already handles it). | upload step (UI → Codex branch) | M | — |
+| A7 | ~~**Your own voice**~~ DROPPED by operator (Kokoro only). Was: a human VO is the strongest anti-slop signal. Keep Kokoro for drafts; allow an operator-recorded WAV to replace narration before final (alignment already handles it). | upload step (UI → Codex branch) | M | — |
 
 Not recommended on this box: XTTS/F5/Chatterbox-class voice cloning — they need a GPU or >4 GB RAM and run far
 slower than realtime on 4 cores.
@@ -150,10 +150,17 @@ OpenVINO would swap). Revisit when there is income for a GPU box or a paid image
 Rough cost per video after step 2: 3–4 Claude calls (angle, draft, edit, hook judge) + 1 vision call ≈ $0.8–1.2 at
 list price, all inside the subscription; render time unchanged except A1 (+ a few seconds).
 
-## 10. Decisions for the operator
+## 10. Operator decisions (recorded 22 Oct 2026)
 
-- Free Pexels/Pixabay API key for B-roll: yes/no (free, but an external account).
-- Which voice(s) per channel after the A4 sample sheet; whether you want to record your own VO sometimes.
-- Music licence policy: Pixabay-licence + CC0 only, or also CC-BY with attribution in descriptions.
-- How hard the stance can be (E1): "opinionated but fair" default, or per-channel tone settings.
-- Budget per script (number of passes / Opus vs Sonnet) when quotas are tight.
+- **Stock B-roll (Pexels/Pixabay): DEFERRED.** Neither is issuing API keys right now; V5(c) stays in the
+  background. V5 proceeds with headless-Chromium screen captures, Wikimedia and real-data charts.
+- **Voice: Kokoro only, never a human recording.** A7 is dropped; A4 (voice A/B + processing chain) is how we
+  get a better voice.
+- **Music: anything that will not draw a copyright claim/strike.** Use licences that are free for monetised
+  YouTube + Instagram use without Content ID claims (YouTube Audio Library no-attribution tracks, Pixabay Music,
+  CC0, CC-BY with attribution in the description). Avoid tracks registered with Content ID; store licence evidence
+  per track.
+- **Stance: fully hard.** Scripts take one clear side and defend it without hedging in the voice-over. Limits that
+  still apply: every factual claim remains source-grounded (no invented facts), no insults or attacks on people or
+  groups, no misleading claims (YouTube policy). The opposing view goes into the pinned comment.
+- Budget per script: not decided; default Sonnet 5.5 medium for all passes, Opus only when picked per job.
