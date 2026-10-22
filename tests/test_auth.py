@@ -37,6 +37,15 @@ def test_dashboard_requires_login_and_csrf_for_mutation(tmp_path: Path) -> None:
         assert "Add licensed music" in dashboard.text
         assert "musicUpload" in dashboard.text
         assert "Publishing accounts" in dashboard.text
+        assert "sidebar.id='studioSidebar'" in dashboard.text
+        assert 'data-studio-nav="studio"' in dashboard.text
+        assert 'data-studio-nav="publishing"' in dashboard.text
+        assert 'data-studio-nav="accounts"' in dashboard.text
+        assert 'data-studio-nav="scheduling"' in dashboard.text
+        assert 'pages.studio.append(grid);pages.publishing.append(publishing)' in dashboard.text
+        assert 'window.addEventListener(\'hashchange\',showPage)' in dashboard.text
+        assert '@media(max-width:760px)' in dashboard.text
+        assert '.studio-sidebar.open{transform:translateX(0)}' in dashboard.text
         assert "Connections require verified platform authorization" in dashboard.text
         assert "Download diagnostics JSONL" in dashboard.text
         assert "cgroup lifetime peak" in dashboard.text

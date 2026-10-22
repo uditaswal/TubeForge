@@ -25,6 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.api.scene_ui import SCENE_CONTROLS
+from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_SCRIPT
 from tubeforge.core.runtime import Runtime, create_runtime
 from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, VoiceRequest, video_plan_from_package
 from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
@@ -1022,7 +1023,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
             "",
         )
-        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + "</body>")
+        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}</style></head>")
+        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + STUDIO_SCRIPT + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
