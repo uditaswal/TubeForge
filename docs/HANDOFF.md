@@ -44,6 +44,7 @@ strict JSON script + scene plan; all pixels, audio and encoding are local and co
 | Publication prep for reference jobs | IMPLEMENTED | Same job reached `publication_approval_required` (metadata, thumbnail, platform variants built; `_reference_timing`, thumbnail bound to final checksum). Nothing approved or published. Thumbnail is still the legacy bitmap-text placeholder. |
 | Engagement debate comment (`metadata.engagement_comment`) | IMPLEMENTED (backend only) | Writer prompt (v8 only) asks for one provocative-but-fair pinned-comment question; contract rejects links/@/#/non-questions; carried into `publication_package.metadata`. Not generated in a live job yet; nothing posts it. |
 | Content quality step 1 (review §9: pacing, craft gate, comment CTA, fonts, no placeholders) | IMPLEMENTED | Job `b1c3a6b5…` (Sonnet, 1 attempt, $0.21): 92 words, 35.6 s, −14.2 LUFS, 6 narration gaps ≥0.25 s (was 14), ~155 wpm (was 139); stance + challenge CTA + counter-argument pinned comment; `review-sheet.png` inspected. 2/7 scenes on estimated alignment — needs a listen. Operator has not watched it. |
+| Real-imagery plates (review §6/§9a: Pixabay B-roll, source-page screenshots with marker highlight, typed code cards) | IMPLEMENTED | Job `90625bb5…` (Sonnet, 1 attempt): hook/CTA on Pixabay video, 3 scenes with captured source paragraphs, 1 Rust code card, 76→24 % stat kept as animated chart; preview 33.9 s, −14.2 LUFS, RTF 13.4, 844 MB RSS; `review-sheet.png` inspected. Later change (not re-rendered): screenshot viewport 820→540 px so quoted text is large — verified separately on Google's post. Operator has not watched it. |
 | Instagram publisher | NOT STARTED | |
 
 ## Render evidence
@@ -61,13 +62,20 @@ Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 ## Next step
 1. Operator watches `preview.mp4` (Studio → job → Watch preview) and gives creative feedback.
 2. Operator watches `final.mp4` of job `8c23e099…` and decides on the publication gate (do NOT approve until watched). Then: real thumbnail from a final-video frame (current one is a placeholder), orchestrator-level test for the reference final→publication path.
-3. Operator watches preview of job `b1c3a6b5…` vs `8c23e099…`. Then content review §9 step 2: writers' room (S1 angle/draft/edit passes), hook tournament (S2, the hook still follows a '…, but why?' formula), format recipes (S3).
+3. Operator watches previews of jobs `90625bb5…` (new: real imagery) vs `b1c3a6b5…` vs `8c23e099…`. Then content review §9 step 2: writers' room (S1 angle/draft/edit passes), hook tournament (S2, the hook still follows a '…, but why?' formula), format recipes (S3).
 4. Image layer beyond icons: Wikimedia/stock photo slot per scene (rights path exists in `providers/media/`), better fonts.
 5. Scheduler → private YouTube, then Instagram (hook gate/recipes are superseded by the content review's S1–S3).
 6. **Codex v8 jobs now REQUIRE the host redeploy** (22 Oct): v8 prompts no longer embed the om-* skills, so the old wheel's preflight hashes differ from the worker's and the job stops before any model call. Codex (gpt-sol) host runner is the old wheel — its prompts lack the craft block/icons until redeployed, so the worker's new hook gate may reject Codex scripts: icons/phone-fit prompt text only reach Codex after the root redeploy
    (`docs/tubeforge-codex-runner-runtime.md`); Codex output is still validated by the worker (fit/word-count checks).
 
+## Plates / Pixabay (22 Oct) — operator notes
+- Key lives in the untracked `.env` (`TUBEFORGE_PIXABAY_API_KEY`, template in `.env.example`); compose passes it to the **worker** only. Shared limiter state: `data/cache/pixabay/ratelimit.json` (80 req/min default, honours `X-RateLimit-*` and 429). Search results cached 24 h, files cached by asset id; per-asset evidence (id, page, author, licence) is in `reference/plates/manifest.json` and the job's `asset_manifest.plates`.
+- Worker image now ships Chromium + Playwright (rebuild took ~38 min on this host: `docker compose build worker web migrate scheduler`). Capture only opens the job's own source URLs, refuses non-public addresses, and falls back to the template when blocked/quote not found. Screenshots show real page content incl. embedded images — commentary use, not a legal guarantee.
+- Pixabay music is NOT used (Content ID risk); stock visuals only. Codex-owned jobs get no visuals until the Codex host runner is redeployed (old prompts).
+- Not done: Pixabay credit in descriptions (not required), diagrams (review V6), animated line/cost charts beyond the existing big_stat bars, per-job visual toggle.
+
 ## UI follow-ups for the Codex UI branch (no UI was touched here)
+- Show each scene's visual (stock query/clip, source quote + screenshot, code) in script review, allow removing a scene's visual, and show `plates_prepared` fallbacks (`events`, `reference/plates/manifest.json`) in the job activity. Show Pixabay evidence in publication review.
 - Show `package.metadata.engagement_comment` in script review as an editable "Pinned comment (debate starter)" field; script approval covers it. Automatic/auto-review mode needs no extra step, so it is bypassed there. A per-job "skip comment" toggle would need an API field — not added.
 - Show the comment in the publication review (`publication_package.metadata.engagement_comment`) with copy button; posting it needs a `commentThreads.insert` call and the YouTube `youtube.force-ssl` scope, neither implemented (manual paste for now).
 - Script-writer picker already exists in the API (`script_model`); the UI selector for Claude Sonnet 5.5 / Opus 5.5 / Codex is the earlier follow-up.

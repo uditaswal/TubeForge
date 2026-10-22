@@ -82,7 +82,7 @@ def plan_clip(rects: list[dict], doc_width: float, doc_height: float) -> tuple[f
     right = max(r["x"] + r["w"] for r in rects)
     top = min(r["y"] for r in rects)
     bottom = max(r["y"] + r["h"] for r in rects)
-    width = min(doc_width, max(520.0, min(doc_width, right - left + 80)))
+    width = doc_width
     x = min(max(0.0, (left + right) / 2 - width / 2), max(0.0, doc_width - width))
     max_height = width * CARD_HEIGHT / CARD_WIDTH
     height = min(max_height, max(bottom - top + 180, max_height * .55))
