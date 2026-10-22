@@ -207,7 +207,7 @@ Changes this implies (folded into step 2 and step 4):
 
 ## 10. Operator decisions (recorded 22 Oct 2026)
 
-- **Stock B-roll (Pexels/Pixabay): DEFERRED.** Neither is issuing API keys right now; V5(c) stays in the
+- **Stock B-roll: Pixabay API key AVAILABLE (22 Oct, later the same day)** — stored only in the untracked `.env` as `TUBEFORGE_PIXABAY_API_KEY`; Pexels still unavailable. Earlier note: Neither is issuing API keys right now; V5(c) stays in the
   background. V5 proceeds with headless-Chromium screen captures, Wikimedia and real-data charts.
 - **Voice: Kokoro only, never a human recording.** A7 is dropped; A4 (voice A/B + processing chain) is how we
   get a better voice.
