@@ -53,5 +53,6 @@ def test_schedules_keep_separate_account_plans_and_reject_disabled_destinations(
         assert "disabled" in blocked["reason"]
         assert [item["title"] for item in client.get("/api/topics").json() if item["status"] == "ready"] == ["A third topic"]
         dashboard = client.get("/").text
-        assert "scheduleDestinationAccounts" in dashboard
-        assert "destination_account_ids,video_description:descriptionInput.value.trim()||null" in dashboard
+        assert "channelAccountGrid" in dashboard
+        assert "channelTopicList" in dashboard
+        assert "channelScheduleList" in dashboard

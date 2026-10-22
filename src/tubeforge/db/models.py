@@ -16,6 +16,7 @@ class TopicRecord(Base):
 
     __tablename__ = "topics"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str | None] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
@@ -221,6 +222,7 @@ class ScheduleRecord(Base):
 
     __tablename__ = "schedules"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str | None] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     cron: Mapped[str] = mapped_column(String(120), nullable=False)
     timezone: Mapped[str] = mapped_column(String(100), nullable=False, default="UTC")

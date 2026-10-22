@@ -130,14 +130,15 @@ On phones, open **Menu** to switch sections; Escape or the backdrop closes it.
 The URL hash preserves the selected section when reloading. Background job
 updates continue without replacing an open form or dialog.
 
-In **Scheduling**, choose the exact app accounts for each new schedule. You can
-select several accounts or leave the plan empty. An optional schedule video
-description applies to every selected account; when blank, each account's
-default description is used. The saved schedule list shows its destination
-accounts. When a scheduled topic becomes a video job, TubeForge saves the
-account names, categories and descriptions with that job for later draft
-review. A missing or disabled selected account blocks that schedule run and
-keeps the topic ready. Scheduling a video never uploads it.
+In **Scheduling**, choose an account card first. Each account has its own topic
+queue and generation schedules. Add one topic per line to that account; its
+schedules take only its ready topics. Create a schedule under that same account
+with a format, voice profile, duration, cron and timezone. Its optional video
+description overrides the account default for generated jobs. Account identity,
+category and effective description are saved with each job for later draft
+review. Disabled accounts keep their existing topics and schedules visible but
+block new work. Existing unassigned topics and schedules remain separate from
+account queues. Scheduling a video never uploads it.
 
 Creator Studio now lists publishing accounts and reports their stored state.
 It enables **Connect YouTube** only when dashboard login, an encryption key,

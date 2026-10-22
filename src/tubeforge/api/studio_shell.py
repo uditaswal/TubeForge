@@ -71,11 +71,6 @@ label{color:#d5e0ee;font-size:12px;font-weight:540}
 .event{background:var(--studio-panel-alt);border-color:var(--line);border-radius:10px}
 .actions{gap:8px}
 fieldset{min-width:0}
-.schedule-destinations{margin:20px 0 16px;padding:15px;border:1px solid var(--line);border-radius:10px}
-.schedule-destinations legend{padding:0 5px;color:#edf3fb;font-size:13px;font-weight:650}
-.schedule-destinations .checkbox{min-width:0;align-items:flex-start}
-.schedule-destinations .checkbox span{min-width:0;overflow-wrap:anywhere}
-.schedule-destinations .checkbox input{flex:none;margin-top:3px}
 details summary{cursor:pointer}
 dialog{max-width:min(860px,calc(100vw - 28px));max-height:calc(100dvh - 28px);background:var(--panel);color:#edf3fb;border:1px solid var(--line);border-radius:15px;box-shadow:0 24px 70px #0009}
 dialog::backdrop{background:#030912b8}
@@ -113,7 +108,7 @@ STUDIO_SCRIPT = r"""<script>
   const accounts=shell.querySelector('#accountProfileForm')?.closest('.panel');
   const scheduling=shell.querySelector('#bulkTopics')?.closest('.panel');
   if(!header||!connection||!publishing||!accounts||!scheduling)return;
-  const labels={studio:['Studio','Create, review and track local video generations.'],publishing:['Publishing','Prepare exact video and destination drafts for review.'],accounts:['Accounts','Manage local account profiles and verified connections.'],scheduling:['Scheduling','Queue topics and save future generation schedules.']};
+  const labels={studio:['Studio','Create, review and track local video generations.'],publishing:['Publishing','Prepare exact video and destination drafts for review.'],accounts:['Accounts','Manage local account profiles and verified connections.'],scheduling:['Scheduling','Choose an account to manage its topic queue and generation schedules.']};
   const sidebar=document.createElement('aside');sidebar.className='studio-sidebar';sidebar.id='studioSidebar';sidebar.setAttribute('aria-label','Workspace navigation');
   sidebar.innerHTML='<div class="studio-brand"><span class="studio-brand-mark">TF</span><span>TubeForge<small>Creator Studio</small></span></div><div class="studio-workspace">Local workspace</div><p class="studio-nav-label">Workspace</p><nav class="studio-nav" aria-label="Studio sections"><button type="button" data-studio-nav="studio">Studio</button><button type="button" data-studio-nav="publishing">Publishing</button><button type="button" data-studio-nav="accounts">Accounts</button><button type="button" data-studio-nav="scheduling">Scheduling</button></nav><p class="studio-sidebar-foot">Account plans remain local until a destination is verified and a separate draft is reviewed.</p>';
   const backdrop=document.createElement('button');backdrop.type='button';backdrop.className='studio-backdrop';backdrop.setAttribute('aria-label','Close navigation');backdrop.hidden=true;
