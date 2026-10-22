@@ -74,6 +74,7 @@ def test_reference_schema_and_prompt_preserve_legacy_boundary():
     raw = copy.deepcopy(raw)
     raw["package"]["metadata"]["title_options"] = [f"Synthetic title {i}" for i in range(10)]
     raw["package"]["hook_options"] = [f"Synthetic hook {i}" for i in range(5)]
+    raw["package"]["metadata"]["engagement_comment"] = "Rust or C for new code: which would you bet your job on?"
     package = unwrap_generation(raw, request=request)
     package.pop("request")
     package.pop("scene_plans")
@@ -86,8 +87,11 @@ def test_reference_schema_and_prompt_preserve_legacy_boundary():
     jsonschema.validate(raw, schema)
     legacy = codex_output_schema(envelope=True)
     assert "reference_short" not in legacy["$defs"]["ContentPackage"]["properties"]
+    assert "engagement_comment" not in legacy["$defs"]["VideoMetadata"]["properties"]
+    assert "engagement_comment" in schema["$defs"]["VideoMetadata"]["required"]
     prompt = build_content_prompt(request, template_version="m6-content-v8", max_chars=60000)
     assert "reference-short-v1" in prompt
+    assert "engagement_comment" in prompt
     assert "8–15" in prompt
 
 
@@ -115,3 +119,13 @@ def test_reference_contract_requires_exact_approval_sources_and_visuals():
     corrupted["sources"][0]["excerpt"] = "Changed evidence"
     with pytest.raises(ValueError, match="source packet differs"):
         compile_reference_contract(encoded, json.dumps(corrupted).encode(), accepted_script_identity=identity)
+
+
+def test_engagement_comment_must_be_a_clean_question():
+    from tubeforge.domain.contracts import VideoMetadata
+    base = {"title_options": ["t"], "description": "d"}
+    assert VideoMetadata(**base).model_dump(mode="json").get("engagement_comment", "absent") == "absent"
+    assert VideoMetadata(**base, engagement_comment="Rust or C: which one?").engagement_comment
+    for bad in ("Rust beats C.", "Rust or C? see https://x.test", "Rust or C? #flame", "Rust or C? @someone"):
+        with pytest.raises(ValueError):
+            VideoMetadata(**base, engagement_comment=bad)

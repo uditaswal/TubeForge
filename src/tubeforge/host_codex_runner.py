@@ -123,6 +123,9 @@ def codex_output_schema(*, envelope: bool = False, reference: bool = False, keep
     package_schema = schema["$defs"]["ContentPackage"] if envelope else schema
     if not reference:
         package_schema["properties"].pop("reference_short", None)
+        # The pinned debate comment belongs to the reference-short profile only.
+        metadata_schema = schema["$defs"]["VideoMetadata"]
+        metadata_schema["properties"].pop("engagement_comment", None)
     else:
         if not envelope:
             raise ValueError("reference output requires the trusted-request envelope")
