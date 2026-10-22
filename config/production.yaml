@@ -31,9 +31,10 @@ pipeline:
     # Per-job choices (sonnet-medium default, opus) are allow-listed in host_claude_runner.MODELS.
     model: "claude-sonnet-5-5"
     socket_path: "/app/data/run/claude/claude.sock"
-    socket_timeout_seconds: 590
+    # Writers' room (angle + draft + editor, plus one repair) needs more than the single-call 590 s.
+    socket_timeout_seconds: 900
     invocation_limit: 2
-    reservation_seconds: 1200
+    reservation_seconds: 1800
     prompt_template_version: "m6-content-v7"
   video_generation:
     default_preset: "default"
