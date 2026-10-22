@@ -112,6 +112,10 @@ Job `584fd95de80047649d959af2d9075363` (16:9, 60 s, operator-approved script `6b
 - Native 16:9 card/teaching composition with word timing; guarded "Retry approved media stages" recovery before any preview exists.
 - Full worktree suite earlier: 429 passed, 18 skipped. Always re-run after changes.
 
+### Multi-account creation and Creator Studio redesign (merged from `codex/multi-account-setup`, 22 October)
+
+Local YouTube, Instagram, Snapchat and X/Twitter account profiles (name, category, default description) are **IMPLEMENTED** and, for the creation subset, **VERIFIED** on the branch (22 affected API/publishing tests, migration head, real local H.264 staged-draft smoke). A generation snapshots exact destination, account, category and description choices (`video_destination_intents`, migration `20261022_0029`) without touching writer input or opening a live connection; per-schedule destinations and account-owned topic queues (migration `20261022_0030`, topics and schedules carry `account_id`; unassigned legacy rows stay isolated and visible) are **IMPLEMENTED**. The reference-inspired Studio shell, account-first Scheduling tab and Generations view are **IMPLEMENTED**; operator desktop/390 px visual review is the open item. New Codex CLI runs save exact argv provenance. No online upload or platform connection was added. Details: `docs/planning/multi-account-setup.md`, `docs/planning/studio-ui-redesign.md`.
+
 ### Open blockers / decisions
 
 1. 1080×1920 reference final blocked by host memory gate (see phase 2).
