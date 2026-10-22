@@ -150,7 +150,7 @@ EDITOR_INSTRUCTIONS = (
     "You are the ruthless line editor of a Shorts channel. Below are the REQUEST and a DRAFT output that already passes validation. "
     "Return the COMPLETE improved output in exactly the same schema. Edit for: (1) hook: judge the five hook_options on whether they stop a scroll in 1.5 seconds, "
     "make sense with no context, are specific and sound like a person said them; make the best one (or a sharper rewrite of it, at most 14 words) the scene 1 narration and headline, "
-    "and make the five options genuinely different formulas; (2) rhythm: sentences at most 12 words, one 3-5 word punch line in every two scenes, never two scenes with the same opening word; "
+    "and make the five options genuinely different formulas; (2) rhythm: sentences at most 12 words, put a 3-5 word punch sentence inside every second scene (each scene must still total 8-15 spoken words, so never leave a scene shorter than 8), never two scenes with the same opening word; "
     "(3) cut every hedge and filler word from the voice-over ('might', 'around', 'some say', 'in one study'; attribution stays on screen); "
     "(4) the biggest number or twist lands in the second half and the last line before the CTA echoes the hook; (5) the CTA keeps its one-sided challenge before 'Follow for more'. "
     "Do not add or change any fact, number, claim_id, source_id, visual quote or reveal_words index meaning; keep every field valid; keep the narration within 78-92 words total. "
@@ -188,20 +188,26 @@ def angle_pass(request, root, *, model, effort, usage_total) -> tuple[dict | Non
 
 def editor_pass(request, root, raw, *, model, effort, schema, version, usage_total):
     """One edit call over a valid draft; keep the draft unless the edited output validates too."""
-    note: dict = {"applied": False}
-    try:
-        consume_invocation(request, root, salt="editor", limit=1)
-        encoded = json.dumps(normalize_content_request(request.request), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        task = EDITOR_INSTRUCTIONS + "\nREQUEST=" + encoded + "\nDRAFT=" + json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
-        edited, usage = call_claude(task, schema, model=model, effort=effort)
-        _add_usage(usage_total, usage)
-        package, normalizations = _validate_once(edited, request, version)
-        note["applied"] = True
-        return package, normalizations, note
-    except Exception as error:
-        note["reason"] = f"{type(error).__name__}: {_concise(error) if isinstance(error, (ValidationError, ProviderValidationError)) else str(error)[:200]}"
-        print("editor pass rejected: " + note["reason"], file=sys.stderr, flush=True)
-        return None, None, note
+    note: dict = {"applied": False, "calls": 0}
+    encoded = json.dumps(normalize_content_request(request.request), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    task = EDITOR_INSTRUCTIONS + "\nREQUEST=" + encoded + "\nDRAFT=" + json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+    for attempt in range(2):  # one edit, plus one repair of that edit; the draft is the fallback either way
+        try:
+            consume_invocation(request, root, salt="editor", limit=2)
+            edited, usage = call_claude(task, schema, model=model, effort=effort)
+            note["calls"] += 1
+            _add_usage(usage_total, usage)
+            package, normalizations = _validate_once(edited, request, version)
+            note["applied"] = True
+            return package, normalizations, note
+        except Exception as error:
+            reason = _concise(error) if isinstance(error, (ValidationError, ProviderValidationError)) else str(error)[:200]
+            note["reason"] = f"{type(error).__name__}: {reason}"
+            print(f"editor attempt {attempt + 1} rejected: {note['reason']}", file=sys.stderr, flush=True)
+            if not isinstance(error, (ValidationError, ProviderValidationError)):
+                break
+            task += "\n\nYour previous edit was rejected by validation:\n" + reason + "\nReturn the complete corrected output, fixing only these errors."
+    return None, None, note
 
 
 def _validate_once(raw, request, version):
