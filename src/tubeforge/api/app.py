@@ -10,6 +10,7 @@ import html
 import json
 import os
 import secrets
+import shlex
 import shutil
 import threading
 import wave
@@ -26,6 +27,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.api.scene_ui import SCENE_CONTROLS
 from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_SCRIPT
+from tubeforge.api.generation_ui import GENERATION_CSS, GENERATION_CONTROLS
 from tubeforge.api.scheduling_ui import SCHEDULING_CSS, SCHEDULING_SCRIPT
 from tubeforge.core.runtime import Runtime, create_runtime
 from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, VoiceRequest, video_plan_from_package
@@ -691,6 +693,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(error)) from error
         return {"id": account.id, "platform": account.platform, "display_name": account.display_name, "category": account.category, "default_description": account.default_description, "status": account.status}
 
+    @app.put("/api/social-accounts/{account_id}/default", tags=["social accounts"])
+    def set_default_social_account(account_id: str) -> dict[str, object]:
+        try:
+            account = runtime.accounts.set_default(account_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="account not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"id": account.id, "is_default": account.is_default}
+
     @app.post("/api/social-accounts/{account_id}/disable", tags=["social accounts"])
     def disable_social_account(account_id: str) -> Response:
         try: runtime.accounts.disable(account_id)
@@ -800,8 +812,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const descriptionInput=document.createElement('textarea');descriptionInput.id='videoDescription';descriptionInput.maxLength=5000;descriptionInput.placeholder='Leave blank to use each selected account’s default description';descriptionLabel.append(descriptionInput);
           intentField.append(intentLegend,intentHelp,intentAccounts,descriptionLabel);
           form.querySelector('button[type="submit"]').before(intentField);
-          async function loadIntentAccounts(){const selected=new Set([...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value));try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=(await response.json()).filter(account=>!account.disabled);intentAccounts.replaceChildren();if(!accounts.length){intentAccounts.textContent='No account profiles yet. Add one below, or create this video without a destination.';return;}for(const account of accounts){const label=document.createElement('label');label.className='checkbox';const check=document.createElement('input');check.type='checkbox';check.value=account.id;check.checked=selected.has(account.id);check.setAttribute('aria-label','Plan for '+account.platform+' account '+account.display_name);const details=document.createElement('span');details.textContent=account.platform+' · '+account.display_name+' · '+account.category+' ('+account.status.replaceAll('_',' ')+')';label.append(check,details);intentAccounts.append(label);}}catch(_){if(intentAccounts.textContent==='Loading account profiles…')intentAccounts.textContent='Could not load account profiles. Reload before selecting destinations.';}}
-          window.addEventListener('tubeforge:accounts-changed',loadIntentAccounts);loadIntentAccounts();
+          let accountChoicesLoaded=false;
+          async function loadIntentAccounts(){const selected=new Set([...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value));try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=(await response.json()).filter(account=>!account.disabled);intentAccounts.replaceChildren();if(!accounts.length){intentAccounts.textContent='No account profiles yet. Add one in Accounts, or create this video without a destination.';return;}for(const account of accounts){const label=document.createElement('label');label.className='checkbox';const check=document.createElement('input');check.type='checkbox';check.value=account.id;check.checked=accountChoicesLoaded?selected.has(account.id):account.is_default;check.defaultChecked=check.checked;check.setAttribute('aria-label','Plan for '+account.platform+' account '+account.display_name);const details=document.createElement('span');details.textContent=account.platform+' · '+account.display_name+' · '+account.category+' ('+account.status.replaceAll('_',' ')+')'+(account.is_default?' · default':'');label.append(check,details);intentAccounts.append(label);}accountChoicesLoaded=true;}catch(_){if(intentAccounts.textContent==='Loading account profiles…')intentAccounts.textContent='Could not load account profiles. Reload before selecting destinations.';}}
+          window.addEventListener('tubeforge:default-changed',()=>{accountChoicesLoaded=false;});window.addEventListener('tubeforge:accounts-changed',loadIntentAccounts);loadIntentAccounts();
           const originalFetch=window.fetch;
           window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.channel_identity=channelSelect.value||null;body.music_track=document.querySelector('#musicSelect')?.value||null;body.destination_account_ids=[...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value);body.description=descriptionInput.value.trim()||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
           const panel = document.createElement('fieldset');
@@ -850,7 +863,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           fetch('/api/oauth/youtube/status').then(response=>response.json()).then(result=>{youtubeReady=Boolean(result.configured);connect.disabled=!youtubeReady;connectStatus.textContent=youtubeReady?'YouTube authorization is ready. Google will ask you to choose a channel.':result.reason;}).catch(()=>{connectStatus.textContent='Could not check YouTube connection setup.';});
           async function start(accountId){if(!youtubeReady)return;connect.disabled=true;connectStatus.textContent='Starting Google authorization…';try{const response=await fetch('/api/oauth/youtube/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId||null})});if(!response.ok)throw Error(await response.text());const result=await response.json();location.assign(result.authorization_url);}catch(_){connectStatus.textContent='Could not start Google authorization. Check the app configuration and retry.';connect.disabled=false;}}
           connect.onclick=()=>start(null);
-          async function loadAccounts(){try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=await response.json();list.replaceChildren();if(!accounts.length){list.textContent='No account profiles yet.';return;}for(const account of accounts){const row=document.createElement('div');row.className='event';row.style.marginTop='12px';const name=document.createElement('strong');name.textContent=account.display_name+' · '+account.platform+' · '+account.category;const state=document.createElement('div');state.textContent=account.status==='connected'&&account.external_account_id?'Connected · '+account.external_account_id:account.status.replaceAll('_',' ');const edit=document.createElement('button');edit.type='button';edit.className='small secondary';edit.textContent='Edit profile';edit.onclick=()=>{const editor=document.createElement('form');editor.innerHTML='<label>Account name<input name="display_name" maxlength="200" required></label><label>Category<input name="category" maxlength="100" required></label><label>Default video description<textarea name="default_description" maxlength="5000"></textarea></label><button type="submit" class="small secondary">Save changes</button><div role="status"></div>';editor.elements.display_name.value=account.display_name;editor.elements.category.value=account.category;editor.elements.default_description.value=account.default_description;editor.onsubmit=async event=>{event.preventDefault();const button=editor.querySelector('button'),feedback=editor.querySelector('[role="status"]');button.disabled=true;feedback.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/profile',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(editor)))});if(!response.ok)throw Error(await response.text());feedback.textContent='Profile saved.';window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){feedback.textContent='Could not save profile: '+error.message;button.disabled=false;}};row.append(editor);edit.remove();};row.append(name,state,edit);if(account.platform==='youtube'&&account.external_account_id){const reconnect=document.createElement('button');reconnect.type='button';reconnect.className='small secondary';reconnect.textContent='Reconnect this channel';reconnect.disabled=!youtubeReady;reconnect.onclick=()=>start(account.id);row.append(reconnect);}list.append(row);}}catch(_){if(list.textContent==='Loading accounts…')list.textContent='Could not load account profiles. Reload to retry.';}}
+          async function loadAccounts(){try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=await response.json();list.replaceChildren();if(!accounts.length){list.textContent='No account profiles yet.';return;}for(const account of accounts){const row=document.createElement('div');row.className='event';row.style.marginTop='12px';const name=document.createElement('strong');name.textContent=account.display_name+' · '+account.platform+' · '+account.category;const state=document.createElement('div');state.textContent=account.status==='connected'&&account.external_account_id?'Connected · '+account.external_account_id:account.status.replaceAll('_',' ');const edit=document.createElement('button');edit.type='button';edit.className='small secondary';edit.textContent='Edit profile';edit.onclick=()=>{const editor=document.createElement('form');editor.innerHTML='<label>Account name<input name="display_name" maxlength="200" required></label><label>Category<input name="category" maxlength="100" required></label><label>Default video description<textarea name="default_description" maxlength="5000"></textarea></label><button type="submit" class="small secondary">Save changes</button><div role="status"></div>';editor.elements.display_name.value=account.display_name;editor.elements.category.value=account.category;editor.elements.default_description.value=account.default_description;editor.onsubmit=async event=>{event.preventDefault();const button=editor.querySelector('button'),feedback=editor.querySelector('[role="status"]');button.disabled=true;feedback.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/profile',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(editor)))});if(!response.ok)throw Error(await response.text());feedback.textContent='Profile saved.';window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){feedback.textContent='Could not save profile: '+error.message;button.disabled=false;}};row.append(editor);edit.remove();};row.append(name,state,edit);const defaultButton=document.createElement('button');defaultButton.type='button';defaultButton.className='small secondary';defaultButton.textContent=account.is_default?'Default account':'Set as default';defaultButton.disabled=account.is_default||account.disabled;defaultButton.onclick=async()=>{defaultButton.disabled=true;defaultButton.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/default',{method:'PUT'});if(!response.ok)throw Error(await response.text());window.dispatchEvent(new Event('tubeforge:default-changed'));window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){defaultButton.textContent='Could not save default: '+error.message;defaultButton.disabled=false;}};row.append(defaultButton);if(account.platform==='youtube'&&account.external_account_id){const reconnect=document.createElement('button');reconnect.type='button';reconnect.className='small secondary';reconnect.textContent='Reconnect this channel';reconnect.disabled=!youtubeReady;reconnect.onclick=()=>start(account.id);row.append(reconnect);}list.append(row);}}catch(_){if(list.textContent==='Loading accounts…')list.textContent='Could not load account profiles. Reload to retry.';}}
           profileForm.onsubmit=async event=>{event.preventDefault();const button=profileForm.querySelector('button[type="submit"]'),feedback=document.querySelector('#accountProfileStatus');button.disabled=true;feedback.textContent='Saving profile…';try{const response=await fetch('/api/social-accounts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(profileForm)))});if(!response.ok)throw Error(await response.text());feedback.textContent='Account profile saved. Connection is still required before online delivery.';profileForm.reset();window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){feedback.textContent='Could not save profile: '+error.message;}finally{button.disabled=false;}};
           loadAccounts();
         })();
@@ -1033,11 +1046,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
         )
         dashboard = dashboard.replace(
+            "card.append(actions)}async function refresh()",
+            "actions.append(button('Inputs & script','secondary',()=>window.openStudioRecord(j.id)));let format=document.createElement('div');format.className='generation-format';const kind=j.format.production_mode==='source_clip'?'Source clips':j.format.aspect_ratio==='9:16'&&j.format.duration_seconds<=120?'Shorts':j.format.aspect_ratio==='9:16'?'Vertical video':'Landscape video';format.textContent=kind+' · '+j.format.preset+' · '+j.format.duration_seconds+'s · '+(j.destinations.length?j.destinations.map(item=>item.platform+' / '+item.account_name+' / '+item.category).join(', '):'No destination selected');card.append(format,actions)}async function refresh()",
+        )
+        dashboard = dashboard.replace(
             "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
             "",
         )
-        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}</style></head>")
-        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + STUDIO_SCRIPT + "</body>")
+        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}</style></head>")
+        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + STUDIO_SCRIPT + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -1049,16 +1066,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         payloads = []
         for job in runtime.jobs.list_recent():
             can_retry_validation, retry_identity = _can_retry_approved_asset_validation(runtime, job)
+            events = runtime.events.list_for_job(job.id)
             payloads.append({
                 **_job_payload(job), "topic": job.request.topic,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
-                "event_count": len(runtime.events.list_for_job(job.id)),
+                "event_count": len(events),
+                "latest_event": {"event_type": events[-1].event_type, "stage": events[-1].details.get("stage") if isinstance(events[-1].details.get("stage"), str) else None, "created_at": _as_ist(events[-1].created_at)} if events else None,
+                "destinations": runtime.jobs.destination_intents(job.id),
+                "format": {"preset": job.request.preset_name, "aspect_ratio": job.request.aspect_ratio, "duration_seconds": job.request.target_duration_seconds, "production_mode": job.request.production_mode},
                 "deletable": job.claim_owner is None and job.state in deletable,
                 "artifact_cleanup_eligible": job.claim_owner is None and job.state is JobState.PUBLISHED,
                 "can_retry_validation": can_retry_validation,
                 "retry_script_identity": retry_identity,
             })
         return payloads
+
+    @app.get("/api/jobs/{job_id}/studio-record", tags=["jobs"])
+    def get_studio_record(job_id: str) -> dict[str, object]:
+        """Return saved operator inputs and durable Codex invocation evidence."""
+        try:
+            job = runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        commands: list[str] = []
+        evidence = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_generation_evidence")
+        if evidence is not None:
+            try:
+                provenance = json.loads(Path(evidence.path).read_text(encoding="utf-8")).get("provenance") or {}
+                if provenance.get("provider") == "codex-cli":
+                    commands = [shlex.join(args) for args in provenance.get("commands", []) if isinstance(args, list) and all(isinstance(arg, str) for arg in args)]
+            except (OSError, ValueError, TypeError):
+                pass
+        return {"job_id": job_id, "request": job.request.model_dump(mode="json"), "destinations": runtime.jobs.destination_intents(job_id), "video_description": runtime.jobs.video_description(job_id), "codex_commands": commands, "command_status": "recorded" if commands else "not_recorded"}
 
     @app.post("/api/jobs/{job_id}/retry-validation", tags=["jobs"])
     def retry_approved_validation(job_id: str, decision: RetryApprovedValidationRequest, request: Request) -> dict[str, object]:

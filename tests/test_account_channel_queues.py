@@ -1,6 +1,8 @@
 """Account-first topic queues never feed another channel's schedule."""
 
 from argparse import Namespace
+import hashlib
+import json
 from pathlib import Path
 
 from alembic import command
@@ -11,6 +13,8 @@ from sqlalchemy import create_engine, text
 from tubeforge.api.app import create_app
 from tubeforge.core.config import AppConfig, DatabaseConfig, Settings
 from tubeforge.db.models import Base
+from tubeforge.db.repositories import Artifact
+from tubeforge.domain.states import JobState
 
 
 def test_channel_schedules_only_reserve_their_own_topics(tmp_path: Path) -> None:
@@ -48,10 +52,38 @@ def test_channel_schedules_only_reserve_their_own_topics(tmp_path: Path) -> None
         second = client.post(f"/api/schedules/{history_schedule['id']}/run").json()
         assert second["state"] == "created" and second["topic_id"] == history["id"]
         assert [item["account_id"] for item in client.get(f"/api/jobs/{second['job_id']}/destination-intents").json()] == [history_id]
+        app.state.runtime.events.append(first["job_id"], "stage_started", stage="research")
+        active_job = next(item for item in client.get("/api/jobs").json() if item["id"] == first["job_id"])
+        assert active_job["latest_event"]["event_type"] == "stage_started"
+        assert active_job["latest_event"]["stage"] == "research"
+        assert active_job["state"]
+        assert active_job["destinations"][0]["account_id"] == tech_id
+        assert active_job["format"]["production_mode"] == "generated"
+        record = client.get(f"/api/jobs/{first['job_id']}/studio-record").json()
+        assert record["request"]["topic"] == "Virtual worlds"
+        assert record["destinations"][0]["account_name"] == "Virtual World Master"
+        assert record["command_status"] == "not_recorded"
+        evidence = tmp_path / "codex-evidence.json"
+        payload = json.dumps({"provenance": {"provider": "codex-cli", "commands": [["codex", "exec", "--json"]]}}).encode()
+        evidence.write_bytes(payload)
+        app.state.runtime.artifacts.save(Artifact(first["job_id"], JobState.CONTENT_GENERATING, "content_generation_evidence", str(evidence), hashlib.sha256(payload).hexdigest(), {}))
+        assert client.get(f"/api/jobs/{first['job_id']}/studio-record").json()["codex_commands"] == ["codex exec --json"]
+        assert client.get("/api/jobs/missing/studio-record").status_code == 404
+        assert client.put(f"/api/social-accounts/{tech_id}/default").json()["is_default"] is True
+        assert client.put(f"/api/social-accounts/{history_id}/default").json()["is_default"] is True
+        profiles = client.get("/api/social-accounts").json()
+        assert [item["id"] for item in profiles if item["is_default"]] == [history_id]
+        assert client.put("/api/social-accounts/missing/default").status_code == 404
         assert app.state.runtime.topics.get(legacy["id"]).status == "ready"
         dashboard = client.get("/").text
         assert "Choose a channel" in dashboard
         assert "Unassigned items" in dashboard
+        assert "Work in progress" in dashboard
+        assert "channelQueueSummary" in dashboard
+        assert "Inputs & script" in dashboard
+        assert "generationRecord" in dashboard
+        assert "Set as default" in dashboard
+        assert 'data-studio-nav="media"' in dashboard
 
 
 def test_account_queue_migration_keeps_existing_items_unassigned(tmp_path: Path) -> None:
@@ -74,3 +106,18 @@ def test_account_queue_migration_keeps_existing_items_unassigned(tmp_path: Path)
         assert connection.scalar(text("SELECT count(*) FROM topics WHERE id='old-topic'")) == 1
         assert connection.scalar(text("SELECT count(*) FROM schedules WHERE id='old-schedule'")) == 1
     engine.dispose()
+
+
+def test_default_account_survives_restart_and_disabled_account_cannot_be_selected(tmp_path: Path) -> None:
+    settings = Settings(app=AppConfig(name="test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'defaults.db'}"))
+    first = create_app(settings)
+    Base.metadata.create_all(first.state.database.engine)
+    with TestClient(first) as client:
+        account_id = client.post("/api/social-accounts", json={"platform": "youtube", "display_name": "Tech", "category": "Tech"}).json()["id"]
+        assert client.put(f"/api/social-accounts/{account_id}/default").json()["is_default"] is True
+    second = create_app(settings)
+    with TestClient(second) as client:
+        assert client.get("/api/social-accounts").json()[0]["is_default"] is True
+        assert client.post(f"/api/social-accounts/{account_id}/disable").status_code == 204
+        assert client.put(f"/api/social-accounts/{account_id}/default").status_code == 422
+        assert client.get("/api/social-accounts").json()[0]["is_default"] is False
