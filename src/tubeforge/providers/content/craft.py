@@ -97,9 +97,9 @@ def craft_problems(package) -> list[str]:
             problems.append(f"{starts.count(word)} scenes start with '{word}'; vary the openings")
     # Payoff late: the last numeric reveal must land in the back half, not right after the hook.
     stat_positions = [index for index, scene in enumerate(scenes) if scene.template == "big_stat"]
-    if stat_positions and stat_positions[-1] < len(scenes) // 2:
+    if stat_positions and stat_positions[-1] < 2:
         problems.append(f"the big_stat payoff is scene {stat_positions[-1] + 1} of {len(scenes)}; move the strongest number/twist "
-                        "to the second half so the hook's question stays open longer")
+                        "to scene 3 or later so the hook's question stays open longer")
     # Comment CTA: the closing line must provoke a reply, not only ask for a follow.
     final = scenes[-1].vo
     before_follow = re.split(r"(?i)\bfollow\b", final, maxsplit=1)[0]

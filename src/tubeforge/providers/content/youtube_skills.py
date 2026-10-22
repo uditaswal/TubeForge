@@ -93,9 +93,13 @@ def evaluate(package, root: Path | None = None) -> dict[str, object]:
         candidates = package.hook_options
         if len(candidates) != 5 or len(set(candidates)) != 5 or any(not text.strip() or len(text) > 500 for text in candidates):
             raise ValueError("expected five distinct hook_options")
-        opening = re.split(r"(?<=[.!?…])\s+", package.script_sections[0].narration.strip(), maxsplit=1)[0]
+        narration = package.script_sections[0].narration.strip()
+        opening = re.split(r"(?<=[.!?…])\s+", narration, maxsplit=1)[0]
+        if opening not in candidates and narration in candidates:
+            opening = narration  # a two-sentence hook ("X did Y. One engineer.") is allowed as a whole
         if opening not in candidates:
-            raise ValueError("opening sentence must exactly match one hook candidate")
+            raise ValueError(f"scene 1's first sentence {opening!r} must be copied character for character from one of hook_options "
+                             "(or the whole scene 1 narration must equal one option)")
         hook = _tool(root, "yt-script", "hookscore.py")
         title = _tool(root, "yt-package", "title.py")
         hooks = []
