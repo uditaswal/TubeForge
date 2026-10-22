@@ -29,3 +29,11 @@ Evidence: focused API/repository/UI tests, scheduler regression, signed-in dashb
 Out of scope: online platform connection, automatic publishing, changing the topic queue's scheduling policy or Claude's video renderer.
 
 Current Phase 4 state: **IMPLEMENTED**. The full focused dashboard, scheduler, account and publishing regression passed (26 tests); the Scheduling script parses in V8; refreshed desktop and phone previews returned HTTP 200. Browser inspection of the Scheduling tab on a real phone width and operator feedback remain pending. Next action: review the updated tab with the operator and address any visual or interaction issues.
+
+## Phase 5 — Account-first channel queues (operator correction)
+User-visible outcome: Scheduling opens with account cards; choosing a channel shows only that channel's queued topics, recent jobs and schedules, with add-topic and create-schedule actions in the same context.
+Acceptance: two accounts have independent topic queues; a schedule can only reserve a topic from its own account; a disabled or missing account cannot silently send a topic elsewhere; legacy unassigned topics and schedules remain isolated; signed-in desktop and 390 px mobile layouts expose the account context and truthful empty/error states.
+Evidence: migration on a populated local test DB, focused scheduler/API/UI tests, a live preview with two sample accounts and mobile review.
+Out of scope: online app connection/upload, auto publication, changes to Claude's video renderer.
+
+Current Phase 5 state: **IMPLEMENTED**. A populated-database migration retained unassigned items; account-isolation, scheduler, auth and publishing regression passed (28 tests). The account-first Scheduling script parses in V8; loopback desktop and phone previews load with separate Tech and History topics and schedules. Operator visual/mobile inspection remains pending. Next action: review the updated account-first layout and correct any interaction issues.

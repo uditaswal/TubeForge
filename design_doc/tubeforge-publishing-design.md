@@ -794,6 +794,16 @@ scheduler, account and publishing tests passing and updated desktop/phone
 previews returning HTTP 200. Operator mobile and visual review remains the
 next action; no scheduled upload was added.
 
+The operator then corrected the Scheduling information architecture: each
+channel needs its own topics. The current account-first tab is **IMPLEMENTED**:
+account cards sit above the selected channel's topic queue and schedules, and
+new schedules target one exact account. Topic and schedule ownership are durable
+in migration `20261022_0030`; old unassigned records remain isolated. A schedule
+cannot reserve another account's topic. The populated migration and focused
+dashboard, account, scheduler and publishing regression passed (28 tests).
+Desktop and 390 px preview endpoints show separate Tech and History examples;
+operator visual/mobile review is the next action. No online upload was added.
+
 ### Reference-renderer integration — active priority
 
 User supersedes the earlier landscape test with the supplied [Claude review](../docs/CLAUDE_PIPELINE_REVIEW.md). Overall **IMPLEMENTED**; shared layout phase verified, dashboard integration outstanding. Previous Rust preview is rejected and is not acceptance evidence. Canonical target: 1080×1920/30fps, 25–45 seconds, 6–8 scenes, 8–15 spoken words per scene, 0.3–0.4s tails, first-frame hook, fixed templates, visible sources, single-line 1–3-word 84px captions, music/SFX, closing follow CTA, −15..−13 LUFS and ≤−1.5 dBTP encoded true peak. Draft: 720×1280. Use native Python, Kokoro INT8 primary/Piper fallback, concurrency one.

@@ -64,7 +64,7 @@ class SchedulerService:
         run_id = uuid4().hex
         if not self.schedules.begin_run(run_id=run_id, schedule_id=schedule.id, run_key=key, now=now):
             return {"state": "duplicate", "schedule_id": schedule.id}
-        ready = self.topics.list(status="ready", limit=1)
+        ready = self.topics.list(status="ready", limit=1, account_id=schedule.account_id)
         next_at = next_run(schedule.cron, schedule.timezone, now)
         self.schedules.advance(schedule.id, now=now, next_run_at=next_at)
         if not ready:
@@ -76,11 +76,15 @@ class SchedulerService:
         try:
             request = request_from_topic(topic, schedule, self.codex_config)
             destination_ids, description = schedule_destination_options(schedule.options)
+            if schedule.account_id is not None:
+                if destination_ids and destination_ids != (schedule.account_id,):
+                    raise ValueError("account schedule must target only its own account")
+                destination_ids = (schedule.account_id,)
         except (ValueError, ProviderValidationError) as error:
             self.schedules.finish_run(run_id=run_id, state="invalid_request", now=now, topic_id=topic.id, details={"reason": str(error)[:1000]})
             return {"state": "invalid_request", "schedule_id": schedule.id, "topic_id": topic.id, "reason": str(error)[:1000]}
         try:
-            job = self.topics.reserve_and_create_job(topic_id=topic.id, scheduler_id=self.scheduler_id, job_id=job_id, request=request, lease_seconds=self.reservation_seconds, destination_account_ids=destination_ids, video_description=description)
+            job = self.topics.reserve_and_create_job(topic_id=topic.id, scheduler_id=self.scheduler_id, job_id=job_id, request=request, lease_seconds=self.reservation_seconds, destination_account_ids=destination_ids, video_description=description, account_id=schedule.account_id)
         except ValueError as error:
             self.schedules.finish_run(run_id=run_id, state="invalid_request", now=now, topic_id=topic.id, details={"reason": str(error)[:1000]})
             return {"state": "invalid_request", "schedule_id": schedule.id, "topic_id": topic.id, "reason": str(error)[:1000]}

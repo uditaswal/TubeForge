@@ -26,6 +26,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.api.scene_ui import SCENE_CONTROLS
 from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_SCRIPT
+from tubeforge.api.scheduling_ui import SCHEDULING_CSS, SCHEDULING_SCRIPT
 from tubeforge.core.runtime import Runtime, create_runtime
 from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, VoiceRequest, video_plan_from_package
 from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
@@ -127,12 +128,14 @@ class TopicCreateRequest(BaseModel):
     notes: str = Field(default="", max_length=24_000)
     priority: int = Field(default=0, ge=-1000, le=1000)
     options: dict[str, object] = Field(default_factory=dict)
+    account_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class TopicBulkCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     titles: tuple[str, ...] = Field(min_length=1, max_length=200)
     priority: int = Field(default=0, ge=-1000, le=1000)
+    account_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -141,6 +144,7 @@ class ScheduleCreateRequest(BaseModel):
     cron: str = Field(min_length=1, max_length=120)
     timezone: str = Field(default="UTC", min_length=1, max_length=100)
     options: dict[str, object] = Field(default_factory=dict)
+    account_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class LoginRequest(BaseModel):
@@ -464,16 +468,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/topics", status_code=status.HTTP_201_CREATED, tags=["topics"])
     def create_topic(value: TopicCreateRequest) -> dict[str, object]:
-        topic = runtime.topics.create(uuid4().hex, title=value.title, notes=value.notes, priority=value.priority, options=value.options)
-        return {"id": topic.id, "title": topic.title, "status": topic.status, "priority": topic.priority}
+        try:
+            topic = runtime.topics.create(uuid4().hex, title=value.title, notes=value.notes, priority=value.priority, options=value.options, account_id=value.account_id)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"id": topic.id, "title": topic.title, "status": topic.status, "priority": topic.priority, "account_id": topic.account_id}
 
     @app.post("/api/topics/bulk", status_code=status.HTTP_201_CREATED, tags=["topics"])
     def create_topics_bulk(value: TopicBulkCreateRequest) -> list[dict[str, object]]:
         try:
-            topics = runtime.topics.create_many(tuple((uuid4().hex, title) for title in value.titles), priority=value.priority)
+            topics = runtime.topics.create_many(tuple((uuid4().hex, title) for title in value.titles), priority=value.priority, account_id=value.account_id)
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
-        return [{"id": item.id, "title": item.title, "status": item.status, "priority": item.priority} for item in topics]
+        return [{"id": item.id, "title": item.title, "status": item.status, "priority": item.priority, "account_id": item.account_id} for item in topics]
 
     @app.get("/api/social-accounts", tags=["social accounts"])
     def list_social_accounts() -> list[dict[str, object]]:
@@ -691,24 +698,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/api/topics", tags=["topics"])
-    def list_topics(status_filter: str | None = None) -> list[dict[str, object]]:
-        return [{"id": item.id, "title": item.title, "notes": item.notes, "priority": item.priority, "status": item.status, "generation_job_id": item.generation_job_id, "attempts": item.attempts} for item in runtime.topics.list(status=status_filter)]
+    def list_topics(status_filter: str | None = None, account_id: str | None = None) -> list[dict[str, object]]:
+        topics = runtime.topics.list(status=status_filter, **({"account_id": account_id} if account_id is not None else {}))
+        return [{"id": item.id, "title": item.title, "notes": item.notes, "priority": item.priority, "status": item.status, "generation_job_id": item.generation_job_id, "attempts": item.attempts, "account_id": item.account_id} for item in topics]
 
     @app.post("/api/schedules", status_code=status.HTTP_201_CREATED, tags=["schedules"])
     def create_schedule(value: ScheduleCreateRequest) -> dict[str, object]:
         try:
             destination_ids, _ = schedule_destination_options(value.options)
+            options = dict(value.options)
+            if value.account_id is not None:
+                if destination_ids and destination_ids != (value.account_id,):
+                    raise ValueError("account schedule must target only its own account")
+                options["destination_account_ids"] = [value.account_id]
+                destination_ids = (value.account_id,)
             available = {account.id for account in runtime.accounts.list() if not account.disabled}
             if any(account_id not in available for account_id in destination_ids):
                 raise ValueError("selected destination account is missing or disabled")
-            schedule = runtime.schedules.create(uuid4().hex, name=value.name, cron=value.cron, timezone=value.timezone, next_run_at=next_run(value.cron, value.timezone, datetime.now(UTC)), options=value.options)
+            schedule = runtime.schedules.create(uuid4().hex, name=value.name, cron=value.cron, timezone=value.timezone, next_run_at=next_run(value.cron, value.timezone, datetime.now(UTC)), options=options, account_id=value.account_id)
         except (ValueError, KeyError) as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid schedule: {error}") from error
-        return {"id": schedule.id, "name": schedule.name, "next_run_at": schedule.next_run_at}
+        return {"id": schedule.id, "name": schedule.name, "next_run_at": schedule.next_run_at, "account_id": schedule.account_id}
 
     @app.get("/api/schedules", tags=["schedules"])
-    def list_schedules() -> list[dict[str, object]]:
-        return [{"id": item.id, "name": item.name, "cron": item.cron, "timezone": item.timezone, "enabled": item.enabled, "next_run_at": item.next_run_at, "last_run_at": item.last_run_at, "options": item.options} for item in runtime.schedules.list()]
+    def list_schedules(account_id: str | None = None) -> list[dict[str, object]]:
+        schedules = runtime.schedules.list()
+        if account_id is not None:
+            schedules = [item for item in schedules if item.account_id == account_id]
+        return [{"id": item.id, "name": item.name, "cron": item.cron, "timezone": item.timezone, "enabled": item.enabled, "next_run_at": item.next_run_at, "last_run_at": item.last_run_at, "options": item.options, "account_id": item.account_id} for item in schedules]
 
     @app.post("/api/schedules/{schedule_id}/run", tags=["schedules"])
     def run_schedule(schedule_id: str) -> dict[str, object]:
@@ -811,30 +828,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           });
         })();
         </script>"""
-        operations_controls = """<script>
-        (() => {
-          const csrf=(document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1];
-          if (csrf) { const original=window.fetch; window.fetch=(url, init={}) => { const method=(init.method||'GET').toUpperCase(); if (!['GET','HEAD','OPTIONS'].includes(method)) init.headers={...(init.headers||{}),'x-csrf-token':decodeURIComponent(csrf)}; return original(url,init); }; }
-          const shell=document.querySelector('.shell'); if (!shell) return;
-          const form=document.querySelector('#createForm'),channelSelect=form.querySelector('[name="channel_identity"]'),presetSelect=form.querySelector('#presetSelect');
-          const panel=document.createElement('section'); panel.className='panel'; panel.style.marginTop='18px';
-          panel.innerHTML='<h2>Topic queue</h2><p class=sub>Paste one topic per line. Notes can be added from the API today.</p><textarea id=bulkTopics placeholder="Topic one&#10;Topic two"></textarea><button id=bulkTopicsButton type=button>Add topics</button><div id=topicStatus class=notice></div><h2 style="margin-top:22px">Schedule</h2><p class=sub>New schedules use the selected channel voice, format and duration. Choose destinations for this schedule below. Scheduled review policy is unchanged.</p><label>Name<input id=scheduleName value="Twice daily"></label><label>Cron<input id=scheduleCron value="0 9,18 * * *"></label><label>Timezone<input id=scheduleTimezone value="UTC"></label><button id=scheduleButton type=button disabled>Create schedule</button><div id=scheduleStatus class=notice role=status></div><div id=operationsList class=muted style="margin-top:12px"></div>';
-          shell.append(panel);
-          const destinationField=document.createElement('fieldset');destinationField.className='schedule-destinations';
-          const destinationLegend=document.createElement('legend');destinationLegend.textContent='Apps and accounts for this schedule';
-          const destinationHelp=document.createElement('p');destinationHelp.className='sub';destinationHelp.textContent='Select exact local profiles. Each scheduled video saves this plan; it does not upload automatically.';
-          const destinationChecks=document.createElement('div');destinationChecks.id='scheduleDestinationAccounts';destinationChecks.textContent='Loading account profiles…';
-          const descriptionLabel=document.createElement('label');descriptionLabel.textContent='Video description (optional)';
-          const descriptionInput=document.createElement('textarea');descriptionInput.id='scheduleVideoDescription';descriptionInput.maxLength=5000;descriptionInput.placeholder='Leave blank to use each selected account’s default';descriptionLabel.append(descriptionInput);
-          destinationField.append(destinationLegend,destinationHelp,destinationChecks,descriptionLabel);panel.querySelector('#scheduleButton').before(destinationField);
-          const scheduleButton=panel.querySelector('#scheduleButton');
-          async function loadScheduleAccounts(){const selected=new Set([...destinationChecks.querySelectorAll('input:checked')].map(item=>item.value));try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=(await response.json()).filter(account=>!account.disabled);destinationChecks.replaceChildren();if(!accounts.length){destinationChecks.textContent='No account profiles yet. Add one in Accounts, or save a schedule without destinations.';}for(const account of accounts){const label=document.createElement('label');label.className='checkbox';const check=document.createElement('input');check.type='checkbox';check.value=account.id;check.checked=selected.has(account.id);const details=document.createElement('span');details.textContent=account.platform+' · '+account.display_name+' · '+account.category+' ('+account.status.replaceAll('_',' ')+')';label.append(check,details);destinationChecks.append(label);}scheduleButton.disabled=false;}catch(_){destinationChecks.textContent='Could not load account profiles. Reload before scheduling.';scheduleButton.disabled=true;}}
-          window.addEventListener('tubeforge:accounts-changed',loadScheduleAccounts);loadScheduleAccounts();
-          async function listOps(){try{const [topics,schedules,accounts]=await Promise.all(['/api/topics','/api/schedules','/api/social-accounts'].map(path=>fetch(path).then(response=>{if(!response.ok)throw Error();return response.json();})));const list=panel.querySelector('#operationsList');list.replaceChildren();const count=document.createElement('p');count.textContent=`${topics.length} topics · ${schedules.length} schedules`;list.append(count);const accountNames=new Map(accounts.map(account=>[account.id,account.platform+' · '+account.display_name+' · '+account.category]));for(const schedule of schedules){const row=document.createElement('div');row.className='event';row.style.marginTop='12px';const title=document.createElement('strong');title.textContent=schedule.name;const detail=document.createElement('div');const ids=schedule.options?.destination_account_ids||[];detail.textContent=schedule.cron+' · '+schedule.timezone+' · '+(ids.length?ids.map(id=>accountNames.get(id)||'Unavailable account').join(', '):'No destination accounts');row.append(title,detail);list.append(row);}}catch(_){panel.querySelector('#operationsList').textContent='Could not load schedules. Reload to retry.';}}
-          document.querySelector('#bulkTopicsButton').onclick=async()=>{const titles=document.querySelector('#bulkTopics').value.split('\\n').map(v=>v.trim()).filter(Boolean);const r=await fetch('/api/topics/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({titles})});document.querySelector('#topicStatus').textContent=r.ok?`Added ${(await r.json()).length} topics.`:'Could not add topics: '+await r.text();if(r.ok){document.querySelector('#bulkTopics').value='';listOps();}};
-          scheduleButton.onclick=async()=>{const status=panel.querySelector('#scheduleStatus'),duration=form.querySelector('[name=duration_seconds]');if(!duration.reportValidity())return;const destination_account_ids=[...destinationChecks.querySelectorAll('input:checked')].map(item=>item.value);const body={name:panel.querySelector('#scheduleName').value,cron:panel.querySelector('#scheduleCron').value,timezone:panel.querySelector('#scheduleTimezone').value,options:{channel_identity:channelSelect.value||null,preset_name:presetSelect.value,aspect_ratio:presetSelect.selectedOptions[0]?.dataset.aspect||'16:9',duration_seconds:Number(duration.value),destination_account_ids,video_description:descriptionInput.value.trim()||null}};scheduleButton.disabled=true;status.textContent='Saving schedule…';try{const r=await fetch('/api/schedules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error(await r.text());status.textContent='Schedule created with '+destination_account_ids.length+' planned account'+(destination_account_ids.length===1?'':'s')+'. No upload was queued.';await listOps();}catch(error){status.textContent='Could not create schedule: '+error.message;}finally{scheduleButton.disabled=false;}}; listOps();
-        })();
-        </script>"""
+        operations_controls = SCHEDULING_SCRIPT
         account_controls = """<script>
         (() => {
           const shell=document.querySelector('.shell'); if(!shell)return;
@@ -1038,7 +1032,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
             "",
         )
-        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}</style></head>")
+        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}</style></head>")
         return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + STUDIO_SCRIPT + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
