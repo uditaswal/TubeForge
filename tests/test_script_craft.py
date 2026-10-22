@@ -62,3 +62,11 @@ def test_comment_only_code_visual_is_rejected():
     scenes[2] = scenes[2].model_copy(update={"visual": scenes[2].visual.model_copy(update={"lines": ("// only a comment",)})})
     data_pkg.reference_short = data_pkg.reference_short.model_copy(update={"scenes": tuple(scenes)})
     assert any("only comments" in p for p in visual_problems(data_pkg))
+
+
+def test_jargon_and_unspeakable_numbers_are_rejected():
+    from tubeforge.providers.content.craft import SPEECH_UNSAFE
+    bad = package({1: {"vo": "No cutover. The bill was $120,000 and 3.4x faster on 1,383 MB machines.", "caption": "No cutover. The bill was $120,000 and 3.4x faster on 1,383 MB machines."}}, late_stat=True)
+    problems = " | ".join(craft_problems(bad))
+    assert "cliché" in problems and "voice reads badly" in problems
+    assert not SPEECH_UNSAFE.search("The bill was 120 thousand dollars, 3.4 times faster, 14.5 weeks, 76% fewer bugs.")

@@ -3,10 +3,24 @@ from PIL import Image
 from tubeforge.pipeline.capture import CARD_HEIGHT, CARD_WIDTH, _public, draw_highlight, plan_clip
 
 
-def test_plan_clip_uses_full_width_and_matches_the_card_aspect():
-    x, y, w, h = plan_clip([{"x": 40, "y": 800, "w": 450, "h": 26}, {"x": 40, "y": 826, "w": 300, "h": 26}], 540, 5000)
+def test_plan_clip_uses_full_width_and_never_exceeds_the_card_aspect():
+    rects = [{"x": 40, "y": 800, "w": 450, "h": 26}, {"x": 40, "y": 826, "w": 300, "h": 26}]
+    x, y, w, h = plan_clip(rects, 540, 5000)
     assert (x, w) == (0, 540) and h <= 540 * CARD_HEIGHT / CARD_WIDTH + 1e-6
     assert y <= 800 and y + h >= 852  # the whole match stays inside the crop
+
+
+def test_plan_clip_aligns_to_the_paragraph_when_it_fits():
+    rects = [{"x": 40, "y": 830, "w": 450, "h": 26}]
+    block = {"y": 800.0, "h": 150.0}
+    x, y, w, h = plan_clip(rects, 540, 5000, block)
+    assert y == 790.0 and y + h == 960.0  # block top/bottom plus 10 px padding, no partial extra lines
+
+
+def test_plan_clip_falls_back_to_matched_lines_for_tall_blocks():
+    rects = [{"x": 40, "y": 830, "w": 450, "h": 26}, {"x": 40, "y": 856, "w": 450, "h": 26}]
+    x, y, w, h = plan_clip(rects, 540, 5000, {"y": 100.0, "h": 2000.0})
+    assert 830 - 1.2 * 26 - 10 - 1e-6 <= y + 1e-6 and y <= 830 and y + h >= 882
 
 
 def test_plan_clip_stays_inside_short_documents():

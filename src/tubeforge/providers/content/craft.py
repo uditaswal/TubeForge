@@ -15,7 +15,11 @@ BANNED_PHRASES = (
     "buckle up", "stay tuned", "mind-blowing", "mind blowing", "unlock", "unleash", "revolutionize",
     "revolutionise", "delve", "landscape", "let that sink in", "you won't believe", "it's no secret",
     "at the end of the day", "the secret sauce", "not just", "elevate", "supercharge", "harness the power",
+    # Insider jargon a general viewer does not know (explain it in plain words instead).
+    "cutover", "paradigm", "synergy", "leverage", "bandwidth", "idempotent", "orchestrate",
 )
+# Written forms the voice reads badly: currency symbols, thousands commas, "3.4x", unit abbreviations, operators.
+SPEECH_UNSAFE = re.compile(r"[$€£¥&@#=+<>/\\]|\d,\d{3}|\d\s?[x×](?![\w])|\b\d+(?:\.\d+)?\s?(?:KB|MB|GB|TB|ms|kHz|MHz|GHz|fps)\b", re.I)
 COMMENT_PROMPT = re.compile(r"\?|\b(comment|tell me|defend|prove me wrong|fight me|change my mind|disagree|agree)\b", re.I)
 STOPWORDS = frozenset("a an the and or but so of to in on for with by is are was were be it its this that your you we our at as from".split())
 
@@ -77,6 +81,11 @@ def craft_problems(package) -> list[str]:
         hits = [phrase for phrase in BANNED_PHRASES if f" {phrase} " in lowered]
         if hits:
             problems.append(f"scene {index} uses cliché phrasing {hits}; say it plainly and specifically")
+    for index, text in enumerate(spoken, 1):
+        unsafe = sorted({m.group(0).strip() for m in SPEECH_UNSAFE.finditer(text)})
+        if unsafe:
+            problems.append(f"scene {index} narration has written forms the voice reads badly {unsafe}; write them as spoken words "
+                            "('120 thousand dollars' not '$120,000', '3.4 times' not '3.4x', 'megabytes' not 'MB', no thousands commas)")
     for index, hook in enumerate(package.hook_options, 1):
         lowered = " " + re.sub(r"[^\w'\- ]", " ", hook.casefold()) + " "
         hits = [phrase for phrase in BANNED_PHRASES if f" {phrase} " in lowered]
