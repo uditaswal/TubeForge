@@ -770,6 +770,21 @@ The longer accepted Git phrase about `app.py` and `Git’s staging area` still b
 
 ## 11. Current release status and next action
 
+### Feature branch: multi-account planning and Creator Studio UI — operator review
+
+On `codex/multi-account-setup`, local YouTube, Instagram, Snapchat and X/Twitter
+account profiles, categories and default descriptions are **IMPLEMENTED**. A
+generation saves exact destination and description choices, and a finished
+video passes those choices into the existing manual draft flow. Online account
+connection or upload behavior is outside this feature. The reference-inspired
+Studio shell, section navigation and phone drawer are **IMPLEMENTED** in the
+same branch. Focused signed-in auth, account, generation and publishing tests
+passed (22/22); the final navigation script parses, and desktop and 390 px
+interactive preview pages load from the isolated loopback server. Visual and
+horizontal-overflow acceptance remain pending operator browser review. The
+next action is to address that feedback. The feature branch remains separate
+from Claude's `dev` work.
+
 ### Reference-renderer integration — active priority
 
 User supersedes the earlier landscape test with the supplied [Claude review](../docs/CLAUDE_PIPELINE_REVIEW.md). Overall **IMPLEMENTED**; shared layout phase verified, dashboard integration outstanding. Previous Rust preview is rejected and is not acceptance evidence. Canonical target: 1080×1920/30fps, 25–45 seconds, 6–8 scenes, 8–15 spoken words per scene, 0.3–0.4s tails, first-frame hook, fixed templates, visible sources, single-line 1–3-word 84px captions, music/SFX, closing follow CTA, −15..−13 LUFS and ≤−1.5 dBTP encoded true peak. Draft: 720×1280. Use native Python, Kokoro INT8 primary/Piper fallback, concurrency one.

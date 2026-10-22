@@ -123,6 +123,13 @@ with their current connection/support state. Review every destination's title,
 description or caption before saving a separate publishing draft. Video
 creation never starts an upload.
 
+Creator Studio groups the same live controls into **Studio** (create and review
+generations), **Publishing** (drafts and delivery activity), **Accounts**
+(local profiles and connections), and **Scheduling** (topics and schedules).
+On phones, open **Menu** to switch sections; Escape or the backdrop closes it.
+The URL hash preserves the selected section when reloading. Background job
+updates continue without replacing an open form or dialog.
+
 Creator Studio now lists publishing accounts and reports their stored state.
 It enables **Connect YouTube** only when dashboard login, an encryption key,
 and a Google OAuth web application are configured. The browser is redirected
