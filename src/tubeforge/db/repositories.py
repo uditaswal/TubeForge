@@ -110,6 +110,24 @@ class CachedGeneration:
     usage: dict[str, object]
 
 
+def _snapshot_video_destinations(session: Session, job_id: str, account_ids: tuple[str, ...], description: str | None, now: datetime) -> None:
+    """Save exact account metadata in the same transaction as the new job."""
+    if len(account_ids) > 20 or len(set(account_ids)) != len(account_ids):
+        raise ValueError("select at most 20 distinct destination accounts")
+    if any(not isinstance(account_id, str) or not account_id for account_id in account_ids):
+        raise ValueError("destination account IDs must be nonempty strings")
+    if description is not None and (not isinstance(description, str) or not description.strip() or len(description) > 5000):
+        raise ValueError("video description must contain 1–5000 characters")
+    if not account_ids:
+        return
+    accounts = {item.id: item for item in session.scalars(select(SocialAccountRecord).where(SocialAccountRecord.id.in_(account_ids)))}
+    if len(accounts) != len(account_ids) or any(accounts[item].disabled for item in account_ids):
+        raise ValueError("selected destination account is missing or disabled")
+    for account_id in account_ids:
+        account = accounts[account_id]
+        session.add(VideoDestinationIntentRecord(job_id=job_id, account_id=account_id, platform=account.platform, account_name=account.display_name, category=account.category, description=description.strip() if description is not None else account.default_description, created_at=now))
+
+
 class JobRepository:
     """Persist jobs without retaining a session across provider work."""
 
@@ -117,10 +135,6 @@ class JobRepository:
         self._session_factory = session_factory
 
     def create(self, job_id: str, request: ContentRequest, *, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None) -> PipelineJob:
-        if len(destination_account_ids) > 20 or len(set(destination_account_ids)) != len(destination_account_ids):
-            raise ValueError("select at most 20 distinct destination accounts")
-        if video_description is not None and (not video_description.strip() or len(video_description) > 5000):
-            raise ValueError("video description must contain 1–5000 characters")
         now = datetime.now(UTC)
         record = PipelineJobRecord(
             id=job_id, request_json=request.model_dump_json(), video_description=video_description.strip() if video_description is not None else None, state=JobState.TOPIC_CREATED.value,
@@ -131,14 +145,8 @@ class JobRepository:
         )
         try:
             with self._session_factory.begin() as session:
-                if destination_account_ids:
-                    accounts = {item.id: item for item in session.scalars(select(SocialAccountRecord).where(SocialAccountRecord.id.in_(destination_account_ids)))}
-                    if len(accounts) != len(destination_account_ids) or any(accounts[item].disabled for item in destination_account_ids):
-                        raise ValueError("selected destination account is missing or disabled")
                 session.add(record)
-                for account_id in destination_account_ids:
-                    account = accounts[account_id]
-                    session.add(VideoDestinationIntentRecord(job_id=job_id, account_id=account_id, platform=account.platform, account_name=account.display_name, category=account.category, description=video_description.strip() if video_description is not None else account.default_description, created_at=now))
+                _snapshot_video_destinations(session, job_id, destination_account_ids, video_description, now)
         except IntegrityError as error:
             raise ValueError(f"job already exists: {job_id}") from error
         return _job_from_record(record)
@@ -490,15 +498,16 @@ class TopicRepository:
             if record is None: raise KeyError("topic not found")
             return _topic_from_record(record)
 
-    def reserve_and_create_job(self, *, topic_id: str, scheduler_id: str, job_id: str, request: ContentRequest, lease_seconds: int) -> PipelineJob | None:
+    def reserve_and_create_job(self, *, topic_id: str, scheduler_id: str, job_id: str, request: ContentRequest, lease_seconds: int, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None) -> PipelineJob | None:
         """Atomically convert one READY topic into exactly one ordinary job."""
         now = datetime.now(UTC)
         with self._session_factory.begin() as session:
             result = session.execute(update(TopicRecord).where(TopicRecord.id == topic_id, TopicRecord.status == "ready").values(status="generating", generation_job_id=job_id, reserved_by=scheduler_id, reserved_at=now, lease_expires_at=now + timedelta(seconds=lease_seconds), attempts=TopicRecord.attempts + 1, updated_at=now))
             if result.rowcount != 1:
                 return None
-            record = PipelineJobRecord(id=job_id, request_json=request.model_dump_json(), state=JobState.TOPIC_CREATED.value, resume_state=None, failure_message=None, created_at=now, updated_at=now, claim_owner=None, claimed_at=None, lease_expires_at=None, heartbeat_at=None, attempt_count=0, next_retry_at=None, cancellation_requested_at=None, authentication_restored_at=None)
+            record = PipelineJobRecord(id=job_id, request_json=request.model_dump_json(), video_description=video_description.strip() if video_description is not None else None, state=JobState.TOPIC_CREATED.value, resume_state=None, failure_message=None, created_at=now, updated_at=now, claim_owner=None, claimed_at=None, lease_expires_at=None, heartbeat_at=None, attempt_count=0, next_retry_at=None, cancellation_requested_at=None, authentication_restored_at=None)
             session.add(record)
+            _snapshot_video_destinations(session, job_id, destination_account_ids, video_description, now)
             session.flush()
             return _job_from_record(record)
 
