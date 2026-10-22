@@ -137,3 +137,14 @@ def test_real_encoder_and_cancel_preserve_existing_output(tmp_path):
         encode(timeline, audio, target, draft=True, motion=False, cancelled=lambda: True)
     assert target.read_bytes() == original
     assert json.loads(target.with_suffix(".qa.json").read_text())["passed"] is False
+
+
+def test_compress_pauses_shortens_only_long_internal_silences():
+    import numpy as np
+    from tubeforge.rendering.shorts.prepare import compress_pauses
+    sr = 1000
+    tone = np.full(200, .5, np.float32)
+    audio = np.concatenate([tone, np.zeros(600, np.float32), tone, np.zeros(100, np.float32), tone])
+    out = compress_pauses(audio, sr, .15)
+    assert len(out) == 200 * 3 + 150 + 100
+    assert np.count_nonzero(out) == 600

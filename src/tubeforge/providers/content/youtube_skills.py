@@ -26,8 +26,12 @@ RESOURCES = PRODUCTION_RESOURCES
 
 
 def resource_set_for(template_version: str) -> dict[str, tuple[str, ...]]:
-    """Keep old cached prompt identities stable while enriching new v7 jobs."""
-    return PRODUCTION_RESOURCES if template_version in {SKILL_TEMPLATE, "m6-content-v8"} else LEGACY_RESOURCES
+    """Keep old cached prompt identities stable while enriching new v7 jobs.
+
+    v8 (reference Shorts) scenes are fixed templates described in the prompt itself, so the
+    om-* storyboard skills (written for v7 scene plans) are not sent; that keeps prompt budget for craft rules.
+    """
+    return PRODUCTION_RESOURCES if template_version == SKILL_TEMPLATE else LEGACY_RESOURCES
 
 
 def resource_root() -> Path:

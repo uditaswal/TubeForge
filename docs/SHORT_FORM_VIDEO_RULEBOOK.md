@@ -3,8 +3,9 @@
 Use this for future scripts, scene plans, renderer changes and review of vertical Shorts. The [reference audit](DOCKER_SHORT_BENCHMARK_REVIEW.md) holds attachment details and measured comparisons; this file contains reusable production rules. The canonical narration contract remains [yt-script automation](../.agents/skills/yt-script/automation.md).
 
 The newer `reference-short-v1` profile follows the [Claude pipeline review](CLAUDE_PIPELINE_REVIEW.md):
-25–45 seconds, 6–8 scenes, 8–15 spoken words per scene, 0.3–0.4-second speech
-tails, fixed semantic templates and a final spoken/visible follow CTA. Its
+25–45 seconds, 6–8 scenes, 8–15 spoken words per scene, 0.12–0.4-second speech
+tails (default 0.18 s since 22 Oct 2026; internal pauses capped at 0.15 s, voice 1.15×), fixed semantic templates
+and a final spoken comment challenge followed by the visible follow CTA. Its
 encoded true-peak gate is **≤−1.5 dBTP**, stricter than the legacy gate below.
 Finals remain 1080×1920/30fps; drafts are 720×1280. Native local Kokoro INT8 is
 primary with local Piper fallback, one worker, real-audio alignment and logged
@@ -40,7 +41,7 @@ Validate scene order against the approved package; reject stale hashes, unsuppor
 
 For 1080×1920, keep essential text inside **x=60–930, y=200–1500**. Reserve the top 200 px for platform chrome, the bottom 420 px for description/navigation, and the right action rail at roughly x>930 from y=1000–1700. Put progress near y=215. These are conservative design guides, so inspect the actual platform preview as well.
 
-Use a separate caption zone below the teaching visual, centered near x=490, y=1385. Aim for one bold line of one to three words at **84 px or larger**, with a dark outline/backplate and an active-word highlight. Split chunks rather than silently shrinking or clipping them. Keep the terminal/card above the caption zone. Check full text bounding boxes, cursor and backplates against safe bounds on every rendered frame, then view representative encoded frames at phone scale.
+Use a separate caption zone below the teaching visual, centered near x=490, y=1385. Aim for one bold line of one to three words at **84 px or larger** (reference profile: 96 px Anton), with a dark outline/backplate and an active-word highlight. Split chunks rather than silently shrinking or clipping them. Keep the terminal/card above the caption zone. Check full text bounding boxes, cursor and backplates against safe bounds on every rendered frame, then view representative encoded frames at phone scale.
 
 Derive caption words from the accepted narration, align the **actual synthesized speech** using word timestamps or forced alignment (for example faster-whisper), and cross-check command names and scene boundaries. If alignment fails, a proportional estimate is a flagged fallback requiring listening review; it is not measured timing. Preserve both spoken and displayed forms where punctuation is said differently from text shown on screen.
 

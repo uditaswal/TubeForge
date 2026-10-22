@@ -56,7 +56,10 @@ benchmark evidence from production acceptance.
 
 The newer reference-short-v1 profile follows docs/CLAUDE_PIPELINE_REVIEW.md:
 6–8 scenes, 8–15 spoken words each, 25–45 seconds, final 1080×1920/30fps,
-720×1280 drafts, one-line 84px captions and encoded true peak ≤−1.5 dBTP.
+720×1280 drafts, one-line 96px Anton captions, Kokoro at 1.15× with pauses capped at 0.15 s and
+0.18 s scene tails (22 Oct 2026), ≤96 narration words, and encoded true peak ≤−1.5 dBTP.
+Script-craft checks (`providers/content/craft.py`: banned clichés, ≤2 rhetorical questions, late payoff,
+comment-challenge CTA, no echo headings) are repairable writer errors.
 Keep geometry in the shared rendering/shorts library, not model output. Run
 native local Kokoro and forced alignment sequentially to bound model memory;
 Piper and estimated alignment are explicit, recorded fallbacks. The canonical

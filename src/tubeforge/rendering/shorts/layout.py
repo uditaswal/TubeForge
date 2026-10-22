@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -29,10 +30,20 @@ class LayoutError(ValueError):
         super().__init__(f"{code}: {element}: {detail}")
 
 
+FONTS = Path(__file__).with_name("fonts")  # OFL-licensed; licence texts next to the files
+CAPTION_SIZE = 96
+
+
 @lru_cache(maxsize=128)
-def font(size: int, mono: bool = False):
-    name = "DejaVuSansMono" if mono else "DejaVuSans"
-    return ImageFont.truetype(f"/usr/share/fonts/truetype/dejavu/{name}-Bold.ttf", size)
+def font(size: int, mono: bool = False, display: bool = False):
+    """Inter ExtraBold for text, Anton for hooks/numbers/captions, DejaVu Mono for terminals."""
+    if mono:
+        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", size)
+    if display:
+        return ImageFont.truetype(str(FONTS / "Anton-Regular.ttf"), size)
+    face = ImageFont.truetype(str(FONTS / "Inter-Variable.ttf"), size)
+    face.set_variation_by_axes([min(32, max(14, size)), 800])
+    return face
 
 
 def contains(outer, inner):
@@ -80,11 +91,11 @@ class Canvas:
         self.draw.rounded_rectangle(bounds, radius=24, fill=color, outline=outline, width=3)
 
     def text(self, key, value, center, *, size=64, minimum=40, width=810,
-             color=WHITE, mono=False, role="text", parent=None, stroke=0):
+             color=WHITE, mono=False, role="text", parent=None, stroke=0, display=False):
         if not value.strip() or "\n" in value:
             raise LayoutError("invalid_text", key, "requires a nonempty single line")
         while size >= minimum:
-            face = font(size, mono)
+            face = font(size, mono, display)
             bounds = self.draw.textbbox(center, value, font=face, anchor="mm", stroke_width=stroke)
             if bounds[2] - bounds[0] <= width:
                 break
@@ -118,9 +129,9 @@ def background():
 def caption_groups(caption: str) -> tuple[tuple[str, ...], ...]:
     result, current = [], []
     for word in caption.upper().split():
-        if font(84).getlength(word) + 12 > 850:
+        if font(CAPTION_SIZE, display=True).getlength(word) + 12 > 850:
             raise LayoutError("caption_token_overflow", "caption", word)
-        if current and (len(current) == 3 or font(84).getlength(" ".join([*current, word])) + 12 > 850):
+        if current and (len(current) == 3 or font(CAPTION_SIZE, display=True).getlength(" ".join([*current, word])) + 12 > 850):
             result.append(tuple(current))
             current = []
         current.append(word)
@@ -160,7 +171,7 @@ class SceneRenderer:
                 self.icon(c, scene.icon, (495, 380), 220)
                 top, step = 620, 135
             for j, line in enumerate(scene.headline):
-                c.text(f"headline{j}", line, (495, top + j * step), size=126, minimum=84,
+                c.text(f"headline{j}", line, (495, top + j * step), size=step - 10, minimum=84, display=True,
                        color=CYAN if j == len(scene.headline) - 1 else WHITE)
             self.chips(c, scene.chips, top + step * len(scene.headline) + 20, len(scene.chips))
         elif kind == "cta":
@@ -169,10 +180,10 @@ class SceneRenderer:
             self.chips(c, scene.chips, 620, revealed)
             # A longer follow request uses two deliberately composed lines.
             words = scene.headline.split()
-            lines = [scene.headline] if font(68).getlength(scene.headline) <= 810 else [
+            lines = [scene.headline] if font(88, display=True).getlength(scene.headline) <= 810 else [
                 " ".join(words[:2]), " ".join(words[2:])]
             for j, line in enumerate(lines):
-                c.text(f"cta{j}", line, (495, 850 + j * 100), size=76, minimum=54, color=CYAN)
+                c.text(f"cta{j}", line, (495, 850 + j * 100), size=88, minimum=60, color=CYAN, display=True)
             c.text("subline", scene.subline, (495, 1120), size=44)
         else:
             if scene.icon:
@@ -185,14 +196,13 @@ class SceneRenderer:
                 for j, (value, label) in enumerate(values):
                     y = 560 + dy + j * 390
                     if j >= revealed:
-                        c.draw.rounded_rectangle((100, y + 120, 890, y + 148), radius=12, fill="#1b2840")
                         continue
                     amount = grow if j == revealed - 1 else 1.0
                     shown = value * amount
                     text = f"{shown:.1f}".rstrip("0").rstrip(".") if amount < 1 and value != int(value) else f"{round(shown) if amount < 1 else value:g}"
-                    c.text(f"label{j}", label, (495, y - 80), size=44, color=MUTED)
+                    c.text(f"label{j}", label, (495, y - 95), size=44, color=MUTED)
                     c.text(f"number{j}", text + scene.unit, (495, y + 20),
-                           size=154, minimum=100, color=AMBER if j == 0 else CYAN)
+                           size=160, minimum=110, color=AMBER if j == 0 else CYAN, display=True)
                     bounds = (100, y + 120, 890, y + 148)
                     c.mark(Mark(f"bar{j}", "graphic", bounds))
                     c.draw.rounded_rectangle(bounds, radius=12, fill="#26364d")
@@ -210,8 +220,7 @@ class SceneRenderer:
                 top = round(820 - block / 2)
                 for j, value in enumerate(items):
                     y = top + j * (height + gap)
-                    if j >= revealed:  # dim placeholder: the frame is never empty before a reveal
-                        c.draw.rounded_rectangle((90, y, 900, y + height), radius=24, outline="#25344d", width=2)
+                    if j >= revealed:  # unrevealed slots stay empty; motion animates each one in
                         continue
                     key = f"item{j}"
                     c.box(key, (90, y, 900, y + height), outline=CYAN if j else "#536b87")
@@ -248,7 +257,6 @@ class SceneRenderer:
             width = (810 - 20 * (len(labels) - 1)) / len(labels)
             x = 90 + j * (width + 20)
             if j >= revealed:
-                c.draw.rounded_rectangle((x, y, x + width, y + 100), radius=24, outline="#25344d", width=2)
                 continue
             key = f"chip{j}"
             c.box(key, (x, y, x + width, y + 100), color="#183c46")
@@ -257,13 +265,14 @@ class SceneRenderer:
 
     def caption(self, c, words, active):
         value = " ".join(words)
-        length = font(84).getlength(value)
+        face = font(CAPTION_SIZE, display=True)
+        length = face.getlength(value)
         x = 495 - length / 2
         for j, word in enumerate(words):
-            width = font(84).getlength(word)
-            c.text(f"caption{j}", word, (x + width / 2, 1385), size=84, minimum=84,
-                   width=width + 30, color=CYAN if j == active else WHITE, role="caption", stroke=6)
-            x += width + font(84).getlength(" ")
+            width = face.getlength(word)
+            c.text(f"caption{j}", word, (x + width / 2, 1385), size=CAPTION_SIZE, minimum=CAPTION_SIZE,
+                   width=width + 30, color=CYAN if j == active else WHITE, role="caption", stroke=6, display=True)
+            x += width + face.getlength(" ")
 
     def validate(self):
         reports = []
