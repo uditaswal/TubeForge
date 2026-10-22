@@ -248,11 +248,15 @@ class AllowanceExhaustedError(Exception):
     """The host has already spent this request's fixed CLI allowance."""
 
 
-def consume_invocation(request: GenerateShortsScriptRequest, root: Path = RUNNER_ROOT) -> None:
-    """Durably count even failed CLI launches before any model invocation."""
+def consume_invocation(request: GenerateShortsScriptRequest, root: Path = RUNNER_ROOT, *, salt: str = "", limit: int | None = None) -> None:
+    """Durably count even failed CLI launches before any model invocation.
+
+    ``salt``/``limit`` give an auxiliary pass (angle, editor) its own bounded allowance for the same exact request."""
     from tubeforge.domain.contracts import generation_request_key_payload
     material = request.model_dump(mode="json")
     material["request"] = generation_request_key_payload(request.request)
+    if salt:
+        material["pass"] = salt
     digest = hashlib.sha256(json.dumps(material, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     with sqlite3.connect(root / "invocations.sqlite3", timeout=10) as database:
@@ -260,7 +264,7 @@ def consume_invocation(request: GenerateShortsScriptRequest, root: Path = RUNNER
         cursor = database.execute(
             "INSERT INTO invocations (request_hash, count) VALUES (?, 1) "
             "ON CONFLICT(request_hash) DO UPDATE SET count = count + 1 WHERE count < ?",
-            (digest, 1 if request.operation == "ResearchSourcesV1" else INVOCATION_LIMIT),
+            (digest, 1 if request.operation == "ResearchSourcesV1" else (limit or INVOCATION_LIMIT)),
         )
         if cursor.rowcount != 1:
             raise AllowanceExhaustedError("Research attempt already consumed; revise the brief or inspect the saved research result" if request.operation == "ResearchSourcesV1" else "TubeForge's two-attempt limit for this exact source packet is exhausted")

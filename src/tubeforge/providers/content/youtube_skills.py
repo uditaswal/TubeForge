@@ -144,7 +144,7 @@ def select_hook(package):
     return package, report
 
 
-HOOK_MINIMUM = 58  # hookscore "WORKABLE" starts at 55; STRONG at 72
+HOOK_MINIMUM = 45  # a floor only: the editor pass ranks hooks; hookscore rewards 'you' and risk words, which breeds one template
 
 
 def hook_gate(package, root: Path | None = None, minimum: int = HOOK_MINIMUM) -> str | None:
