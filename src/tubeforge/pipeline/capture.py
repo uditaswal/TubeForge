@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -116,9 +117,11 @@ def make_capture(config: SourceCaptureConfig):
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or not _public(parsed.hostname, cache):
             return {"reason": "source URL is not a public http(s) address"}
         try:
-            with sync_playwright() as playwright:
+            # The worker runs as an arbitrary uid with HOME=/, so give Chromium a private writable profile.
+            with tempfile.TemporaryDirectory(prefix="chromium-") as home, sync_playwright() as playwright:
                 browser = playwright.chromium.launch(executable_path=str(config.chromium_path), args=[
-                    "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--hide-scrollbars", "--mute-audio"])
+                    "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--hide-scrollbars", "--mute-audio"],
+                    env={"PATH": "/usr/bin:/bin", "HOME": home, "XDG_CONFIG_HOME": home, "XDG_CACHE_HOME": home})
                 try:
                     context = browser.new_context(viewport={"width": config.viewport_width, "height": 1100}, device_scale_factor=2,
                                                   user_agent=USER_AGENT, locale="en-US", accept_downloads=False)
@@ -134,6 +137,7 @@ def make_capture(config: SourceCaptureConfig):
                     found = page.evaluate(FIND, quote)
                     if not found:
                         return {"reason": "quote not found on the page"}
+                    page.evaluate("getSelection().removeAllRanges()")  # the native selection from window.find must not show
                     clip = plan_clip(found["rects"], found["docWidth"], found["docHeight"])
                     shot = page.screenshot(clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]}, full_page=True)
                 finally:
