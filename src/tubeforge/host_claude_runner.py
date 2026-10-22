@@ -19,6 +19,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import UTC, datetime
@@ -190,6 +191,7 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
             if isinstance(error, InsufficientSourcesError):
                 raise
             last_error = _concise(error)
+            print(f"attempt {attempt + 1} rejected: {last_error}", file=sys.stderr, flush=True)
             task = (prompt + RULES + "\n\nYour previous output was rejected by validation:\n" + last_error +
                     "\nReturn the complete corrected output, changing only what is needed to fix these errors.")
     if package is None:

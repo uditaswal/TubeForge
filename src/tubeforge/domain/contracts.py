@@ -356,7 +356,7 @@ class ContentPackage(DomainModel):
             _require_known_references(clip.section_ids, set(section_ids), "section")
             positions = [section_positions[section_id] for section_id in clip.section_ids]
             if positions != list(range(min(positions), max(positions) + 1)):
-                raise ValueError(f"clip {clip.clip_id!r} must contain contiguous script sections")
+                raise ValueError(f"clip {clip.clip_id!r} must contain contiguous script sections in script order (got {list(clip.section_ids)})")
         if self.reference_short is not None:
             topic = self.reference_short
             if [s.scene_id for s in topic.scenes] != [s.scene_id for s in self.script_sections]:
