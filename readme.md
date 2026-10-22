@@ -93,6 +93,10 @@ loopback only; do not use transient IDE/app-preview URLs or introduce another
 host dashboard port. Before enabling production authentication, migrate the
 database and create the first administrator:
 
+For the repeatable homeserver boot, service check, SSH tunnel, and recovery
+procedure, use the
+[`TubeForge homeserver operator guide`](docs/HOMESERVER_OPERATOR_GUIDE.md).
+
 ```bash
 tubeforge create-admin --username <name>
 ```

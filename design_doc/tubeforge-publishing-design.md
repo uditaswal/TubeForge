@@ -87,6 +87,8 @@ Updated 21 October 2026. Evidence detail: local `AUTONOMOUS_PROGRESS.md` (curren
 
 **22 Oct update (Claude):** phases 2–3 are now **IMPLEMENTED** for the preview path: dashboard `reference-short` preset → shared `rendering/shorts` (Kokoro, Whisper alignment, motion, icons, QA). Evidence: job `41e2ee9a…` 720×1280, 34 s, −14.3 LUFS. Phase 4 (final 1080×1920 + operator audiovisual acceptance) remains open. Details and next steps: `docs/HANDOFF.md`.
 
+**Homeserver operator runbook: IMPLEMENTED.** `docs/HOMESERVER_OPERATOR_GUIDE.md` now records the supported Compose startup, loopback health check, Codex/Claude runner checks, Windows `homeserver` SSH tunnel, logs, restart, and first-admin workflow. Live availability remains determined by the documented `/healthz` check; this documentation change does not alter the pipeline release state.
+
 Supersedes the earlier landscape test per [`docs/CLAUDE_PIPELINE_REVIEW.md`](../docs/CLAUDE_PIPELINE_REVIEW.md). Overall **IMPLEMENTED**. Target (reference-short-v1): 1080×1920/30 fps final, 720×1280 draft, 25–45 s, 6–8 scenes, 8–15 spoken words each, 0.3–0.4 s speech tails, immediate first-frame hook, fixed templates, visible sources, one-line 1–3-word 84 px captions, music/SFX, closing follow CTA, −15..−13 LUFS and ≤ −1.5 dBTP encoded. Native Python, Kokoro INT8 → Piper fallback, concurrency one.
 
 | Phase | Status | Acceptance / evidence |
