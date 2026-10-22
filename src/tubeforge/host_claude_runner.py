@@ -123,7 +123,12 @@ def call_claude(prompt: str, schema: dict, *, model: str, effort: str | None = N
         raise ValueError("Claude structured output exceeds the limit")
     usage = dict(envelope.get("usage") or {})
     usage["total_cost_usd"] = envelope.get("total_cost_usd")
-    usage["web_search_requests"] = (usage.get("server_tool_use") or {}).get("web_search_requests", 0)
+    # The CLI runs WebSearch through a helper model: those searches appear in modelUsage, not in usage.server_tool_use.
+    searches = (usage.get("server_tool_use") or {}).get("web_search_requests", 0) or 0
+    for model_usage in (envelope.get("modelUsage") or {}).values():
+        if isinstance(model_usage, dict):
+            searches += int(model_usage.get("webSearchRequests") or 0)
+    usage["web_search_requests"] = searches
     return structured, usage
 
 
