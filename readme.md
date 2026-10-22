@@ -102,6 +102,27 @@ credential envelopes. Never commit credentials, OAuth tokens, or Piper models.
 
 ### Publishing account connection (Phase 1 in progress)
 
+In **Publishing accounts**, add local YouTube, Instagram, Snapchat, or X/Twitter
+profiles with a friendly account name (for example, Virtual World Master), a
+category (for example, Tech), and a default video description. Multiple profiles
+can share a platform or name. Edit these defaults for future videos; existing
+video plans retain the account name, category, and description captured when
+they were created. A local profile remains **unconfigured** until its exact
+platform identity has been verified. Snapchat and X/Twitter have planning
+profiles only; this setup adds no live connection or upload.
+
+In **Create video**, use **Where this video should go** to select exact account
+profiles. Enter an optional **Video description** to apply it to every selected
+account; leave it blank to use each account's own default. The description is
+saved even if no destination is selected. These choices are stored with the
+generation and appear in **Compose manual post** when its final video is ready.
+Scene revisions inherit the saved destination and description snapshot.
+Connected YouTube/Instagram accounts with supported manual draft handling are
+preselected with the saved description. Other planned accounts remain visible
+with their current connection/support state. Review every destination's title,
+description or caption before saving a separate publishing draft. Video
+creation never starts an upload.
+
 Creator Studio now lists publishing accounts and reports their stored state.
 It enables **Connect YouTube** only when dashboard login, an encryption key,
 and a Google OAuth web application are configured. The browser is redirected
