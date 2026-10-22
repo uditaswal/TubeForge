@@ -150,6 +150,61 @@ OpenVINO would swap). Revisit when there is income for a GPU box or a paid image
 Rough cost per video after step 2: 3–4 Claude calls (angle, draft, edit, hook judge) + 1 vision call ≈ $0.8–1.2 at
 list price, all inside the subscription; render time unchanged except A1 (+ a few seconds).
 
+## 9a. Reference style the operator wants (added 22 Oct 2026)
+
+Operator references (long-form; we want the same *script style* in 35–45 s):
+- Let's Get Rusty — "AI loves rewriting codebases to Rust…" (`Z0Oq7gFSy3w`, 8 min, ~42k views) — transcript read in full.
+- ForrestKnight — "Why Everyone's Rewriting Everything in Rust" (`iu_ALBDtoHo`, 25 min, ~224k views) — opening and ~11:00–14:00 read.
+- Code Bear — "Why AI Companies Are Moving to Rust" (`kq7_2bDLtls`, 5 min) — captions rate-limited (HTTP 429), not read.
+
+What these scripts do that ours do not:
+1. **A fresh, named story, not an evergreen statistic.** "Microsoft ported the Copilot runtime from TypeScript to Rust
+   with one engineer", "Bun's creator ported Bun from Zig in two weeks after Anthropic bought it". Ours used a
+   2019–2024 Android memory-safety paper. Named company + named person + "this year" is the hook material.
+2. **Paradox opening.** "Rust is 10 years old. Nothing changed this year. Yet Microsoft, Meta and Cloudflare all
+   switched in 12 months — something made them do it." The question is *why now*, and the answer (AI made rewrites
+   cheap) is held back.
+3. **Concrete before → after numbers from the primary source.** ~$120k inference + ~3 weeks of one engineer;
+   18× faster; 1,383 MB → 126 MB; builds 46 s → 6 s. Numbers are the payoff, saved for the end ("now the fun part:
+   what did it cost?").
+4. **Counterintuitive details that break the hype.** The first full Rust run passed zero tests; the Rust port was
+   slower until humans fixed allocations; compiler errors were type errors, not memory errors; agents spent 57 % of
+   their time reading code. These keep the viewer because they contradict the expected story.
+5. **A narrator with a point of view.** First-person skepticism ("I'll assume some Anthropic marketing was at play",
+   "it's not a human-out-of-the-loop rewrite"). Opinion is clearly framed as opinion; facts come from the blog post.
+6. **The source on screen.** They scroll the actual blog post and its charts. That is cheap credibility *and* the
+   visual layer we lack.
+7. **A comparison frame.** Big-bang rewrite (Bun) vs in-place incremental rewrite (Microsoft): two options the
+   viewer can take sides on — natural comment fuel.
+
+Target shape for a 40 s Short (illustrative; numbers are as reported in the Let's Get Rusty video and must be taken
+from Microsoft's own post in production):
+
+```
+1 hook      Microsoft rewrote Copilot's engine in Rust. One engineer. Three weeks.
+2 problem   The TypeScript engine dragged Node and V8 into every app: about 100 megabytes.
+3 how       So they swapped it piece by piece while AI agents did the grunt work.
+4 twist     The weird part: the agents spent 57% of their time just reading code.
+5 cost      Then the bill: roughly 120 thousand dollars of inference.
+6 payoff    Result: 18 times faster, and memory fell from 1,383 to 126 megabytes.
+7 verdict   Rewrites used to be career suicide. Now they're a budget line.
+8 cta       Would you pay 120K to delete your TypeScript? Follow for more Rust.
+```
+
+Changes this implies (folded into step 2 and step 4):
+- **R1 Case-study recipe (S3, first recipe):** named actor → problem → method → counterintuitive twist → cost →
+  numeric payoff → verdict → challenge. Payoff numbers must be in the second half.
+- **R2 Fresh primary sources:** briefs should start from one recent engineering blog post / announcement (URL), and
+  research should prefer primary sources from the last 12 months. Topic radar (T1) looks for exactly these posts
+  (engineering blogs, release notes, HN front page).
+- **R3 Narrator persona:** allow a consistent first-person channel voice for *opinions* ("I think…", "my bet…"),
+  never invented experiences ("when I worked at…"). Update the channel voice profile, not the facts rules.
+- **R4 "Why now" paradox hook formula** added to the hook tournament (S2) alongside statistic/mistake/contrarian.
+- **R5 Source screenshots first (V5a moves up):** headless Chromium captures of the source post (headline, the chart
+  that holds the number, a code snippet), shown with a slow zoom behind the stat. This directly copies what the
+  reference channels show and needs no stock API.
+- **R6 Versus template:** two-column "big bang vs incremental", "before vs after" with numbers, for comparison stories.
+
 ## 10. Operator decisions (recorded 22 Oct 2026)
 
 - **Stock B-roll (Pexels/Pixabay): DEFERRED.** Neither is issuing API keys right now; V5(c) stays in the
