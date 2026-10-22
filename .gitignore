@@ -53,3 +53,49 @@ artifacts/wheels/
 # Local-only agent progress logs (rotated archives are AUTONOMOUS_PROGRESS.md_N)
 AUTONOMOUS_PROGRESS.md
 AUTONOMOUS_PROGRESS.md_*
+
+# Other local env files (the template .env.example stays tracked), keys and credentials.
+.env.*
+!.env.example
+*.pem
+*.key
+client_secret*.json
+service-account*.json
+
+# Per-machine Claude Code state; the shared .claude/settings.json stays tracked.
+/.claude/*
+!/.claude/settings.json
+
+# Editors, OS and tool caches.
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+.ruff_cache/
+.coverage
+htmlcov/
+.playwright/
+test-results/
+playwright-report/
+
+# Larger model/weight formats and generated media anywhere (fixtures/examples stay trackable).
+models/*.safetensors
+models/*.pt
+models/*.gguf
+models/*.npz
+*.mp4
+*.mov
+*.webm
+*.wav
+*.mp3
+!tests/fixtures/**/*.mp4
+!examples/**/*.mp4
+!tests/fixtures/**/*.mov
+!examples/**/*.mov
+!tests/fixtures/**/*.webm
+!examples/**/*.webm
+!tests/fixtures/**/*.wav
+!examples/**/*.wav
+!tests/fixtures/**/*.mp3
+!examples/**/*.mp3

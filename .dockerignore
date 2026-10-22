@@ -30,3 +30,7 @@ models/*.onnx.json
 preview*.mp4
 final-*.mp4
 :memory:.ses
+.env.*
+!.env.example
+.claude
+AUTONOMOUS_PROGRESS.md*
