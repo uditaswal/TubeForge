@@ -42,7 +42,7 @@ def test_editor_pass_keeps_the_draft_when_the_edit_is_invalid(tmp_path, monkeypa
     monkeypatch.setattr(runner, "call_claude", lambda *a, **k: ({"status": "ready", "package": {}, "reason": None}, {"total_cost_usd": .1}))
     package, normalizations, note = runner.editor_pass(host, tmp_path, {}, model="m", effort="medium", schema={}, version="m6-content-v8",
                                                        usage_total={"attempts": 0, "total_cost_usd": 0.0})
-    assert package is None and not note["applied"] and note["reason"]
+    assert package is None and not note["applied"] and note["reason"] and note["calls"] == 2  # edit + one repair, then the draft stands
 
 
 def test_prompt_carries_the_chosen_thesis_and_its_recipe():
