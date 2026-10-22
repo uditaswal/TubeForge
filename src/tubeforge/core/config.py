@@ -587,6 +587,26 @@ class ReferenceShortConfig(BaseModel):
     max_pause_seconds: float = Field(default=0.15, ge=0.05, le=1.0)
 
 
+class PixabayConfig(BaseModel):
+    """Pixabay stock photos/videos for reference Shorts. The API key is read from
+    ``TUBEFORGE_PIXABAY_API_KEY`` at runtime and never stored in configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    video_api_url: str = "https://pixabay.com/api/videos/"
+    image_api_url: str = "https://pixabay.com/api/"
+    # Pixabay allows 100 requests per 60 s per key; stay below it and honour the response headers.
+    requests_per_minute: int = Field(default=80, ge=1, le=100)
+    cache_root: Path = Path("./data/cache/pixabay")
+    # Pixabay's terms require caching results for 24 hours instead of repeating searches.
+    search_cache_hours: float = Field(default=24.0, ge=1.0, le=720.0)
+    timeout_seconds: int = Field(default=20, ge=1, le=120)
+    max_download_bytes: int = Field(default=60_000_000, ge=1_000_000, le=500_000_000)
+    min_video_height: int = Field(default=720, ge=240, le=4320)
+    max_retries: int = Field(default=3, ge=0, le=6)
+
+
 class PipelineConfig(BaseModel):
     """Safe provider selection and deterministic M7 voice settings."""
 
@@ -604,6 +624,7 @@ class PipelineConfig(BaseModel):
     kokoro: KokoroProviderConfig = Field(default_factory=KokoroProviderConfig)
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
     reference_short: ReferenceShortConfig = Field(default_factory=ReferenceShortConfig)
+    pixabay: PixabayConfig = Field(default_factory=PixabayConfig)
     preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
     final: FinalRenderConfig = Field(default_factory=FinalRenderConfig)
     shorts_preview: ShortsPreviewRenderConfig = Field(default_factory=ShortsPreviewRenderConfig)

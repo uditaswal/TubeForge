@@ -68,6 +68,8 @@ services:
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
       TUBEFORGE_PIPER_SERVER_URL: http://piper-tts:5000
+      # Optional stock B-roll for reference Shorts; unset disables Pixabay.
+      TUBEFORGE_PIXABAY_API_KEY: ${TUBEFORGE_PIXABAY_API_KEY:-}
     restart: unless-stopped
     # Reference Shorts run Kokoro, Whisper alignment and the encoder sequentially.
     mem_limit: 2g
