@@ -43,6 +43,7 @@ class CodexCliContentProvider:
         self.last_provenance: dict[str, object] | None = None
         self.last_usage: dict[str, object] | None = None
         self._invocation_prompts: list[dict[str, object]] = []
+        self._invocation_commands: list[list[str]] = []
 
     def generate_package(self, request: ContentRequest) -> ContentPackage:
         prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
@@ -68,6 +69,7 @@ class CodexCliContentProvider:
         if not self.cache.consume_invocation(cached, maximum=self.config.invocation_limit, now=now):
             raise ProviderValidationError("TubeForge's two-attempt limit for this exact source packet is exhausted; operator review is required")
         self._invocation_prompts = []
+        self._invocation_commands = []
         self._reservation = cached
         try:
             prompt = build_content_prompt(request, template_version=self.config.prompt_template_version, max_chars=self.config.max_prompt_chars)
@@ -84,6 +86,7 @@ class CodexCliContentProvider:
                 validate_video_package(package, request, provider_name="Codex")
                 package_json = package.model_dump(mode="json")
             provenance["invocations"] = self._invocation_prompts
+            provenance["commands"] = self._invocation_commands
             if not self.cache.accept(cached, package_json, provenance, usage, now=self._now()):
                 raise RetryableProviderError("Codex generation reservation expired before validated result could be accepted")
         except Exception as error:
@@ -109,7 +112,9 @@ class CodexCliContentProvider:
             schema_path, output_path = root / "content-package.schema.json", root / "content-package.json"
             from tubeforge.host_codex_runner import codex_output_schema
             schema_path.write_text(json.dumps(codex_output_schema(envelope=self.config.prompt_template_version in CONTENT_ENVELOPE_TEMPLATES, reference=self.config.prompt_template_version == "m6-content-v8"), sort_keys=True), encoding="utf-8")
-            result = self._process_runner(self.build_cli_args(schema_path, output_path), prompt, output_path, self.config.timeout_seconds, self.config.max_output_bytes)
+            args = self.build_cli_args(schema_path, output_path)
+            self._invocation_commands.append(args)
+            result = self._process_runner(args, prompt, output_path, self.config.timeout_seconds, self.config.max_output_bytes)
             diagnostics = _safe_diagnostic(result.stderr or result.stdout, self.config.max_diagnostic_bytes)
             if result.returncode != 0:
                 self._raise_process_failure(result.returncode, diagnostics)

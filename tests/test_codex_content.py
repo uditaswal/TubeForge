@@ -60,6 +60,7 @@ def test_generation_persists_validated_package_provenance_usage_and_hits_cache(r
     assert provider.generate_package(value).claims[0].claim_id == "claim-1"
     assert provider.last_usage == {"input_tokens": 12, "output_tokens": 34}
     assert provider.last_provenance and provider.last_provenance["provider"] == "codex-cli"
+    assert provider.last_provenance["commands"] == calls
     assert provider.generate_package(value).metadata.title_options == ("Rain",)
     assert len(calls) == 1
 

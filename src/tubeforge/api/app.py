@@ -10,6 +10,7 @@ import html
 import json
 import os
 import secrets
+import shlex
 import shutil
 import threading
 import wave
@@ -25,11 +26,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.api.scene_ui import SCENE_CONTROLS
+from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_SCRIPT
+from tubeforge.api.generation_ui import GENERATION_CSS, GENERATION_CONTROLS
+from tubeforge.api.scheduling_ui import SCHEDULING_CSS, SCHEDULING_SCRIPT
 from tubeforge.core.runtime import Runtime, create_runtime
 from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, VoiceRequest, video_plan_from_package
 from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.scheduling.service import next_run
+from tubeforge.scheduling.service import next_run, schedule_destination_options
 from tubeforge.providers.content.prompts import validate_video_package
 from tubeforge.pipeline.manual_publish import ManualPublishService
 from tubeforge.pipeline.scene_revisions import StaleSceneRevision, create_scene_revision
@@ -104,6 +108,8 @@ class VideoBriefRequest(BaseModel):
     voice_id: str | None = Field(default=None, min_length=1, max_length=200)
     source_url: str | None = Field(default=None, max_length=2_000)
     channel_identity: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    destination_account_ids: tuple[str, ...] = Field(default=(), max_length=20)
+    description: str | None = Field(default=None, min_length=1, max_length=5000)
     source_title: str | None = Field(default=None, max_length=500)
     source_excerpt: str | None = Field(default=None, max_length=24_000)
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
@@ -132,12 +138,14 @@ class TopicCreateRequest(BaseModel):
     notes: str = Field(default="", max_length=24_000)
     priority: int = Field(default=0, ge=-1000, le=1000)
     options: dict[str, object] = Field(default_factory=dict)
+    account_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class TopicBulkCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     titles: tuple[str, ...] = Field(min_length=1, max_length=200)
     priority: int = Field(default=0, ge=-1000, le=1000)
+    account_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -146,6 +154,7 @@ class ScheduleCreateRequest(BaseModel):
     cron: str = Field(min_length=1, max_length=120)
     timezone: str = Field(default="UTC", min_length=1, max_length=100)
     options: dict[str, object] = Field(default_factory=dict)
+    account_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class LoginRequest(BaseModel):
@@ -156,9 +165,18 @@ class LoginRequest(BaseModel):
 
 class SocialAccountCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    platform: str = Field(pattern=r"^(youtube|instagram|facebook|snapchat)$")
+    platform: str = Field(pattern=r"^(youtube|instagram|facebook|snapchat|x)$")
     display_name: str = Field(min_length=1, max_length=200)
+    category: str = Field(default="general", min_length=1, max_length=100)
+    default_description: str = Field(default="", max_length=5000)
     auth_type: str = Field(default="oauth", pattern=r"^(oauth|manual_handoff)$")
+
+
+class SocialAccountProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: str = Field(min_length=1, max_length=200)
+    category: str = Field(min_length=1, max_length=100)
+    default_description: str = Field(default="", max_length=5000)
 
 
 class OAuthStartRequest(BaseModel):
@@ -468,20 +486,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/topics", status_code=status.HTTP_201_CREATED, tags=["topics"])
     def create_topic(value: TopicCreateRequest) -> dict[str, object]:
-        topic = runtime.topics.create(uuid4().hex, title=value.title, notes=value.notes, priority=value.priority, options=value.options)
-        return {"id": topic.id, "title": topic.title, "status": topic.status, "priority": topic.priority}
+        try:
+            topic = runtime.topics.create(uuid4().hex, title=value.title, notes=value.notes, priority=value.priority, options=value.options, account_id=value.account_id)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"id": topic.id, "title": topic.title, "status": topic.status, "priority": topic.priority, "account_id": topic.account_id}
 
     @app.post("/api/topics/bulk", status_code=status.HTTP_201_CREATED, tags=["topics"])
     def create_topics_bulk(value: TopicBulkCreateRequest) -> list[dict[str, object]]:
         try:
-            topics = runtime.topics.create_many(tuple((uuid4().hex, title) for title in value.titles), priority=value.priority)
+            topics = runtime.topics.create_many(tuple((uuid4().hex, title) for title in value.titles), priority=value.priority, account_id=value.account_id)
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
-        return [{"id": item.id, "title": item.title, "status": item.status, "priority": item.priority} for item in topics]
+        return [{"id": item.id, "title": item.title, "status": item.status, "priority": item.priority, "account_id": item.account_id} for item in topics]
 
     @app.get("/api/social-accounts", tags=["social accounts"])
     def list_social_accounts() -> list[dict[str, object]]:
-        return [{"id": item.id, "platform": item.platform, "display_name": item.display_name, "external_account_id": item.external_account_id, "auth_type": item.auth_type, "scopes": item.scopes, "status": item.status, "capabilities": item.capabilities, "is_default": item.is_default, "disabled": item.disabled, "token_expires_at": item.token_expires_at, "last_validated_at": item.last_validated_at} for item in runtime.accounts.list()]
+        return [{"id": item.id, "platform": item.platform, "display_name": item.display_name, "category": item.category, "default_description": item.default_description, "external_account_id": item.external_account_id, "auth_type": item.auth_type, "scopes": item.scopes, "status": item.status, "capabilities": item.capabilities, "is_default": item.is_default, "disabled": item.disabled, "token_expires_at": item.token_expires_at, "last_validated_at": item.last_validated_at} for item in runtime.accounts.list()]
 
     @app.get("/api/oauth/youtube/status", tags=["social accounts"])
     def youtube_oauth_status() -> dict[str, object]:
@@ -545,8 +566,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ready: list[dict[str, object]] = []
         for job in runtime.jobs.list_recent(limit=200):
             if job.state in READY_STATES and job.claim_owner is None and runtime.artifacts.get(job.id, JobState.FINAL_RENDERING, "final") is not None:
-                ready.append({"job_id": job.id, "title": job.request.topic, "state": job.state.value})
+                ready.append({"job_id": job.id, "title": job.request.topic, "state": job.state.value, "video_description": runtime.jobs.video_description(job.id), "destination_intents": runtime.jobs.destination_intents(job.id)})
         return ready
+
+    @app.get("/api/jobs/{job_id}/destination-intents", tags=["jobs"])
+    def job_destination_intents(job_id: str) -> list[dict[str, str]]:
+        try:
+            runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="job not found") from error
+        return runtime.jobs.destination_intents(job_id)
 
     @app.get("/api/publishing/status", tags=["publishing"])
     def publishing_worker_status() -> dict[str, object]:
@@ -664,8 +693,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # This endpoint creates a visible placeholder only. A browser-supplied
         # token or claimed remote ID cannot prove account ownership and must
         # never create a "connected" publishing destination.
-        account = runtime.accounts.create(uuid4().hex, platform=value.platform, display_name=value.display_name, external_account_id=None, auth_type=value.auth_type, credential_ciphertext=None, scopes=(), capabilities=())
-        return {"id": account.id, "platform": account.platform, "display_name": account.display_name, "status": account.status, "capabilities": account.capabilities}
+        try:
+            account = runtime.accounts.create(uuid4().hex, platform=value.platform, display_name=value.display_name, external_account_id=None, auth_type=value.auth_type, credential_ciphertext=None, scopes=(), capabilities=(), category=value.category, default_description=value.default_description)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"id": account.id, "platform": account.platform, "display_name": account.display_name, "category": account.category, "default_description": account.default_description, "status": account.status, "capabilities": account.capabilities}
+
+    @app.put("/api/social-accounts/{account_id}/profile", tags=["social accounts"])
+    def update_social_account_profile(account_id: str, value: SocialAccountProfileRequest) -> dict[str, object]:
+        try:
+            account = runtime.accounts.update_profile(account_id, display_name=value.display_name, category=value.category, default_description=value.default_description)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="account not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"id": account.id, "platform": account.platform, "display_name": account.display_name, "category": account.category, "default_description": account.default_description, "status": account.status}
+
+    @app.put("/api/social-accounts/{account_id}/default", tags=["social accounts"])
+    def set_default_social_account(account_id: str) -> dict[str, object]:
+        try:
+            account = runtime.accounts.set_default(account_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="account not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"id": account.id, "is_default": account.is_default}
 
     @app.post("/api/social-accounts/{account_id}/disable", tags=["social accounts"])
     def disable_social_account(account_id: str) -> Response:
@@ -674,20 +726,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/api/topics", tags=["topics"])
-    def list_topics(status_filter: str | None = None) -> list[dict[str, object]]:
-        return [{"id": item.id, "title": item.title, "notes": item.notes, "priority": item.priority, "status": item.status, "generation_job_id": item.generation_job_id, "attempts": item.attempts} for item in runtime.topics.list(status=status_filter)]
+    def list_topics(status_filter: str | None = None, account_id: str | None = None, unassigned: bool = False) -> list[dict[str, object]]:
+        if account_id is not None and unassigned:
+            raise HTTPException(status_code=422, detail="choose an account or unassigned topics")
+        topics = runtime.topics.list(status=status_filter, **({"account_id": None if unassigned else account_id} if unassigned or account_id is not None else {}))
+        return [{"id": item.id, "title": item.title, "notes": item.notes, "priority": item.priority, "status": item.status, "generation_job_id": item.generation_job_id, "attempts": item.attempts, "account_id": item.account_id} for item in topics]
 
     @app.post("/api/schedules", status_code=status.HTTP_201_CREATED, tags=["schedules"])
     def create_schedule(value: ScheduleCreateRequest) -> dict[str, object]:
         try:
-            schedule = runtime.schedules.create(uuid4().hex, name=value.name, cron=value.cron, timezone=value.timezone, next_run_at=next_run(value.cron, value.timezone, datetime.now(UTC)), options=value.options)
+            destination_ids, _ = schedule_destination_options(value.options)
+            options = dict(value.options)
+            if value.account_id is not None:
+                if destination_ids and destination_ids != (value.account_id,):
+                    raise ValueError("account schedule must target only its own account")
+                options["destination_account_ids"] = [value.account_id]
+                destination_ids = (value.account_id,)
+            available = {account.id for account in runtime.accounts.list() if not account.disabled}
+            if any(account_id not in available for account_id in destination_ids):
+                raise ValueError("selected destination account is missing or disabled")
+            schedule = runtime.schedules.create(uuid4().hex, name=value.name, cron=value.cron, timezone=value.timezone, next_run_at=next_run(value.cron, value.timezone, datetime.now(UTC)), options=options, account_id=value.account_id)
         except (ValueError, KeyError) as error:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid cron schedule: {error}") from error
-        return {"id": schedule.id, "name": schedule.name, "next_run_at": schedule.next_run_at}
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid schedule: {error}") from error
+        return {"id": schedule.id, "name": schedule.name, "next_run_at": schedule.next_run_at, "account_id": schedule.account_id}
 
     @app.get("/api/schedules", tags=["schedules"])
-    def list_schedules() -> list[dict[str, object]]:
-        return [{"id": item.id, "name": item.name, "cron": item.cron, "timezone": item.timezone, "enabled": item.enabled, "next_run_at": item.next_run_at, "last_run_at": item.last_run_at, "options": item.options} for item in runtime.schedules.list()]
+    def list_schedules(account_id: str | None = None, unassigned: bool = False) -> list[dict[str, object]]:
+        if account_id is not None and unassigned:
+            raise HTTPException(status_code=422, detail="choose an account or unassigned schedules")
+        schedules = runtime.schedules.list()
+        if unassigned or account_id is not None:
+            schedules = [item for item in schedules if item.account_id == (None if unassigned else account_id)]
+        return [{"id": item.id, "name": item.name, "cron": item.cron, "timezone": item.timezone, "enabled": item.enabled, "next_run_at": item.next_run_at, "last_run_at": item.last_run_at, "options": item.options, "account_id": item.account_id} for item in schedules]
 
     @app.post("/api/schedules/{schedule_id}/run", tags=["schedules"])
     def run_schedule(schedule_id: str) -> dict[str, object]:
@@ -705,9 +775,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/videos", status_code=status.HTTP_201_CREATED, tags=["videos"])
     def create_video(brief: VideoBriefRequest) -> dict[str, object]:
         available_music = runtime.orchestrator.music_catalog.names() if runtime.orchestrator.music_catalog else set()
-        job = runtime.jobs.create(uuid4().hex, _video_request(brief, application_settings, available_music=available_music))
+        try:
+            job = runtime.jobs.create(uuid4().hex, _video_request(brief, application_settings, available_music=available_music), destination_account_ids=brief.destination_account_ids, video_description=brief.description)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
-        return {**_job_payload(job), "watch_url": f"/api/jobs/{job.id}/artifacts/final"}
+        return {**_job_payload(job), "video_description": runtime.jobs.video_description(job.id), "destination_intents": runtime.jobs.destination_intents(job.id), "watch_url": f"/api/jobs/{job.id}/artifacts/final"}
 
     @app.post("/api/source-clips", status_code=status.HTTP_201_CREATED, tags=["videos"])
     def create_source_clips(brief: SourceClipRequest) -> dict[str, object]:
@@ -750,8 +823,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const ownerSelect=document.createElement('select');ownerSelect.name='script_model';ownerSelect.id='scriptModel';
           ownerSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading models…'}));ownerLabel.append(ownerSelect);form.insertBefore(ownerLabel,presetLabel);
           fetch('/api/content-profiles').then(r=>r.ok?r.json():null).then(data=>{if(!data||!data.script_models)return;ownerSelect.replaceChildren();data.script_models.forEach(o=>ownerSelect.append(Object.assign(document.createElement('option'),{value:o.id,textContent:o.label,disabled:!o.enabled})));ownerSelect.value=data.default_script_model;}).catch(()=>{ownerSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Server default'}));});
+          const intentField=document.createElement('fieldset');intentField.id='videoDestinationIntent';intentField.style.marginTop='18px';
+          intentField.style.minWidth='0';intentField.style.border='1px solid #31415f';intentField.style.borderRadius='9px';intentField.style.padding='14px';
+          const intentLegend=document.createElement('legend');intentLegend.textContent='Where this video should go';
+          const intentHelp=document.createElement('p');intentHelp.className='sub';intentHelp.textContent='Choose exact local account profiles. This saves a plan with the video; no upload or online connection starts.';
+          const intentAccounts=document.createElement('div');intentAccounts.id='videoIntentAccounts';intentAccounts.textContent='Loading account profiles…';
+          const descriptionLabel=document.createElement('label');descriptionLabel.textContent='Video description (optional)';
+          const descriptionInput=document.createElement('textarea');descriptionInput.id='videoDescription';descriptionInput.maxLength=5000;descriptionInput.placeholder='Leave blank to use each selected account’s default description';descriptionLabel.append(descriptionInput);
+          intentField.append(intentLegend,intentHelp,intentAccounts,descriptionLabel);
+          form.querySelector('button[type="submit"]').before(intentField);
+          let accountChoicesLoaded=false;
+          async function loadIntentAccounts(){const selected=new Set([...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value));try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=(await response.json()).filter(account=>!account.disabled);intentAccounts.replaceChildren();if(!accounts.length){intentAccounts.textContent='No account profiles yet. Add one in Accounts, or create this video without a destination.';return;}for(const account of accounts){const label=document.createElement('label');label.className='checkbox';const check=document.createElement('input');check.type='checkbox';check.value=account.id;check.checked=accountChoicesLoaded?selected.has(account.id):account.is_default;check.defaultChecked=check.checked;check.setAttribute('aria-label','Plan for '+account.platform+' account '+account.display_name);const details=document.createElement('span');details.textContent=account.platform+' · '+account.display_name+' · '+account.category+' ('+account.status.replaceAll('_',' ')+')'+(account.is_default?' · default':'');label.append(check,details);intentAccounts.append(label);}accountChoicesLoaded=true;}catch(_){if(intentAccounts.textContent==='Loading account profiles…')intentAccounts.textContent='Could not load account profiles. Reload before selecting destinations.';}}
+          window.addEventListener('tubeforge:default-changed',()=>{accountChoicesLoaded=false;});window.addEventListener('tubeforge:accounts-changed',loadIntentAccounts);loadIntentAccounts();
           const originalFetch=window.fetch;
-          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.script_model=ownerSelect.value||null;body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.channel_identity=channelSelect.value||null;body.music_track=document.querySelector('#musicSelect')?.value||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
+          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.script_model=ownerSelect.value||null;body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.channel_identity=channelSelect.value||null;body.music_track=document.querySelector('#musicSelect')?.value||null;body.destination_account_ids=[...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value);body.description=descriptionInput.value.trim()||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
           const panel = document.createElement('fieldset');
           panel.style.marginTop = '18px'; panel.style.border = '1px solid #31415f'; panel.style.borderRadius = '9px';
           panel.innerHTML = '<legend>Clip existing video / stream</legend><label>Source URL<input id="sourceClipUrl" type="url" placeholder="https://…"></label><label>Number of clips<input id="sourceClipCount" type="number" value="1" min="1" max="12"></label><label class="checkbox"><input id="sourceClipCaptions" type="checkbox"> Burn available captions</label><button id="sourceClipCreate" type="button" class="secondary">Create clip job</button>';
@@ -780,34 +865,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           });
         })();
         </script>"""
-        operations_controls = """<script>
-        (() => {
-          const csrf=(document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1];
-          if (csrf) { const original=window.fetch; window.fetch=(url, init={}) => { const method=(init.method||'GET').toUpperCase(); if (!['GET','HEAD','OPTIONS'].includes(method)) init.headers={...(init.headers||{}),'x-csrf-token':decodeURIComponent(csrf)}; return original(url,init); }; }
-          const shell=document.querySelector('.shell'); if (!shell) return;
-          const panel=document.createElement('section'); panel.className='panel'; panel.style.marginTop='18px';
-          panel.innerHTML='<h2>Topic queue</h2><p class=sub>Paste one topic per line. Notes can be added from the API today.</p><textarea id=bulkTopics placeholder="Topic one&#10;Topic two"></textarea><button id=bulkTopicsButton type=button>Add topics</button><div id=topicStatus class=notice></div><h2 style="margin-top:22px">Schedule</h2><p class=sub>New schedules use the channel voice, format and duration selected above. Scheduled review policy is unchanged.</p><label>Name<input id=scheduleName value="Twice daily"></label><label>Cron<input id=scheduleCron value="0 9,18 * * *"></label><label>Timezone<input id=scheduleTimezone value="UTC"></label><button id=scheduleButton type=button>Create schedule</button><div id=scheduleStatus class=notice></div><div id=operationsList class=muted style="margin-top:12px"></div>';
-          shell.append(panel);
-          async function listOps(){ const [topics,schedules]=await Promise.all([fetch('/api/topics').then(r=>r.json()),fetch('/api/schedules').then(r=>r.json())]); document.querySelector('#operationsList').textContent=`${topics.length} topics · ${schedules.length} schedules`; }
-          document.querySelector('#bulkTopicsButton').onclick=async()=>{const titles=document.querySelector('#bulkTopics').value.split('\\n').map(v=>v.trim()).filter(Boolean);const r=await fetch('/api/topics/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({titles})});document.querySelector('#topicStatus').textContent=r.ok?`Added ${(await r.json()).length} topics.`:'Could not add topics: '+await r.text();if(r.ok){document.querySelector('#bulkTopics').value='';listOps();}};
-          document.querySelector('#scheduleButton').onclick=async()=>{const button=document.querySelector('#scheduleButton'),status=document.querySelector('#scheduleStatus'),duration=form.querySelector('[name=duration_seconds]');if(!duration.reportValidity())return;const body={name:document.querySelector('#scheduleName').value,cron:document.querySelector('#scheduleCron').value,timezone:document.querySelector('#scheduleTimezone').value,options:{channel_identity:channelSelect.value||null,preset_name:presetSelect.value,aspect_ratio:presetSelect.selectedOptions[0]?.dataset.aspect||'16:9',duration_seconds:Number(duration.value)}};button.disabled=true;status.textContent='Saving schedule…';try{const r=await fetch('/api/schedules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error(await r.text());status.textContent='Schedule created.';await listOps();}catch(error){status.textContent='Could not create schedule: '+error.message;}finally{button.disabled=false;}}; listOps();
-        })();
-        </script>"""
+        operations_controls = SCHEDULING_SCRIPT
         account_controls = """<script>
         (() => {
           const shell=document.querySelector('.shell'); if(!shell)return;
           const panel=document.createElement('section');panel.className='panel';panel.style.marginTop='18px';
           const title=document.createElement('h2');title.textContent='Publishing accounts';
-          const note=document.createElement('p');note.className='sub';note.textContent='Connections require verified platform authorization. Instagram connection is not available yet.';
+          const note=document.createElement('p');note.className='sub';note.textContent='Set up local account profiles for destination planning. A profile is not a platform connection. Connections require verified platform authorization.';
+          const profileForm=document.createElement('form');profileForm.id='accountProfileForm';
+          profileForm.innerHTML='<fieldset><legend>Add account profile</legend><label>Platform<select name="platform"><option value="youtube">YouTube</option><option value="instagram">Instagram</option><option value="snapchat">Snapchat</option><option value="x">X / Twitter</option></select></label><label>Account name<input name="display_name" maxlength="200" required placeholder="Virtual World Master"></label><label>Category<input name="category" maxlength="100" required placeholder="Tech"></label><label>Default video description<textarea name="default_description" maxlength="5000" placeholder="Used when a video has no custom description"></textarea></label><button type="submit" class="small secondary">Save account profile</button><div id="accountProfileStatus" role="status" aria-live="polite"></div></fieldset>';
+          const profileField=profileForm.querySelector('fieldset');profileField.style.minWidth='0';profileField.style.marginTop='14px';profileField.style.border='1px solid #31415f';profileField.style.borderRadius='9px';profileField.style.padding='14px';
           const connect=document.createElement('button');connect.type='button';connect.className='small secondary';connect.textContent='Connect YouTube';connect.disabled=true;connect.style.marginTop='12px';
           const connectStatus=document.createElement('div');connectStatus.className='sub';connectStatus.setAttribute('role','status');connectStatus.textContent='Checking YouTube connection setup…';
           const list=document.createElement('div');list.className='muted';list.setAttribute('aria-live','polite');list.textContent='Loading accounts…';
-          panel.append(title,note,connect,connectStatus,list);shell.append(panel);
+          panel.append(title,note,profileForm,connect,connectStatus,list);shell.append(panel);
           let youtubeReady=false;
           fetch('/api/oauth/youtube/status').then(response=>response.json()).then(result=>{youtubeReady=Boolean(result.configured);connect.disabled=!youtubeReady;connectStatus.textContent=youtubeReady?'YouTube authorization is ready. Google will ask you to choose a channel.':result.reason;}).catch(()=>{connectStatus.textContent='Could not check YouTube connection setup.';});
           async function start(accountId){if(!youtubeReady)return;connect.disabled=true;connectStatus.textContent='Starting Google authorization…';try{const response=await fetch('/api/oauth/youtube/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId||null})});if(!response.ok)throw Error(await response.text());const result=await response.json();location.assign(result.authorization_url);}catch(_){connectStatus.textContent='Could not start Google authorization. Check the app configuration and retry.';connect.disabled=false;}}
           connect.onclick=()=>start(null);
-          fetch('/api/social-accounts').then(async response=>{if(!response.ok)throw Error('Account list unavailable');const accounts=await response.json();list.replaceChildren();if(!accounts.length){list.textContent='No publishing accounts configured.';return;}for(const account of accounts){const row=document.createElement('div');row.className='event';row.style.marginTop='12px';const name=document.createElement('strong');name.textContent=account.display_name+' · '+account.platform;const state=document.createElement('div');state.textContent=account.status==='connected'&&account.external_account_id?'Connected · '+account.external_account_id:account.status.replaceAll('_',' ');row.append(name,state);if(account.platform==='youtube'&&account.external_account_id){const reconnect=document.createElement('button');reconnect.type='button';reconnect.className='small secondary';reconnect.textContent='Reconnect this channel';reconnect.disabled=!youtubeReady;reconnect.onclick=()=>start(account.id);row.append(reconnect);fetch('/api/oauth/youtube/status').then(r=>r.json()).then(v=>reconnect.disabled=!v.configured).catch(()=>{});}list.append(row);}}).catch(()=>{list.textContent='Could not load publishing accounts. Reload to retry.';});
+          async function loadAccounts(){try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=await response.json();list.replaceChildren();if(!accounts.length){list.textContent='No account profiles yet.';return;}for(const account of accounts){const row=document.createElement('div');row.className='event';row.style.marginTop='12px';const name=document.createElement('strong');name.textContent=account.display_name+' · '+account.platform+' · '+account.category;const state=document.createElement('div');state.textContent=account.status==='connected'&&account.external_account_id?'Connected · '+account.external_account_id:account.status.replaceAll('_',' ');const edit=document.createElement('button');edit.type='button';edit.className='small secondary';edit.textContent='Edit profile';edit.onclick=()=>{const editor=document.createElement('form');editor.innerHTML='<label>Account name<input name="display_name" maxlength="200" required></label><label>Category<input name="category" maxlength="100" required></label><label>Default video description<textarea name="default_description" maxlength="5000"></textarea></label><button type="submit" class="small secondary">Save changes</button><div role="status"></div>';editor.elements.display_name.value=account.display_name;editor.elements.category.value=account.category;editor.elements.default_description.value=account.default_description;editor.onsubmit=async event=>{event.preventDefault();const button=editor.querySelector('button'),feedback=editor.querySelector('[role="status"]');button.disabled=true;feedback.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/profile',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(editor)))});if(!response.ok)throw Error(await response.text());feedback.textContent='Profile saved.';window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){feedback.textContent='Could not save profile: '+error.message;button.disabled=false;}};row.append(editor);edit.remove();};row.append(name,state,edit);const defaultButton=document.createElement('button');defaultButton.type='button';defaultButton.className='small secondary';defaultButton.textContent=account.is_default?'Default account':'Set as default';defaultButton.disabled=account.is_default||account.disabled;defaultButton.onclick=async()=>{defaultButton.disabled=true;defaultButton.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/default',{method:'PUT'});if(!response.ok)throw Error(await response.text());window.dispatchEvent(new Event('tubeforge:default-changed'));window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){defaultButton.textContent='Could not save default: '+error.message;defaultButton.disabled=false;}};row.append(defaultButton);if(account.platform==='youtube'&&account.external_account_id){const reconnect=document.createElement('button');reconnect.type='button';reconnect.className='small secondary';reconnect.textContent='Reconnect this channel';reconnect.disabled=!youtubeReady;reconnect.onclick=()=>start(account.id);row.append(reconnect);}list.append(row);}}catch(_){if(list.textContent==='Loading accounts…')list.textContent='Could not load account profiles. Reload to retry.';}}
+          profileForm.onsubmit=async event=>{event.preventDefault();const button=profileForm.querySelector('button[type="submit"]'),feedback=document.querySelector('#accountProfileStatus');button.disabled=true;feedback.textContent='Saving profile…';try{const response=await fetch('/api/social-accounts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(profileForm)))});if(!response.ok)throw Error(await response.text());feedback.textContent='Account profile saved. Connection is still required before online delivery.';profileForm.reset();window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){feedback.textContent='Could not save profile: '+error.message;}finally{button.disabled=false;}};
+          loadAccounts();
         })();
         </script>"""
         publishing_controls = """<script>
@@ -821,14 +899,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const videoSelect=document.createElement('select');videoSelect.id='publishVideo';videoSelect.disabled=true;videoLabel.append(videoSelect);
           const preview=document.createElement('button');preview.type='button';preview.className='small secondary';preview.textContent='Preview selected video';preview.disabled=true;preview.onclick=()=>{const dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');if(!dialog||!player||!videoSelect.value)return;document.querySelector('#videoTitle').textContent='Publishing preview: '+videoSelect.selectedOptions[0].textContent;player.pause();player.src='/api/jobs/'+encodeURIComponent(videoSelect.value)+'/artifacts/final';player.autoplay=false;dialog.showModal();};
           const destinationLabel=document.createElement('div');destinationLabel.className='sub';destinationLabel.style.marginTop='14px';destinationLabel.textContent='Destinations and individual post details';
+          const planned=document.createElement('div');planned.id='plannedVideoDestinations';planned.className='sub';planned.style.marginTop='10px';planned.setAttribute('role','status');
           const destinations=document.createElement('div');destinations.id='publishDestinations';destinations.textContent='Loading connected accounts…';
           const save=document.createElement('button');save.type='button';save.id='savePublishDraft';save.textContent='Save publishing draft';save.disabled=true;
           const status=document.createElement('div');status.className='notice';status.id='publishDraftStatus';status.setAttribute('role','status');
           const historyHeading=document.createElement('h3');historyHeading.textContent='Publishing drafts';historyHeading.style.marginTop='20px';
           const refreshHistory=document.createElement('button');refreshHistory.type='button';refreshHistory.className='small secondary';refreshHistory.textContent='Refresh publishing activity';refreshHistory.style.marginBottom='12px';
           const history=document.createElement('div');history.id='publishDraftHistory';history.className='muted';history.textContent='Loading drafts…';
-          panel.append(heading,help,workerState,videoLabel,preview,destinationLabel,destinations,save,status,historyHeading,refreshHistory,history);shell.append(panel);
-          const rows=new Map();let workerReady=false;
+          panel.append(heading,help,workerState,videoLabel,preview,destinationLabel,planned,destinations,save,status,historyHeading,refreshHistory,history);shell.append(panel);
+          const rows=new Map(),videosById=new Map(),accountsById=new Map();let workerReady=false;
           function inputField(labelText,kind){const label=document.createElement('label');label.textContent=labelText;const input=document.createElement(kind);input.maxLength=kind==='textarea'?5000:500;label.append(input);return {label,input};}
           async function requestDeliveryAction(item,action,button){if(action==='resume'&&!window.confirm('Continue only this saved remote upload session? No new session will be opened.'))return;button.disabled=true;status.textContent=action==='inspect'?'Requesting read-only remote inspection…':action==='resume'?'Requesting saved-session continuation…':'Checking the reconnected destination…';try{const response=await fetch('/api/publishing/deliveries/'+encodeURIComponent(item.id)+'/actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action})});if(!response.ok)throw Error(await response.text());const result=await response.json();status.textContent=action==='retry_after_reconnect'?'Destination moved to '+result.state.replaceAll('_',' ')+'. Refresh activity for the worker result.':'Action queued. Refresh publishing activity to see the durable result.';await loadDrafts();}catch(error){status.textContent='Could not request action: '+error.message;button.disabled=false;}}
           async function loadDrafts(){try{
@@ -866,7 +945,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           }catch(_){if(history.textContent==='Loading drafts…')history.textContent='Could not load publishing drafts.';}}
           async function loadWorkerState(){try{const response=await fetch('/api/publishing/status');if(!response.ok)throw Error();const result=await response.json();workerReady=Boolean(result.manual_submission_enabled);workerState.textContent=workerReady?'Publisher worker online for private YouTube submission.':'Publisher worker unavailable. Drafts can be saved; submission is disabled.';}catch(_){workerReady=false;workerState.textContent='Publisher worker status is unavailable. Drafts can be saved; submission is disabled.';}for(const button of history.querySelectorAll('[data-submit-draft]'))button.disabled=!workerReady||button.dataset.reviewed!=='true';for(const button of history.querySelectorAll('[data-reconcile]'))button.disabled=!workerReady;}
           refreshHistory.onclick=async()=>{refreshHistory.disabled=true;refreshHistory.textContent='Refreshing activity…';await loadDrafts();refreshHistory.disabled=false;refreshHistory.textContent='Refresh publishing activity';};
-          async function loadChoices(){try{const [videosResponse,accountsResponse]=await Promise.all([fetch('/api/publishing/ready-videos'),fetch('/api/social-accounts')]);if(!videosResponse.ok||!accountsResponse.ok)throw Error();const videos=await videosResponse.json(),accounts=(await accountsResponse.json()).filter(item=>item.status==='connected'&&!item.disabled&&item.external_account_id&&['youtube','instagram'].includes(item.platform));videoSelect.replaceChildren();if(!videos.length){videoSelect.append(Object.assign(document.createElement('option'),{textContent:'No finished videos available'}));}else{for(const video of videos)videoSelect.append(Object.assign(document.createElement('option'),{value:video.job_id,textContent:video.title+' · '+video.state.replaceAll('_',' ')}));videoSelect.disabled=false;preview.disabled=false;}destinations.replaceChildren();if(!accounts.length){destinations.textContent='No verified publishing accounts. Connect an account above first.';}for(const account of accounts){const card=document.createElement('fieldset');card.style.border='1px solid #31415f';card.style.borderRadius='9px';card.style.marginTop='10px';const legend=document.createElement('legend');const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Publish to '+account.display_name);legend.append(check,document.createTextNode(' '+account.platform+' · '+account.display_name+' · '+account.external_account_id));card.append(legend);const caption=inputField(account.platform==='youtube'?'YouTube description':'Instagram caption','textarea');caption.input.maxLength=account.platform==='youtube'?5000:2200;card.append(caption.label);let title=null,tags=null;if(account.platform==='youtube'){title=inputField('YouTube title','input');title.input.maxLength=100;tags=inputField('YouTube keyword tags, comma separated','input');card.append(title.label,tags.label);}destinations.append(card);rows.set(account.id,{account,check,caption:caption.input,title:title?.input,tags:tags?.input});}save.disabled=!videos.length||!accounts.length;}catch(_){videoSelect.replaceChildren();destinations.textContent='Could not load videos or accounts. Reload to retry.';preview.disabled=true;save.disabled=true;}}
+          function applyVideoIntent(){const video=videosById.get(videoSelect.value);planned.replaceChildren();for(const row of rows.values()){row.check.checked=false;row.caption.value='';if(row.title)row.title.value='';if(row.tags)row.tags.value='';}if(!video)return;const intents=video.destination_intents||[];if(!intents.length){planned.textContent='This video has no saved destination plan. Choose a connected account below to prepare a draft.';for(const row of rows.values()){if(video.video_description&&video.video_description.length<=row.caption.maxLength)row.caption.value=video.video_description;if(row.title)row.title.value=video.title.slice(0,100);}return;}const heading=document.createElement('strong');heading.textContent='Saved creation plan';planned.append(heading);for(const intent of intents){const account=accountsById.get(intent.account_id),row=rows.get(intent.account_id),fits=row&&intent.description.length<=row.caption.maxLength;const line=document.createElement('p');line.textContent=intent.platform+' · '+intent.account_name+' · '+intent.category+(fits?' — ready for draft review':row?' — description exceeds this platform’s limit; shorten it before selecting':' — '+(account?.status||'account unavailable')+'; connection or platform draft support required');planned.append(line);if(row){row.check.checked=Boolean(fits);row.caption.value=fits?intent.description:'';if(row.title)row.title.value=video.title.slice(0,100);}}}
+          videoSelect.onchange=applyVideoIntent;
+          async function loadChoices(){try{const [videosResponse,accountsResponse]=await Promise.all([fetch('/api/publishing/ready-videos'),fetch('/api/social-accounts')]);if(!videosResponse.ok||!accountsResponse.ok)throw Error();const videos=await videosResponse.json(),allAccounts=await accountsResponse.json(),accounts=allAccounts.filter(item=>item.status==='connected'&&!item.disabled&&item.external_account_id&&['youtube','instagram'].includes(item.platform));videosById.clear();accountsById.clear();rows.clear();for(const video of videos)videosById.set(video.job_id,video);for(const account of allAccounts)accountsById.set(account.id,account);videoSelect.replaceChildren();if(!videos.length){videoSelect.append(Object.assign(document.createElement('option'),{textContent:'No finished videos available'}));planned.textContent='Saved destination plans appear when a final video is ready.';}else{for(const video of videos)videoSelect.append(Object.assign(document.createElement('option'),{value:video.job_id,textContent:video.title+' · '+video.state.replaceAll('_',' ')}));videoSelect.disabled=false;preview.disabled=false;}destinations.replaceChildren();if(!accounts.length){destinations.textContent='No verified YouTube or Instagram accounts available for a manual publishing draft. Planned accounts remain visible above.';}for(const account of accounts){const card=document.createElement('fieldset');card.style.border='1px solid #31415f';card.style.borderRadius='9px';card.style.marginTop='10px';const legend=document.createElement('legend');const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Publish to '+account.display_name);legend.append(check,document.createTextNode(' '+account.platform+' · '+account.display_name+' · '+account.external_account_id));card.append(legend);const caption=inputField(account.platform==='youtube'?'YouTube description':'Instagram caption','textarea');caption.input.maxLength=account.platform==='youtube'?5000:2200;card.append(caption.label);let title=null,tags=null;if(account.platform==='youtube'){title=inputField('YouTube title','input');title.input.maxLength=100;tags=inputField('YouTube keyword tags, comma separated','input');card.append(title.label,tags.label);}destinations.append(card);rows.set(account.id,{account,check,caption:caption.input,title:title?.input,tags:tags?.input});}save.disabled=!videos.length||!accounts.length;applyVideoIntent();}catch(_){videoSelect.replaceChildren();destinations.textContent='Could not load videos or accounts. Reload to retry.';preview.disabled=true;save.disabled=true;}}
           save.onclick=async()=>{const selected=[...rows.values()].filter(row=>row.check.checked);if(!selected.length){status.textContent='Select at least one destination account.';return;}const destinationData={};for(const row of selected){const metadata={caption:row.caption.value.trim()};if(row.account.platform==='youtube'){metadata.title=row.title.value.trim();metadata.tags=row.tags.value.split(',').map(value=>value.trim()).filter(Boolean);}destinationData[row.account.id]=metadata;}save.disabled=true;save.textContent='Saving draft…';status.textContent='Validating and copying the selected video…';try{const response=await fetch('/api/publishing/drafts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({job_id:videoSelect.value,destinations:destinationData})});if(!response.ok)throw Error(await response.text());const draft=await response.json();status.textContent='Draft '+draft.id.slice(0,8)+' saved for '+draft.destinations.length+' destination(s). No upload was started.';await loadDrafts();}catch(error){status.textContent='Could not save draft: '+error.message;}finally{save.disabled=false;save.textContent='Save publishing draft';}};
           loadChoices();loadDrafts();loadWorkerState();setInterval(loadWorkerState,20000);
         })();
@@ -985,10 +1066,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Script: ${j.script_model||j.script_owner||'codex'} · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
         )
         dashboard = dashboard.replace(
+            "card.append(actions)}async function refresh()",
+            "actions.append(button('Inputs & script','secondary',()=>window.openStudioRecord(j.id)));let format=document.createElement('div');format.className='generation-format';const kind=j.format.production_mode==='source_clip'?'Source clips':j.format.aspect_ratio==='9:16'&&j.format.duration_seconds<=120?'Shorts':j.format.aspect_ratio==='9:16'?'Vertical video':'Landscape video';format.textContent=kind+' · '+j.format.preset+' · '+j.format.duration_seconds+'s · '+(j.destinations.length?j.destinations.map(item=>item.platform+' / '+item.account_name+' / '+item.category).join(', '):'No destination selected');card.append(format,actions)}async function refresh()",
+        )
+        dashboard = dashboard.replace(
             "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
             "",
         )
-        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + "</body>")
+        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}</style></head>")
+        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + STUDIO_SCRIPT + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -1000,16 +1086,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         payloads = []
         for job in runtime.jobs.list_recent():
             can_retry_validation, retry_identity = _can_retry_approved_asset_validation(runtime, job)
+            events = runtime.events.list_for_job(job.id)
             payloads.append({
                 **_job_payload(job), "topic": job.request.topic, "script_owner": job.request.script_owner, "script_model": job.request.script_model,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
-                "event_count": len(runtime.events.list_for_job(job.id)),
+                "event_count": len(events),
+                "latest_event": {"event_type": events[-1].event_type, "stage": events[-1].details.get("stage") if isinstance(events[-1].details.get("stage"), str) else None, "created_at": _as_ist(events[-1].created_at)} if events else None,
+                "destinations": runtime.jobs.destination_intents(job.id),
+                "format": {"preset": job.request.preset_name, "aspect_ratio": job.request.aspect_ratio, "duration_seconds": job.request.target_duration_seconds, "production_mode": job.request.production_mode},
                 "deletable": job.claim_owner is None and job.state in deletable,
                 "artifact_cleanup_eligible": job.claim_owner is None and job.state is JobState.PUBLISHED,
                 "can_retry_validation": can_retry_validation,
                 "retry_script_identity": retry_identity,
             })
         return payloads
+
+    @app.get("/api/jobs/{job_id}/studio-record", tags=["jobs"])
+    def get_studio_record(job_id: str) -> dict[str, object]:
+        """Return saved operator inputs and durable Codex invocation evidence."""
+        try:
+            job = runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        commands: list[str] = []
+        evidence = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_generation_evidence")
+        if evidence is not None:
+            try:
+                provenance = json.loads(Path(evidence.path).read_text(encoding="utf-8")).get("provenance") or {}
+                if provenance.get("provider") == "codex-cli":
+                    commands = [shlex.join(args) for args in provenance.get("commands", []) if isinstance(args, list) and all(isinstance(arg, str) for arg in args)]
+            except (OSError, ValueError, TypeError):
+                pass
+        return {"job_id": job_id, "request": job.request.model_dump(mode="json"), "destinations": runtime.jobs.destination_intents(job_id), "video_description": runtime.jobs.video_description(job_id), "codex_commands": commands, "command_status": "recorded" if commands else "not_recorded"}
 
     @app.post("/api/jobs/{job_id}/retry-validation", tags=["jobs"])
     def retry_approved_validation(job_id: str, decision: RetryApprovedValidationRequest, request: Request) -> dict[str, object]:

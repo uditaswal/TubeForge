@@ -19,6 +19,17 @@ def next_run(cron: str, timezone: str, after: datetime) -> datetime:
     return croniter(cron, local).get_next(datetime).astimezone(UTC)
 
 
+def schedule_destination_options(options: dict[str, object]) -> tuple[tuple[str, ...], str | None]:
+    """Validate the local delivery plan saved on a schedule."""
+    raw_ids = options.get("destination_account_ids", [])
+    if not isinstance(raw_ids, (list, tuple)) or len(raw_ids) > 20 or any(not isinstance(item, str) or not item for item in raw_ids) or len(set(raw_ids)) != len(raw_ids):
+        raise ValueError("select at most 20 distinct destination accounts")
+    description = options.get("video_description")
+    if description is not None and (not isinstance(description, str) or not description.strip() or len(description) > 5000):
+        raise ValueError("video description must contain 1–5000 characters")
+    return tuple(raw_ids), description.strip() if description is not None else None
+
+
 def request_from_topic(topic: Topic, schedule: Schedule, codex_config=None) -> ContentRequest:
     """Build the same provider-neutral request accepted by manual generation."""
     options = {**schedule.options, **topic.options}
@@ -53,7 +64,7 @@ class SchedulerService:
         run_id = uuid4().hex
         if not self.schedules.begin_run(run_id=run_id, schedule_id=schedule.id, run_key=key, now=now):
             return {"state": "duplicate", "schedule_id": schedule.id}
-        ready = self.topics.list(status="ready", limit=1)
+        ready = self.topics.list(status="ready", limit=1, account_id=schedule.account_id)
         next_at = next_run(schedule.cron, schedule.timezone, now)
         self.schedules.advance(schedule.id, now=now, next_run_at=next_at)
         if not ready:
@@ -64,10 +75,19 @@ class SchedulerService:
         from tubeforge.core.errors import ProviderValidationError
         try:
             request = request_from_topic(topic, schedule, self.codex_config)
+            destination_ids, description = schedule_destination_options(schedule.options)
+            if schedule.account_id is not None:
+                if destination_ids and destination_ids != (schedule.account_id,):
+                    raise ValueError("account schedule must target only its own account")
+                destination_ids = (schedule.account_id,)
         except (ValueError, ProviderValidationError) as error:
             self.schedules.finish_run(run_id=run_id, state="invalid_request", now=now, topic_id=topic.id, details={"reason": str(error)[:1000]})
             return {"state": "invalid_request", "schedule_id": schedule.id, "topic_id": topic.id, "reason": str(error)[:1000]}
-        job = self.topics.reserve_and_create_job(topic_id=topic.id, scheduler_id=self.scheduler_id, job_id=job_id, request=request, lease_seconds=self.reservation_seconds)
+        try:
+            job = self.topics.reserve_and_create_job(topic_id=topic.id, scheduler_id=self.scheduler_id, job_id=job_id, request=request, lease_seconds=self.reservation_seconds, destination_account_ids=destination_ids, video_description=description, account_id=schedule.account_id)
+        except ValueError as error:
+            self.schedules.finish_run(run_id=run_id, state="invalid_request", now=now, topic_id=topic.id, details={"reason": str(error)[:1000]})
+            return {"state": "invalid_request", "schedule_id": schedule.id, "topic_id": topic.id, "reason": str(error)[:1000]}
         if job is None:
             self.schedules.finish_run(run_id=run_id, state="contention", now=now, topic_id=topic.id)
             return {"state": "contention", "schedule_id": schedule.id}
