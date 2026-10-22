@@ -134,6 +134,8 @@ def make_capture(config: SourceCaptureConfig):
                     if any(marker in title for marker in BLOCKED_TITLES):
                         return {"reason": f"page blocked automated access ({title[:40]!r})"}
                     page.add_style_tag(content=HIDE_OVERLAYS)
+                    page.evaluate(f"document.documentElement.style.zoom = '{config.page_zoom}'")  # bigger text on the 810 px card
+                    page.wait_for_timeout(400)
                     found = page.evaluate(FIND, quote)
                     if not found:
                         return {"reason": "quote not found on the page"}
