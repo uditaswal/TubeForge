@@ -19,4 +19,4 @@ Inputs: exact reviewed master hash, passed quality review, channel voice, intend
 
 Acceptance: inspected export bundle plus accurate handoff manifest, with unresolved platform/account/integration dependencies stated. Actual publishing acceptance additionally requires durable remote confirmation and project workflow checks. No upload occurs as part of importing these skills.
 
-Provenance: ../openmontage-review/README.md. OpenMontage itself only exports locally.
+Provenance: docs/reviews/openmontage/README.md (repo-only archive, not packaged). OpenMontage itself only exports locally.

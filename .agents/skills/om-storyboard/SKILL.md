@@ -19,4 +19,4 @@ Return an ordered scene table with scene ID, accepted hash/word anchors, timing,
 
 Acceptance: every accepted narration beat has a grounded visual purpose; inspect the real storyboard manifest and contact sheet tied to accepted hashes. Check phone-size readability and topic-specific teaching value. A written plan alone does not establish creative acceptance or a completed render.
 
-Provenance: ../openmontage-review/README.md. No upstream code is required.
+Provenance: docs/reviews/openmontage/README.md (repo-only archive, not packaged). No upstream code is required.

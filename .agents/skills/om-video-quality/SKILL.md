@@ -18,4 +18,4 @@ Require the reviewed file, accepted script/scene identities, expected format and
 
 Return a review table: timecode/scene, evidence inspected, expected behavior, observed behavior, severity and repair. Separate verified passes, failures and missing evidence. Recommend acceptance only after required automated checks and real-artifact inspection pass. Do not claim operator approval or publish the file.
 
-Provenance: ../openmontage-review/README.md. No external reviewer, provider or script is installed by this skill.
+Provenance: docs/reviews/openmontage/README.md (repo-only archive, not packaged). No external reviewer, provider or script is installed by this skill.

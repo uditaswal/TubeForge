@@ -15,7 +15,7 @@ OAuth applications and credentials.
 
 See the [current project plan and release status](design_doc/tubeforge-publishing-design.md#11-current-release-status-and-next-action)
 for validation evidence, blockers, and next tasks. See
-[AUTONOMOUS_PROGRESS.md](AUTONOMOUS_PROGRESS.md) for the append-only work log.
+`AUTONOMOUS_PROGRESS.md` (local-only, gitignored; rotated per `AGENTS.md`) for the append-only work log.
 The same project plan defines forward work and acceptance checks. The [earlier delivery plan](docs/planning/publishing-delivery-plan.md)
 retains inventory and acceptance evidence. The [dashboard prototype](design_doc/tubeforge-dashboard.html)
 is illustrative; it is not the current Creator Studio interface.
@@ -484,6 +484,37 @@ narration scene does not become one static shot. Source-grounded production
 writing, the fixed portrait visual system, and licensed music decisions are
 recorded in
 [`docs/SHORTS_WORKFLOW.md`](docs/SHORTS_WORKFLOW.md).
+
+## Script owner and the reference Shorts path
+
+**Script writer.** Each video job records which AI writes its script. Creator Studio's
+*New video* form has a **Script writer (AI model)** selector: *Claude Sonnet 5.5 · medium effort*
+(default), *Claude Opus 5.5 · high effort*, or *Codex · gpt-5.6-sol*. The API field is
+`script_model` (`sonnet-medium` | `opus` | `gpt-sol`) on `POST /api/videos`. Reference Shorts also
+reject weak hooks (yt-script hook score below 58) and scenes whose text will not fit the phone layout;
+Claude repairs such rejections once within its two-attempt limit. Codex runs through
+the root-owned host runner (`docs/tubeforge-codex-runner-runtime.md`). Claude runs
+through a user-level runner that uses the installed Claude Code CLI with **no tools**
+(research alone gets web search):
+
+```bash
+scripts/run_claude_runner.sh          # foreground; or the systemd --user unit in docs/
+```
+
+The runner listens on `data/run/claude/claude.sock` (visible to the worker as
+`/app/data/run/claude/claude.sock`) and is enabled by `pipeline.claude.enabled` in the
+config. It uses the same prompt, schema, validation and two-attempt limit as Codex, and
+repairs a failed domain validation once (each call counts against the limit). The CLI
+binary is resolved from `TUBEFORGE_CLAUDE_BIN`, `PATH`, or the VS Code extension.
+
+**Reference Shorts** (`reference-short` preset, prompt `m6-content-v8`): 9:16,
+6–8 scenes, ≤84 narration words, 30–45 seconds. The writer returns only semantic scene
+JSON (template, text, optional `icon` from a fixed set, reveal anchors). The shared
+`rendering/shorts` library owns all geometry, Kokoro speech + Whisper forced alignment,
+motion (entrances, count-ups, scene transitions, push-in, moving background), audio
+mastering (−14 LUFS, ≤−2.5 dBTP) and QA. The preview is a 720×1280 draft; the final is
+1080×1920. The worker needs ≥2 GB RAM (`compose.yaml`) and the image extras
+`alignment` and `reference-renderer` (rebuild after pulling: `docker compose build`).
 
 ## Shorts production standard
 

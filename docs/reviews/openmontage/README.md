@@ -1,6 +1,6 @@
 # Reviewed OpenMontage guidance
 
-This directory records a static review and documentation-only consolidation. Read SECURITY_REVIEW.md for findings and limitations; source-manifest.json pins the inspected working tree. No upstream skill instructions were followed during review, and no upstream program was executed.
+This directory records a static review and documentation-only consolidation. Read SECURITY_REVIEW.md for findings and limitations; The per-file SHA-256 manifest (source-manifest.json, 2,172 entries) was removed on 2026-10-21 to cut agent context cost; the reviewed main ref in SECURITY_REVIEW.md identifies the inspected tree. No upstream skill instructions were followed during review, and no upstream program was executed.
 
 Installed beside this folder:
 - om-storyboard: visual treatment and asset planning after canonical narration acceptance.

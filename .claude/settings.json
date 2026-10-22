@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.venv-benchmark/**)",
+      "Read(./.venv/**)",
+      "Read(./models/**)",
+      "Read(./AUTONOMOUS_PROGRESS.md_*)",
+      "Read(./artifacts/smoke/**/playwright/driver/**)",
+      "Read(./**/__pycache__/**)",
+      "Read(./**/*.pyc)",
+      "Read(./**/*.mp4)",
+      "Read(./**/*.mov)",
+      "Read(./**/*.webm)",
+      "Read(./**/*.wav)",
+      "Read(./**/*.mp3)",
+      "Read(./**/*.onnx)",
+      "Read(./**/*.safetensors)",
+      "Read(./**/*.bin)"
+    ]
+  }
+}
