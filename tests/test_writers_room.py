@@ -62,3 +62,18 @@ def test_hooks_must_not_share_one_formula():
     p = package(late_stat=True)
     p.hook_options = same
     assert any("question mark" in x for x in craft_problems(p)) and any("'but'" in x for x in craft_problems(p))
+
+
+def test_web_searches_run_by_the_cli_helper_model_are_counted(monkeypatch):
+    import json
+    import subprocess
+    envelope = {"is_error": False, "structured_output": {"ok": True}, "total_cost_usd": .1,
+                "usage": {"server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0}},
+                "modelUsage": {"claude-sonnet-5-5": {"webSearchRequests": 0}, "claude-haiku-5-5": {"webSearchRequests": 3}}}
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=json.dumps(envelope).encode(), stderr=b""))
+    monkeypatch.setattr(runner, "claude_binary", lambda: "claude")
+    _, usage = runner.call_claude("p", {"type": "object"}, model="m", web_search=True)
+    assert usage["web_search_requests"] == 3
+    envelope["modelUsage"]["claude-haiku-5-5"]["webSearchRequests"] = 0
+    _, usage = runner.call_claude("p", {"type": "object"}, model="m", web_search=True)
+    assert usage["web_search_requests"] == 0  # a model answering from memory is still refused by run_research
