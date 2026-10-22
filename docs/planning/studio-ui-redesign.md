@@ -37,3 +37,27 @@ Evidence: migration on a populated local test DB, focused scheduler/API/UI tests
 Out of scope: online app connection/upload, auto publication, changes to Claude's video renderer.
 
 Current Phase 5 state: **IMPLEMENTED**. A populated-database migration retained unassigned items, which the UI exposes in a read-only card; account-isolation, scheduler, auth and publishing regression passed (28 tests), and the follow-up unassigned/API/UI check passed (7 tests). The account-first Scheduling script parses in V8; loopback desktop and phone previews load with separate Tech and History topics and schedules. Operator visual/mobile inspection remains pending. Next action: review the updated account-first layout and correct any interaction issues.
+
+## Phase 6 — Queue and progress visibility
+User-visible outcome: Studio and each account queue show queued topics, scheduled runs, and the actual state of active jobs, with a route to the generation record.
+Acceptance: account queues remain isolated; job state comes from persisted jobs rather than inferred progress percentages; an empty queue and failed fetch are explicit; signed-in desktop and phone dashboards load.
+Evidence: focused API/UI workflow tests, populated local preview, job-state inspection.
+Out of scope: scheduler policy changes, remote upload, invented completion estimates.
+
+## Phase 7 — Generation record and copy actions
+User-visible outcome: Generations has its own page, and each job exposes its saved destination accounts, format, inputs, description, narration, and recorded Codex provenance with truthful copy actions.
+Acceptance: exact saved account intent and request fields survive refresh; copy reports success/failure; absent script or exact command is labeled unavailable; job review actions still work.
+Evidence: focused tests and signed-in dashboard inspection.
+Out of scope: replaying Codex, exposing secrets, changing generation content.
+
+## Phase 8 — Account defaults and simplified creation
+User-visible outcome: operators can save an account as the initial creation destination and edit each account's default description in Accounts; clipping moves to its own page and optional music upload leaves the main creation path.
+Acceptance: defaults persist across reloads and apply only as initial selections; per-video overrides still win; clipping and music actions retain their API behavior on desktop and phone.
+Evidence: repository/API/UI tests and signed-in responsive smoke check.
+Out of scope: remote account connections, publishing, global production config changes.
+
+Current Phase 6 state: **VERIFIED**. The signed-in account queue test creates separate account schedules and jobs, records a stage event, and confirms the `/api/jobs` state/event plus dashboard queue controls; scheduler and auth regression passed (7 tests). Studio and Scheduling scripts parse in V8, and the refreshed phone preview returned HTTP 200. No progress percentage is inferred. Next action: build the dedicated generation record view and copy controls in Phase 7.
+
+Current Phase 7 state: **IMPLEMENTED**. Generation metadata, saved-input API, narration copy and exact-command provenance are in place; existing jobs with no command record are labeled unavailable. A focused test reads a saved Codex command from a real local artifact record; the 48-test affected-workflow batch passed, rendered dashboard and new controls parse in V8, and the populated Tech/History preview responds on desktop and phone URLs. Operator visual review remains open. Next action: review the populated generation cards and record dialog on both widths.
+
+Current Phase 8 state: **IMPLEMENTED**. One durable default account can be selected in Accounts, its description remains editable, and media tools have a separate page. A restart test confirms the default survives and disabled accounts cannot be selected; the 48-test affected-workflow batch passed. The preview shows one saved default account and both channel jobs. Operator desktop/phone visual review remains open. Next action: review creation, Accounts and Media tools on both widths before visual acceptance.

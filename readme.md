@@ -123,12 +123,30 @@ with their current connection/support state. Review every destination's title,
 description or caption before saving a separate publishing draft. Video
 creation never starts an upload.
 
-Creator Studio groups the same live controls into **Studio** (create and review
-generations), **Publishing** (drafts and delivery activity), **Accounts**
-(local profiles and connections), and **Scheduling** (topics and schedules).
+Creator Studio separates **Studio** (queue overview and creation),
+**Generations** (saved jobs and review), **Scheduling** (account topic queues
+and schedules), **Accounts** (local profiles and connections), **Media tools**
+(source clipping and licensed music upload), and **Publishing** (drafts and
+delivery activity).
 On phones, open **Menu** to switch sections; Escape or the backdrop closes it.
 The URL hash preserves the selected section when reloading. Background job
 updates continue without replacing an open form or dialog.
+
+Studio shows queued topics and actual job states across accounts. In Scheduling,
+each account queue shows all its topics, saved schedules, the current job state
+and latest recorded stage. **Open generation** leads to that job's saved record.
+Generations labels each job's format, duration and planned platform accounts.
+**Inputs & script** shows the saved brief, source links, description and
+account snapshots, with copy buttons for inputs and available narration. A
+Codex command appears only for runs whose exact arguments were recorded;
+older runs say that the command was not recorded. The command's temporary
+output paths are historical and are not replay actions.
+
+In Accounts, **Set as default** saves one local account as the initial
+destination selection for new videos. You can change the selection per video.
+Edit an account profile to change its default video description; a custom
+description on a video or schedule overrides it. Neither action changes an
+already saved job or schedule.
 
 In **Scheduling**, choose an account card first. Each account has its own topic
 queue and generation schedules. Add one topic per line to that account; its

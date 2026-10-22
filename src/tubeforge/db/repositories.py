@@ -598,6 +598,19 @@ class SocialAccountRepository:
             session.flush()
             result = _social_account_from_record(row)
         return result
+    def set_default(self, account_id: str) -> SocialAccount:
+        """Select one local creation default without changing saved job intents."""
+        with self._session_factory.begin() as session:
+            row = session.get(SocialAccountRecord, account_id)
+            if row is None: raise KeyError("account not found")
+            if row.disabled: raise ValueError("disabled account cannot be the default")
+            now = datetime.now(UTC)
+            for account in session.scalars(select(SocialAccountRecord).where(SocialAccountRecord.is_default.is_(True))):
+                account.is_default, account.updated_at = False, now
+            row.is_default, row.updated_at = True, now
+            session.flush()
+            result = _social_account_from_record(row)
+        return result
     def credential_ciphertext(self, account_id: str) -> str | None:
         with self._session_factory() as session:
             row = session.get(SocialAccountRecord, account_id)
@@ -607,7 +620,7 @@ class SocialAccountRepository:
         with self._session_factory.begin() as session:
             row = session.get(SocialAccountRecord, account_id)
             if row is None: raise KeyError("account not found")
-            row.disabled, row.status, row.updated_at = True, "disabled", datetime.now(UTC)
+            row.disabled, row.is_default, row.status, row.updated_at = True, False, "disabled", datetime.now(UTC)
 
 
 class ArtifactRepository:
