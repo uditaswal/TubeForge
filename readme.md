@@ -137,8 +137,9 @@ with a format, voice profile, duration, cron and timezone. Its optional video
 description overrides the account default for generated jobs. Account identity,
 category and effective description are saved with each job for later draft
 review. Disabled accounts keep their existing topics and schedules visible but
-block new work. Existing unassigned topics and schedules remain separate from
-account queues. Scheduling a video never uploads it.
+block new work. Existing unassigned topics and schedules appear in a read-only
+**Unassigned items** card and remain separate from account queues. Scheduling a
+video never uploads it.
 
 Creator Studio now lists publishing accounts and reports their stored state.
 It enables **Connect YouTube** only when dashboard login, an encryption key,

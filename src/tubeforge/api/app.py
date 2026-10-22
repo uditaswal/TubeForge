@@ -698,8 +698,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/api/topics", tags=["topics"])
-    def list_topics(status_filter: str | None = None, account_id: str | None = None) -> list[dict[str, object]]:
-        topics = runtime.topics.list(status=status_filter, **({"account_id": account_id} if account_id is not None else {}))
+    def list_topics(status_filter: str | None = None, account_id: str | None = None, unassigned: bool = False) -> list[dict[str, object]]:
+        if account_id is not None and unassigned:
+            raise HTTPException(status_code=422, detail="choose an account or unassigned topics")
+        topics = runtime.topics.list(status=status_filter, **({"account_id": None if unassigned else account_id} if unassigned or account_id is not None else {}))
         return [{"id": item.id, "title": item.title, "notes": item.notes, "priority": item.priority, "status": item.status, "generation_job_id": item.generation_job_id, "attempts": item.attempts, "account_id": item.account_id} for item in topics]
 
     @app.post("/api/schedules", status_code=status.HTTP_201_CREATED, tags=["schedules"])
@@ -721,10 +723,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"id": schedule.id, "name": schedule.name, "next_run_at": schedule.next_run_at, "account_id": schedule.account_id}
 
     @app.get("/api/schedules", tags=["schedules"])
-    def list_schedules(account_id: str | None = None) -> list[dict[str, object]]:
+    def list_schedules(account_id: str | None = None, unassigned: bool = False) -> list[dict[str, object]]:
+        if account_id is not None and unassigned:
+            raise HTTPException(status_code=422, detail="choose an account or unassigned schedules")
         schedules = runtime.schedules.list()
-        if account_id is not None:
-            schedules = [item for item in schedules if item.account_id == account_id]
+        if unassigned or account_id is not None:
+            schedules = [item for item in schedules if item.account_id == (None if unassigned else account_id)]
         return [{"id": item.id, "name": item.name, "cron": item.cron, "timezone": item.timezone, "enabled": item.enabled, "next_run_at": item.next_run_at, "last_run_at": item.last_run_at, "options": item.options, "account_id": item.account_id} for item in schedules]
 
     @app.post("/api/schedules/{schedule_id}/run", tags=["schedules"])

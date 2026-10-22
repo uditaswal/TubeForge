@@ -798,7 +798,8 @@ The operator then corrected the Scheduling information architecture: each
 channel needs its own topics. The current account-first tab is **IMPLEMENTED**:
 account cards sit above the selected channel's topic queue and schedules, and
 new schedules target one exact account. Topic and schedule ownership are durable
-in migration `20261022_0030`; old unassigned records remain isolated. A schedule
+in migration `20261022_0030`; old unassigned records remain isolated and visible
+in a read-only card. A schedule
 cannot reserve another account's topic. The populated migration and focused
 dashboard, account, scheduler and publishing regression passed (28 tests).
 Desktop and 390 px preview endpoints show separate Tech and History examples;
