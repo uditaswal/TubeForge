@@ -39,6 +39,10 @@ def visual_problems(package) -> list[str]:
         problems.append("two consecutive scenes have no visual; alternate so the viewer never sees two plain template scenes in a row")
     if kinds.count("stock") > 3:
         problems.append("more than 3 stock scenes; use source screenshots or code for scenes that prove a claim")
+    for index, scene in enumerate(scenes, 1):
+        visual = scene.visual
+        if visual is not None and visual.kind == "code" and all(line.lstrip().startswith(("//", "#", "--", "/*", "*")) for line in visual.lines):
+            problems.append(f"scene {index} code visual contains only comments; use real syntax from the sources, or a source or stock visual")
     sources = {source.source_id: source for source in getattr(getattr(package, "request", None), "sources", ())}
     for index, scene in enumerate(scenes, 1):
         visual = scene.visual

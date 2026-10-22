@@ -617,6 +617,7 @@ class SourceCaptureConfig(BaseModel):
     timeout_seconds: int = Field(default=25, ge=5, le=120)
     # Narrow, phone-like layout so the quoted text is large once scaled onto the 810 px card.
     viewport_width: int = Field(default=540, ge=360, le=1400)
+    page_zoom: float = Field(default=1.5, ge=1.0, le=2.5)
 
 
 class PipelineConfig(BaseModel):

@@ -129,7 +129,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "{kind:'stock', query, media} real B-roll or photo (query = 2-4 concrete filmable English words such as 'server room racks' or 'rocket launch', never abstract words like 'success'; media is 'video' or 'photo'), "
             "{kind:'source', quote} a screenshot of the cited source page, where quote is an exact 8-160 character passage copied word for word from that scene's cited source excerpt, "
             "containing its key number or claim, "
-            "{kind:'code', language, lines} a short typed code snippet (1-6 lines of at most 30 characters; real from the sources or clearly illustrative). "
+            "{kind:'code', language, lines} a short typed snippet of REAL code syntax (1-6 lines of at most 30 characters, from the sources or clearly illustrative), only when the claim is about code; never comment-only snippets. "
             "Use stock on the hook and CTA (the only scenes allowed to be stock-only atmosphere besides one more) and source or code on scenes that prove a claim; "
             "give at least 4 of the scenes a visual and never leave two consecutive scenes without one; at most 3 stock scenes; source and code are not allowed on hook or CTA, "
             "and a source scene must cite that source. Keep every template field fully valid even when a card replaces its body, because the template is the fallback if a screenshot fails. "
