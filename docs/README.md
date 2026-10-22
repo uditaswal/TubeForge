@@ -5,7 +5,7 @@
 - [Development contract](../AGENTS.md)
 - [Video production rulebook](SHORT_FORM_VIDEO_RULEBOOK.md)
 - [Reference benchmark audit](DOCKER_SHORT_BENCHMARK_REVIEW.md)
-- [Append-only validation evidence](../AUTONOMOUS_PROGRESS.md)
+- Append-only validation evidence: `AUTONOMOUS_PROGRESS.md` (local-only, gitignored; archives are `AUTONOMOUS_PROGRESS.md_N`)
 - [Repository hygiene plan and acceptance](REPOSITORY_HYGIENE.md)
 
 ## Operations
@@ -33,4 +33,4 @@
 The planning documents capture proposals and supplied briefs; they are not
 proof of implemented behavior. The project plan owns current status;
 `STATUS.md` redirects there and the dated copy preserves its former content.
-`overnight/` contains historical autonomous-session records; runtime logs stay ignored.
+[HANDOFF.md](HANDOFF.md) is the first file every agent (Codex or Claude) reads; runtime logs stay ignored.

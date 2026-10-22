@@ -49,3 +49,7 @@ artifacts/wheels/
 /preview*.mp4
 /final-*.mp4
 /*.log
+
+# Local-only agent progress logs (rotated archives are AUTONOMOUS_PROGRESS.md_N)
+AUTONOMOUS_PROGRESS.md
+AUTONOMOUS_PROGRESS.md_*

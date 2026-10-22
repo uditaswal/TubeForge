@@ -1,7 +1,7 @@
 # OpenMontage static security review
 
 Reviewed 2026-10-14. Local repository: `/home/uditaswal/docker/tubeforge/git-repos/OpenMontage`. Main ref: `e45f5b12bd46440b04f3675af9a77d0718e6a254`.
-Snapshot: 2172 working-tree files, 89,150,519 bytes excluding .git. See source-manifest.json for individual SHA-256 hashes. Working-tree hashes, rather than the branch ref alone, identify reviewed content.
+Snapshot: 2172 working-tree files, 89,150,519 bytes excluding .git. The per-file SHA-256 manifest was removed on 2026-10-21 (recoverable from git history); regenerate it from the upstream checkout if needed. Working-tree hashes, rather than the branch ref alone, identify reviewed content.
 
 ## Decision
 

@@ -12,7 +12,7 @@ production worker entry points.
 | `codex_overnight.sh` | Historical autonomous development supervisor | Requires a supplied `OVERNIGHT_MISSION.md`; unavailable by default |
 
 `run_codex_overnight.sh` is a separate historical development runner using
-`docs/overnight/MISSION.md`. The root entry point forwards to this script for
+`docs/HANDOFF.md`. The root entry point forwards to this script for
 existing local cron invocations. It is not used for production scripts.
 Neither development runner should be invoked merely to validate repository
 cleanup. Generated output under `autonomous_logs/` and `.codex-overnight/` is
