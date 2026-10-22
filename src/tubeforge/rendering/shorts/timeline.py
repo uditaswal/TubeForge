@@ -15,6 +15,18 @@ class Word:
 
 
 @dataclass(frozen=True)
+class FrameState:
+    """Everything a motion renderer needs for one instant."""
+    index: int
+    revealed: int
+    chunk: int | None
+    active: int
+    scene_t: float          # seconds since the scene began
+    scene_dur: float
+    since_reveal: float | None  # seconds since the newest reveal anchor (None before the first)
+
+
+@dataclass(frozen=True)
 class SceneTiming:
     start: float
     end: float
@@ -71,3 +83,10 @@ class Timeline:
                 return index, revealed, chunk_index, active_word - offset
             offset += len(group)
         raise ValueError("caption mapping does not cover aligned words")
+
+    def state(self, seconds: float) -> FrameState:
+        index, revealed, chunk, active = self.event(seconds)
+        timing, scene = self.timings[index], self.topic.scenes[index]
+        started = [timing.words[w].start for w in scene.reveal_words if seconds >= timing.words[w].start]
+        return FrameState(index, revealed, chunk, active, seconds - timing.start, timing.end - timing.start,
+                          seconds - max(started) if started else None)

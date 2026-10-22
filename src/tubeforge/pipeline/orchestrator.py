@@ -38,6 +38,8 @@ from tubeforge.pipeline.visual_router import VisualRouter
 from tubeforge.pipeline.variants import plan_variants
 from tubeforge.pipeline.sources import SourceIngestor, resolve_source_packet, source_packet
 from tubeforge.providers.content.prompts import CONTENT_TEMPLATE_VERSION
+from tubeforge.pipeline import reference_short
+from tubeforge.core.config import ReferenceShortConfig
 from tubeforge.pipeline.diagnostics import stage_clock, stage_measurement
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
 from tubeforge.rendering.loudness import MUSIC_LOUDNESS_VERSION
@@ -99,11 +101,12 @@ class PipelineOrchestrator:
         self.source_media = source_media or SourceMediaRepository(artifacts._session_factory)
         self.visual_router = VisualRouter()
         self.music_catalog = music_catalog
+        self.reference_config = ReferenceShortConfig()
 
     @classmethod
     def from_settings(cls, settings: Settings, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, external_operations: ExternalOperationRepository | None = None) -> "PipelineOrchestrator":
         """Application-bound constructor that preserves configured render profiles."""
-        return cls(
+        orchestrator = cls(
             jobs, artifacts, approvals, content, media, voice, publisher,
             settings.pipeline.voice.artifact_root, external_operations,
             voice_config=settings.pipeline.voice, preview_config=settings.pipeline.preview,
@@ -112,6 +115,8 @@ class PipelineOrchestrator:
             youtube_config=settings.pipeline.youtube, verification_config=settings.pipeline.verification, source_clips=settings.pipeline.source_clips,
             music_catalog=MusicCatalog(settings.pipeline.voice.artifact_root.parent / "music", settings.pipeline.video_generation.music_catalog, ffprobe=str(settings.pipeline.voice.ffprobe_executable)),
         )
+        orchestrator.reference_config = settings.pipeline.reference_short
+        return orchestrator
 
     def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None, ownership_check: Callable[..., bool] | None = None) -> PipelineJob:
         """Run with an optional worker-owned execution guard."""
@@ -305,6 +310,8 @@ class PipelineOrchestrator:
             self._transition(job, JobState.ASSET_ACQUISITION, approvals=frozenset({ApprovalGate.SCRIPT})); return
         if job.state is JobState.ASSET_ACQUISITION:
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
+            if reference_short.is_reference(package):
+                self._reference_assets(job, package); return
             scene_contract_checksum: str | None = None
             if any(scene.visual_type in EXPLICIT_SCENE_LAYOUTS for scene in package.scene_plans):
                 script_artifact = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
@@ -379,6 +386,9 @@ class PipelineOrchestrator:
         if job.state is JobState.ASSETS_READY:
             self._transition(job, JobState.VOICE_GENERATION); return
         if job.state is JobState.VOICE_GENERATION:
+            reference = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
+            if reference_short.is_reference(reference):
+                self._reference_voice(job, reference, cancellation_requested); return
             if self.voice_config.alignment_provider == "whisper-base-en-dtw-v1" and not job.request.language.casefold().startswith("en"):
                 raise ProviderValidationError("pinned English audio alignment cannot process this job language")
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
@@ -499,6 +509,8 @@ class PipelineOrchestrator:
             self._transition(job, JobState.CAPTION_GENERATION); return
         if job.state is JobState.CAPTION_GENERATION:
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
+            if reference_short.is_reference(package):
+                self._reference_captions(job, package); return
             phrases = segment_content_package(package)
             voices = self._required_json(job.id, JobState.VOICE_GENERATION, "voice_manifest")["voices"]
             durations = tuple(float(item["duration_seconds"]) for item in voices)
@@ -712,7 +724,9 @@ class PipelineOrchestrator:
             if not existing.get("passed"):
                 raise ProviderValidationError("final quality gate has unresolved hard failures")
             return
-        if job.request.production_mode == "source_clip":
+        if self._reference_package(job) is not None:
+            report = self._reference_quality(job, final)
+        elif job.request.production_mode == "source_clip":
             # `render_vertical` independently ffprobes the source-derived output.
             report = {"passed": Path(final.path).is_file() and Path(final.path).stat().st_size > 0, "findings": [{"code": "source_clip_probe", "severity": "warning", "message": "source clip render was validated during clip rendering"}], "media": {}}
         else:
@@ -766,6 +780,124 @@ class PipelineOrchestrator:
         self.events.append(job.id, "quality_gate_completed", passed=report["passed"], findings=report["findings"])
         if not report["passed"]:
             raise ProviderValidationError("final quality gate failed")
+
+    # ---- reference-short-v1 path (shared rendering/shorts library) ----------
+
+    def _reference_package(self, job: PipelineJob) -> ContentPackage | None:
+        raw = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
+        if raw is None or "reference_short" not in raw:
+            return None
+        package = ContentPackage.model_validate(raw)
+        return package if reference_short.is_reference(package) else None
+
+    def _reference_dir(self, job: PipelineJob) -> Path:
+        return self._artifact_path(job.id, "reference")
+
+    def _reference_assets(self, job: PipelineJob, package: ContentPackage) -> None:
+        """No media assets: graphics are code-drawn. Keep the contact sheet for review."""
+        topic = package.reference_short
+        directory = self._reference_dir(job) / "layout"
+        for index, page in enumerate(reference_short.layout_review(topic, directory), 1):
+            self._save_file(job.id, JobState.ASSET_ACQUISITION, f"contact_sheet_{index:03d}", page,
+                            {"generator": "rendering.shorts.review", "scene_count": len(topic.scenes), "page": index})
+        self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", {"scenes": {}, "profile": "reference-short-v1", "quality": {"passed": True, "method": "layout-qa"}})
+        self._transition(job, JobState.ASSETS_READY)
+
+    def _reference_voice(self, job: PipelineJob, package: ContentPackage, cancellation_requested) -> None:
+        directory = self._reference_dir(job)
+        topic = package.reference_short
+        existing = self._valid_artifact(job.id, JobState.VOICE_GENERATION, "narration")
+        timing_artifact = self._valid_artifact(job.id, JobState.VOICE_GENERATION, "timing_map")
+        timeline = None
+        if existing and timing_artifact and (directory / "topic.json").is_file():
+            try:
+                timeline = reference_short.load_timeline(topic, directory)
+            except ProviderValidationError:
+                timeline = None
+        if timeline is None:
+            self._ensure_ownership(force=True)
+            voice = job.request.voice_id if job.request.voice_id and job.request.voice_id != "piper" else None
+            timeline = reference_short.prepare_speech(topic, directory, self.reference_config, voice=voice,
+                                                      cancelled=cancellation_requested or (lambda: False))
+        self._save_file(job.id, JobState.VOICE_GENERATION, "narration", directory / "narration.wav", {"generator": "rendering.shorts.prepare", "sample_rate": 48000})
+        self._save_file(job.id, JobState.VOICE_GENERATION, "voice_manifest", directory / "voice-manifest.json", {"generator": "rendering.shorts.prepare"})
+        self._save_file(job.id, JobState.VOICE_GENERATION, "timing_map", directory / "timeline.json", {"alignment": [t.alignment for t in timeline.timings], "duration": timeline.duration})
+        self.events.append(job.id, "reference_speech_ready", duration=round(timeline.duration, 2), alignment=sorted({t.alignment for t in timeline.timings}))
+        self._transition(job, JobState.CAPTION_GENERATION)
+
+    def _reference_captions(self, job: PipelineJob, package: ContentPackage) -> None:
+        timeline = reference_short.load_timeline(package.reference_short, self._reference_dir(job))
+        srt = reference_short.srt_from_timeline(timeline)
+        self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions_srt", "captions.srt", srt)
+        self._checkpoint_generated(job.id, JobState.CAPTION_GENERATION, "captions", "captions-display.srt", srt)
+        self._transition(job, JobState.VOICE_READY)
+
+    def _reference_inputs(self, job: PipelineJob, package: ContentPackage) -> tuple[dict[str, object], str]:
+        directory = self._reference_dir(job)
+        content = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
+        narration = self._required_artifact(job.id, JobState.VOICE_GENERATION, "narration")
+        timing = self._required_artifact(job.id, JobState.VOICE_GENERATION, "timing_map")
+        inputs = {"content": content.checksum_sha256, "narration": narration.checksum_sha256, "timing_map": timing.checksum_sha256}
+        return inputs, hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+
+    def _reference_source_identity(self, job: PipelineJob, package: ContentPackage, inputs: dict, name: str, approval_identity: str | None) -> str:
+        return reference_short.render_identity(package.reference_short, str(inputs["narration"]), str(inputs["timing_map"]),
+                                               draft=name == "preview", approval_identity=approval_identity)
+
+    def _reference_render_checkpoint(self, job: PipelineJob, stage: JobState, name: str, filename: str, cancellation_requested, *, approval_identity: str | None, approval_id: str | None) -> tuple[Artifact, str]:
+        package = self._reference_package(job)
+        inputs, input_identity = self._reference_inputs(job, package)
+        source_identity = self._reference_source_identity(job, package, inputs, name, approval_identity)
+        existing = self._valid_artifact(job.id, stage, name)
+        manifest = self._load_json_artifact(job.id, stage, f"{name}_manifest")
+        if existing and manifest and manifest.get("source_render_identity") == source_identity and manifest.get("input_identity") == input_identity:
+            return existing, str(manifest["render_identity"])
+        directory = self._reference_dir(job)
+        timeline = reference_short.load_timeline(package.reference_short, directory)
+        output = self._artifact_path(job.id, filename)
+        self._ensure_ownership(force=True)
+        self.events.append(job.id, "render_started", render=name, renderer=reference_short.RENDERER_VERSION)
+        report = reference_short.render(timeline, directory, output, self.reference_config, draft=name == "preview",
+                                        cancelled=cancellation_requested or (lambda: False))
+        self._ensure_ownership(force=True)
+        checksum = self._checksum(output)
+        identity = hashlib.sha256(json.dumps({"source_render_identity": source_identity, "artifact_checksum": checksum, "render_instance": uuid.uuid4().hex}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        provenance = {"render_identity": identity, "source_render_identity": source_identity, "renderer_template_version": reference_short.RENDERER_VERSION, "render_strategy": "reference-shorts-library", "input_identity": input_identity, "inputs": inputs, "qa": {key: report.get(key) for key in ("passed", "loudness", "realtime_factor", "peak_process_rss_kib", "alignment", "distinct_frame_events", "draft")}, "approval_identity": approval_identity, "approval_id": approval_id}
+        artifact = self._save_artifact(Artifact(job.id, stage, name, str(output), checksum, provenance))
+        self._replace_json(job.id, stage, f"{name}_manifest", {**provenance, "artifact_checksum": artifact.checksum_sha256})
+        qa_path = output.with_suffix(".qa.json")
+        if qa_path.is_file():
+            self._save_file(job.id, stage, f"{name}_qa", qa_path, {"generator": "rendering.shorts.encode"})
+        self.events.append(job.id, "render_completed", render=name, checksum_sha256=artifact.checksum_sha256)
+        return artifact, identity
+
+    def _reference_preview_is_current(self, job: PipelineJob) -> bool:
+        try:
+            package = self._reference_package(job)
+            preview = self._required_artifact(job.id, JobState.PREVIEW_RENDERING, "preview")
+            manifest = self._required_json(job.id, JobState.PREVIEW_RENDERING, "preview_manifest")
+            inputs, input_identity = self._reference_inputs(job, package)
+            return (manifest.get("artifact_checksum") == preview.checksum_sha256 and manifest.get("input_identity") == input_identity
+                    and manifest.get("source_render_identity") == self._reference_source_identity(job, package, inputs, "preview", None)
+                    and self._checksum(Path(preview.path)) == preview.checksum_sha256)
+        except (ProviderValidationError, OSError):
+            return False
+
+    def _reference_quality(self, job: PipelineJob, final: Artifact) -> dict[str, object]:
+        """The library already decoded, probed and loudness-gated the final; re-verify bytes."""
+        qa_path = Path(final.path).with_suffix(".qa.json")
+        findings: list[dict[str, str]] = []
+        report: dict[str, object] = {"media": {}}
+        if not qa_path.is_file():
+            findings.append({"code": "reference_qa_missing", "severity": "error", "message": "render QA report is missing"})
+        else:
+            qa = json.loads(qa_path.read_text())
+            report["reference_qa"] = {key: qa.get(key) for key in ("passed", "loudness", "probe", "realtime_factor", "alignment")}
+            if not qa.get("passed") or qa.get("draft") or qa.get("video_sha256") != final.checksum_sha256:
+                findings.append({"code": "reference_qa_failed", "severity": "error", "message": "render QA did not pass for this exact final file"})
+        report["findings"] = findings
+        report["passed"] = not findings
+        return report
 
     def _publication_checkpoints(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None) -> None:
         """Build independent, locally validated M12 metadata and thumbnail checkpoints."""
@@ -865,6 +997,8 @@ class PipelineOrchestrator:
 
     def _render_checkpoint(self, job: PipelineJob, renderer: PreviewRenderer, stage: JobState, name: str, filename: str, cancellation_requested: Callable[[], bool] | None, *, approval_identity: str | None = None, approval_id: str | None = None) -> tuple[Artifact, str]:
         """Render only after every source checkpoint has been revalidated."""
+        if self._reference_package(job) is not None:
+            return self._reference_render_checkpoint(job, stage, name, filename, cancellation_requested, approval_identity=approval_identity, approval_id=approval_id)
         segments, narration, captions, input_identity, inputs = self._render_inputs(job, renderer)
         source_render_identity = self._render_identity(
             renderer, segments, narration, captions, input_identity, approval_identity,
@@ -934,6 +1068,8 @@ class PipelineOrchestrator:
 
     def _preview_is_current(self, job: PipelineJob) -> bool:
         """Fail closed when the approved preview or any of its inputs changed."""
+        if self._reference_package(job) is not None:
+            return self._reference_preview_is_current(job)
         try:
             renderer = self._preview_renderer_for(job)
             preview = self._required_artifact(job.id, JobState.PREVIEW_RENDERING, "preview")

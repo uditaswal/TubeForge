@@ -9,6 +9,7 @@ import argparse
 from dataclasses import asdict
 import json
 import logging
+import re
 from pathlib import Path
 import sys
 import time
@@ -73,7 +74,9 @@ def align(topic, output, model_path):
             raise ValueError("voice manifest no longer matches scene audio")
         audio, sr = sf.read(path, dtype="float32")
         duration = len(audio) / sr
-        kwargs = dict(audio_path=path, text=scene.vo, phrase_id=scene.scene_id,
+        # The shared word tokenizer splits "3.4" into two words; joining decimals with
+        # an apostrophe keeps one token per whitespace-separated spoken word.
+        kwargs = dict(audio_path=path, text=re.sub(r"(?<=\d)[.,](?=\d)", "\u2019", scene.vo), phrase_id=scene.scene_id,
                       section_id=scene.scene_id, phrase_start_seconds=0,
                       phrase_end_seconds=duration, ordinal_start=0)
         method, scene_warning = "whisper-base-en-dtw-v1", warning
@@ -81,7 +84,12 @@ def align(topic, output, model_path):
             if aligner is None:
                 raise ProviderValidationError("forced alignment unavailable")
             try:
-                measured = aligner.align(**kwargs)
+                try:
+                    measured = aligner.align(**kwargs)
+                except RetryableProviderError:
+                    # Transient model/memory failure: one retry before the logged estimate fallback.
+                    time.sleep(2)
+                    measured = aligner.align(**kwargs)
             except RepairableAlignmentResult:
                 measured = aligner.align(**kwargs, configuration="normalized-overlap-v1")
                 method += ":normalized-overlap-v1"

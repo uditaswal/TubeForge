@@ -127,13 +127,13 @@ def test_real_encoder_and_cancel_preserve_existing_output(tmp_path):
                     "sine=frequency=440:sample_rate=48000:duration=28",
                     "-af", "loudnorm=I=-14:TP=-2.5:LRA=9", "-ar", "48000", str(audio)], check=True)
     target = tmp_path / "fixture.mp4"
-    report = encode(timeline, audio, target, draft=True)
+    report = encode(timeline, audio, target, draft=True, motion=False)
     assert report["passed"] and report["full_decode"]
     assert report["distinct_frame_events"] < report["frames"] / 4
     assert report["loudness"]["input_tp"] <= -1.5
     target.with_suffix(".passed-qa.json").write_text(json.dumps(report, indent=2))
     original = target.read_bytes()
     with pytest.raises(RenderCancelled):
-        encode(timeline, audio, target, draft=True, cancelled=lambda: True)
+        encode(timeline, audio, target, draft=True, motion=False, cancelled=lambda: True)
     assert target.read_bytes() == original
     assert json.loads(target.with_suffix(".qa.json").read_text())["passed"] is False

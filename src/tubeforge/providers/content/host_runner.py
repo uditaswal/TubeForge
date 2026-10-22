@@ -19,6 +19,7 @@ Transport = Callable[[str, bytes, int], bytes]
 
 class HostRunnerContentProvider:
     provider_name = "host-codex-runner"
+    script_owner = "codex"
 
     def __init__(self, config: CodexProviderConfig, cache: GenerationCacheRepository, *, transport: Transport | None = None, clock: Callable[[], datetime] | None = None) -> None:
         self.config, self.cache = config, cache
@@ -29,6 +30,7 @@ class HostRunnerContentProvider:
 
     def research_sources(self, request: ContentRequest) -> dict:
         """Typed research operation; no narration cache or approval mutation."""
+        self._require_owner(request)
         def call(operation):
             message = GenerateShortsScriptRequest(operation=operation, request=generation_request_content(request))
             response = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), message.model_dump_json().encode(), self.config.socket_timeout_seconds))
@@ -40,7 +42,12 @@ class HostRunnerContentProvider:
             raise ProviderValidationError("Host runner needs the research update installed before topic research can run")
         return call("ResearchSourcesV1").model_dump(mode="json")
 
+    def _require_owner(self, request: ContentRequest) -> None:
+        if request.script_owner != self.script_owner:
+            raise ProviderValidationError(f"this job's script owner is {request.script_owner!r}, which is not enabled here")
+
     def generate_package(self, request: ContentRequest) -> ContentPackage:
+        self._require_owner(request)
         # Reject an unsupported prompt before reserving or charging a model call.
         prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
         host_request = generation_request_content(request)
@@ -113,7 +120,7 @@ class HostRunnerContentProvider:
         package = ContentPackage.model_validate(raw)
         if normalize_content_request(package.request) != normalize_content_request(request):
             raise ProviderValidationError("host runner output source packet differs from the requested source packet")
-        validate_video_package(package, request, provider_name="Codex")
+        validate_video_package(package, request, provider_name=self.script_owner.title())
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, evaluate
         if request.prompt_version in SKILL_TEMPLATES:
             evaluate(package)

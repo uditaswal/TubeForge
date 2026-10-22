@@ -80,12 +80,28 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "or insufficient_sources with null package and a specific reason. "
             "This is the reference-short-v1 profile. Create 6–8 ordered script_sections and matching "
             "reference_short.scenes. Each narration contains 8–15 whitespace-separated spoken words; "
-            "aim for about 75–90 words total and 25–45 seconds including 0.35-second scene tails. "
+            "aim for 68–80 words total (the local voice speaks about 2.1 words per second, and the whole video must stay under 45 seconds including 0.35-second scene tails). "
             "Use complete sentences, a specific first-sentence hook matching one of five distinct hook_options, "
             "source-grounded escalation, concrete payoff and a final spoken Follow for more <topic> CTA. "
             "Put that exact follow request in the final CTA headline and metadata.call_to_action. "
             "Choose fixed templates: hook first, cta last; middle scenes big_stat, before_after, flow, checklist or terminal. "
             "Make the first frame readable immediately: headline lines are short, not full narration paragraphs. "
+            "Set icon on every scene to the best-matching name from: shield, bug, lock, gear, bolt, cloud, database, server, code, chip, clock, chart_up, chart_down, check, cross, warning, search, document, globe, user, rocket, star (or null); never invent names. "
+            "SCRIPT CRAFT (this decides whether viewers stay; the opening hook is scored and weak hooks are rejected): "
+            "Scene 1's whole narration is the hook: at most 14 words, it says you/your within the first six words, "
+            "contains one concrete number, name or date taken from the sources, names a cost or risk to the viewer "
+            "(lose, cost, risk, waste, stop, before, never, fail) and leaves a question open (why, how, what, but, nobody, almost, except) "
+            "without answering it in the same sentence. Shape, not facts: 'Your team may be losing X to Y, and almost nobody checks.' "
+            "The five hook_options use five different formulas (statistic, mistake, contrarian flip, question, stakes) and each obeys those rules. "
+            "Never open in report voice ('Researchers found', 'A study shows', 'X fell from A to B'). "
+            "Chain scenes with turns (but, so, until, then) so each scene answers the previous open question and opens the next. "
+            "Speak to the viewer in second person, sentences of at most 12 words, one idea per scene, concrete nouns, no hedging filler; "
+            "attribute briefly instead ('Google's data shows'). Escalate: hook, why it hits you, proof number, twist or limit ('but'), what to do, "
+            "a payoff line that echoes the hook, then the Follow for more CTA. Never invent facts to make a hook stronger. "
+            "Phone-fit text budgets (the renderer rejects overflow): hook headline lines at most 14 characters each, "
+            "chips at most 9 characters each when there are three chips (14 for two, 24 for one), big_stat/flow/checklist/before_after headings at most 26, big_stat labels at most 18, "
+            "flow nodes, checklist items and before/after texts at most 26, terminal lines at most 30, "
+            "CTA headline at most 24 and CTA subline at most 32 characters. Prefer lower-case words over wide capitals. "
             "Use numbers as figures/bars, arrows for relationships, real or explicitly illustrative terminal output. "
             "Every teaching scene must reveal a meaningful change tied to ordered zero-based reveal_words indices "
             "into that scene's whitespace-separated narration. One anchor per node, item, terminal line or CTA chip; "
@@ -160,6 +176,34 @@ def validate_video_package(package: ContentPackage, request: ContentRequest, *, 
         # narration/on-screen quotations remain separate content fields.
         for field in ("visual_type", "fallback_visual", "visual_subject", "visual_purpose", "composition"):
             reject_instruction_spoofing(getattr(scene, field), field=f"scene_plans.{scene.scene_id}.{field}")
+    if package.reference_short is not None:
+        words = sum(len(section.narration.split()) for section in package.script_sections)
+        if words > 84:
+            raise ProviderValidationError(f"{provider_name} narration has {words} words; reference Shorts need at most 84 so the video stays under 45 seconds")
+        from tubeforge.providers.content.youtube_skills import hook_gate
+        weak = hook_gate(package)
+        if weak:
+            raise ProviderValidationError(f"{provider_name} {weak}")
+        # Fail closed before narration/TTS: every scene must fit the phone layout.
+        # Report every offending scene at once so a writer can repair them in one pass.
+        from tubeforge.rendering.shorts.layout import LayoutError, SceneRenderer
+        try:
+            renderer = SceneRenderer(package.reference_short)
+        except LayoutError as error:
+            raise ProviderValidationError(f"{provider_name} caption text cannot be displayed ({error.issue['code']}: {error.issue['detail']})") from error
+        problems = []
+        for index, scene in enumerate(package.reference_short.scenes):
+            try:
+                renderer.compose(index)
+            except LayoutError as error:
+                problems.append(f"scene {index + 1} ({scene.template}): {error.issue['element']} {error.issue['code']} - {error.issue['detail']}")
+        if not problems:
+            try:
+                renderer.validate()  # also measures every caption chunk
+            except LayoutError as error:
+                problems.append(f"{error.issue['element']} {error.issue['code']} - {error.issue['detail']}")
+        if problems:
+            raise ProviderValidationError(f"{provider_name} scene text does not fit the phone layout; shorten these: " + " | ".join(problems))
     if len(package.script_sections) < 6 or len(package.scene_plans) < 6:
         raise ProviderValidationError(f"{provider_name} output must contain at least six script sections and scene plans")
     section_scenes = [section.scene_id for section in package.script_sections]

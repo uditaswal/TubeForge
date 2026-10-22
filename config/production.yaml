@@ -23,6 +23,18 @@ pipeline:
     invocation_limit: 2
     reservation_seconds: 1200
     prompt_template_version: "m6-content-v7"
+  # Optional second script owner, selectable per job in Creator Studio. It talks
+  # to a user-level runner (scripts/run_claude_runner.sh) over a socket under
+  # ./data/run/claude, which the worker container already bind-mounts.
+  claude:
+    enabled: true
+    # Per-job choices (sonnet-medium default, opus) are allow-listed in host_claude_runner.MODELS.
+    model: "claude-sonnet-5-5"
+    socket_path: "/app/data/run/claude/claude.sock"
+    socket_timeout_seconds: 590
+    invocation_limit: 2
+    reservation_seconds: 1200
+    prompt_template_version: "m6-content-v7"
   video_generation:
     default_preset: "default"
     presets:
@@ -45,6 +57,18 @@ pipeline:
         minimum_duration_seconds: 30
         maximum_duration_seconds: 120
         aspect_ratio: "9:16"
+        captions_enabled: true
+        music_track: null
+        visual_style: "cinematic-tech"
+        review_mode: "manual"
+        mcp_servers: []
+      # Reference Shorts: 9:16, 6–8 scenes, shared renderer (rendering/shorts).
+      reference-short:
+        duration_seconds: 36
+        minimum_duration_seconds: 30
+        maximum_duration_seconds: 45
+        aspect_ratio: "9:16"
+        prompt_version: "m6-content-v8"
         captions_enabled: true
         music_track: null
         visual_style: "cinematic-tech"
@@ -85,6 +109,11 @@ pipeline:
     ffprobe_executable: "ffprobe"
     # Keep the existing timing method until the independent C3 acceptance gate.
     alignment_provider: "local-waveform-v1"
+  reference_short:
+    # Shared reference-short-v1 renderer: native Kokoro + Whisper forced alignment.
+    alignment_model_path: "./data/benchmark/models/models--Systran--faster-whisper-base.en/snapshots/3d3d5dee26484f91867d81cb899cfcf72b96be6c"
+    voice: "af_bella"
+    budget_realtime_factor: 20
   media:
     # Each job can select local generated art or rights-safe Wikimedia stock.
     # Google Image results are never used because they have no reuse proof.

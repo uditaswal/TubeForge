@@ -72,21 +72,29 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     mix = voice + bed + effects
     for name, samples in (("music-ducked", bed), ("effects", effects), ("mix-raw", mix)):
         sf.write(output / f"{name}.wav", samples, SR, subtype="FLOAT")
-    deadline = time.monotonic() + 120
+    deadline = time.monotonic() + 240
     raw = output / "mix-raw.wav"
+    # Speech peaks cap plain linear loudnorm near -16 LUFS. Match loudness with a
+    # true-peak limiter in the chain: measure, apply gain+limiter, re-measure and
+    # correct (at most three passes), so -14 LUFS holds under the -2.5 dBTP ceiling.
     measured = analyze(raw, ffmpeg=ffmpeg, deadline=deadline, cancelled=cancelled, poll_seconds=.1,
                        target_i=-14, target_tp=-2.5, target_lra=9)
-    filt = "loudnorm=I=-14:TP=-2.5:LRA=9:linear=true:" + ":".join(
-        f"{key}={measured[value]}" for key, value in (
-            ("measured_I", "input_i"), ("measured_TP", "input_tp"),
-            ("measured_LRA", "input_lra"), ("measured_thresh", "input_thresh"),
-            ("offset", "target_offset")))
+    gain = -14 - float(measured["input_i"])
     final = output / "mix.wav"
     temporary = output / "mix.pending.wav"
+    result = measured
     try:
-        checked([ffmpeg, "-y", "-v", "error", "-i", str(raw), "-af", filt,
-                 "-ar", str(SR), "-c:a", "pcm_s24le", str(temporary)],
-                deadline=deadline, cancelled=cancelled)
+        for attempt in range(3):
+            checked([ffmpeg, "-y", "-v", "error", "-i", str(raw), "-af",
+                     f"volume={gain:.2f}dB,alimiter=limit=0.74:attack=5:release=60:level=disabled",
+                     "-ar", str(SR), "-c:a", "pcm_s24le", str(temporary)],
+                    deadline=deadline, cancelled=cancelled)
+            result = analyze(temporary, ffmpeg=ffmpeg, deadline=deadline, cancelled=cancelled, poll_seconds=.1,
+                             target_i=-14, target_tp=-2.5, target_lra=9)
+            error = -14 - float(result["input_i"])
+            if abs(error) <= .3 and float(result["input_tp"]) <= -2.4:
+                break
+            gain += error
         if cancelled():
             raise RuntimeError("mastering cancelled before promotion")
         temporary.replace(final)
@@ -96,7 +104,7 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
                   "origin": "Original synthesized signals, no sampled recording",
                   "bpm": 96, "music_peak_before_duck": .12, "speech_duck_maximum": .75,
                   "master_target_lufs": -14, "master_target_dbtp": -2.5,
-                  "input_measurement": measured, "narration_sha256": file_hash(narration),
+                  "input_measurement": measured, "mastered_measurement": result, "mastering": "gain-matched true-peak limiter, up to 3 measured passes", "narration_sha256": file_hash(narration),
                   "mix_sha256": file_hash(final),
                   "rights_note": "Synthesis does not establish voice/model/font licensing; retain their provenance separately."}
     (output / "audio-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
