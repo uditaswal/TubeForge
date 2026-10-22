@@ -3,6 +3,7 @@
 Last updated: 2026-10-22 by Claude · branch `dev` · see `git log -3` for the checkpoint.
 Rules live in `AGENTS.md`. Evidence log `AUTONOMOUS_PROGRESS.md` is local-only and small (append-only; archives `_N` — do **not** read them).
 Full review of the project (why videos look bad, phases): `docs/REVIEW_2026-10-21_END_TO_END.md`.
+Content-quality review (script, hook, engagement, voice, music, visuals → actionable steps): `docs/REVIEW_2026-10-22_CONTENT_QUALITY.md`.
 
 ## Goal
 Scheduled/user-briefed AI Shorts → local render (Kokoro TTS, Python/FFmpeg) → review → upload to
@@ -59,7 +60,8 @@ Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 ## Next step
 1. Operator watches `preview.mp4` (Studio → job → Watch preview) and gives creative feedback.
 2. Operator watches `final.mp4` of job `8c23e099…` and decides on the publication gate (do NOT approve until watched). Then: real thumbnail from a final-video frame (current one is a placeholder), orchestrator-level test for the reference final→publication path.
-3. Image layer beyond icons: Wikimedia/stock photo slot per scene (rights path exists in `providers/media/`), better fonts.
+3. Content quality quick wins from `docs/REVIEW_2026-10-22_CONTENT_QUALITY.md` §9 step 1 (voice speed/gaps, anti-slop validator, late payoff, comment CTA, no duplicate text, fonts), then the writers' room (§3 S1–S3).
+4. Image layer beyond icons: Wikimedia/stock photo slot per scene (rights path exists in `providers/media/`), better fonts.
 4. Hook quality gate (hookscore < 65 → one rewrite), format recipes, then scheduler → private YouTube, then Instagram.
 5. Codex (gpt-sol) host runner is the old wheel — its prompts lack the craft block/icons until redeployed, so the worker's new hook gate may reject Codex scripts: icons/phone-fit prompt text only reach Codex after the root redeploy
    (`docs/tubeforge-codex-runner-runtime.md`); Codex output is still validated by the worker (fit/word-count checks).
