@@ -39,8 +39,8 @@ strict JSON script + scene plan; all pixels, audio and encoding are local and co
 | Script-writer picker in Studio: Sonnet 5.5 medium (default), Opus 5.5 high, Codex GPT-5.6 Sol | IMPLEMENTED | `script_model` on `/api/videos`; `/api/content-profiles` lists models; Sonnet job `8c23e099…` end to end |
 | Hook/script craft: prompt block + scored hook gate (≥58) + repairable skill/layout checks | IMPLEMENTED | Sonnet hooks scored 56–70 vs 42 before; selected "76% memory bugs, then what?" (67). Gate lives in `providers/content/youtube_skills.hook_gate` and `validate_video_package` |
 | Motion layer (`rendering/shorts/motion.py`) + 22 procedural icons (`icons.py`) | IMPLEMENTED | stills + full encode inspected |
-| Preview approval → 1080×1920 final → quality gate for reference jobs | NOT STARTED (code paths written, never run) | `_reference_render_checkpoint`/`_reference_quality` |
-| Publication prep for reference jobs | NOT STARTED | `_publication_checkpoints` expects legacy `timing_map.phrases`, assets, thumbnail inputs |
+| Preview approval → 1080×1920 final → quality gate for reference jobs | IMPLEMENTED | Job `8c23e099…` (22 Oct): final.mp4 1080×1920, 34.2 s, library QA + `quality_report` passed; contact sheet `final-sheet.png`. Operator has not watched it. |
+| Publication prep for reference jobs | IMPLEMENTED | Same job reached `publication_approval_required` (metadata, thumbnail, platform variants built; `_reference_timing`, thumbnail bound to final checksum). Nothing approved or published. Thumbnail is still the legacy bitmap-text placeholder. |
 | Instagram publisher | NOT STARTED | |
 
 ## Render evidence
@@ -57,8 +57,7 @@ Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 
 ## Next step
 1. Operator watches `preview.mp4` (Studio → job → Watch preview) and gives creative feedback.
-2. Run preview approval → final render (1080×1920 takes ~2.5× longer) → fix `_publication_checkpoints` for reference jobs
-   (build `timing_map`-compatible chapters from `timeline.json`; skip asset-based thumbnail inputs).
+2. Operator watches `final.mp4` of job `8c23e099…` and decides on the publication gate (do NOT approve until watched). Then: real thumbnail from a final-video frame (current one is a placeholder), orchestrator-level test for the reference final→publication path.
 3. Image layer beyond icons: Wikimedia/stock photo slot per scene (rights path exists in `providers/media/`), better fonts.
 4. Hook quality gate (hookscore < 65 → one rewrite), format recipes, then scheduler → private YouTube, then Instagram.
 5. Codex (gpt-sol) host runner is the old wheel — its prompts lack the craft block/icons until redeployed, so the worker's new hook gate may reject Codex scripts: icons/phone-fit prompt text only reach Codex after the root redeploy
