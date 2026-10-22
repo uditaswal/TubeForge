@@ -785,6 +785,15 @@ horizontal-overflow acceptance remain pending operator browser review. The
 next action is to address that feedback. The feature branch remains separate
 from Claude's `dev` work.
 
+Operator review added per-schedule destinations. The Scheduling tab now saves
+exact local app/account selections and an optional description per schedule;
+the scheduler copies the account metadata into its job in the same transaction
+as topic reservation. A disabled or missing account fails the run without
+consuming the topic. This extension is **IMPLEMENTED** with 26 focused dashboard,
+scheduler, account and publishing tests passing and updated desktop/phone
+previews returning HTTP 200. Operator mobile and visual review remains the
+next action; no scheduled upload was added.
+
 ### Reference-renderer integration — active priority
 
 User supersedes the earlier landscape test with the supplied [Claude review](../docs/CLAUDE_PIPELINE_REVIEW.md). Overall **IMPLEMENTED**; shared layout phase verified, dashboard integration outstanding. Previous Rust preview is rejected and is not acceptance evidence. Canonical target: 1080×1920/30fps, 25–45 seconds, 6–8 scenes, 8–15 spoken words per scene, 0.3–0.4s tails, first-frame hook, fixed templates, visible sources, single-line 1–3-word 84px captions, music/SFX, closing follow CTA, −15..−13 LUFS and ≤−1.5 dBTP encoded true peak. Draft: 720×1280. Use native Python, Kokoro INT8 primary/Piper fallback, concurrency one.

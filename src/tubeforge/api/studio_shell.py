@@ -71,6 +71,11 @@ label{color:#d5e0ee;font-size:12px;font-weight:540}
 .event{background:var(--studio-panel-alt);border-color:var(--line);border-radius:10px}
 .actions{gap:8px}
 fieldset{min-width:0}
+.schedule-destinations{margin:20px 0 16px;padding:15px;border:1px solid var(--line);border-radius:10px}
+.schedule-destinations legend{padding:0 5px;color:#edf3fb;font-size:13px;font-weight:650}
+.schedule-destinations .checkbox{min-width:0;align-items:flex-start}
+.schedule-destinations .checkbox span{min-width:0;overflow-wrap:anywhere}
+.schedule-destinations .checkbox input{flex:none;margin-top:3px}
 details summary{cursor:pointer}
 dialog{max-width:min(860px,calc(100vw - 28px));max-height:calc(100dvh - 28px);background:var(--panel);color:#edf3fb;border:1px solid var(--line);border-radius:15px;box-shadow:0 24px 70px #0009}
 dialog::backdrop{background:#030912b8}
