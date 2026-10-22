@@ -615,7 +615,8 @@ class SourceCaptureConfig(BaseModel):
     enabled: bool = True
     chromium_path: Path = Path("/usr/bin/chromium")
     timeout_seconds: int = Field(default=25, ge=5, le=120)
-    viewport_width: int = Field(default=820, ge=480, le=1400)
+    # Narrow, phone-like layout so the quoted text is large once scaled onto the 810 px card.
+    viewport_width: int = Field(default=540, ge=360, le=1400)
 
 
 class PipelineConfig(BaseModel):

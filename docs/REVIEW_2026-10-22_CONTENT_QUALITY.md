@@ -205,6 +205,12 @@ Changes this implies (folded into step 2 and step 4):
   reference channels show and needs no stock API.
 - **R6 Versus template:** two-column "big bang vs incremental", "before vs after" with numbers, for comparison stories.
 
+## 9b. Status of the visual layer (22 Oct, evening)
+
+Done: V5 (Pixabay stock + source screenshots, no Pexels), code cards (§ operator list item 2), source quotes validated verbatim
+against the cited excerpt, visual gate (≥4 scenes, no two plain scenes in a row, ≤3 stock). Existing big_stat covers animated number charts.
+Open: SVG diagrams (V6), `versus` template (R6), line/cost-counter charts, beat-synced cuts, Claude frame review (V7).
+
 ## 10. Operator decisions (recorded 22 Oct 2026)
 
 - **Stock B-roll: Pixabay API key AVAILABLE (22 Oct, later the same day)** — stored only in the untracked `.env` as `TUBEFORGE_PIXABAY_API_KEY`; Pexels still unavailable. Earlier note: Neither is issuing API keys right now; V5(c) stays in the
