@@ -53,12 +53,19 @@ def _norm(text: str) -> str:
     return " ".join(re.sub(r"[\u2018\u2019]", "'", re.sub(r"[\u201c\u201d]", '"', text)).casefold().split())
 
 
+REPORT_VOICE = re.compile(r"^(researchers?|scientists?|analysts?|a (new |recent )?(study|report|survey|paper)|studies|according to|new data|data shows?)\b"
+                          r"|\b(fell|rose|dropped|grew|increased|decreased|climbed|declined) from [\w.%$]+ to [\w.%$]+", re.I)
+
+
 def craft_problems(package) -> list[str]:
     """Return repair instructions for a reference package, or an empty list."""
     topic = package.reference_short
     scenes = topic.scenes
     problems: list[str] = []
     spoken = [scene.vo for scene in scenes]
+    opening = re.split(r"(?<=[.!?…])\s+", spoken[0].strip(), maxsplit=1)[0]
+    if REPORT_VOICE.search(opening):
+        problems.append(f"the opening {opening!r} is in report voice; open with a named story, a verdict, a paradox or a stake instead of describing a finding")
     for index, scene in enumerate(scenes, 1):
         headline = getattr(scene, "headline", ())
         texts = [scene.vo, *(headline if isinstance(headline, tuple) else (headline,)), getattr(scene, "heading", "")]

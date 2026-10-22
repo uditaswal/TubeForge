@@ -81,11 +81,15 @@ def test_runner_maps_only_allow_listed_models_to_cli_model_and_effort():
     assert resolve_model(Wrapper(request(script_owner="claude", script_model="opus"))) == ("claude-opus-5-5", "high")
 
 
-def test_hook_gate_rejects_report_voice_and_accepts_a_real_hook():
+def test_hook_gate_is_only_a_floor_and_report_voice_is_a_craft_error():
     from types import SimpleNamespace
+    from tubeforge.providers.content.craft import REPORT_VOICE
     from tubeforge.providers.content.youtube_skills import hook_gate
     def package(text):
         return SimpleNamespace(script_sections=[SimpleNamespace(narration=text + " More follows here.")])
-    weak = hook_gate(package("Memory bugs fell from 76% to 24% of Android's flaws."))
-    assert weak and "ADDRESS" in weak
-    assert hook_gate(package("Your code may have lost 76% of its safety, but almost nobody checks why.")) is None
+    assert hook_gate(package("Microsoft rewrote Copilot's engine in Rust for $120,000.")) is None  # named story must pass the floor
+    assert hook_gate(package("Stuff happened.")) is not None
+    for report in ("Memory bugs fell from 76% to 24% of Android's flaws.", "Researchers found most bugs hide in new code.", "A study shows rewrites fail."):
+        assert REPORT_VOICE.search(report)
+    for story in ("Microsoft rewrote Copilot's engine in Rust. One engineer.", "You couldn't afford this rewrite before."):
+        assert not REPORT_VOICE.search(story)
