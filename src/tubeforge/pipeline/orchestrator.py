@@ -116,6 +116,8 @@ class PipelineOrchestrator:
             music_catalog=MusicCatalog(settings.pipeline.voice.artifact_root.parent / "music", settings.pipeline.video_generation.music_catalog, ffprobe=str(settings.pipeline.voice.ffprobe_executable)),
         )
         orchestrator.reference_config = settings.pipeline.reference_short
+        orchestrator.pixabay_config = settings.pipeline.pixabay
+        orchestrator.capture_config = settings.pipeline.source_capture
         return orchestrator
 
     def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None, ownership_check: Callable[..., bool] | None = None) -> PipelineJob:
@@ -311,7 +313,7 @@ class PipelineOrchestrator:
         if job.state is JobState.ASSET_ACQUISITION:
             package = ContentPackage.model_validate(self._required_json(job.id, JobState.CONTENT_GENERATING, "content_package"))
             if reference_short.is_reference(package):
-                self._reference_assets(job, package); return
+                self._reference_assets(job, package, cancellation_requested); return
             scene_contract_checksum: str | None = None
             if any(scene.visual_type in EXPLICIT_SCENE_LAYOUTS for scene in package.scene_plans):
                 script_artifact = self._required_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
@@ -793,15 +795,38 @@ class PipelineOrchestrator:
     def _reference_dir(self, job: PipelineJob) -> Path:
         return self._artifact_path(job.id, "reference")
 
-    def _reference_assets(self, job: PipelineJob, package: ContentPackage) -> None:
-        """No media assets: graphics are code-drawn. Keep the contact sheet for review."""
+    pixabay_config = None
+    capture_config = None
+
+    def _reference_assets(self, job: PipelineJob, package: ContentPackage, cancellation_requested=None) -> None:
+        """Prepare optional real-imagery plates (never failing the job), then keep the contact sheet for review."""
         topic = package.reference_short
+        plates = self._reference_plates(job, topic, cancellation_requested)
         directory = self._reference_dir(job) / "layout"
         for index, page in enumerate(reference_short.layout_review(topic, directory), 1):
             self._save_file(job.id, JobState.ASSET_ACQUISITION, f"contact_sheet_{index:03d}", page,
                             {"generator": "rendering.shorts.review", "scene_count": len(topic.scenes), "page": index})
-        self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", {"scenes": {}, "profile": "reference-short-v1", "quality": {"passed": True, "method": "layout-qa"}})
+        self._replace_json(job.id, JobState.ASSET_ACQUISITION, "asset_manifest", {"scenes": {}, "profile": "reference-short-v1", "quality": {"passed": True, "method": "layout-qa"}, "plates": plates})
         self._transition(job, JobState.ASSETS_READY)
+
+    def _reference_plates(self, job: PipelineJob, topic, cancellation_requested) -> dict[str, object]:
+        """Pixabay B-roll and source screenshots; each scene falls back to its template on any failure."""
+        from tubeforge.pipeline.capture import make_capture
+        from tubeforge.pipeline.plates import prepare_plates
+        from tubeforge.providers.media.pixabay import PixabayClient
+        directory = self._reference_dir(job)
+        directory.mkdir(parents=True, exist_ok=True)
+        wants_visuals = any(scene.visual is not None for scene in topic.scenes)
+        if not wants_visuals:
+            (directory / "plates").mkdir(exist_ok=True)
+            return {"scenes": {}}
+        pixabay = PixabayClient(self.pixabay_config) if self.pixabay_config is not None else None
+        capture = make_capture(self.capture_config) if self.capture_config is not None else None
+        manifest = prepare_plates(topic, directory, pixabay=pixabay, capture=capture, cancelled=cancellation_requested or (lambda: False))
+        self.events.append(job.id, "plates_prepared", scenes={key: value["kind"] for key, value in manifest["scenes"].items()},
+                           fallbacks={key: value.get("reason") for key, value in manifest["scenes"].items() if value["kind"] == "none"})
+        return {"scenes": {key: {k: v for k, v in value.items() if k != "evidence"} | ({"evidence": value["evidence"]} if "evidence" in value else {})
+                           for key, value in manifest["scenes"].items()}}
 
     def _reference_voice(self, job: PipelineJob, package: ContentPackage, cancellation_requested) -> None:
         directory = self._reference_dir(job)

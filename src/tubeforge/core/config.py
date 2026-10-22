@@ -607,6 +607,17 @@ class PixabayConfig(BaseModel):
     max_retries: int = Field(default=3, ge=0, le=6)
 
 
+class SourceCaptureConfig(BaseModel):
+    """Headless-Chromium screenshots of cited source pages for reference Shorts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    chromium_path: Path = Path("/usr/bin/chromium")
+    timeout_seconds: int = Field(default=25, ge=5, le=120)
+    viewport_width: int = Field(default=820, ge=480, le=1400)
+
+
 class PipelineConfig(BaseModel):
     """Safe provider selection and deterministic M7 voice settings."""
 
@@ -625,6 +636,7 @@ class PipelineConfig(BaseModel):
     voice: VoicePipelineConfig = Field(default_factory=VoicePipelineConfig)
     reference_short: ReferenceShortConfig = Field(default_factory=ReferenceShortConfig)
     pixabay: PixabayConfig = Field(default_factory=PixabayConfig)
+    source_capture: SourceCaptureConfig = Field(default_factory=SourceCaptureConfig)
     preview: PreviewRenderConfig = Field(default_factory=PreviewRenderConfig)
     final: FinalRenderConfig = Field(default_factory=FinalRenderConfig)
     shorts_preview: ShortsPreviewRenderConfig = Field(default_factory=ShortsPreviewRenderConfig)

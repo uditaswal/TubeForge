@@ -5,8 +5,14 @@ from tubeforge.providers.content.craft import craft_problems
 from tubeforge.rendering.shorts.schema import ShortsTopic
 
 
-def package(scenes=None, hooks=(), late_stat=False):
+STOCK = {"kind": "stock", "query": "server room racks"}
+CODE = {"kind": "code", "language": "rust", "lines": ["let x = 1;"]}
+
+
+def package(scenes=None, hooks=(), late_stat=False, visuals=(0, 2, 3, 5)):
     data = topic_data()
+    for i in visuals:
+        data["scenes"][i]["visual"] = STOCK if i in (0, 4, 5, 6) else CODE
     if late_stat:
         data["scenes"][1], data["scenes"][4] = data["scenes"][4], data["scenes"][1]
     for index, update in (scenes or {}).items():
@@ -39,3 +45,11 @@ def test_too_many_rhetorical_questions():
     problems = craft_problems(package({**GOOD, 1: {"vo": text, "caption": text},
                                        2: {"vo": text, "caption": text}, 3: {"vo": text, "caption": text}}, late_stat=True))
     assert any("rhetorical questions" in p for p in problems)
+
+
+def test_visual_rules():
+    from tubeforge.providers.content.craft import visual_problems
+    assert visual_problems(package(late_stat=True)) == []
+    few = " | ".join(visual_problems(package(visuals=(0, 5))))
+    assert "only 2 of 7 scenes" in few and "two consecutive scenes" in few
+    assert any("more than 3 stock" in p for p in visual_problems(package(visuals=(0, 4, 5, 6))))
