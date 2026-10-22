@@ -271,7 +271,7 @@ def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunne
         from tubeforge.providers.content.youtube_skills import preflight
         prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
         claude_binary()
-        return HostRunnerSuccess(package={}, provenance={"resource_hashes": preflight(), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
+        return HostRunnerSuccess(package={}, provenance={"resource_hashes": preflight(template_version=request.request.prompt_version), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
                                                          "preflight": True, "operations": ["ResearchSourcesV1"], "runner": "claude"})
     if request.operation == "ResearchSourcesV1":
         return run_research(request, model=model)
