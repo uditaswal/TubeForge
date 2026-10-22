@@ -115,6 +115,10 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Do not invent company migrations, benefits, causal explanations, command output or numbers. "
             "If evidence contradicts the proposed angle, qualify the angle and explain what is supported. "
             "Provide ten title_options, one coordinated thumbnail text of at most three words, description and tags. "
+            "Also write metadata.engagement_comment: one pinned-comment debate starter of at most 280 characters, a single sharp question "
+            "that forces viewers to pick a side on the video's real trade-off (for example 'Rust or C for new code: which one would you bet your job on?'). "
+            "Make it provocative and opinionated but fair: take a side or frame a dilemma about the topic, never insult people, groups or languages' users, "
+            "never state an unsupported fact, no links, @mentions or hashtags, and it must contain a question mark. "
             "\nREQUEST=" + encoded + _skill_contract(request)
         )
         if len(prompt) > max_chars:

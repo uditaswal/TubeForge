@@ -47,7 +47,10 @@ def metadata_from_package(package: ContentPackage, timing: dict[str, Any], confi
     if len(tags) > config.tag_max_count or sum(len(item) for item in tags) > config.tag_payload_max_length:
         raise ProviderValidationError("metadata tags exceed configured limits")
     chapters = derive_chapters(package, timing)
-    return {"title": title, "description": description, "tags": tags, "chapters": chapters, "validation": "accepted"}
+    result: dict[str, object] = {"title": title, "description": description, "tags": tags, "chapters": chapters, "validation": "accepted"}
+    if package.metadata.engagement_comment:
+        result["engagement_comment"] = _clean(package.metadata.engagement_comment)
+    return result
 
 
 def derive_chapters(package: ContentPackage, timing: dict[str, Any]) -> list[dict[str, object]]:

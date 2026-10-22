@@ -41,6 +41,7 @@ strict JSON script + scene plan; all pixels, audio and encoding are local and co
 | Motion layer (`rendering/shorts/motion.py`) + 22 procedural icons (`icons.py`) | IMPLEMENTED | stills + full encode inspected |
 | Preview approval → 1080×1920 final → quality gate for reference jobs | IMPLEMENTED | Job `8c23e099…` (22 Oct): final.mp4 1080×1920, 34.2 s, library QA + `quality_report` passed; contact sheet `final-sheet.png`. Operator has not watched it. |
 | Publication prep for reference jobs | IMPLEMENTED | Same job reached `publication_approval_required` (metadata, thumbnail, platform variants built; `_reference_timing`, thumbnail bound to final checksum). Nothing approved or published. Thumbnail is still the legacy bitmap-text placeholder. |
+| Engagement debate comment (`metadata.engagement_comment`) | IMPLEMENTED (backend only) | Writer prompt (v8 only) asks for one provocative-but-fair pinned-comment question; contract rejects links/@/#/non-questions; carried into `publication_package.metadata`. Not generated in a live job yet; nothing posts it. |
 | Instagram publisher | NOT STARTED | |
 
 ## Render evidence
@@ -62,6 +63,11 @@ Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 4. Hook quality gate (hookscore < 65 → one rewrite), format recipes, then scheduler → private YouTube, then Instagram.
 5. Codex (gpt-sol) host runner is the old wheel — its prompts lack the craft block/icons until redeployed, so the worker's new hook gate may reject Codex scripts: icons/phone-fit prompt text only reach Codex after the root redeploy
    (`docs/tubeforge-codex-runner-runtime.md`); Codex output is still validated by the worker (fit/word-count checks).
+
+## UI follow-ups for the Codex UI branch (no UI was touched here)
+- Show `package.metadata.engagement_comment` in script review as an editable "Pinned comment (debate starter)" field; script approval covers it. Automatic/auto-review mode needs no extra step, so it is bypassed there. A per-job "skip comment" toggle would need an API field — not added.
+- Show the comment in the publication review (`publication_package.metadata.engagement_comment`) with copy button; posting it needs a `commentThreads.insert` call and the YouTube `youtube.force-ssl` scope, neither implemented (manual paste for now).
+- Script-writer picker already exists in the API (`script_model`); the UI selector for Claude Sonnet 5.5 / Opus 5.5 / Codex is the earlier follow-up.
 
 ## Gotchas learned
 - Kill/restart the Claude runner after *any* change to prompts/layout (it imports code at start): `scripts/run_claude_runner.sh`.

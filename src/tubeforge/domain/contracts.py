@@ -277,6 +277,23 @@ class VideoMetadata(DomainModel):
     call_to_action: str | None = Field(default=None, min_length=1, max_length=300)
     tags: tuple[str, ...] = Field(default=(), max_length=30)
     chapters: tuple[Chapter, ...] = Field(default=())
+    engagement_comment: str | None = Field(default=None, min_length=1, max_length=280)
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_serialization(self, handler):
+        value = handler(self)
+        if self.engagement_comment is None:
+            value.pop("engagement_comment", None)
+        return value
+
+    @model_validator(mode="after")
+    def validate_engagement_comment(self) -> VideoMetadata:
+        text = (self.engagement_comment or "").casefold()
+        if any(marker in text for marker in ("http://", "https://", "www.", "@", "#")):
+            raise ValueError("engagement comment must not contain links, mentions or hashtags")
+        if self.engagement_comment is not None and "?" not in self.engagement_comment:
+            raise ValueError("engagement comment must pose a question")
+        return self
 
 
 class ThumbnailBrief(DomainModel):
