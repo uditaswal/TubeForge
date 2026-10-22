@@ -843,11 +843,15 @@ class PipelineOrchestrator:
         narration = self._required_artifact(job.id, JobState.VOICE_GENERATION, "narration")
         timing = self._required_artifact(job.id, JobState.VOICE_GENERATION, "timing_map")
         inputs = {"content": content.checksum_sha256, "narration": narration.checksum_sha256, "timing_map": timing.checksum_sha256}
+        plates = reference_short.plates_identity(directory)
+        if plates != "none":
+            inputs["plates"] = plates
         return inputs, hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
     def _reference_source_identity(self, job: PipelineJob, package: ContentPackage, inputs: dict, name: str, approval_identity: str | None) -> str:
         return reference_short.render_identity(package.reference_short, str(inputs["narration"]), str(inputs["timing_map"]),
-                                               draft=name == "preview", approval_identity=approval_identity)
+                                               draft=name == "preview", approval_identity=approval_identity,
+                                               plates_sha=str(inputs.get("plates", "none")))
 
     def _reference_render_checkpoint(self, job: PipelineJob, stage: JobState, name: str, filename: str, cancellation_requested, *, approval_identity: str | None, approval_id: str | None) -> tuple[Artifact, str]:
         package = self._reference_package(job)

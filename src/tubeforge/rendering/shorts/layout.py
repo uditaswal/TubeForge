@@ -146,8 +146,9 @@ class SceneRenderer:
     The caller supplies aligned reveal/word events. Repeated event keys return
     the same image without recomposition; memory does not grow with duration.
     """
-    def __init__(self, topic: ShortsTopic):
+    def __init__(self, topic: ShortsTopic, cards: frozenset[int] = frozenset()):
         self.topic = topic
+        self.cards = cards  # scene indices whose body is replaced by a code/screenshot card
         self.groups = [caption_groups(s.caption) for s in topic.scenes]
         self._base_key = self._frame_key = None
         self._base = self._frame = None
@@ -190,7 +191,9 @@ class SceneRenderer:
                 self.icon(c, scene.icon, (495, 300), 140)
                 dy = 65
             c.text("heading", scene.heading, (495, 355 + dy), size=72, minimum=48)
-            if kind == "big_stat":
+            if index in self.cards:
+                c.mark(Mark("card", "graphic", (90, 500, 900, 1170)))
+            elif kind == "big_stat":
                 values = [(scene.before, scene.before_label), (scene.after, scene.after_label)]
                 scale = max(scene.before, scene.after, 1)
                 for j, (value, label) in enumerate(values):

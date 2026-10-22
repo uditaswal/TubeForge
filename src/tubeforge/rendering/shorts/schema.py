@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_serializer, model_validator
 
 from .icons import ICON_NAMES
 
@@ -20,6 +20,38 @@ class Source(StrictModel):
     url: HttpUrl
 
 
+CODE_LANGUAGES = ("rust", "python", "typescript", "javascript", "go", "c", "cpp", "java", "bash", "json", "yaml", "sql", "text")
+
+
+class StockVisual(StrictModel):
+    """Pixabay B-roll behind the scene: a searched clip (default) or portrait photo."""
+    kind: Literal["stock"]
+    query: str = Field(min_length=3, max_length=60)
+    media: Literal["video", "photo"] = "video"
+
+
+class SourceVisual(StrictModel):
+    """Screenshot of the cited source page, cropped to the paragraph that holds ``quote``."""
+    kind: Literal["source"]
+    quote: str = Field(min_length=8, max_length=160)
+
+
+class CodeVisual(StrictModel):
+    """Short syntax-highlighted snippet that types itself in."""
+    kind: Literal["code"]
+    language: Literal[CODE_LANGUAGES]  # type: ignore[valid-type]
+    lines: tuple[str, ...] = Field(min_length=1, max_length=6)
+
+    @model_validator(mode="after")
+    def short_lines(self):
+        if any(not line.strip() or len(line) > 30 or "\t" in line for line in self.lines):
+            raise ValueError("code lines must be nonempty, tab-free and at most 30 characters")
+        return self
+
+
+Visual = Annotated[StockVisual | SourceVisual | CodeVisual, Field(discriminator="kind")]
+
+
 class Scene(StrictModel):
     scene_id: str = Field(min_length=1, max_length=64)
     vo: str = Field(min_length=1, max_length=400)
@@ -28,6 +60,15 @@ class Scene(StrictModel):
     reveal_words: tuple[int, ...] = Field(min_length=1, max_length=3)
     # Optional badge from the fixed procedural icon set; never a file or URL.
     icon: IconName | None = None
+    # Optional real imagery for the scene; None keeps the code-drawn template only.
+    visual: Visual | None = None
+
+    @model_serializer(mode="wrap")
+    def omit_empty_visual(self, handler):
+        value = handler(self)
+        if self.visual is None:
+            value.pop("visual", None)
+        return value
 
     @model_validator(mode="after")
     def narration_and_anchors(self):
@@ -127,6 +168,11 @@ class ShortsTopic(StrictModel):
         if len(ids) != len(self.sources) or len({s.scene_id for s in self.scenes}) != len(self.scenes):
             raise ValueError("scene and source identities must be unique")
         for number, scene in enumerate(self.scenes, 1):
+            visual = scene.visual
+            if visual is not None and visual.kind in {"source", "code"} and scene.template in {"hook", "cta"}:
+                raise ValueError(f"scene {number}: only stock visuals may sit on the hook or CTA scene")
+            if visual is not None and visual.kind == "source" and not scene.source_ids:
+                raise ValueError(f"scene {number}: a source screenshot needs the scene to cite a source")
             if not set(scene.source_ids) <= ids:
                 raise ValueError(f"scene {number} cites an unknown source")
             if scene.template not in {"hook", "cta"} and not scene.source_ids:

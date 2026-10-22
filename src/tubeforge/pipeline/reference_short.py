@@ -19,6 +19,7 @@ from tubeforge.core.errors import ProviderValidationError
 from tubeforge.domain.contracts import ContentPackage
 from tubeforge.rendering.shorts.audio import master
 from tubeforge.rendering.shorts.encode import RenderCancelled, encode, file_hash
+from tubeforge.rendering.shorts import plates as plates_module
 from tubeforge.rendering.shorts.layout import LayoutError
 from tubeforge.rendering.shorts.prepare import prepare
 from tubeforge.rendering.shorts.review import write_layout_review
@@ -62,6 +63,16 @@ def prepare_speech(topic: ShortsTopic, directory: Path, config: ReferenceShortCo
         raise ProviderValidationError(f"reference speech preparation failed: {error}") from error
 
 
+def load_plates(topic: ShortsTopic, directory: Path, ffmpeg: str = "ffmpeg"):
+    manifest = plates_module.load_manifest(directory)
+    return plates_module.Plates(topic, directory, manifest, ffmpeg), plates_module.card_indices(topic, manifest)
+
+
+def plates_identity(directory: Path) -> str:
+    path = directory / plates_module.MANIFEST
+    return file_hash(path) if path.is_file() else "none"
+
+
 def load_timeline(topic: ShortsTopic, directory: Path) -> Timeline:
     data = json.loads((directory / "timeline.json").read_text())
     if data.get("topic_sha256") != file_hash(directory / "topic.json"):
@@ -71,7 +82,7 @@ def load_timeline(topic: ShortsTopic, directory: Path) -> Timeline:
     timings = tuple(SceneTiming(row["start"], row["end"], tuple(Word(**w) for w in row["words"]),
                                 row["alignment"], row["voice_end"]) for row in data["scenes"])
     try:
-        return Timeline(topic, timings)
+        return Timeline(topic, timings, plates_module.card_indices(topic, plates_module.load_manifest(directory)))
     except (ValueError, LayoutError) as error:
         raise ProviderValidationError(f"reference timeline rejected: {error}") from error
 
@@ -101,7 +112,8 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
                      ffmpeg=config.ffmpeg_executable)
         return encode(timeline, mix, destination, draft=draft, cancelled=cancelled,
                       budget_rtf=config.budget_realtime_factor, ffmpeg=config.ffmpeg_executable,
-                      ffprobe=config.ffprobe_executable)
+                      ffprobe=config.ffprobe_executable,
+                      plates=load_plates(timeline.topic, directory, config.ffmpeg_executable)[0])
     except RenderCancelled:
         raise
     except (ValueError, MemoryError, TimeoutError, LayoutError) as error:
@@ -109,8 +121,10 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
 
 
 def render_identity(topic: ShortsTopic, narration_sha: str, timeline_sha: str, *, draft: bool,
-                    approval_identity: str | None) -> str:
+                    approval_identity: str | None, plates_sha: str = "none") -> str:
     material = {"renderer": RENDERER_VERSION, "draft": draft, "topic": hashlib.sha256(
         topic.model_dump_json().encode()).hexdigest(), "narration": narration_sha,
         "timeline": timeline_sha, "approval": approval_identity}
+    if plates_sha != "none":
+        material["plates"] = plates_sha
     return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

@@ -213,12 +213,20 @@ class PixabayClient:
                 for h in data["hits"] if h.get("largeImageURL")]
 
     @staticmethod
-    def best(assets: list[StockAsset], *, min_duration: float = 0.0, exclude: set[str] = frozenset()) -> StockAsset | None:
-        """Prefer portrait, long enough, high-resolution clips; skip assets already used in this video."""
+    def best(assets: list[StockAsset], *, min_duration: float = 0.0, exclude: set[str] = frozenset(),
+             query: str = "") -> StockAsset | None:
+        """Relevance first (search rank and tag overlap), then portrait, long enough, high resolution.
+
+        Skips assets already used in this video."""
+        words = {w for w in query.casefold().replace(",", " ").split() if len(w) > 2}
+        rank = {a.asset_id: i for i, a in enumerate(assets)}
+
         def score(a: StockAsset) -> float:
-            portrait = 1.0 if a.height >= a.width else .55
+            tags = {t.strip().casefold() for t in a.tags.replace(" ", ",").split(",")}
+            relevance = (1 + len(words & tags)) / (1 + .12 * rank[a.asset_id])
+            portrait = 1.0 if a.height >= a.width else .8
             long_enough = 1.0 if (a.duration is None or a.duration >= min_duration) else .6
-            return portrait * long_enough * min(a.height, 1920) / 1920
+            return relevance * portrait * long_enough * (.6 + .4 * min(a.height, 1920) / 1920)
         pool = [a for a in assets if a.asset_id not in exclude]
         return max(pool, key=score, default=None)
 
