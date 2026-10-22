@@ -6,6 +6,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+/AUTONOMOUS_PROGRESS.md
+/AUTONOMOUS_PROGRESS.md_[0-9]*
 .mypy_cache/
 *.egg-info/
 data/

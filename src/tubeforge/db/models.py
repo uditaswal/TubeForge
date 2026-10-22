@@ -57,6 +57,8 @@ class SocialAccountRecord(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     platform: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False, default="general")
+    default_description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     external_account_id: Mapped[str | None] = mapped_column(String(300), index=True)
     auth_type: Mapped[str] = mapped_column(String(32), nullable=False)
     credential_ciphertext: Mapped[str | None] = mapped_column(Text)
@@ -72,6 +74,18 @@ class SocialAccountRecord(Base):
     last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class VideoDestinationIntentRecord(Base):
+    """Local destination and metadata snapshot captured with a generation job."""
+    __tablename__ = "video_destination_intents"
+    job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class OAuthConnectionRecord(Base):
@@ -241,6 +255,7 @@ class PipelineJobRecord(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    video_description: Mapped[str | None] = mapped_column(Text)
     state: Mapped[str] = mapped_column(String(64), nullable=False)
     resume_state: Mapped[str | None] = mapped_column(String(64))
     failure_message: Mapped[str | None] = mapped_column(Text)
