@@ -185,3 +185,32 @@ def test_source_credit_is_off_by_default_and_watermark_is_optional(tmp_path):
     assert "show_source_credit" not in json.loads(plain_request.model_dump_json()) and "channel_watermark" not in plain_request.model_dump()
     from tubeforge.domain.contracts import generation_request_key_payload
     assert generation_request_key_payload(plain_request) == generation_request_key_payload(marked_request)
+
+
+def test_mascot_is_optional_static_and_never_covers_content(tmp_path):
+    from tubeforge.pipeline import reference_short
+    from tubeforge.rendering.overlay_mascot import command
+    from tubeforge.rendering.shorts.layout import RenderOptions, SceneRenderer, intersects
+    from tubeforge.rendering.shorts.mascot import SPRITE, sprite
+
+    assert SPRITE.is_file() and sprite().getchannel("A").getbbox()
+    topic = ShortsTopic.model_validate(topic_data())
+    plain, with_mascot = SceneRenderer(topic), SceneRenderer(topic, options=RenderOptions(mascot=True))
+    shown = 0
+    for index in range(len(topic.scenes)):
+        assert not any(m.role == "mascot" for m in plain.compose(index).marks)
+        canvas = with_mascot.compose(index)
+        mascot = [m for m in canvas.marks if m.role == "mascot"]
+        if mascot:
+            shown += 1
+            assert not any(intersects(mascot[0].bounds, m.bounds) for m in canvas.marks if m is not mascot[0])
+            assert plain.compose(index).image.tobytes() != canvas.image.tobytes()
+        else:
+            assert plain.compose(index).image.tobytes() == canvas.image.tobytes()  # hidden: the frame is untouched
+    assert shown >= 1
+    reference_short.write_options(tmp_path, show_sources=False, watermark=None, mascot=True)
+    assert reference_short.load_options(tmp_path).mascot and reference_short.options_identity(tmp_path) != "none"
+    assert "overlay=x=main_w-overlay_w-(main_w*0.04):y=main_h-overlay_h-(main_w*0.04)" in " ".join(command(tmp_path / "a.mp4", tmp_path / "b.mp4"))
+    import pytest
+    with pytest.raises(ValueError):
+        command(tmp_path / "a.mp4", tmp_path / "b.mp4", position="middle")

@@ -79,6 +79,7 @@ class ContentRequest(DomainModel):
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus)$")
     # Render-only options (reference Shorts): never part of generation identity, omitted while default.
     show_source_credit: bool = False
+    show_mascot: bool = False
     channel_watermark: str | None = Field(default=None, min_length=1, max_length=40, pattern=r"^[^\x00-\x1f<>]+$")
 
     @model_serializer(mode="wrap")
@@ -86,6 +87,8 @@ class ContentRequest(DomainModel):
         value = handler(self)
         if not self.show_source_credit:
             value.pop("show_source_credit", None)
+        if not self.show_mascot:
+            value.pop("show_mascot", None)
         if self.channel_watermark is None:
             value.pop("channel_watermark", None)
         if self.script_owner == "codex":
@@ -132,6 +135,7 @@ def generation_request_key_payload(request: ContentRequest) -> dict[str, object]
     value = generation_request_content(request).model_dump(mode="json")
     value.pop("show_source_credit", None)  # render-only: changing them must not trigger a new script
     value.pop("channel_watermark", None)
+    value.pop("show_mascot", None)
     if request.prompt_version in {"m6-content-v1", "m6-content-v2", "m6-content-v3", "m6-content-v4"} and request.channel_identity == "default" and request.channel_voice_profile == ContentRequest.model_fields["channel_voice_profile"].default:
         value.pop("channel_identity")
         value.pop("channel_voice_profile")
