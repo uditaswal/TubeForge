@@ -97,7 +97,8 @@ def narration_word_limits(request: ContentRequest) -> tuple[int, int]:
         return 48, 120
     if request.aspect_ratio == "9:16":
         return max(72, round(request.target_duration_seconds * 2.4)), round(request.target_duration_seconds * 3.7)
-    return max(30, round(request.target_duration_seconds * 1.5)), round(request.target_duration_seconds * 4.0)
+    # Kokoro speaks ~2.3 words/s and Piper ~2.7; the host runner never sees the chosen voice, so one range serves both.
+    return max(30, round(request.target_duration_seconds * 1.7)), round(request.target_duration_seconds * 3.0)
 
 
 def build_content_prompt(request: ContentRequest, *, template_version: str, max_chars: int, writers_room: dict | None = None) -> str:
@@ -185,7 +186,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
     duration_direction = (
         f" For {request.target_duration_seconds} seconds, the combined script_sections narration must contain "
         f"{minimum_words} to {maximum_words} words. "
-        f"Aim for about {round(request.target_duration_seconds * 2.7)} spoken words total. "
+        f"Aim for about {round(request.target_duration_seconds * 2.4)} spoken words total. "
         "Count narration only, excluding metadata, claims, and visual descriptions. "
         "Check the total before returning JSON and revise within this response if outside the bounds. "
         "Expand only source-supported explanations; do not pad with invented facts or repetitive filler."

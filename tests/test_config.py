@@ -95,7 +95,7 @@ def test_default_yaml_uses_safe_per_job_visual_media_policy() -> None:
 
 def test_default_voice_duration_tolerance_accepts_real_local_pacing() -> None:
     config = VoicePipelineConfig()
-    assert config.target_duration_tolerance_ratio == 0.30
+    assert config.target_duration_tolerance_ratio == 0.40
     assert 60 * (1 + config.target_duration_tolerance_ratio) >= 78
     assert config.alignment_provider == "local-waveform-v1"
 
