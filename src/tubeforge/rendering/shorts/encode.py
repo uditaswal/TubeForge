@@ -12,9 +12,11 @@ import tempfile
 import time
 from collections.abc import Callable
 
+import numpy as np
 from PIL import Image
 
 from tubeforge.rendering.loudness import analyze
+from .audio_health import scan_samples
 from .timeline import Timeline
 
 
@@ -59,7 +61,7 @@ def checked(command, *, deadline, cancelled):
 
 def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
            cancelled: Callable[[], bool] = lambda: False, budget_rtf=10.0, max_swap_growth_kib=524288, motion=True,
-           ffmpeg="ffmpeg", ffprobe="ffprobe", plates=None):
+           ffmpeg="ffmpeg", ffprobe="ffprobe", plates=None, narration_health=None):
     """Promote only a fully decoded, measured video. Caller owns job fencing.
 
     The cancelled callback must also return True on ownership loss. Destination
@@ -79,6 +81,7 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
               "topic_sha256": hashlib.sha256(timeline.topic.model_dump_json().encode()).hexdigest(),
               "audio_sha256": file_hash(audio), "layout": timeline.renderer.validate(),
               "alignment": [s.alignment for s in timeline.timings], "draft": draft,
+              "narration_health": narration_health,
               "budget_realtime_factor": budget_rtf, "motion": motion,
               "plates": {str(i): (plates.entry(i).get("kind"), (plates.entry(i).get("evidence") or {}).get("asset_id"))
                          for i in range(len(timeline.topic.scenes)) if plates is not None and plates.entry(i)}}
@@ -168,7 +171,16 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
             checked([ffmpeg, "-v", "error", "-xerror", "-i", str(temporary), "-f", "null", "-"],
                     deadline=qa_deadline, cancelled=cancelled)
             loudness = analyze(temporary, ffmpeg=ffmpeg, deadline=qa_deadline, cancelled=cancelled, poll_seconds=.1)
+            decoded_audio = checked([ffmpeg, "-v", "error", "-i", str(temporary), "-vn", "-ac", "1",
+                                     "-ar", "48000", "-f", "f32le", "pipe:1"],
+                                    deadline=qa_deadline, cancelled=cancelled)
+            if len(decoded_audio) % 4:
+                raise ValueError("encoded audio diagnostic returned incomplete float samples")
+            audio_health = scan_samples(np.frombuffer(decoded_audio, dtype="<f4"), 48000,
+                                        scene_starts=tuple(t.start for t in timeline.timings))
+            audio_health["artifact_sha256"] = file_hash(temporary)
             report.update(probe=probe, loudness=loudness, full_decode=True,
+                          audio_health=audio_health,
                           render_seconds=render_seconds, realtime_factor=render_seconds / duration,
                           distinct_frame_events=events, frames=round(timeline.duration * 30),
                           peak_process_rss_kib=peak_rss, peak_child_rss_kib=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,

@@ -614,6 +614,13 @@ and its unresolved final-render gate are recorded in
 
 ## Creator Studio UI contract
 
+For newly rendered reference Shorts, Generations → Generation record shows
+timestamped audio signal warnings for the narration and the encoded preview or
+final. Open the full audio report there for scene numbers, time ranges, artifact
+hashes and whether the warning list was capped. Silence, clipping and level
+changes are advisory checks; listen to the whole video before approving it.
+Older and widescreen generations may have no audio report.
+
 Dashboard/API changes ship together. Any operator-visible workflow must have a
 working control, accurate pending/success/failure feedback, silent background
 refresh after initial load, and responsive dark-theme behavior. Reviews,

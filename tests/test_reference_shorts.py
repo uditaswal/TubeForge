@@ -132,6 +132,8 @@ def test_real_encoder_and_cancel_preserve_existing_output(tmp_path):
     assert report["passed"] and report["full_decode"]
     assert report["distinct_frame_events"] < report["frames"] / 4
     assert report["loudness"]["input_tp"] <= -1.5
+    assert report["audio_health"]["artifact_sha256"] == report["video_sha256"]
+    assert report["audio_health"]["sample_rate"] == 48000
     target.with_suffix(".passed-qa.json").write_text(json.dumps(report, indent=2))
     original = target.read_bytes()
     with pytest.raises(RenderCancelled):
