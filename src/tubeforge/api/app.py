@@ -204,6 +204,22 @@ class DeliveryActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: str = Field(pattern=r"^(inspect|resume|retry_after_reconnect)$")
 
+def _with_page_text(source: SourceReference) -> SourceReference:
+    """Fill a blank title/excerpt from the source page itself (HTTPS, public hosts, no redirects)."""
+    from urllib.parse import urlparse
+    from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
+    from tubeforge.pipeline.sources import SourceIngestor
+    host = (urlparse(str(source.url)).hostname or "").casefold()
+    title = (source.title or "").strip() or host
+    excerpt = (source.excerpt or "").strip()
+    if not excerpt and host and host != "local.invalid":
+        try:
+            excerpt = SourceIngestor(frozenset({host})).ingest(source.model_copy(update={"title": title})).excerpt
+        except (ProviderValidationError, RetryableProviderError, ValueError) as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"could not read the source page {source.url} ({error}); paste the passage into its excerpt field instead") from error
+    return source.model_copy(update={"title": title, "excerpt": excerpt})
+
+
 def _video_request(value: VideoBriefRequest, settings: Settings, *, available_music: set[str] | None = None) -> ContentRequest:
     generation = settings.pipeline.video_generation
     name = value.preset or generation.default_preset
@@ -236,26 +252,15 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         source_ids = [source.source_id for source in value.sources]
         if len(set(source_ids)) != len(source_ids):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="approved source packet must have unique source IDs")
-        if any(not source.title.strip() or not source.excerpt or not source.excerpt.strip() for source in value.sources):
+        sources = [_with_page_text(source) for source in value.sources]
+        if any(not source.title.strip() or not source.excerpt or not source.excerpt.strip() for source in sources):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="each approved source needs a title and exact excerpt")
-        sources = list(value.sources)
     else:
         sources = [SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title=("Brief notes (unverified)" if settings.pipeline.sources.research_enabled else "Operator-approved source notes"), excerpt="\n".join(notes))]
         if value.source_url:
             from urllib.parse import urlparse
-            title = (value.source_title or "").strip()
-            excerpt = (value.source_excerpt or "").strip()
-            if not excerpt:  # no pasted passage: read the whole page ourselves (HTTPS, public hosts, no redirects)
-                from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
-                from tubeforge.pipeline.sources import SourceIngestor
-                host = (urlparse(value.source_url).hostname or "").casefold()
-                try:
-                    snapshot = SourceIngestor(frozenset({host})).ingest(SourceReference(source_id="approved-source-1", url=value.source_url, title=title or host))
-                except (ProviderValidationError, RetryableProviderError, ValueError) as error:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"could not read the source page ({error}); paste the passage into the excerpt field instead") from error
-                excerpt = snapshot.excerpt
             try:
-                sources.append(SourceReference(source_id="approved-source-1", url=value.source_url, title=title or (urlparse(value.source_url).hostname or value.source_url), excerpt=excerpt))
+                sources.append(_with_page_text(SourceReference(source_id="approved-source-1", url=value.source_url, title=(value.source_title or "").strip() or (urlparse(value.source_url).hostname or value.source_url), excerpt=(value.source_excerpt or "").strip())))
             except ValueError as error:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source URL must be an absolute HTTP(S) URL") from error
         elif value.source_title or value.source_excerpt:
@@ -1042,21 +1047,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         dashboard = dashboard.replace(
             '<label>Notes<textarea name="notes" required placeholder="One point per line"></textarea></label>',
-            '<label>Brief notes / key points<textarea name="notes" required placeholder="One point per line"></textarea></label>'
-            '<label>Source URL (optional)<input name="source_url" type="url" maxlength="2000" placeholder="https://…"></label>'
-            '<label>Source title<input name="source_title" maxlength="500" placeholder="Optional; defaults to the site name"></label>'
-            '<label>Approved source excerpt<textarea name="source_excerpt" maxlength="24000" placeholder="Optional: leave empty to read the whole page from the URL"></textarea></label>',
+            '<label>Brief notes / key points<textarea name="notes" required placeholder="One point per line"></textarea></label>',
         )
         source_fields = """<label>Audience<input name="audience" maxlength="200" required value="general"></label>
         <label>Creative angle<textarea name="angle" maxlength="4000" placeholder="What should the viewer understand or be able to do?"></textarea><span class="sub">This guides the story. It stays separate from source evidence.</span></label>
-        <details class="source-packet"><summary>Use multiple approved sources</summary><p class="sub">Provide one to eight source objects with unique source_id, title, URL, and exact excerpt. The source IDs and text are part of the saved request identity.</p><label>Approved source packet (JSON)<textarea name="source_packet_json" rows="8" spellcheck="false" aria-describedby="sourcePacketHelp" placeholder='[{"source_id":"docs-image","title":"Official documentation","url":"https://example.com/topic","excerpt":"Paste the exact approved passage here."}]'></textarea></label><p class="sub" id="sourcePacketHelp">When this packet is supplied, Brief notes remain writing direction and are not added as a source. Leave the single-source URL fields empty.</p></details>"""
+<fieldset class="sources" id="sourceRows"><legend>Sources (optional)</legend><p class="sub">Add the pages the script should be based on. Give a URL and we read the whole page for you, or paste an exact passage to use only that. Up to 8.</p><div id="sourceList"></div><button type="button" class="secondary" id="addSource">+ Add source</button></fieldset>
+        <script>(()=>{const list=document.querySelector('#sourceList'),add=document.querySelector('#addSource');if(!list||!add)return;
+        const row=()=>{const r=document.createElement('div');r.className='source-row';r.innerHTML='<label>Page URL<input class="src-url" type="url" maxlength="2000" placeholder="https://…"></label><label>Title <span class="sub">(optional)</span><input class="src-title" maxlength="500" placeholder="Defaults to the site name"></label><label>Exact passage <span class="sub">(optional — leave empty to read the whole page)</span><textarea class="src-excerpt" maxlength="24000" placeholder="Paste only the part you want the script to rely on"></textarea></label><button type="button" class="small secondary src-remove">Remove source</button>';r.querySelector('.src-remove').onclick=()=>{r.remove();add.disabled=false;};list.append(r);add.disabled=list.children.length>=8;};
+        add.onclick=row;row();window.collectSources=()=>[...list.querySelectorAll('.source-row')].map((r,i)=>{const url=r.querySelector('.src-url').value.trim();if(!url)return null;let host=url;try{host=new URL(url).hostname}catch(_){}return {source_id:'source-'+(i+1),url,title:r.querySelector('.src-title').value.trim()||host,excerpt:r.querySelector('.src-excerpt').value.trim()||null};}).filter(Boolean);})();</script>"""
         dashboard = dashboard.replace(
             "</label><label>Target duration (seconds)",
             "</label>" + source_fields + "<label>Target duration (seconds)",
         )
         dashboard = dashboard.replace(
             "textarea{min-height:106px;resize:vertical}",
-            "textarea{min-height:106px;resize:vertical}details.source-packet{margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}details.source-packet summary{color:#cbd7eb;cursor:pointer;font-size:13px;font-weight:700}details.source-packet .sub{margin-top:7px}",
+            "textarea{min-height:106px;resize:vertical}fieldset.sources{margin:14px 0;padding:10px 12px;border:1px solid var(--line);border-radius:9px}fieldset.sources legend{color:#cbd7eb;font-size:13px;font-weight:700}.source-row{margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px}",
         )
         dashboard = dashboard.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')")
         dashboard = dashboard.replace(
@@ -1064,7 +1069,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)",
         )
         old_brief_submit = r"let d=new FormData(e.currentTarget),body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled')};let r=await fetch('/api/videos'"
-        new_brief_submit = r"let d=new FormData(e.currentTarget),sourceText=String(d.get('source_packet_json')||'').trim(),sources=null;if(sourceText){try{sources=JSON.parse(sourceText);if(!Array.isArray(sources)||sources.length<1||sources.length>8)throw new Error();}catch(_){notice.textContent='Enter one to eight approved sources as a valid JSON array.';return;}}let body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),angle:String(d.get('angle')||'').trim()||null,audience:String(d.get('audience')||'general').trim()||'general',sources,duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null,source_url:d.get('source_url')||null,source_title:d.get('source_title')||null,source_excerpt:d.get('source_excerpt')||null};let r=await fetch('/api/videos'"
+        new_brief_submit = r"let d=new FormData(e.currentTarget),sources=(window.collectSources?window.collectSources():[]);if(!sources.length)sources=null;let body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),angle:String(d.get('angle')||'').trim()||null,audience:String(d.get('audience')||'general').trim()||'general',sources,duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null};let r=await fetch('/api/videos'"
         assert dashboard.count(old_brief_submit) == 1, dashboard.count(old_brief_submit)
         dashboard = dashboard.replace(old_brief_submit, new_brief_submit)
         dashboard = dashboard.replace(
@@ -1185,9 +1190,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         options = [
             {"id": voice, "label": voice.replace("_", " ").title(), "provider": "kokoro"}
             for voice in pipeline.kokoro.voices
-            if pipeline.kokoro.enabled and pipeline.voice_provider in {"kokoro", "hybrid"}
+            if pipeline.kokoro.enabled and pipeline.voice_provider in {"kokoro", "hybrid", "hybrid-http"}
         ]
-        if pipeline.voice_provider in {"piper", "piper-http", "hybrid"}:
+        if pipeline.voice_provider in {"piper", "piper-http", "hybrid", "hybrid-http"}:
             label = "Piper local voice" if pipeline.voice_provider == "piper-http" else "Piper reliable fallback"
             options.append({"id": "piper", "label": label, "provider": pipeline.voice_provider})
         return options

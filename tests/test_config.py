@@ -48,7 +48,7 @@ def test_shorts_final_defaults_match_phone_first_video_and_audio_contract() -> N
 def test_production_shorts_use_codex_local_piper_and_measured_audio() -> None:
     production = load_settings(Path("config/production.yaml"))
     assert production.pipeline.content_provider == "codex"
-    assert production.pipeline.voice_provider == "piper-http"
+    assert production.pipeline.voice_provider == "hybrid-http"
     assert production.pipeline.piper.listen_host == "127.0.0.1"
     assert production.pipeline.piper.listen_port == 5000
     for profile in (production.pipeline.shorts_preview, production.pipeline.shorts_final):

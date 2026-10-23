@@ -15,7 +15,7 @@ database:
 pipeline:
   # Production scripts cross only the host's restricted Unix-socket runner.
   content_provider: "codex"
-  voice_provider: "piper-http"
+  voice_provider: "hybrid-http"
   codex:
     model: "gpt-5.6-sol"
     socket_path: "/run/tubeforge-codex/codex.sock"
