@@ -70,3 +70,11 @@ def test_jargon_and_unspeakable_numbers_are_rejected():
     problems = " | ".join(craft_problems(bad))
     assert "cliché" in problems and "voice reads badly" in problems
     assert not SPEECH_UNSAFE.search("The bill was 120 thousand dollars, 3.4 times faster, 14.5 weeks, 76% fewer bugs.")
+
+
+def test_thumbnail_text_must_be_short_and_not_repeat_the_opening():
+    pkg = package(GOOD, late_stat=True)
+    opening = pkg.reference_short.scenes[0].vo
+    pkg.thumbnail_brief = SimpleNamespace(text_options=[" ".join(opening.split()[:3]), "ONE TWO THREE FOUR", "TAKE IT OFFLINE"])
+    problems = " | ".join(craft_problems(pkg))
+    assert "text_option 1" in problems and "text_option 2" in problems and "text_option 3" not in problems

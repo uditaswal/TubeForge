@@ -19,4 +19,12 @@ Inputs: exact reviewed master hash, passed quality review, channel voice, intend
 
 Acceptance: inspected export bundle plus accurate handoff manifest, with unresolved platform/account/integration dependencies stated. Actual publishing acceptance additionally requires durable remote confirmation and project workflow checks. No upload occurs as part of importing these skills.
 
+## Upload-ready package standard (TubeForge Publishing page)
+
+- **Title:** pick from the writer's ten options for concrete stakes or a named subject; ≤ 100 characters; no date-only or CVE-number-only titles; no angle brackets.
+- **Description:** exactly two lines. Line 1 is the hook sentence (≤ 125 characters, the part shown above the fold). Line 2 is the call to action, the named source and up to three hashtags. Longer text belongs in a pinned comment.
+- **Thumbnail:** 1280×720 JPEG ≤ 2 MB. Big 2–3-word headline (a question plus a payoff in yellow works well), one logo badge when the subject is a named technology, and a video frame chosen after the opening hook so no sentence appears twice. Never put the same words in thumbnail, on-frame text and title.
+- **Operator control:** title, description, tags and thumbnail (text, video moment, logo, or an uploaded image) stay editable until the draft is saved; the reviewed identity covers the thumbnail checksum.
+- Validate with `python .agents/skills/om-video-quality/qa_check.py data/artifacts/<job_id>` before creating a draft.
+
 Provenance: docs/reviews/openmontage/README.md (repo-only archive, not packaged). OpenMontage itself only exports locally.

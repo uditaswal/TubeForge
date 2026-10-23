@@ -18,4 +18,17 @@ Require the reviewed file, accepted script/scene identities, expected format and
 
 Return a review table: timecode/scene, evidence inspected, expected behavior, observed behavior, severity and repair. Separate verified passes, failures and missing evidence. Recommend acceptance only after required automated checks and real-artifact inspection pass. Do not claim operator approval or publish the file.
 
+## TubeForge known-failure checklist (run before calling a job done)
+
+Run `python .agents/skills/om-video-quality/qa_check.py data/artifacts/<job_id>` first. It prints PASS/WARN/FAIL for the failures we have already hit; a FAIL blocks acceptance, a WARN needs a human look. Passing it is not creative acceptance: still view the contact sheet and listen.
+
+1. **Duration vs voice.** The writer's word budget is spoken words ÷ speaking rate, and the rate depends on the voice (Kokoro ≈ 2.3 words/s, Piper ≈ 2.7). 60 s ≈ 140 words, not 190. Landscape jobs must land within ±40 % of the target; Shorts within 25–45 s. If a script is long, shorten the script; do not widen the gate again.
+2. **Card text length.** Animated-card headings must be ≤ 30 characters (a label, never a sentence) and elements ≤ 32. Long hook sentences belong in the narration, not the heading.
+3. **No repeated words on screen.** The thumbnail headline, the on-frame headline and the narration must not say the same thing twice. Thumbnail text is 2–3 words (or a short question plus payoff) and the thumbnail's video frame comes from after the opening hook.
+4. **Loudness.** Reference Shorts: −15…−13 LUFS and true peak ≤ −1.5 dBTP; legacy jobs −16.5…−12.5 LUFS, ≤ −1 dBTP. Peaky voices land a little under target; re-measure the encoded file, not the narration.
+5. **Logos and stock.** A scene about a named technology gets its `logo` slug (list in the v8 prompt, assets in `src/tubeforge/assets/logos`); stock comes from the local library first (`origin` in `reference/plates/manifest.json`). Check the badge is legible on the light disc and the stock matches the scene.
+6. **Publishing package.** Title ≤ 100 characters, description exactly two lines (hook + call to action/source/hashtags), thumbnail 1280×720 JPEG ≤ 2 MB. Everything stays editable on the Publishing page before a draft is saved.
+7. **Services run stale code.** After any change to prompts, layout or skills restart the Claude runner and `web worker scheduler`; the publisher worker needs a restart for adapter changes. A "prompt differs; redeploy host wheel" preflight error means a runner is on old code.
+8. **Cache and allowances.** An identical request replays its cached script. Change the brief to get a new script; never reset an attempt allowance.
+
 Provenance: docs/reviews/openmontage/README.md (repo-only archive, not packaged). No external reviewer, provider or script is installed by this skill.

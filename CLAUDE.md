@@ -16,6 +16,7 @@ Claude-specific notes:
   (the production runner resolves it from `TUBEFORGE_CLAUDE_BIN`).
 - Judge video work by **looking at frames** (FFmpeg contact sheet + Read on the PNG),
   not by test results alone.
+- Before reporting a video job done run `python .agents/skills/om-video-quality/qa_check.py data/artifacts/<job_id>` (checklist in `.agents/skills/om-video-quality/SKILL.md`).
 - Python with the renderer deps: `.venv-benchmark/bin/python`.
 - Before stopping or near your token limit: commit at a green checkpoint and update the
   "Next step" section of `docs/HANDOFF.md` with a concrete file/command.

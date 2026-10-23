@@ -173,6 +173,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Do not invent company migrations, benefits, causal explanations, command output or numbers. "
             "If evidence contradicts the proposed angle, qualify the angle and explain what is supported. "
             "Provide ten title_options, one coordinated thumbnail text of at most three words, description and tags. "
+            "Each thumbnail text_option is two or three punchy words that add a verdict, stake or number and never repeat the words of scene 1 (viewers already see those in the video). "
             "Return clip_candidates as an empty list (this is already a Short). "
             "Also write metadata.engagement_comment: one pinned-comment debate starter of at most 280 characters that states the strongest "
             "counter-argument to the video's own verdict and ends in a question that forces viewers to pick a side (for example 'Strongest case for C: decades of tooling and audited code. Still betting on Rust?'). "

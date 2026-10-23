@@ -10,6 +10,8 @@ You are developing TubeForge, an automated YouTube-video generation system. This
 - `docs/SHORT_FORM_VIDEO_RULEBOOK.md` — video quality and creative review.
 - `docs/CONTENT_SKILLS_CONTRACT.md` — binding rules for `.agents/skills`, `yt-script`, research, scene plans and the reference-short profile. **Read it before any script, skill, research or scene-plan work.**
 
+- Delivery QA: before any video job is called done, run `.agents/skills/om-video-quality/qa_check.py` on its artifact folder and apply that skill's checklist; publishing-package rules are in `om-social-delivery`.
+
 ## Context hygiene (token cost)
 
 Large files and generated trees are fine to use for debugging, but read them by exact path and in slices; never sweep them.
