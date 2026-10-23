@@ -37,7 +37,8 @@ class KokoroVoiceProvider:
         model_identity = (digest(model), digest(voices))
         key = hashlib.sha256(json.dumps({"text": text, "voice": request.voice_id, "provider": self.provider_name,
                                         "version": self.settings.adapter_version, "model": model_identity,
-                                        "speed": self.settings.speed, "language": "en-us"}, sort_keys=True).encode()).hexdigest()
+                                        "speed": self.settings.speed, "language": "en-us",
+                                        "request_settings": request.settings}, sort_keys=True).encode()).hexdigest()
         destination = Path(request.output_path) if request.output_path else self._path(self.settings.cache_root) / request.voice_id / f"{key}.wav"
         if self._valid_wave(destination):
             return self._result(destination)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+import hashlib
 import json
 import logging
 import re
@@ -25,6 +26,7 @@ from tubeforge.providers.voice.kokoro import KokoroVoiceProvider
 from tubeforge.providers.voice.piper import PiperVoiceProvider
 from .encode import checked, file_hash
 from .schema import ShortsTopic
+from .spoken import collapse_alignment, prepare_spoken, profile_hash
 from .timeline import SceneTiming, Timeline, Word
 
 LOG = logging.getLogger(__name__)
@@ -57,9 +59,16 @@ def synthesize(topic, settings, output, voice):
     pacing = settings.pipeline.reference_short
     primary = KokoroVoiceProvider(settings.pipeline.kokoro.model_copy(update={"speed": pacing.voice_speed}))
     fallback = PiperVoiceProvider(settings.pipeline.piper)
-    records = []
-    for index, scene in enumerate(topic.scenes):
-        request = VoiceRequest(text=scene.vo, language="en", voice_id=voice, section_id=scene.scene_id)
+    identity = profile_hash(profile=pacing.spoken_profile, lexicon=pacing.pronunciation_lexicon,
+                            group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing)
+    groups = []
+    for first in range(0, len(topic.scenes), pacing.speech_group_size):
+        scenes = topic.scenes[first:first + pacing.speech_group_size]
+        forms = [prepare_spoken(scene.vo, profile=pacing.spoken_profile,
+                                lexicon=pacing.pronunciation_lexicon) for scene in scenes]
+        spoken_text = " ".join(form.text for form in forms)
+        request = VoiceRequest(text=spoken_text, language="en", voice_id=voice, section_id=scenes[0].scene_id,
+                               settings=(("spoken_profile_sha256", identity),))
         warning = None
         try:
             result = primary.synthesize(request)
@@ -75,16 +84,40 @@ def synthesize(topic, settings, output, voice):
             raise ValueError("voice output is silent")
         audio = audio[max(0, active[0] - round(.04 * sr)):min(len(audio), active[-1] + round(.1 * sr))]
         audio = compress_pauses(audio, sr, pacing.max_pause_seconds)
-        path = output / f"voice-{index:02d}.wav"
-        sf.write(path, audio, sr, subtype="PCM_16")
-        records.append({"scene_id": scene.scene_id, "file": path.name, "sha256": file_hash(path),
-                        "provider": result.provider_name, "warning": warning,
-                        "duration": len(audio) / sr})
-    (output / "voice-manifest.json").write_text(json.dumps(records, indent=2) + "\n")
+        raw = output / f"voice-group-{first:02d}-raw.wav"
+        sf.write(raw, audio, sr, subtype="PCM_16")
+        path = raw
+        if pacing.voice_processing == "gentle-v1":
+            path = output / f"voice-group-{first:02d}.wav"
+            checked([pacing.ffmpeg_executable, "-y", "-v", "error", "-i", str(raw), "-af",
+                     "highpass=f=70,acompressor=threshold=0.1:ratio=1.6:attack=15:release=120:makeup=1",
+                     "-ar", str(sr), "-ac", "1", "-c:a", "pcm_s16le", str(path)],
+                    deadline=time.monotonic() + 90, cancelled=lambda: False)
+        group_audio, group_sr = sf.read(path, dtype="float32")
+        if group_sr != sr or group_audio.ndim != 1 or not np.isfinite(group_audio).all():
+            raise ValueError("processed voice is not finite mono speech")
+        groups.append({"first_scene": first, "scene_ids": [s.scene_id for s in scenes],
+                       "spoken_text": spoken_text,
+                       "spoken_sha256": hashlib.sha256(spoken_text.encode()).hexdigest(),
+                       "alignment_text": " ".join(form.alignment_text for form in forms),
+                       "display_spans": [form.display_spans for form in forms],
+                       "applied": [form.applied for form in forms],
+                       "file": path.name, "sha256": file_hash(path), "raw_file": raw.name,
+                       "raw_sha256": file_hash(raw), "provider": result.provider_name,
+                       "warning": warning, "duration": len(group_audio) / sr})
+    (output / "voice-manifest.json").write_text(json.dumps({"version": "speech-prep-v1",
+        "profile_sha256": identity, "topic_sha256": file_hash(output / "topic.json"),
+        "groups": groups}, indent=2) + "\n")
 
 
-def align(topic, output, model_path, tail=.18):
-    records = json.loads((output / "voice-manifest.json").read_text())
+def align(topic, output, model_path, tail=.18, *, pacing=None):
+    manifest = json.loads((output / "voice-manifest.json").read_text())
+    if manifest.get("version") != "speech-prep-v1" or manifest.get("topic_sha256") != file_hash(output / "topic.json"):
+        raise ValueError("voice manifest no longer matches reviewed topic")
+    if pacing is not None and manifest.get("profile_sha256") != profile_hash(
+            profile=pacing.spoken_profile, lexicon=pacing.pronunciation_lexicon,
+            group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing):
+        raise ValueError("speech settings changed between synthesis and alignment")
     warning = None
     try:
         aligner = LocalWhisperDTWAligner(model_path=model_path, model_sha256=alignment_model_sha256(model_path))
@@ -93,16 +126,26 @@ def align(topic, output, model_path, tail=.18):
         warning = f"Forced alignment unavailable; estimated timing: {type(error).__name__}"
         LOG.warning(warning)
     timings, pieces, cursor, warnings = [], [], 0.0, []
-    for scene, record in zip(topic.scenes, records, strict=True):
+    scene_index = 0
+    for record in manifest["groups"]:
+        scenes = topic.scenes[scene_index:scene_index + len(record["scene_ids"])]
+        if [scene.scene_id for scene in scenes] != record["scene_ids"] or record["first_scene"] != scene_index:
+            raise ValueError("voice group does not match reviewed scene order")
+        forms = [prepare_spoken(scene.vo, profile=pacing.spoken_profile,
+                                lexicon=pacing.pronunciation_lexicon) for scene in scenes] if pacing else None
+        if forms and (record["spoken_text"] != " ".join(form.text for form in forms) or
+                      record["alignment_text"] != " ".join(form.alignment_text for form in forms) or
+                      record["display_spans"] != [list(map(list, form.display_spans)) for form in forms]):
+            raise ValueError("voice group spoken/display mapping changed")
+        if hashlib.sha256(record["spoken_text"].encode()).hexdigest() != record["spoken_sha256"]:
+            raise ValueError("spoken text changed after synthesis")
         path = output / record["file"]
-        if file_hash(path) != record["sha256"] or record["scene_id"] != scene.scene_id:
-            raise ValueError("voice manifest no longer matches scene audio")
+        if file_hash(path) != record["sha256"] or file_hash(output / record["raw_file"]) != record["raw_sha256"]:
+            raise ValueError("voice group audio changed after synthesis")
         audio, sr = sf.read(path, dtype="float32")
         duration = len(audio) / sr
-        # The shared word tokenizer splits "3.4" into two words; joining decimals with
-        # an apostrophe keeps one token per whitespace-separated spoken word.
-        kwargs = dict(audio_path=path, text=re.sub(r"(?<=\d)[.,](?=\d)", "\u2019", scene.vo), phrase_id=scene.scene_id,
-                      section_id=scene.scene_id, phrase_start_seconds=0,
+        kwargs = dict(audio_path=path, text=record["alignment_text"], phrase_id=scenes[0].scene_id,
+                      section_id=scenes[0].scene_id, phrase_start_seconds=0,
                       phrase_end_seconds=duration, ordinal_start=0)
         method, scene_warning = "whisper-base-en-dtw-v1", warning
         try:
@@ -122,20 +165,52 @@ def align(topic, output, model_path, tail=.18):
             measured = LocalWordAligner().align(**kwargs)
             method = "estimated-waveform-weighted-v1"
             scene_warning = f"Estimated timing requires listening review: {type(error).__name__}"
-            LOG.warning("%s: %s", scene.scene_id, scene_warning)
-        if len(measured) != len(scene.vo.split()):
-            raise ValueError("aligned tokenization does not map to exact scene narration")
-        words = tuple(Word(cursor + w.start_seconds, cursor + w.end_seconds) for w in measured)
-        voice_end = cursor + duration
-        end = voice_end + tail
-        timings.append(SceneTiming(cursor, end, words, method, voice_end))
-        # Local PCM resampling is deterministic and requires no remote service.
-        resampled = np.interp(np.arange(round(duration * 48000)) * sr / 48000,
-                              np.arange(len(audio)), audio).astype(np.float32)
-        pieces.append((round(cursor * 48000), resampled))
-        if scene_warning:
-            warnings.append({"scene_id": scene.scene_id, "warning": scene_warning})
-        cursor = end
+            LOG.warning("%s: %s", scenes[0].scene_id, scene_warning)
+        counts = [span[-1][1] for span in record["display_spans"]]
+        if len(measured) != sum(counts):
+            raise ValueError("aligned tokenization does not cover exact spoken narration")
+        boundaries = [0.0]
+        offset = 0
+        for count in counts[:-1]:
+            previous_end, next_start = measured[offset + count - 1].end_seconds, measured[offset + count].start_seconds
+            if next_start < previous_end - .025:
+                raise ValueError("speech group scene boundary overlaps a spoken word")
+            boundaries.append(max(boundaries[-1], min(duration, (previous_end + next_start) / 2)))
+            offset += count
+        boundaries.append(duration)
+        offset = 0
+        for local_index, scene in enumerate(scenes):
+            low, high = boundaries[local_index:local_index + 2]
+            segment = audio[round(low * sr):round(high * sr)].copy()
+            if not len(segment):
+                raise ValueError("speech group produced an empty scene")
+            # A grouped utterance must be split to retain the reviewed scene tail.
+            # Taper only the two sides of that new cut; an abrupt nonzero sample
+            # at the join can click even when the alignment lies between words.
+            taper = min(round(.004 * sr), len(segment) // 2)
+            if local_index and taper:
+                segment[:taper] *= np.linspace(0, 1, taper, endpoint=True)
+            if local_index < len(scenes) - 1 and taper:
+                segment[-taper:] *= np.linspace(1, 0, taper, endpoint=True)
+            spans = tuple(tuple(span) for span in record["display_spans"][local_index])
+            local_measured = measured[offset:offset + counts[local_index]]
+            mapped = collapse_alignment(local_measured, spans)
+            words = tuple(Word(cursor + max(0.0, start - low), cursor + min(len(segment) / sr, end - low))
+                          for start, end in mapped)
+            voice_end = cursor + len(segment) / sr
+            end = voice_end + tail
+            timings.append(SceneTiming(cursor, end, words, method, voice_end))
+            sf.write(output / f"voice-{scene_index:02d}.wav", segment, sr, subtype="PCM_16")
+            resampled = np.interp(np.arange(round(len(segment) * 48000 / sr)) * sr / 48000,
+                                  np.arange(len(segment)), segment).astype(np.float32)
+            pieces.append((round(cursor * 48000), resampled))
+            if scene_warning:
+                warnings.append({"scene_id": scene.scene_id, "warning": scene_warning})
+            cursor = end
+            offset += counts[local_index]
+            scene_index += 1
+    if scene_index != len(topic.scenes):
+        raise ValueError("voice groups omitted reviewed scenes")
     timeline = Timeline(topic, tuple(timings))
     voice = np.zeros(round(timeline.duration * 48000), np.float32)
     for start, audio in pieces:
@@ -145,6 +220,7 @@ def align(topic, output, model_path, tail=.18):
         "duration": timeline.duration, "scenes": [asdict(t) for t in timings], "warnings": warnings,
         "alignment_model_sha256": aligner.model_sha256 if aligner else None,
         "topic_sha256": file_hash(output / "topic.json"),
+        "speech_profile_sha256": manifest["profile_sha256"],
         "narration_sha256": file_hash(output / "narration.wav"),
     }, indent=2) + "\n")
 
@@ -180,7 +256,8 @@ def main():
     if args.stage == "synthesize":
         synthesize(topic, load_settings(args.config), args.output, args.voice)
     else:
-        align(topic, args.output, args.alignment_model, load_settings(args.config).pipeline.reference_short.scene_tail_seconds)
+        pacing = load_settings(args.config).pipeline.reference_short
+        align(topic, args.output, args.alignment_model, pacing.scene_tail_seconds, pacing=pacing)
 
 
 if __name__ == "__main__":

@@ -577,6 +577,16 @@ mastering (−14 LUFS, ≤−2.5 dBTP) and QA. The preview is a 720×1280 draft;
 1080×1920. The worker needs ≥2 GB RAM (`compose.yaml`) and the image extras
 `alignment` and `reference-renderer` (rebuild after pulling: `docker compose build`).
 
+For a local speech-quality trial, `pipeline.reference_short` accepts
+`spoken_profile: spoken-v1`, a `pronunciation_lexicon` mapping one displayed
+token to one or more spoken words, `speech_group_size: 2`, and
+`voice_processing: gentle-v1`. All default to the original per-scene path with
+no spoken expansion or voice processing. The trial preserves reviewed narration
+and captions; `voice-manifest.json` records spoken text, applied substitutions,
+word mappings, profile identity and raw/processed voice hashes. Re-render and
+listen to the complete video after changing these settings. Inspect caption
+timing, scene seams, pronunciation and music balance before accepting it.
+
 ## Shorts production standard
 
 TubeForge’s Shorts workflow accepts a complete 30–120 second video exported at

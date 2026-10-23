@@ -66,6 +66,17 @@ Piper and estimated alignment are explicit, recorded fallbacks. The canonical
 yt-script automation resource owns this profile's narration guidance. Changed
 skill resources require installed-wheel hash verification before host use.
 
+Reference Short speech preparation may use the opt-in `spoken-v1` profile after
+the exact reviewed scene copy is accepted. It expands only bounded whole-token
+numbers, percentages, currency and common technical initials, plus an explicit
+single-display-token channel lexicon. The original `vo` and caption remain the
+reviewed/display text. The voice manifest must retain the spoken text, applied
+rules, exact spoken-to-display word spans, profile identity and raw/processed
+audio hashes. Alignment must cover every spoken word before it is collapsed to
+display-word timing; missing or extra words fail closed. Grouped synthesis and
+voice-only processing are opt-in render settings, not writer instructions or
+approval. Any changed audio requires a new listener review of the exact render.
+
 
 ### Topic research before narration
 

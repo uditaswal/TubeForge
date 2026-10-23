@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -585,6 +585,11 @@ class ReferenceShortConfig(BaseModel):
     voice_speed: float = Field(default=1.15, ge=0.8, le=1.4)
     scene_tail_seconds: float = Field(default=0.18, ge=0.12, le=0.4)
     max_pause_seconds: float = Field(default=0.15, ge=0.05, le=1.0)
+    # Opt-in speech experiment. Original approved narration/captions stay untouched.
+    spoken_profile: Literal["off", "spoken-v1"] = "off"
+    pronunciation_lexicon: dict[str, str] = Field(default_factory=dict)
+    speech_group_size: int = Field(default=1, ge=1, le=2)
+    voice_processing: Literal["off", "gentle-v1"] = "off"
 
 
 class PixabayConfig(BaseModel):
