@@ -30,6 +30,7 @@ class RenderOptions:
     """Operator display choices that are not part of the approved script."""
     show_sources: bool = False      # on-screen "Source: ..." credit under each scene
     watermark: str | None = None    # very small channel name in the top margin
+    mascot: bool = False            # small static Chip sprite in a free corner of each scene
 
 
 class LayoutError(ValueError):
@@ -259,6 +260,11 @@ class SceneRenderer:
         if self.options.watermark:
             # Decorative and deliberately small; sits in the top margin above the progress bar, outside the QA safe box.
             c.draw.text((70, 168), self.options.watermark, font=font(30), fill="#8798b3", anchor="ls")
+        if self.options.mascot:
+            from .mascot import place
+            bounds = place(c, intersects)
+            if bounds is not None:
+                c.mark(Mark("mascot", "mascot", bounds))
         return c
 
     def icon(self, c, name, center, diameter, logo=False):

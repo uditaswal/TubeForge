@@ -65,7 +65,7 @@ Order is by value ÷ effort and dependency. Each has one user-visible outcome, a
 *Out of scope:* new render primitives (that is M4).
 
 ### M3 — Series identity and design system (M · shared)
-*Outcome:* every video is recognisably the same series yet shows a distinct story: episode number tag, section tag per scene ("THE HOOK", "THE STAKES"), progress footer "n / N", a recurring mascot slot (original character drawn by us as vector assets), chosen palette "worlds" (e.g. Paper/Night/Alert) and a signature continuity device (a line that becomes underline, arrow, crack).
+*Outcome:* every video is recognisably the same series yet shows a distinct story: episode number tag, section tag per scene ("THE HOOK", "THE STAKES"), progress footer "n / N", a recurring mascot (done 24 Oct: one static original sprite "Chip", see HANDOFF; no animation by operator decision), chosen palette "worlds" (e.g. Paper/Night/Alert) and a signature continuity device (a line that becomes underline, arrow, crack).
 *Work:* `rendering/shorts/brand.py` + config `pipeline.series` (name, episode counter, mascot asset, palette), layout changes, font test sheet script (hard words, numerals), safe-zone compliance, tests; episode counter kept in DB so numbers never repeat.
 *Acceptance:* two consecutive jobs show different episode numbers and different section tags; layout QA passes; font sheet reviewed.
 *Out of scope:* licensed characters, real people, copying any reference's mascot.
