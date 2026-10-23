@@ -128,6 +128,8 @@ class PixabayClient:
         self._open = opener or build_opener(_NoRedirect()).open
         self.clock, self.sleep = clock, sleep
         self.requests_made = 0
+        from tubeforge.providers.media.library import StockLibrary
+        self.library = StockLibrary(self.root)
 
     @property
     def available(self) -> bool:
@@ -250,4 +252,5 @@ class PixabayClient:
         finally:
             temporary.unlink(missing_ok=True)
         (destination.with_suffix(".json")).write_text(json.dumps(asset.evidence(), indent=2))
+        self.library.add(asset, destination)
         return destination

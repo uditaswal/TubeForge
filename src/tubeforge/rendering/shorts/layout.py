@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .icons import badge
+from .logos import logo_badge
 
 from .schema import ShortsTopic
 
@@ -168,16 +169,16 @@ class SceneRenderer:
         dy = 0
         if kind == "hook":
             top, step = 520, 150
-            if scene.icon:
-                self.icon(c, scene.icon, (495, 380), 220)
+            if scene.icon or scene.logo:
+                self.icon(c, scene.logo or scene.icon, (495, 380), 220, logo=bool(scene.logo))
                 top, step = 620, 135
             for j, line in enumerate(scene.headline):
                 c.text(f"headline{j}", line, (495, top + j * step), size=step - 10, minimum=84, display=True,
                        color=CYAN if j == len(scene.headline) - 1 else WHITE)
             self.chips(c, scene.chips, top + step * len(scene.headline) + 20, len(scene.chips))
         elif kind == "cta":
-            if scene.icon:
-                self.icon(c, scene.icon, (495, 430), 200)
+            if scene.icon or scene.logo:
+                self.icon(c, scene.logo or scene.icon, (495, 430), 200, logo=bool(scene.logo))
             self.chips(c, scene.chips, 620, revealed)
             # A longer follow request uses two deliberately composed lines.
             words = scene.headline.split()
@@ -187,8 +188,8 @@ class SceneRenderer:
                 c.text(f"cta{j}", line, (495, 850 + j * 100), size=88, minimum=60, color=CYAN, display=True)
             c.text("subline", scene.subline, (495, 1120), size=44)
         else:
-            if scene.icon:
-                self.icon(c, scene.icon, (495, 300), 140)
+            if scene.icon or scene.logo:
+                self.icon(c, scene.logo or scene.icon, (495, 300), 140, logo=bool(scene.logo))
                 dy = 65
             c.text("heading", scene.heading, (495, 355 + dy), size=72, minimum=48)
             if index in self.cards:
@@ -248,11 +249,11 @@ class SceneRenderer:
                    size=26, minimum=26, color=MUTED, role="source")
         return c
 
-    def icon(self, c, name, center, diameter):
+    def icon(self, c, name, center, diameter, logo=False):
         x, y = center
         bounds = (x - diameter / 2, y - diameter / 2, x + diameter / 2, y + diameter / 2)
         c.mark(Mark("icon", "graphic", bounds))
-        sprite = badge(name, diameter)
+        sprite = logo_badge(name, diameter) if logo else badge(name, diameter)
         c.image.alpha_composite(sprite, (round(bounds[0]), round(bounds[1]))) if c.image.mode == "RGBA" else c.image.paste(sprite, (round(bounds[0]), round(bounds[1])), sprite)
 
     def chips(self, c, labels, y, revealed):

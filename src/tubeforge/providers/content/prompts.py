@@ -9,6 +9,7 @@ from typing import Any
 
 from tubeforge.core.errors import ProviderValidationError
 from tubeforge.domain.contracts import ContentPackage, ContentRequest, generation_request_key_payload
+from tubeforge.rendering.shorts.logos import logo_catalogue
 
 CONTENT_TEMPLATE_VERSION = "m6-content-v7"
 CONTENT_ENVELOPE_TEMPLATES = {"m6-content-v6", CONTENT_TEMPLATE_VERSION, "m6-content-v8"}
@@ -143,6 +144,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Choose fixed templates: hook first, cta last; middle scenes big_stat, before_after, flow, checklist or terminal. "
             "Make the first frame readable immediately: headline lines are short, not full narration paragraphs. "
             "Set icon on every scene to the best-matching name from: shield, bug, lock, gear, bolt, cloud, database, server, code, chip, clock, chart_up, chart_down, check, cross, warning, search, document, globe, user, rocket, star (or null); never invent names. "
+            "When a scene is about a named technology or product, set logo to its slug from this list (it replaces the icon badge on that scene; at most one logo per scene, null otherwise, never invent slugs): " + logo_catalogue() + ". "
             "SCRIPT CRAFT (this decides whether viewers stay; the opening hook is scored and weak hooks are rejected): "
             "Scene 1's whole narration is the hook: at most 14 words, it contains one concrete number, name or date taken from the sources, "
             "names a cost, risk or surprise, and leaves something open without answering it in the same sentence. "
