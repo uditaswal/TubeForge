@@ -4,12 +4,30 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from enum import StrEnum
 
 from pydantic import Field, model_validator
 
 from tubeforge.domain.contracts import CardRevealCues, ContentPackage, DomainModel, MediaSearchRequest, SourceReference, TeachingRevealCues, TerminalRevealCues
 from tubeforge.providers.content.prompts import reject_instruction_spoofing
+
+
+CARD_HEADING_LIMIT = 30
+
+
+def _card_heading(scene) -> str:
+    """Animated cards fit a short heading; a long on-screen sentence is shortened at a clause or word boundary."""
+    for text in (scene.on_screen_text, scene.visual_subject):
+        text = " ".join((text or "").split())
+        if text and len(text) <= CARD_HEADING_LIMIT:
+            return text
+    text = " ".join((scene.on_screen_text or scene.visual_subject or (scene.search_queries[0] if scene.search_queries else "")).split())
+    for clause in re.split(r"[,;:.!?—–]\s+|\s+[-—–]\s+", text):
+        if 0 < len(clause) <= CARD_HEADING_LIMIT:
+            return clause
+    shortened = text[:CARD_HEADING_LIMIT + 1].rsplit(" ", 1)[0].rstrip(",;:.-—–")
+    return shortened or text[:CARD_HEADING_LIMIT]
 
 
 class SceneLayout(StrEnum):
@@ -201,7 +219,7 @@ def compile_scene_contract(
         rows.append(SceneContractRow(
             scene_id=scene.scene_id,
             layout=layout,
-            heading=(scene.visual_subject or scene.on_screen_text or scene.search_queries[0]) if layout is SceneLayout.TERMINAL else (scene.on_screen_text or scene.visual_subject or scene.search_queries[0]),
+            heading=(scene.visual_subject or scene.on_screen_text or scene.search_queries[0]) if layout is SceneLayout.TERMINAL else _card_heading(scene) if scene.card_cues is not None else (scene.on_screen_text or scene.visual_subject or scene.search_queries[0]),
             command=scene.on_screen_text if layout is SceneLayout.TERMINAL else None,
             display_elements=scene.visual_elements,
             source_ids=sources,
