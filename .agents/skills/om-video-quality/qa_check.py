@@ -90,6 +90,19 @@ def check(job: Path) -> list[tuple[str, str, str]]:
         hook = " ".join([first.get("vo", ""), *(first.get("headline") or [])])
         if len(first.get("vo", "").split()) > 14:
             add("WARN", "hook-length", "the hook narration is over 14 words")
+    if reference:
+        scenes = package["reference_short"]["scenes"]
+        first, last = scenes[0], scenes[-1]
+        if re.search(r"^\W*(hi|hello|hey|welcome|what'?s up|in this video|today (we|i)|guys)\b", first.get("vo", ""), re.I):
+            add("FAIL", "hook-greeting", f"scene 1 opens with a greeting or intro: {first['vo'][:40]!r}")
+        if last.get("template") == "loop":
+            follow = re.search(r"\b(follow|subscribe)\b", " ".join([last.get("vo", ""), *last.get("headline", []), *last.get("chips", [])]), re.I)
+            same = (last.get("headline"), last.get("chips"), last.get("icon"), last.get("logo")) == (first.get("headline"), first.get("chips"), first.get("icon"), first.get("logo"))
+            open_end = not re.search(r"[.!?\u2026]\W*$", last.get("vo", "").strip())
+            ok = same and open_end and not follow
+            add("PASS" if ok else "FAIL", "loop-ending", f"last scene repeats scene 1 frame: {same}; open-ended sentence: {open_end}; no follow request: {not follow}")
+        else:
+            add("WARN", "loop-ending", f"ends with a {last.get('template')} scene, not a loop (legacy follow ending)")
     for text in brief.get("text_options", []):
         overlap = content(text) & content(hook)
         words_in = len(text.split())

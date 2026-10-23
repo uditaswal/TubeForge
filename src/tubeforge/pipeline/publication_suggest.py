@@ -55,7 +55,8 @@ def two_line_description(package: ContentPackage) -> str:
     first = _first_sentence(metadata.description) or (package.hook_options[0] if package.hook_options else package.request.topic)
     match = re.search(r"Source:\s*([^.]+)", metadata.description)
     source = match.group(1).strip() if match else (package.request.sources[0].title if package.request.sources else "")
-    parts = [metadata.call_to_action.strip().rstrip(".")] if metadata.call_to_action else []
+    cta = (metadata.call_to_action or "").strip().rstrip(".")
+    parts = [cta] if cta and not re.search(r"\b(follow|subscribe)\b", cta, re.I) else []  # videos loop; no follow request in descriptions
     if source and not source.startswith("Brief notes"):
         parts.append(f"Source: {source.split(',')[0].strip()}")
     second = " · ".join(parts + [" ".join(_hashtags(list(metadata.tags)))]).strip(" ·")

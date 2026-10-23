@@ -173,10 +173,10 @@ class SceneRenderer:
         for j in range(count):
             bounds = (70 + j * (span + gap), 212, 70 + j * (span + gap) + span, 219)
             c.mark(Mark(f"progress{j}", "progress", bounds))
-            c.draw.rounded_rectangle(bounds, radius=3, fill=CYAN if j <= index else "#29374d")
+            c.draw.rounded_rectangle(bounds, radius=3, fill=CYAN if j <= (0 if scene.template == "loop" else index) else "#29374d")
         kind = scene.template
         dy = 0
-        if kind == "hook":
+        if kind in {"hook", "loop"}:  # the loop scene reuses the hook composition so the last frame matches the first
             top, step = 520, 150
             if scene.icon or scene.logo:
                 self.icon(c, scene.logo or scene.icon, (495, 380), 220, logo=bool(scene.logo))

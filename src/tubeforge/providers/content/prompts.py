@@ -61,12 +61,12 @@ def normalize_content_request(request: ContentRequest) -> dict[str, Any]:
 
 
 RECIPES = {
-    "case_study": "WHO did it (named company/person/product) -> the PROBLEM before -> HOW they did it -> the counterintuitive TWIST -> the COST or effort -> the NUMERIC PAYOFF -> your VERDICT -> challenge",
-    "myth_truth": "the popular MYTH stated as viewers believe it -> why it feels true -> the sourced fact that breaks it -> the number -> the surprising limit -> your VERDICT -> challenge",
-    "stop_doing": "the common habit viewers have -> what it really costs (sourced number) -> what the data says to do instead -> the twist or exception -> VERDICT -> challenge",
-    "versus": "option A vs option B named in the first scene -> what each side claims -> the sourced evidence for each -> the deciding number -> your VERDICT (pick one) -> challenge",
-    "nobody_tells_you": "the thing nobody mentions -> why it stays hidden -> the sourced proof -> what changes if you know it -> VERDICT -> challenge",
-    "before_after": "BEFORE state with a number -> what changed and who changed it -> AFTER state with a number -> the catch -> VERDICT -> challenge",
+    "case_study": "WHO did it (named company/person/product) -> the PROBLEM before -> HOW they did it -> the counterintuitive TWIST -> the COST or effort -> the NUMERIC PAYOFF -> your VERDICT -> LOOP sentence back into the hook",
+    "myth_truth": "the popular MYTH stated as viewers believe it -> why it feels true -> the sourced fact that breaks it -> the number -> the surprising limit -> your VERDICT -> LOOP sentence back into the hook",
+    "stop_doing": "the common habit viewers have -> what it really costs (sourced number) -> what the data says to do instead -> the twist or exception -> VERDICT -> LOOP sentence back into the hook",
+    "versus": "option A vs option B named in the first scene -> what each side claims -> the sourced evidence for each -> the deciding number -> your VERDICT (pick one) -> LOOP sentence back into the hook",
+    "nobody_tells_you": "the thing nobody mentions -> why it stays hidden -> the sourced proof -> what changes if you know it -> VERDICT -> LOOP sentence back into the hook",
+    "before_after": "BEFORE state with a number -> what changed and who changed it -> AFTER state with a number -> the catch -> VERDICT -> LOOP sentence back into the hook",
 }
 
 
@@ -116,9 +116,11 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "reference_short.scenes. Each narration contains 8–15 whitespace-separated spoken words; "
             "aim for 78–92 words total and never more than 96 (the local voice speaks about 2.5 words per second, and the whole video must stay under 45 seconds including short scene tails). "
             "Use complete sentences, a specific first-sentence hook matching one of five distinct hook_options, "
-            "source-grounded escalation, concrete payoff and a final CTA scene whose narration first throws a one-sided challenge viewers will argue with "
-            "(a pointed question or 'tell me I'm wrong'), then says Follow for more <topic>. "
-            "Put that exact follow request in the final CTA headline and metadata.call_to_action. "
+            "source-grounded escalation, concrete payoff and a final scene with template loop (not cta). "
+            "LOOP ENDING: there is no follow, subscribe or like request anywhere in the video; the last scene's narration is one open-ended sentence "
+            "with no final full stop that hands straight back into scene 1's first words (for example '...and that is exactly why the real question is' then scene 1 opens 'Run a PHP website?'), "
+            "so the video replays seamlessly. The loop scene copies scene 1's headline lines, chips, icon and logo exactly, so its last frame equals the first frame. "
+            "Set metadata.call_to_action to a short teaser line without any follow or subscribe request. "
             "The narrator may state opinions in first person ('I'd bet on Rust', 'I think this is wrong') but never invent personal experience or insider access. "
             "STANCE: take one clear, hard side on the topic's real trade-off and defend it without hedging in the voice-over "
             "(no 'might', 'some say', 'around', 'in one study' in narration; attribution lives in the on-screen source line). "
@@ -155,11 +157,11 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Chain scenes with turns (but, so, until, then) so each scene answers the previous open question and opens the next. "
             "Speak to the viewer in second person, sentences of at most 12 words, one idea per scene, concrete nouns, no hedging filler; "
             "attribute briefly instead ('Google's data shows'). Escalate: hook, why it hits you, proof number, twist or limit ('but'), what to do, "
-            "a payoff line that echoes the hook, then the challenge + Follow for more CTA. Never invent facts to make a hook stronger. "
+            "a payoff line that echoes the hook, then the loop sentence that bridges back into scene 1. Never invent facts to make a hook stronger. "
             "Phone-fit text budgets (the renderer rejects overflow): hook headline lines at most 14 characters each, "
             "chips at most 9 characters each when there are three chips (14 for two, 24 for one), big_stat/flow/checklist/before_after headings at most 26, big_stat labels at most 18, "
             "flow nodes, checklist items and before/after texts at most 26, terminal lines at most 30, "
-            "CTA headline at most 24 and CTA subline at most 32 characters. Prefer lower-case words over wide capitals. "
+            "the loop scene reuses scene 1's headline and chips unchanged. Prefer lower-case words over wide capitals. "
             "Use numbers as figures/bars, arrows for relationships, real or explicitly illustrative terminal output. "
             "Every teaching scene must reveal a meaningful change tied to ordered zero-based reveal_words indices "
             "into that scene's whitespace-separated narration. One anchor per node, item, terminal line or CTA chip; "
