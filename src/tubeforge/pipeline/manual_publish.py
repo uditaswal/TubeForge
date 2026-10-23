@@ -127,7 +127,7 @@ class ManualPublishService:
 
     @staticmethod
     def _validate_metadata(platform: str, metadata: dict[str, object]) -> None:
-        allowed = {"caption", "title", "tags", "hashtags", "visibility"} if platform == "youtube" else {"caption", "hashtags"}
+        allowed = {"caption", "title", "tags", "hashtags", "visibility", "thumbnail_sha256"} if platform == "youtube" else {"caption", "hashtags"}
         if set(metadata) - allowed:
             raise ValueError("unsupported destination metadata field")
         caption = metadata.get("caption")
@@ -140,6 +140,9 @@ class ManualPublishService:
         hashtags = metadata.get("hashtags", [])
         if not isinstance(hashtags, list) or len(hashtags) > 30 or any(not isinstance(tag, str) or not tag.startswith("#") or len(tag) < 2 for tag in hashtags):
             raise ValueError("hashtags must be a list of up to 30 nonempty #tags")
+        thumbnail = metadata.get("thumbnail_sha256")
+        if thumbnail is not None and (platform != "youtube" or not isinstance(thumbnail, str) or len(thumbnail) != 64 or any(c not in "0123456789abcdef" for c in thumbnail)):
+            raise ValueError("thumbnail reference is invalid")
         if platform == "youtube":
             if metadata.get("visibility", "private") not in {"private", "unlisted", "public"}:
                 raise ValueError("YouTube visibility is invalid")

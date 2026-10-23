@@ -13,6 +13,7 @@ from tubeforge.pipeline.delivery_executor import RemoteObservation, SafePrefligh
 
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+THUMBNAIL_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
 CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 CHUNK_BYTES = 8 * 1024 * 1024
 
@@ -60,7 +61,22 @@ class AccountYouTubeAdapter:
     def upload(self, *, session_id: str, external_account_id: str, credential: dict[str, object], asset_path: Path, metadata: dict[str, object], heartbeat: Callable[[], bool]) -> UploadReceipt:
         _session_url(session_id)
         access_token = _token(credential)
-        return self._send_from(session_id, access_token, asset_path, 0, heartbeat)
+        receipt = self._send_from(session_id, access_token, asset_path, 0, heartbeat)
+        self._apply_thumbnail(receipt.remote_id, access_token, asset_path, metadata)
+        return receipt
+
+    def _apply_thumbnail(self, remote_id: str, access_token: str, asset_path: Path, metadata: dict[str, object]) -> None:
+        """Best effort: the video is already uploaded, so a thumbnail failure must never change the delivery outcome."""
+        digest = metadata.get("thumbnail_sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            return
+        path = asset_path.parent / "thumbnails" / f"{digest}.jpg"
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 2_000_000:
+                return
+            self.client.post(THUMBNAIL_URL, params={"videoId": remote_id}, headers={"Authorization": f"Bearer {access_token}", "Content-Type": "image/jpeg"}, content=path.read_bytes())
+        except (httpx.HTTPError, OSError):
+            return
 
     def resume_session(self, *, session_id: str, credential: dict[str, object], asset_path: Path, heartbeat: Callable[[], bool]) -> UploadReceipt:
         """Query Google first, then continue only the same saved session URI."""
