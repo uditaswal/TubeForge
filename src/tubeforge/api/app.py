@@ -636,25 +636,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         meta_path = folder / "thumbnail.json"
         meta: dict[str, object] = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
         ffmpeg = application_settings.pipeline.voice.ffmpeg_executable
-        duration = float(runtime.orchestrator.ffprobe.inspect(video)["duration_seconds"])
-        if force or not meta or not (folder / str(meta.get("file", "-"))).is_file():
+        duration = float(meta["duration"]) if meta.get("duration") else float(runtime.orchestrator.ffprobe.inspect(video)["duration_seconds"])
+        wants_portrait = package.request.aspect_ratio == "9:16"
+        stale_shape = bool(meta) and not meta.get("custom") and bool(meta.get("portrait", False)) != wants_portrait
+        if force or stale_shape or not meta or not (folder / str(meta.get("file", "-"))).is_file():
             options = suggest(package)["thumbnail_text_options"]
             scenes = package.reference_short.scenes if package.reference_short is not None else ()
             default_logo = next((scene.logo for scene in scenes if scene.logo), None)
             new = {"text": text if text is not None else str(meta.get("text") or (options[0] if options else package.request.topic)),
                    "frame_time": frame_time if frame_time is not None else float(meta.get("frame_time") or thumbs.best_time(ffmpeg, video, duration)),
                    "logo": (logo if logo is not False else meta.get("logo", default_logo)), "custom": False}
-            image = thumbs.compose(thumbs.grab_frame(ffmpeg, video, float(new["frame_time"])), str(new["text"]), new["logo"])
+            frame = thumbs.grab_frame(ffmpeg, video, float(new["frame_time"]))
+            if package.request.aspect_ratio == "9:16":
+                shorts = application_settings.pipeline.shorts_thumbnail
+                image, _ = thumbs.compose_portrait(frame, str(new["text"]), new["logo"], config=shorts, brand=Path(shorts.brand_logo_path) if shorts.brand_logo_path else thumbs.BRAND_LOGO)
+            else:
+                image = thumbs.compose(frame, str(new["text"]), new["logo"])
             temporary = folder / "thumbnail.tmp.jpg"
             digest = thumbs.save(image, temporary)
             target = folder / f"thumbnail-{digest[:12]}.jpg"
             temporary.replace(target)
-            meta = {**new, "file": target.name, "sha256": digest}
+            meta = {**new, "file": target.name, "sha256": digest, "portrait": wants_portrait, "duration": duration}
             meta_path.write_text(json.dumps(meta, indent=1))
             for stale in folder.glob("thumbnail-*.jpg"):
                 if stale != target:
                     stale.unlink(missing_ok=True)
-        return {"url": f"/api/publishing/jobs/{job_id}/thumbnail.jpg?v={str(meta['sha256'])[:12]}", "sha256": meta["sha256"], "text": meta.get("text"),
+        portrait = package.request.aspect_ratio == "9:16"
+        return {"url": f"/api/publishing/jobs/{job_id}/thumbnail.jpg?v={str(meta['sha256'])[:12]}", "sha256": meta["sha256"], "text": meta.get("text"), "portrait": portrait,
                 "frame_time": meta.get("frame_time"), "logo": meta.get("logo"), "custom": bool(meta.get("custom")),
                 "frame_times": thumbs.candidate_times(duration), "logos": list(thumbs.LOGO_NAMES)}
 
@@ -691,7 +699,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if image.width < 640 or image.height < 360:
             raise HTTPException(status_code=422, detail="thumbnail must be at least 640×360")
         from PIL import ImageOps
-        image = ImageOps.fit(image, thumbs.SIZE, Image.Resampling.LANCZOS)
+        shorts = application_settings.pipeline.shorts_thumbnail
+        package, _, _ = _publishing_context(job_id)
+        image = ImageOps.fit(image, (shorts.width, shorts.height) if package.request.aspect_ratio == "9:16" else thumbs.SIZE, Image.Resampling.LANCZOS)
         temporary = folder / "thumbnail.tmp.jpg"
         digest = thumbs.save(image, temporary)
         target = folder / f"thumbnail-{digest[:12]}.jpg"
@@ -703,14 +713,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _thumbnail_state(job_id)
 
     @app.get("/api/publishing/jobs/{job_id}/thumbnail.jpg", tags=["publishing"])
-    def current_thumbnail(job_id: str) -> FileResponse:
-        _, _, folder = _publishing_context(job_id)
+    def current_thumbnail(job_id: str, guides: int = 0) -> Response:
+        package, _, folder = _publishing_context(job_id)
         meta_path = folder / "thumbnail.json"
         if not meta_path.is_file():
             raise HTTPException(status_code=404, detail="no thumbnail yet")
         path = folder / json.loads(meta_path.read_text())["file"]
         if not path.is_file():
             raise HTTPException(status_code=404, detail="thumbnail file is missing")
+        if guides and package.request.aspect_ratio == "9:16":
+            from io import BytesIO
+            from PIL import Image
+            from tubeforge.pipeline import thumbnail as thumbs
+            buffer = BytesIO()
+            thumbs.draw_guides(Image.open(path).convert("RGB"), application_settings.pipeline.shorts_thumbnail).save(buffer, "JPEG", quality=85)
+            return Response(buffer.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache", "Content-Disposition": f'inline; filename="thumbnail-{job_id[:8]}.jpg"'})
 
     @app.get("/api/publishing/status", tags=["publishing"])
@@ -1060,9 +1077,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const rows=new Map(),videosById=new Map(),accountsById=new Map();let workerReady=false;
 
           const pkgBox=document.createElement('fieldset');pkgBox.style.cssText='border:1px solid #31415f;border-radius:9px;margin-top:14px';
-          pkgBox.innerHTML='<legend>Upload-ready package — title, description and thumbnail are prefilled and fully editable</legend><div class="sub" id="pkgStatus" role="status">Select a finished video to prepare its title, two-line description and thumbnail.</div><label>Video title<input id="pkgTitle" maxlength="100"></label><label>Description (two lines)<textarea id="pkgDesc" rows="3" maxlength="5000"></textarea></label><label>Keyword tags, comma separated<input id="pkgTags"></label><div class="actions"><button type="button" class="small secondary" id="pkgCopyTitle">Copy title</button><button type="button" class="small secondary" id="pkgCopyDesc">Copy description</button></div><img id="pkgThumb" alt="Thumbnail preview" style="display:none;width:100%;max-width:480px;border-radius:10px;margin-top:10px;border:1px solid #31415f"><label>Thumbnail text (2–3 punchy words)<input id="pkgText" maxlength="48"></label><label>Video moment<select id="pkgFrame"></select></label><label>Logo badge<select id="pkgLogo"></select></label><label>Title ideas<select id="pkgTitles"></select></label><div class="actions"><button type="button" class="small" id="pkgUpdate">Update thumbnail</button><label class="small secondary" style="display:inline-block;cursor:pointer;padding:8px 12px">Upload my own image<input id="pkgFile" type="file" accept="image/png,image/jpeg" hidden></label><a id="pkgDownload" class="small secondary" style="display:none;padding:8px 12px" download>Download thumbnail</a></div>';
+          pkgBox.innerHTML='<legend>Upload-ready package — title, description and thumbnail are prefilled and fully editable</legend><div class="sub" id="pkgStatus" role="status">Select a finished video to prepare its title, two-line description and thumbnail.</div><label>Video title<input id="pkgTitle" maxlength="100"></label><label>Description (two lines)<textarea id="pkgDesc" rows="3" maxlength="5000"></textarea></label><label>Keyword tags, comma separated<input id="pkgTags"></label><div class="actions"><button type="button" class="small secondary" id="pkgCopyTitle">Copy title</button><button type="button" class="small secondary" id="pkgCopyDesc">Copy description</button></div><label class="checkbox" id="pkgGuidesRow" style="display:none"><input type="checkbox" id="pkgGuides"> Show Shorts safe-area guides (review only; not in the file)</label><img id="pkgThumb" alt="Thumbnail preview" style="display:none;width:100%;max-width:480px;border-radius:10px;margin-top:10px;border:1px solid #31415f"><label>Thumbnail text (2–3 punchy words)<input id="pkgText" maxlength="48"></label><label>Video moment<select id="pkgFrame"></select></label><label>Logo badge<select id="pkgLogo"></select></label><label>Title ideas<select id="pkgTitles"></select></label><div class="actions"><button type="button" class="small" id="pkgUpdate">Update thumbnail</button><label class="small secondary" style="display:inline-block;cursor:pointer;padding:8px 12px">Upload my own image<input id="pkgFile" type="file" accept="image/png,image/jpeg" hidden></label><a id="pkgDownload" class="small secondary" style="display:none;padding:8px 12px" download>Download thumbnail</a></div>';
           preview.after(pkgBox);const pkg=id=>pkgBox.querySelector('#'+id);let currentThumb=null;
-          function renderThumb(t){currentThumb=t;const img=pkg('pkgThumb');img.src=t.url;img.style.display='block';pkg('pkgText').value=t.text||'';pkg('pkgText').disabled=t.custom;
+          function renderThumb(t){currentThumb=t;const img=pkg('pkgThumb');img.dataset.url=t.url;pkg('pkgGuidesRow').style.display=t.portrait?'block':'none';img.style.maxWidth=t.portrait?'300px':'480px';img.src=t.url+(t.portrait&&pkg('pkgGuides').checked?'&guides=1':'');img.style.display='block';pkg('pkgText').value=t.text||'';pkg('pkgText').disabled=t.custom;
             const frame=pkg('pkgFrame');frame.replaceChildren();(t.frame_times||[]).forEach(sec=>frame.append(Object.assign(document.createElement('option'),{value:sec,textContent:sec.toFixed(1)+' s'})));if(t.frame_time!=null)frame.value=String((t.frame_times||[]).reduce((a,b)=>Math.abs(b-t.frame_time)<Math.abs(a-t.frame_time)?b:a));
             const logo=pkg('pkgLogo');logo.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'No logo'}));(t.logos||[]).forEach(name=>logo.append(Object.assign(document.createElement('option'),{value:name,textContent:name})));logo.value=t.logo||'';
             const link=pkg('pkgDownload');link.href=t.url;link.style.display='inline-block';pkg('pkgUpdate').disabled=false;}
@@ -1075,6 +1092,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
               const titles=pkg('pkgTitles');titles.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Suggested: '+s.title}));s.title_options.forEach(t=>titles.append(Object.assign(document.createElement('option'),{value:t,textContent:t})));
               renderThumb(s.thumbnail);note.textContent='Review and edit anything below, then save the draft. The thumbnail is attached to the YouTube upload.';}
             catch(error){note.textContent='Could not prepare the package: '+error.message+'. You can still type the title and description yourself.';}}
+          pkg('pkgGuides').onchange=()=>{const img=pkg('pkgThumb');img.src=img.dataset.url+(pkg('pkgGuides').checked?'&guides=1':'');};
           pkg('pkgTitles').onchange=event=>{if(!event.target.value)return;pkg('pkgTitle').value=event.target.value;pkg('pkgTitle').dataset.edited='1';propagate();};
           pkg('pkgUpdate').onclick=async()=>{const id=videoSelect.value,button=pkg('pkgUpdate');button.disabled=true;button.textContent='Composing…';try{const body={text:pkg('pkgText').value.trim()||null,frame_time:Number(pkg('pkgFrame').value),logo:pkg('pkgLogo').value||null};const response=await fetch('/api/publishing/jobs/'+encodeURIComponent(id)+'/thumbnail',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!response.ok)throw Error((await response.json().catch(()=>({}))).detail||response.status);renderThumb(await response.json());}catch(error){pkg('pkgStatus').textContent='Thumbnail not updated: '+error.message;}finally{button.disabled=false;button.textContent='Update thumbnail';}};
           pkg('pkgFile').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const response=await fetch('/api/publishing/jobs/'+encodeURIComponent(videoSelect.value)+'/thumbnail/upload',{method:'POST',headers:{'content-type':file.type||'image/jpeg'},body:file});if(!response.ok)throw Error((await response.json().catch(()=>({}))).detail||response.status);renderThumb(await response.json());pkg('pkgStatus').textContent='Your image is the thumbnail (cropped to 16:9).';}catch(error){pkg('pkgStatus').textContent='Image not used: '+error.message;}event.target.value='';};

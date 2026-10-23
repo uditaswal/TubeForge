@@ -406,6 +406,30 @@ class ShortsFinalRenderConfig(RenderProfile):
     renderer_version: str = "shorts-final-v4"
 
 
+class ShortsThumbnailConfig(BaseModel):
+    """Portrait (1080x1920) thumbnails for Shorts. The safe region is where key content must stay so the
+    Shorts feed UI (title, channel, buttons) never covers it; tune it after checking real Shorts views."""
+
+    model_config = ConfigDict(extra="forbid")
+    width: int = Field(default=1080, ge=540, le=2160)
+    height: int = Field(default=1920, ge=960, le=3840)
+    # x0, y0, x1, y1 of the working region for headline, badge and brand logo.
+    safe_region: tuple[int, int, int, int] = (90, 200, 990, 1560)
+    brand_logo_enabled: bool = True
+    brand_logo_path: Path | None = None   # None = the bundled ProTech circuit-P logo
+    brand_logo_size: int = Field(default=230, ge=80, le=420)
+    headline_margin: int = Field(default=70, ge=0, le=300)  # extra inset inside the safe region, keeps text off the right-hand button rail
+    background: str = Field(default="#08111f", pattern=r"^#[0-9a-fA-F]{6}$")
+    accent: str = Field(default="#53e0ef", pattern=r"^#[0-9a-fA-F]{6}$")
+
+    @model_validator(mode="after")
+    def region_inside_canvas(self) -> "ShortsThumbnailConfig":
+        x0, y0, x1, y1 = self.safe_region
+        if not (0 <= x0 < x1 <= self.width and 0 <= y0 < y1 <= self.height) or x1 - x0 < 400 or y1 - y0 < 800:
+            raise ValueError("safe_region must lie inside the canvas and be at least 400x800")
+        return self
+
+
 class PublicationPreparationConfig(BaseModel):
     """Local M12 metadata and thumbnail policy, enforced before approval."""
 
@@ -644,6 +668,7 @@ class PipelineConfig(BaseModel):
     shorts_preview: ShortsPreviewRenderConfig = Field(default_factory=ShortsPreviewRenderConfig)
     shorts_final: ShortsFinalRenderConfig = Field(default_factory=ShortsFinalRenderConfig)
     publication: PublicationPreparationConfig = Field(default_factory=PublicationPreparationConfig)
+    shorts_thumbnail: ShortsThumbnailConfig = Field(default_factory=ShortsThumbnailConfig)
     youtube: YouTubePublishingConfig = Field(default_factory=YouTubePublishingConfig)
     verification: PublicationVerificationConfig = Field(default_factory=PublicationVerificationConfig)
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)

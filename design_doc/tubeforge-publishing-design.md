@@ -87,6 +87,10 @@ Updated 21 October 2026. Evidence detail: local `AUTONOMOUS_PROGRESS.md` (curren
 
 Documentation review **VERIFIED** (documentation scope only): [five local codebases compared with TubeForge](../docs/REVIEW_2026-10-23_REFERENCE_CODEBASES.md); five local revisions recorded, 38 file/line links checked, report whitespace and `git diff --check` passed. No runtime or creative milestone changes. Owner reuse authorization is recorded. Adoption experiments are **NOT STARTED**: first establish a Kokoro comparison/diagnostics baseline, then pronunciation mappings, speech-grouped synthesis, semantic footage ranking and real retention curves tied to scenes. Blocker for the review: none. Next action: use the report to scope a future implementation task with real-artifact acceptance; implementation was explicitly excluded from this request. Existing release blockers and next five release actions below are unchanged.
 
+### Video/audio quality implementation branch (23 October 2026)
+
+Branch `codex/video-quality-milestones`; [four sequential quality milestones](../docs/VIDEO_QUALITY_MILESTONES.md). Milestone 1 **NOT STARTED** pending audio-diagnostic implementation; milestones 2–4 **NOT STARTED**. Evidence: operator supplied a 16:9 PHP sample brief; its claims are unreviewed and it is not an approved script. Blocker: none for milestone 1. Next action: implement artifact-bound narration/final-audio defect reporting, then run focused tests and render/inspect one real video before advancing. Publishing and retention analytics are excluded from this quality run.
+
 ### Reference-renderer integration — active priority
 
 **22 Oct update (Claude):** phases 2–3 are now **IMPLEMENTED** for the preview path: dashboard `reference-short` preset → shared `rendering/shorts` (Kokoro, Whisper alignment, motion, icons, QA). Evidence: job `41e2ee9a…` 720×1280, 34 s, −14.3 LUFS. Phase 4 (final 1080×1920 + operator audiovisual acceptance) remains open. Details and next steps: `docs/HANDOFF.md`.

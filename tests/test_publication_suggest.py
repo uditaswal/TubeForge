@@ -81,3 +81,35 @@ def test_youtube_adapter_sets_the_staged_thumbnail_best_effort(tmp_path):
         raise httpx.ConnectError("down")
 
     AccountYouTubeAdapter(httpx.Client(transport=httpx.MockTransport(failing)))._apply_thumbnail("v", "t", video, {"thumbnail_sha256": digest})
+
+
+def test_shorts_thumbnail_is_1080x1920_with_key_content_inside_the_safe_region():
+    from tubeforge.core.config import ShortsThumbnailConfig
+    from tubeforge.pipeline.thumbnail import compose_portrait, draw_guides
+
+    config = ShortsThumbnailConfig()
+    assert config.safe_region == (90, 200, 990, 1560)
+    frame = Image.effect_noise((1080, 1920), 40).convert("RGB")
+    for text, logo in (("Run a PHP website? Take it down now", "php"), ("Update PHP now", None), ("Why 76 percent of memory bugs survive code review? Rust says no", "rust")):
+        image, marks = compose_portrait(frame, text, logo, config=config)
+        assert image.size == (1080, 1920) and {"headline", "brand_logo"} <= set(marks)
+        x0, y0, x1, y1 = config.safe_region
+        for name, (a, b, c, d) in marks.items():
+            assert x0 <= a < c <= x1 and y0 <= b < d <= y1, (name, text)
+        brand = marks["brand_logo"]
+        assert (brand[2] - brand[0]) * (brand[3] - brand[1]) < .06 * 1080 * 1920  # visible, not dominant
+        headline = marks["headline"]
+        assert abs((headline[0] + headline[2]) / 2 - 540) < 40  # centred
+    assert draw_guides(image, config).size == (1080, 1920)
+
+
+def test_safe_region_is_configurable_and_validated():
+    import pytest as _pytest
+    from tubeforge.core.config import ShortsThumbnailConfig
+    from tubeforge.pipeline.thumbnail import compose_portrait
+
+    wide = ShortsThumbnailConfig(safe_region=(40, 150, 1040, 1700))
+    _, marks = compose_portrait(None, "Take it down now", None, config=wide)
+    assert all(40 <= m[0] and m[2] <= 1040 and 150 <= m[1] and m[3] <= 1700 for m in marks.values())
+    with _pytest.raises(ValueError):
+        ShortsThumbnailConfig(safe_region=(90, 200, 1200, 1560))

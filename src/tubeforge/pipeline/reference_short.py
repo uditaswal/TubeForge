@@ -136,10 +136,12 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
     try:
         mix = master(directory / "narration.wav", starts, directory / "mix", cancelled=cancelled,
                      ffmpeg=config.ffmpeg_executable)
+        narration_health = json.loads((directory / "mix" / "audio-provenance.json").read_text())["narration_health"]
         return encode(timeline, mix, destination, draft=draft, cancelled=cancelled,
                       budget_rtf=config.budget_realtime_factor, ffmpeg=config.ffmpeg_executable,
                       ffprobe=config.ffprobe_executable,
-                      plates=load_plates(timeline.topic, directory, config.ffmpeg_executable)[0])
+                      plates=load_plates(timeline.topic, directory, config.ffmpeg_executable)[0],
+                      narration_health=narration_health)
     except RenderCancelled:
         raise
     except (ValueError, MemoryError, TimeoutError, LayoutError) as error:
