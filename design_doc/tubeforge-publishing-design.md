@@ -83,6 +83,10 @@ E2E phases (19 Oct): E2E-1 creative→render contract **IMPLEMENTED**; E2E-2 loc
 
 Updated 21 October 2026. Evidence detail: local `AUTONOMOUS_PROGRESS.md` (current + `_N` archives), `docs/HANDOFF.md`, and the archive of this plan.
 
+### Reference-codebase quality review (23 October 2026)
+
+Documentation review **VERIFIED** (documentation scope only): [five local codebases compared with TubeForge](../docs/REVIEW_2026-10-23_REFERENCE_CODEBASES.md); five local revisions recorded, 38 file/line links checked, report whitespace and `git diff --check` passed. No runtime or creative milestone changes. Owner reuse authorization is recorded. Adoption experiments are **NOT STARTED**: first establish a Kokoro comparison/diagnostics baseline, then pronunciation mappings, speech-grouped synthesis, semantic footage ranking and real retention curves tied to scenes. Blocker for the review: none. Next action: use the report to scope a future implementation task with real-artifact acceptance; implementation was explicitly excluded from this request. Existing release blockers and next five release actions below are unchanged.
+
 ### Reference-renderer integration — active priority
 
 **22 Oct update (Claude):** phases 2–3 are now **IMPLEMENTED** for the preview path: dashboard `reference-short` preset → shared `rendering/shorts` (Kokoro, Whisper alignment, motion, icons, QA). Evidence: job `41e2ee9a…` 720×1280, 34 s, −14.3 LUFS. Phase 4 (final 1080×1920 + operator audiovisual acceptance) remains open. Details and next steps: `docs/HANDOFF.md`.

@@ -113,6 +113,8 @@ class VideoBriefRequest(BaseModel):
     description: str | None = Field(default=None, min_length=1, max_length=5000)
     source_title: str | None = Field(default=None, max_length=500)
     source_excerpt: str | None = Field(default=None, max_length=24_000)
+    show_source_credit: bool = False
+    channel_watermark: str | None = Field(default=None, max_length=40)
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus|gpt-sol)$")
@@ -212,6 +214,16 @@ class DeliveryActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: str = Field(pattern=r"^(inspect|resume|retry_after_reconnect)$")
 
+def _watermark(value: str | None) -> str | None:
+    """Optional small channel name: trimmed, single line, no markup; empty means none."""
+    text = " ".join((value or "").split())
+    if not text:
+        return None
+    if len(text) > 40 or any(ord(c) < 32 or c in "<>" for c in text):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="channel name must be at most 40 characters without angle brackets")
+    return text
+
+
 def _with_page_text(source: SourceReference) -> SourceReference:
     """Fill a blank title/excerpt from the source page itself (HTTPS, public hosts, no redirects)."""
     from urllib.parse import urlparse
@@ -284,6 +296,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     return ContentRequest(
         script_owner=owner, script_model=claude_model,
+        show_source_credit=value.show_source_credit, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
         language="en", audience=value.audience, prompt_version=preset.prompt_version or settings.pipeline.codex.prompt_template_version,
@@ -1194,6 +1207,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         source_fields = """<label>Audience<input name="audience" maxlength="200" required value="general"></label>
         <label>Creative angle<textarea name="angle" maxlength="4000" placeholder="What should the viewer understand or be able to do?"></textarea><span class="sub">This guides the story. It stays separate from source evidence.</span></label>
+        <label class="checkbox"><input name="show_source_credit" type="checkbox"> Show the source name on screen in the middle of the video (9:16 Shorts; off by default)</label>
+        <label>Channel name on the video (optional)<input name="channel_watermark" maxlength="40" placeholder="Leave empty for none — shown very small at the top"></label>
 <fieldset class="sources" id="sourceRows"><legend>Sources (optional)</legend><p class="sub">Add the pages the script should be based on. Give a URL and we read the whole page for you, or paste an exact passage to use only that. Up to 8.</p><div id="sourceList"></div><button type="button" class="secondary" id="addSource">+ Add source</button></fieldset>
         <script>(()=>{const list=document.querySelector('#sourceList'),add=document.querySelector('#addSource');if(!list||!add)return;
         const row=()=>{const r=document.createElement('div');r.className='source-row';r.innerHTML='<label>Page URL<input class="src-url" type="url" maxlength="2000" placeholder="https://…"></label><label>Title <span class="sub">(optional)</span><input class="src-title" maxlength="500" placeholder="Defaults to the site name"></label><label>Exact passage <span class="sub">(optional — leave empty to read the whole page)</span><textarea class="src-excerpt" maxlength="24000" placeholder="Paste only the part you want the script to rely on"></textarea></label><button type="button" class="small secondary src-remove">Remove source</button>';r.querySelector('.src-remove').onclick=()=>{r.remove();add.disabled=false;};list.append(r);add.disabled=list.children.length>=8;};
@@ -1212,7 +1227,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "cards.set(job.id,card);card.dataset.jobId=job.id;jobsRoot.append(card)",
         )
         old_brief_submit = r"let d=new FormData(e.currentTarget),body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled')};let r=await fetch('/api/videos'"
-        new_brief_submit = r"let d=new FormData(e.currentTarget),sources=(window.collectSources?window.collectSources():[]);if(!sources.length)sources=null;let body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),angle:String(d.get('angle')||'').trim()||null,audience:String(d.get('audience')||'general').trim()||'general',sources,duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null};let r=await fetch('/api/videos'"
+        new_brief_submit = r"let d=new FormData(e.currentTarget),sources=(window.collectSources?window.collectSources():[]);if(!sources.length)sources=null;let body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),angle:String(d.get('angle')||'').trim()||null,audience:String(d.get('audience')||'general').trim()||'general',sources,duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null,show_source_credit:d.has('show_source_credit'),channel_watermark:String(d.get('channel_watermark')||'').trim()||null};let r=await fetch('/api/videos'"
         assert dashboard.count(old_brief_submit) == 1, dashboard.count(old_brief_submit)
         dashboard = dashboard.replace(old_brief_submit, new_brief_submit)
         dashboard = dashboard.replace(

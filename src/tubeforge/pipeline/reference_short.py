@@ -20,7 +20,7 @@ from tubeforge.domain.contracts import ContentPackage
 from tubeforge.rendering.shorts.audio import master
 from tubeforge.rendering.shorts.encode import RenderCancelled, encode, file_hash
 from tubeforge.rendering.shorts import plates as plates_module
-from tubeforge.rendering.shorts.layout import LayoutError
+from tubeforge.rendering.shorts.layout import LayoutError, RenderOptions
 from tubeforge.rendering.shorts.prepare import prepare
 from tubeforge.rendering.shorts.review import write_layout_review
 from tubeforge.rendering.shorts.schema import ShortsTopic
@@ -37,10 +37,36 @@ def resolve(path: Path) -> Path:
     return path if path.is_absolute() else REPOSITORY_ROOT / path
 
 
+OPTIONS_FILE = "render_options.json"
+
+
+def write_options(directory: Path, *, show_sources: bool, watermark: str | None) -> None:
+    """Persist the operator's display choices beside the timeline; defaults leave no file (older jobs unchanged)."""
+    path = directory / OPTIONS_FILE
+    if not show_sources and not watermark:
+        path.unlink(missing_ok=True)
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"show_sources": bool(show_sources), "watermark": watermark or None}, sort_keys=True))
+
+
+def load_options(directory: Path) -> RenderOptions:
+    try:
+        data = json.loads((directory / OPTIONS_FILE).read_text())
+    except (OSError, ValueError):
+        return RenderOptions()
+    return RenderOptions(show_sources=bool(data.get("show_sources")), watermark=data.get("watermark") or None)
+
+
+def options_identity(directory: Path) -> str:
+    path = directory / OPTIONS_FILE
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "none"
+
+
 def layout_review(topic: ShortsTopic, directory: Path) -> list[Path]:
     """Contact sheet with safe-zone rails, from the same compositor as the video."""
     try:
-        return [write_layout_review(topic, directory)]
+        return [write_layout_review(topic, directory, load_options(directory.parent))]
     except LayoutError as error:
         raise ProviderValidationError(f"reference scene layout rejected: {error}") from error
 
@@ -82,7 +108,7 @@ def load_timeline(topic: ShortsTopic, directory: Path) -> Timeline:
     timings = tuple(SceneTiming(row["start"], row["end"], tuple(Word(**w) for w in row["words"]),
                                 row["alignment"], row["voice_end"]) for row in data["scenes"])
     try:
-        return Timeline(topic, timings, plates_module.card_indices(topic, plates_module.load_manifest(directory)))
+        return Timeline(topic, timings, plates_module.card_indices(topic, plates_module.load_manifest(directory)), load_options(directory))
     except (ValueError, LayoutError) as error:
         raise ProviderValidationError(f"reference timeline rejected: {error}") from error
 
@@ -121,10 +147,12 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
 
 
 def render_identity(topic: ShortsTopic, narration_sha: str, timeline_sha: str, *, draft: bool,
-                    approval_identity: str | None, plates_sha: str = "none") -> str:
+                    approval_identity: str | None, plates_sha: str = "none", options_sha: str = "none") -> str:
     material = {"renderer": RENDERER_VERSION, "draft": draft, "topic": hashlib.sha256(
         topic.model_dump_json().encode()).hexdigest(), "narration": narration_sha,
         "timeline": timeline_sha, "approval": approval_identity}
     if plates_sha != "none":
         material["plates"] = plates_sha
+    if options_sha != "none":
+        material["options"] = options_sha
     return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
