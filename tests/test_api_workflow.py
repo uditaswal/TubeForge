@@ -298,6 +298,32 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert client.get("/api/voices/not-configured/preview").status_code == 404
 
 
+def test_source_url_without_excerpt_reads_the_whole_page(tmp_path: Path, monkeypatch) -> None:
+    from tubeforge.domain.contracts import SourceReference
+    from tubeforge.pipeline import sources as source_module
+
+    database_path = tmp_path / "scrape-source.db"
+    _migrate(database_path)
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"),
+                        auth=AuthConfig(enabled=True, secure_cookies=False))
+    settings.pipeline.codex.prompt_template_version = "m6-content-v7"
+
+    def fake_ingest(self, source):
+        assert source.url.unicode_string() == "https://example.com/advisory"
+        return source_module.SourceSnapshot(source.source_id, str(source.url), source.title, datetime.now(UTC), "0" * 64, "Whole page text.", None)
+
+    monkeypatch.setattr(source_module.SourceIngestor, "ingest", fake_ingest)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        app.state.runtime.auth.create_admin("operator", "a-long-test-password")
+        assert client.post("/login", json={"username": "operator", "password": "a-long-test-password"}).status_code == 200
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+        created = client.post("/api/videos", json={"title": "Advisory", "notes": ["Explain it."], "source_url": "https://example.com/advisory"})
+        assert created.status_code == 201, created.text
+        sources = client.app.state.runtime.jobs.get(created.json()["id"]).request.sources
+        assert [(item.source_id, item.title, item.excerpt) for item in sources][1] == ("approved-source-1", "example.com", "Whole page text.")
+
+
 def test_studio_brief_preserves_separate_angle_and_exact_multi_source_cache_request(tmp_path: Path) -> None:
     from tubeforge.db.repositories import GenerationCacheRepository
     from tubeforge.providers.content.youtube_skills import DEFAULT_VOICE
