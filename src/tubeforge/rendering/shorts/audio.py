@@ -9,6 +9,7 @@ import numpy as np
 import soundfile as sf
 
 from tubeforge.rendering.loudness import analyze
+from .audio_health import scan_wav
 from .encode import checked, file_hash
 
 SR = 48000
@@ -107,5 +108,6 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
                   "input_measurement": measured, "mastered_measurement": result, "mastering": "gain-matched true-peak limiter, up to 3 measured passes", "narration_sha256": file_hash(narration),
                   "mix_sha256": file_hash(final),
                   "rights_note": "Synthesis does not establish voice/model/font licensing; retain their provenance separately."}
+    provenance["narration_health"] = scan_wav(narration, scene_starts=scene_starts)
     (output / "audio-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     return final

@@ -5,6 +5,7 @@ Rules live in `AGENTS.md`. Evidence log `AUTONOMOUS_PROGRESS.md` is local-only a
 Full review of the project (why videos look bad, phases): `docs/REVIEW_2026-10-21_END_TO_END.md`.
 Content-quality review (script, hook, engagement, voice, music, visuals → actionable steps): `docs/REVIEW_2026-10-22_CONTENT_QUALITY.md`.
 Reference-codebase comparison (23 Oct; review only, missing capabilities and adoption experiments): `docs/REVIEW_2026-10-23_REFERENCE_CODEBASES.md`. Current review status and next action remain in the publishing design plan.
+Video-quality implementation worktree: `codex/video-quality-implementation` at `/tmp/tubeforge-video-quality`; milestones in `docs/VIDEO_QUALITY_MILESTONES.md`. Milestone 1 audio diagnostics are IMPLEMENTED, with the real-video technical evidence in `docs/VIDEO_QUALITY_M1_EVIDENCE.md`; full listen and browser interaction remain before VERIFIED. Do not advance to milestone 2 yet.
 
 ## Goal
 Scheduled/user-briefed AI Shorts → local render (Kokoro TTS, Python/FFmpeg) → review → upload to

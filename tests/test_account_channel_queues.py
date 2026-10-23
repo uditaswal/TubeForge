@@ -82,6 +82,8 @@ def test_channel_schedules_only_reserve_their_own_topics(tmp_path: Path) -> None
         assert "channelQueueSummary" in dashboard
         assert "Inputs & script" in dashboard
         assert "generationRecord" in dashboard
+        assert "Audio diagnostics" in dashboard
+        assert "final_qa" in dashboard and "preview_qa" in dashboard
         assert "Set as default" in dashboard
         assert 'data-studio-nav="media"' in dashboard
 
