@@ -35,6 +35,19 @@ Caveat: A and B are tiny channels with no proven results, and A/B look template-
 14. **A design system, not effects:** 3 "worlds" (palette/material), one signature continuity device (the red line), fonts chosen from a test sheet that includes the hardest words, per-material motion physics, a 2.5D camera, **motivated transitions** (an object from scene A becomes scene B), beat-map used *selectively*, deterministic seeded randomness, platform safe zones.
 15. **Written weaknesses list** (`implementation-notes.md`) and a time/cost table per stage.
 
+## 1b. Operator retention rules (24 Oct 2026) — how they map to what exists
+
+Four rules from the operator. The performance claims attached to them (e.g. "retention over 100 % triggers rapid distribution") are **hypotheses to test with real channel data (M9), not facts we may rely on**; the craft rules themselves are sound and cheap to enforce.
+
+| # | Rule | Where we are today (measured on job `0072a2f4…`, 30.6 s, 7 scenes) | Gap | Milestone |
+|---|---|---|---|---|
+| R1 | **2-second visual hook**: bold visual / B-roll / large high-contrast captions from frame 0; never open with a greeting | Scene 1 headline is on screen at t=0, 96 px Anton captions, stock B-roll when the writer picks it, hook narration starts at 0.00 s, hook gate rejects weak openers. But scene 1 shows **no large visual event between 0 s and 4.4 s** (frame-difference > 0.006 on the top two thirds; chips and captions excluded), and nothing *forces* scene 1 to carry B-roll, a source shot, a logo or a big number. | enforce a visual in scene 1; first change inside 2 s; ban greeting openers | M1b |
+| R2 | **Seamless loop**: last sentence connects back into the first | Prompt asks the last line before the CTA to echo the hook's words, but the **spoken CTA is last** ("Follow for more PHP news"), which breaks a loop. No check. Scene tails are 0.18 s, so audio can loop without a gap. | loop-closing sentence + matching last/first visual; reconcile with the follow CTA (decision below) | M1b |
+| R3 | **Pacing**: no pauses in the voice; a visual cut every 1.5–2.5 s | Voice: scene tail 0.18 s, in-scene pause cap 0.15 s, Kokoro 1.15×, narration gaps already small (the Codex review lists pause compression as part of the content contract). Visuals: scenes last 3.8–5.3 s (mean 4.4 s) with reveal/motion events about every 1.5–2.9 s (largest gap 4.4 s in the hook). The `Timeline` validator **requires** a 0.12–0.4 s speech tail, so "zero pauses" would change a validator, not only a setting. | measure it (M0); a "tight" voice profile evaluated by listening; cadence budget as a QA check | M0, M5 (Codex), M4 |
+| R4 | **No low-effort templates**: custom scripts, dynamic editing, original storytelling, curated audio | Fixed template set, one voice, scheduled automation; originality levers exist (stance, source screenshots, writers' room) but nothing *measures* repetition. Music: only no-Content-ID tracks (decision 22 Oct). | similarity gate vs recent videos, template rotation limit, original-evidence formats | M0, M1, M2, M3, M6, M1b |
+
+**Decision needed for R2 (loop vs follow CTA).** Options: (a) keep the spoken follow request in the second-to-last scene and make the **final spoken sentence the loop bridge** (ends mid-thought into the hook, e.g. "…and that is why" → "Run a PHP website?"); the CTA also stays as an on-screen chip. (b) Keep the CTA last and make only the **visuals** loop (last frame = first frame's background, headline echo). Recommendation: (a), with (b) as the fallback when the sentence does not bridge naturally. Needs the operator's call because it changes the "comment challenge before follow" CTA rule.
+
 ## 2. Where we stand today (so milestones are not redundant)
 
 Already have: forced-alignment timing (Whisper, with logged estimate fallback), contact sheets + layout QA, frame-first review habit, `qa_check.py`, writers' room (angle + editor pass), real-imagery plates (stock, source screenshots, code cards), logos, icons, motion layer, series-neutral templates, safe-zone layout, deterministic render identities, publishing package + thumbnails.
@@ -46,6 +59,7 @@ Order is by value ÷ effort and dependency. Each has one user-visible outcome, a
 
 ### M0 — Quality bar from references (S · Claude)
 *Outcome:* a repeatable measurement of any video against the reference range.
+*Metrics to include (from the operator rules):* leading silence, max silence gap, visual-change interval (mean/p90/max, captions excluded), time to first large visual change, first-vs-last frame similarity, scene count per minute.
 *Work:* `.agents/skills/om-video-quality/ref_probe.py` (words, words/s, scene/reveal cadence from frame differences, LUFS, caption words per chunk, loudness range) + `docs/reference/benchmarks.json` holding A/B/C numbers above; extend `qa_check.py` to print "ours vs reference" (WARN, not FAIL).
 *Acceptance:* run on jobs `0072a2f4…` and A/B/C; table is correct against the numbers in §0; unit test on a synthetic clip.
 *Evidence:* printed table in `AUTONOMOUS_PROGRESS.md`.
@@ -56,6 +70,17 @@ Order is by value ÷ effort and dependency. Each has one user-visible outcome, a
 *Work:* new profile `reference-explainer-v1` beside `reference-short-v1` (schema scene count, duration 55–90 s, Timeline/Encode limits currently hard-coded 25–45 s in `timeline.py`, `schema.py`, `prompts.py`), recipe `arc` in the writers' room, craft checks (echo-hook, caveat present, no two consecutive same template, ≥1 numeric reveal per 3 scenes), UI preset, qa_check window.
 *Acceptance:* tests for limits and checks; one real job inspected against M0 table; 3 viewers/operator watch it.
 *Out of scope:* >90 s, landscape.
+
+### M1b — Retention rules gate: hook, loop, pacing, variety (S–M · Claude, shares with Codex)
+*Outcome:* the four operator rules become checks that fail or warn before a video is accepted, so they stay true as we change templates and voices.
+*Work:*
+1. **R1** — craft check: scene 1 must have a visual (stock, source shot, logo badge or big number), opener must not be a greeting/channel intro ("hello", "welcome back", "in this video"); QA: first large visual change ≤ 2.0 s, voice starts ≤ 0.25 s; hook scene gets a reveal inside 2 s in the layout.
+2. **R2** — craft check for the closing line (echo or bridge into scene 1 words) once the CTA decision is made; QA compares the last and first frames (same background/headline) and the audio tail (≤ 0.2 s).
+3. **R3** — add to `qa_check.py`: max silence gap (≤ 0.25 s), mean/p90/max interval between visual change events (target p90 ≤ 2.5 s; the 1.5 s lower bound is a design target, not a gate), cuts/min; layout work to add micro-reveals so no beat exceeds 2.5 s (coordinate with M4).
+4. **R4** — similarity gate: compare the new script's title, hook, template sequence and visual kinds with the channel's last 20 videos (stored locally); WARN above a threshold, FAIL on near-identical template sequence + hook formula; limit repeating the same template more than N times per video.
+*Acceptance:* unit tests with injected defects (greeting opener, no scene-1 visual, static 4 s hook, spoken CTA last, duplicate sequence); two real jobs inspected with contact sheet + the new numbers; listener notes for pacing changes. Measurements are reported separately from operator approval.
+*Evidence:* before/after table on job `0072a2f4…` (hook static until 4.4 s today).
+*Out of scope:* changing the voice profile (M5), new motion primitives (M4), claiming any effect on views.
 
 ### M2 — Concept (screenplay) stage before scenes (M · Claude)
 *Outcome:* the writer first produces `visual-screenplay.json`: per scene a *visual concept* (how the claim physically appears), shared motifs, an intensity curve, and a self-review that deletes repeated/generic ideas; scenes are then written to that screenplay (the PDF's most important lesson: "the meaning drives the visual").
@@ -105,13 +130,14 @@ Retention and view data per hook/format feed back into recipe choice (`pipeline/
 
 ## 4. Suggested sequence and split with Codex
 
-1. **Now (Claude):** M0 → M1 → M2. These change content and need no render-engine work.
+1. **Now (Claude):** M0 → M1b → M1 → M2. These change content and need no render-engine work.
 2. **In parallel (Codex branch):** M5 (timing/audio gates) and the engine work for M4. Agree the two contracts first: `visual-screenplay.json` schema (from M2) and `render_options.json`.
 3. **Then:** M3 (shared) → M6 experiment sandbox → M7 gate → M8. M9 after publishing starts.
 
 Definition of done for each milestone: relevant tests + a real job inspected through contact sheet and `qa_check.py` + a short entry in `AUTONOMOUS_PROGRESS.md` + `docs/HANDOFF.md` status row.
 
 ## 5. Decisions needed from the operator
+- Loop vs follow CTA (R2, see §1b): option (a) bridge sentence last, recommended.
 - Approve extending Shorts beyond 45 s to 60–90 s (M1). Reels allow it; YouTube Shorts allow up to 3 minutes.
 - Mascot/character: we draw an original vector character (recommended) or go characterless.
 - Is a sandbox that executes generated benchmark code on the host acceptable (M6)? Recommend Docker with no network and resource limits.
