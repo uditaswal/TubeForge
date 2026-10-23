@@ -84,3 +84,8 @@ text. Application code binds that trusted request before domain validation;
 conflicting legacy echoes and unknown source citations must still be rejected.
 
 Animated landscape card/teaching scenes must use native landscape composition and locally derived word timing; do not stretch portrait canvases or remove accepted cues to make a render pass. Preserve comparison reveal ordering and exact approved copy. Recovery from initial preview validation may reuse approved media checkpoints only before any preview artifact exists, with the same ownership, source-integrity and exact-script checks as asset recovery.
+
+
+## Delivery QA skill (23 Oct 2026)
+
+`.agents/skills/om-video-quality/` (checklist + `qa_check.py`) and `.agents/skills/om-social-delivery/` (upload-ready package standard) hold the lessons from earlier failures: narration length vs voice speed, card heading width, repeated on-screen words, loudness windows, logo/stock use, stale services and cached scripts. They are **not** in the hashed prompt resource sets (`youtube_skills.RESOURCES`), so editing them does not change prompt identities or require a host redeploy. Run `qa_check.py <job folder>` before reporting a video job done. Writer-facing rules live in `providers/content/prompts.py` and the repairable checks in `providers/content/craft.py` (thumbnail text is checked there for v8 scripts).

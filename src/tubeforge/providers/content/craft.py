@@ -57,6 +57,23 @@ def visual_problems(package) -> list[str]:
     return problems
 
 
+def thumbnail_problems(package) -> list[str]:
+    """Thumbnail words are 2-3 punchy words that add to the hook; repeating the opening wastes the click."""
+    brief = getattr(package, "thumbnail_brief", None)
+    if brief is None:
+        return []
+    first = package.reference_short.scenes[0]
+    opening = set(_content(" ".join([first.vo, *(first.headline if isinstance(first.headline, tuple) else (first.headline,))])))
+    problems: list[str] = []
+    for index, text in enumerate(brief.text_options, 1):
+        words = _content(text)
+        if len(text.split()) > 3:
+            problems.append(f"thumbnail text_option {index} {text!r} has more than three words; use two or three punchy words")
+        elif words and len(opening & set(words)) / len(words) >= .6:
+            problems.append(f"thumbnail text_option {index} {text!r} repeats the opening scene's words; add a different angle (a verdict, stake or number)")
+    return problems
+
+
 def _norm(text: str) -> str:
     return " ".join(re.sub(r"[\u2018\u2019]", "'", re.sub(r"[\u201c\u201d]", '"', text)).casefold().split())
 
@@ -116,6 +133,7 @@ def craft_problems(package) -> list[str]:
         problems.append("the CTA scene must open with a one-sided challenge viewers can answer in the comments "
                         "(a question or 'tell me I'm wrong') before the follow request")
     problems += visual_problems(package)
+    problems += thumbnail_problems(package)
     # One copy of the words: a heading that just repeats the narration adds nothing to the frame.
     for index, scene in enumerate(scenes[1:-1], 2):
         heading = _content(getattr(scene, "heading", ""))
