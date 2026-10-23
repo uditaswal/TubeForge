@@ -19,4 +19,6 @@ def create_voice_provider(settings: Settings) -> VoiceProvider:
         return KokoroVoiceProvider(settings.pipeline.kokoro)
     if settings.pipeline.voice_provider == "hybrid":
         return HybridVoiceProvider(KokoroVoiceProvider(settings.pipeline.kokoro), PiperVoiceProvider(settings.pipeline.piper))
+    if settings.pipeline.voice_provider == "hybrid-http":
+        return HybridVoiceProvider(KokoroVoiceProvider(settings.pipeline.kokoro), PiperHttpVoiceProvider(settings.pipeline.piper))
     return FakeVoiceProvider(settings.pipeline.fake)

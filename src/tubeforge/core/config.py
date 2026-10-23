@@ -629,7 +629,7 @@ class PipelineConfig(BaseModel):
     # deployments select the independent content and voice adapters below.
     provider: str | None = Field(default=None, pattern=r"^(fake|codex|piper)$")
     content_provider: str = Field(default="fake", pattern=r"^(fake|fixed|codex)$")
-    voice_provider: str = Field(default="fake", pattern=r"^(fake|piper|piper-http|kokoro|hybrid)$")
+    voice_provider: str = Field(default="fake", pattern=r"^(fake|piper|piper-http|kokoro|hybrid|hybrid-http)$")
     fake: FakeProviderConfig = Field(default_factory=FakeProviderConfig)
     codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
     claude: ClaudeProviderConfig = Field(default_factory=ClaudeProviderConfig)
@@ -759,7 +759,7 @@ def validate_selected_provider(settings: Settings) -> None:
     Content and voice providers are independent. In particular, validating
     Piper must not skip Codex validation for the real LLM-to-video topology.
     """
-    if settings.pipeline.voice_provider in {"piper", "piper-http", "hybrid"}:
+    if settings.pipeline.voice_provider in {"piper", "piper-http", "hybrid", "hybrid-http"}:
         piper = settings.pipeline.piper
         if piper.model_path is None:
             raise RuntimeError("pipeline.piper.model_path is required when pipeline.provider is piper")
@@ -768,11 +768,11 @@ def validate_selected_provider(settings: Settings) -> None:
             raise RuntimeError("pipeline.piper.model_path does not exist or is not a file")
         if piper.config_path is not None and not _resolve_path(piper.config_path).is_file():
             raise RuntimeError("pipeline.piper.config_path does not exist or is not a file")
-        if settings.pipeline.voice_provider != "piper-http":
+        if settings.pipeline.voice_provider not in {"piper-http", "hybrid-http"}:
             _validate_executable(piper.executable, "pipeline.piper.executable")
-    if settings.pipeline.voice_provider == "piper-http" and not settings.pipeline.piper.server_url:
+    if settings.pipeline.voice_provider in {"piper-http", "hybrid-http"} and not settings.pipeline.piper.server_url:
         raise RuntimeError("pipeline.piper.server_url is required when pipeline.voice_provider is piper-http")
-    if settings.pipeline.voice_provider == "kokoro":
+    if settings.pipeline.voice_provider in {"kokoro", "hybrid-http"}:
         kokoro = settings.pipeline.kokoro
         if kokoro.model_path is None or not _resolve_path(kokoro.model_path).is_file():
             raise RuntimeError("pipeline.kokoro.model_path must name an installed Kokoro ONNX model")

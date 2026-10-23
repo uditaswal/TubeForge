@@ -268,7 +268,7 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert "View script" in dashboard.text
         assert "Copy Codex prompt" in dashboard.text
         assert "Review script and sources" in dashboard.text
-        assert "Approved source excerpt" in dashboard.text
+        assert "Exact passage" in dashboard.text
         assert "Remove local files" in dashboard.text
         assert "Generate local scene art" in dashboard.text
         assert "Rights-safe stock (Wikimedia Commons; local fallback if unavailable)" in dashboard.text
@@ -324,7 +324,7 @@ def test_source_url_without_excerpt_reads_the_whole_page(tmp_path: Path, monkeyp
         assert [(item.source_id, item.title, item.excerpt) for item in sources][1] == ("approved-source-1", "example.com", "Whole page text.")
 
 
-def test_studio_brief_preserves_separate_angle_and_exact_multi_source_cache_request(tmp_path: Path) -> None:
+def test_studio_brief_preserves_separate_angle_and_exact_multi_source_cache_request(tmp_path: Path, monkeypatch) -> None:
     from tubeforge.db.repositories import GenerationCacheRepository
     from tubeforge.providers.content.youtube_skills import DEFAULT_VOICE
 
@@ -383,14 +383,17 @@ def test_studio_brief_preserves_separate_angle_and_exact_multi_source_cache_requ
 
         duplicate = client.post("/api/videos", json={**brief, "sources": [sources[0], {**sources[1], "source_id": sources[0]["source_id"]}]})
         assert duplicate.status_code == 422 and "unique source IDs" in duplicate.text
+        from tubeforge.core.errors import ProviderValidationError
+        from tubeforge.pipeline import sources as source_module
+        monkeypatch.setattr(source_module.SourceIngestor, "ingest", lambda self, source: (_ for _ in ()).throw(ProviderValidationError("blocked")))
         missing_excerpt = client.post("/api/videos", json={**brief, "sources": [{**sources[0], "excerpt": " "}]})
-        assert missing_excerpt.status_code == 422 and "exact excerpt" in missing_excerpt.text
+        assert missing_excerpt.status_code == 422 and "could not read the source page" in missing_excerpt.text
         ambiguous = client.post("/api/videos", json={**brief, "source_url": "https://example.com/extra", "source_title": "Extra", "source_excerpt": "Extra evidence"})
         assert ambiguous.status_code == 422 and "not both" in ambiguous.text
 
         html = client.get("/").text
-        assert 'name="source_packet_json"' in html and 'name="angle"' in html and 'name="audience"' in html
-        assert "sourcePacketHelp" in html and "Enter one to eight approved sources as a valid JSON array." in html
+        assert 'id="sourceList"' in html and 'name="source_url"' not in html and 'source_packet_json' not in html and 'name="angle"' in html and 'name="audience"' in html
+        assert "collectSources" in html and "+ Add source" in html
 
 
 def test_voice_preview_is_synthesized_once_then_served_from_persistent_cache(tmp_path: Path) -> None:
