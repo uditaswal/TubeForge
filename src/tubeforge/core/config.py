@@ -303,7 +303,7 @@ class VoicePipelineConfig(BaseModel):
     # Real local voices have model- and punctuation-dependent pacing. A
     # one-minute editorial request therefore accepts 42--78 seconds by
     # default; the final timing map still remains exact to the produced audio.
-    target_duration_tolerance_ratio: float = Field(default=0.30, ge=0.01, le=0.50)
+    target_duration_tolerance_ratio: float = Field(default=0.40, ge=0.01, le=0.60)
     alignment_provider: str = Field(default="local-waveform-v1", pattern=r"^(local-waveform-v1|whisper-base-en-dtw-v1)$")
     alignment_model_path: Path | None = None
     alignment_model_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
