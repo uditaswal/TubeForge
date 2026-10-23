@@ -438,3 +438,15 @@ def test_mixed_explicit_layout_job_blocks_before_asset_generation(tmp_path: Path
         assert runner.artifacts.get(job_id, JobState.ASSET_ACQUISITION, "asset_manifest") is None
     finally:
         database.dispose()
+
+
+def test_card_heading_shortens_long_hook_sentences_to_fit_the_card() -> None:
+    from types import SimpleNamespace
+    from tubeforge.pipeline.scene_contracts import CARD_HEADING_LIMIT, _card_heading
+
+    def heading(text):
+        return _card_heading(SimpleNamespace(on_screen_text=text, visual_subject=None, search_queries=["php"]))
+
+    assert heading("Every PHP version affected") == "Every PHP version affected"
+    long_hook = "Watch this if you run a PHP website, because a critical flaw could let attackers run commands."
+    assert 0 < len(heading(long_hook)) <= CARD_HEADING_LIMIT and long_hook.startswith(heading(long_hook))

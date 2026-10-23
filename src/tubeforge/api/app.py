@@ -1078,11 +1078,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         dashboard = dashboard.replace(
             "${j.artifacts.length} saved artifacts · ${j.event_count} activity events",
-            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Script: ${j.script_model||j.script_owner||'codex'} · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
+            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Job ${j.id.slice(0,8)} · Script: ${j.script_model||j.script_owner||'codex'} · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
         )
         dashboard = dashboard.replace(
             "card.append(actions)}async function refresh()",
-            "actions.append(button('Inputs & script','secondary',()=>window.openStudioRecord(j.id)));let format=document.createElement('div');format.className='generation-format';const kind=j.format.production_mode==='source_clip'?'Source clips':j.format.aspect_ratio==='9:16'&&j.format.duration_seconds<=120?'Shorts':j.format.aspect_ratio==='9:16'?'Vertical video':'Landscape video';format.textContent=kind+' · '+j.format.preset+' · '+j.format.duration_seconds+'s · '+(j.destinations.length?j.destinations.map(item=>item.platform+' / '+item.account_name+' / '+item.category).join(', '):'No destination selected');card.append(format,actions)}async function refresh()",
+            "actions.append(button('Inputs & script','secondary',()=>window.openStudioRecord(j.id)));actions.append(button('Copy job ID','secondary',async ev=>{const b=ev.currentTarget;try{await navigator.clipboard.writeText(j.id);b.textContent='Copied '+j.id.slice(0,8);}catch(_){window.prompt('Job ID',j.id);}setTimeout(()=>{b.textContent='Copy job ID'},2500);}));let format=document.createElement('div');format.className='generation-format';const kind=j.format.production_mode==='source_clip'?'Source clips':j.format.aspect_ratio==='9:16'&&j.format.duration_seconds<=120?'Shorts':j.format.aspect_ratio==='9:16'?'Vertical video':'Landscape video';format.textContent=kind+' · '+j.format.preset+' · '+j.format.duration_seconds+'s · '+(j.destinations.length?j.destinations.map(item=>item.platform+' / '+item.account_name+' / '+item.category).join(', '):'No destination selected');card.append(format,actions)}async function refresh()",
         )
         dashboard = dashboard.replace(
             "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
