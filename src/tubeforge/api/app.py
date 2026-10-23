@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import hashlib
 import html
 import json
+import subprocess
 import os
 import secrets
 import shlex
@@ -187,6 +188,13 @@ class OAuthStartRequest(BaseModel):
 class OAuthConfirmRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     state: str = Field(min_length=1, max_length=200)
+
+
+class ThumbnailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = Field(default=None, max_length=40)
+    frame_time: float | None = Field(default=None, ge=0, le=7200)
+    logo: str | None = Field(default=None, max_length=40)
 
 
 class ManualPublishDraftRequest(BaseModel):
@@ -592,6 +600,106 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="job not found") from error
         return runtime.jobs.destination_intents(job_id)
 
+    # -- upload-ready title / description / thumbnail for the Publishing page ---------------------------
+    def _publishing_context(job_id: str):
+        from tubeforge.pipeline.publishing_assets import READY_STATES
+        try:
+            job = runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="job not found") from error
+        final = runtime.artifacts.get(job_id, JobState.FINAL_RENDERING, "final")
+        content = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_package")
+        if job.state not in READY_STATES or final is None or content is None:
+            raise HTTPException(status_code=409, detail="the final video is not ready")
+        package = ContentPackage.model_validate_json(Path(content.path).read_text(encoding="utf-8"))
+        folder = Path(final.path).parent / "publishing"
+        return package, Path(final.path), folder
+
+    def _thumbnail_state(job_id: str, *, text: str | None = None, frame_time: float | None = None, logo: str | None | bool = False, force: bool = False) -> dict[str, object]:
+        """Current thumbnail for the job; (re)composed from the final video when asked or missing."""
+        from tubeforge.pipeline import thumbnail as thumbs
+        from tubeforge.pipeline.publication_suggest import suggest
+        package, video, folder = _publishing_context(job_id)
+        meta_path = folder / "thumbnail.json"
+        meta: dict[str, object] = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+        ffmpeg = application_settings.pipeline.voice.ffmpeg_executable
+        duration = float(runtime.orchestrator.ffprobe.inspect(video)["duration_seconds"])
+        if force or not meta or not (folder / str(meta.get("file", "-"))).is_file():
+            options = suggest(package)["thumbnail_text_options"]
+            scenes = package.reference_short.scenes if package.reference_short is not None else ()
+            default_logo = next((scene.logo for scene in scenes if scene.logo), None)
+            new = {"text": text if text is not None else str(meta.get("text") or (options[0] if options else package.request.topic)),
+                   "frame_time": frame_time if frame_time is not None else float(meta.get("frame_time") or thumbs.best_time(ffmpeg, video, duration)),
+                   "logo": (logo if logo is not False else meta.get("logo", default_logo)), "custom": False}
+            image = thumbs.compose(thumbs.grab_frame(ffmpeg, video, float(new["frame_time"])), str(new["text"]), new["logo"])
+            temporary = folder / "thumbnail.tmp.jpg"
+            digest = thumbs.save(image, temporary)
+            target = folder / f"thumbnail-{digest[:12]}.jpg"
+            temporary.replace(target)
+            meta = {**new, "file": target.name, "sha256": digest}
+            meta_path.write_text(json.dumps(meta, indent=1))
+            for stale in folder.glob("thumbnail-*.jpg"):
+                if stale != target:
+                    stale.unlink(missing_ok=True)
+        return {"url": f"/api/publishing/jobs/{job_id}/thumbnail.jpg?v={str(meta['sha256'])[:12]}", "sha256": meta["sha256"], "text": meta.get("text"),
+                "frame_time": meta.get("frame_time"), "logo": meta.get("logo"), "custom": bool(meta.get("custom")),
+                "frame_times": thumbs.candidate_times(duration), "logos": list(thumbs.LOGO_NAMES)}
+
+    @app.get("/api/publishing/jobs/{job_id}/suggestion", tags=["publishing"])
+    def publishing_suggestion(job_id: str) -> dict[str, object]:
+        from tubeforge.pipeline.publication_suggest import suggest
+        package, _, _ = _publishing_context(job_id)
+        try:
+            thumbnail = _thumbnail_state(job_id)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            raise HTTPException(status_code=500, detail="thumbnail could not be composed from the video") from error
+        return {**suggest(package), "thumbnail": thumbnail}
+
+    @app.post("/api/publishing/jobs/{job_id}/thumbnail", tags=["publishing"])
+    def regenerate_thumbnail(job_id: str, value: ThumbnailRequest) -> dict[str, object]:
+        try:
+            return _thumbnail_state(job_id, text=value.text, frame_time=value.frame_time, logo=value.logo if "logo" in value.model_fields_set else False, force=True)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            raise HTTPException(status_code=422, detail="thumbnail could not be composed from the video") from error
+
+    @app.post("/api/publishing/jobs/{job_id}/thumbnail/upload", tags=["publishing"])
+    async def upload_thumbnail(job_id: str, request: Request) -> dict[str, object]:
+        from io import BytesIO
+        from PIL import Image
+        from tubeforge.pipeline import thumbnail as thumbs
+        _, _, folder = _publishing_context(job_id)
+        data = await request.body()
+        if not data or len(data) > 10_000_000:
+            raise HTTPException(status_code=413, detail="thumbnail must be an image up to 10 MB")
+        try:
+            image = Image.open(BytesIO(data)).convert("RGB")
+        except Exception as error:
+            raise HTTPException(status_code=422, detail="thumbnail must be a PNG or JPEG image") from error
+        if image.width < 640 or image.height < 360:
+            raise HTTPException(status_code=422, detail="thumbnail must be at least 640×360")
+        from PIL import ImageOps
+        image = ImageOps.fit(image, thumbs.SIZE, Image.Resampling.LANCZOS)
+        temporary = folder / "thumbnail.tmp.jpg"
+        digest = thumbs.save(image, temporary)
+        target = folder / f"thumbnail-{digest[:12]}.jpg"
+        temporary.replace(target)
+        for stale in folder.glob("thumbnail-*.jpg"):
+            if stale != target:
+                stale.unlink(missing_ok=True)
+        (folder / "thumbnail.json").write_text(json.dumps({"file": target.name, "sha256": digest, "text": None, "frame_time": None, "logo": None, "custom": True}, indent=1))
+        return _thumbnail_state(job_id)
+
+    @app.get("/api/publishing/jobs/{job_id}/thumbnail.jpg", tags=["publishing"])
+    def current_thumbnail(job_id: str) -> FileResponse:
+        _, _, folder = _publishing_context(job_id)
+        meta_path = folder / "thumbnail.json"
+        if not meta_path.is_file():
+            raise HTTPException(status_code=404, detail="no thumbnail yet")
+        path = folder / json.loads(meta_path.read_text())["file"]
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="thumbnail file is missing")
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache", "Content-Disposition": f'inline; filename="thumbnail-{job_id[:8]}.jpg"'})
+
     @app.get("/api/publishing/status", tags=["publishing"])
     def publishing_worker_status() -> dict[str, object]:
         platforms = sorted(publisher_presence.live_platforms())
@@ -600,6 +708,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/publishing/drafts", status_code=status.HTTP_201_CREATED, tags=["publishing"])
     def create_manual_publish_draft(value: ManualPublishDraftRequest) -> dict[str, object]:
         try:
+            staged_thumbnails: dict[str, Path] = {}
+            for metadata in value.destinations.values():
+                digest = metadata.get("thumbnail_sha256")
+                if digest is not None and digest not in staged_thumbnails:
+                    _, _, folder = _publishing_context(value.job_id)
+                    meta_path = folder / "thumbnail.json"
+                    current = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+                    if current.get("sha256") != digest or not (folder / str(current.get("file"))).is_file():
+                        raise ValueError("the thumbnail changed since it was reviewed; reload the Publishing page")
+                    target = publishing_assets.stage_root / "thumbnails" / f"{digest}.jpg"
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if not target.is_file():
+                        shutil.copyfile(folder / str(current["file"]), target)
+                    staged_thumbnails[digest] = target
             asset = publishing_assets.register_final(value.job_id)
             post = manual_posts.create_draft(asset.id, value.destinations)
         except KeyError as error:
@@ -923,6 +1045,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const history=document.createElement('div');history.id='publishDraftHistory';history.className='muted';history.textContent='Loading drafts…';
           panel.append(heading,help,workerState,videoLabel,preview,destinationLabel,planned,destinations,save,status,historyHeading,refreshHistory,history);shell.append(panel);
           const rows=new Map(),videosById=new Map(),accountsById=new Map();let workerReady=false;
+
+          const pkgBox=document.createElement('fieldset');pkgBox.style.cssText='border:1px solid #31415f;border-radius:9px;margin-top:14px';
+          pkgBox.innerHTML='<legend>Upload-ready package — title, description and thumbnail are prefilled and fully editable</legend><div class="sub" id="pkgStatus" role="status">Select a finished video to prepare its title, two-line description and thumbnail.</div><label>Video title<input id="pkgTitle" maxlength="100"></label><label>Description (two lines)<textarea id="pkgDesc" rows="3" maxlength="5000"></textarea></label><label>Keyword tags, comma separated<input id="pkgTags"></label><div class="actions"><button type="button" class="small secondary" id="pkgCopyTitle">Copy title</button><button type="button" class="small secondary" id="pkgCopyDesc">Copy description</button></div><img id="pkgThumb" alt="Thumbnail preview" style="display:none;width:100%;max-width:480px;border-radius:10px;margin-top:10px;border:1px solid #31415f"><label>Thumbnail text (2–3 punchy words)<input id="pkgText" maxlength="40"></label><label>Video moment<select id="pkgFrame"></select></label><label>Logo badge<select id="pkgLogo"></select></label><label>Title ideas<select id="pkgTitles"></select></label><div class="actions"><button type="button" class="small" id="pkgUpdate">Update thumbnail</button><label class="small secondary" style="display:inline-block;cursor:pointer;padding:8px 12px">Upload my own image<input id="pkgFile" type="file" accept="image/png,image/jpeg" hidden></label><a id="pkgDownload" class="small secondary" style="display:none;padding:8px 12px" download>Download thumbnail</a></div>';
+          preview.after(pkgBox);const pkg=id=>pkgBox.querySelector('#'+id);let currentThumb=null;
+          function renderThumb(t){currentThumb=t;const img=pkg('pkgThumb');img.src=t.url;img.style.display='block';pkg('pkgText').value=t.text||'';pkg('pkgText').disabled=t.custom;
+            const frame=pkg('pkgFrame');frame.replaceChildren();(t.frame_times||[]).forEach(sec=>frame.append(Object.assign(document.createElement('option'),{value:sec,textContent:sec.toFixed(1)+' s'})));if(t.frame_time!=null)frame.value=String((t.frame_times||[]).reduce((a,b)=>Math.abs(b-t.frame_time)<Math.abs(a-t.frame_time)?b:a));
+            const logo=pkg('pkgLogo');logo.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'No logo'}));(t.logos||[]).forEach(name=>logo.append(Object.assign(document.createElement('option'),{value:name,textContent:name})));logo.value=t.logo||'';
+            const link=pkg('pkgDownload');link.href=t.url;link.style.display='inline-block';pkg('pkgUpdate').disabled=false;}
+          function propagate(){for(const row of rows.values()){const yt=row.account.platform==='youtube';if(yt&&row.title&&!row.title.dataset.edited)row.title.value=pkg('pkgTitle').value;if(!row.caption.dataset.edited)row.caption.value=pkg('pkgDesc').value;if(yt&&row.tags&&!row.tags.dataset.edited)row.tags.value=pkg('pkgTags').value;}}
+          for(const id of ['pkgTitle','pkgDesc','pkgTags'])pkg(id).addEventListener('input',event=>{event.target.dataset.edited='1';propagate();});
+          for(const [id,source] of [['pkgCopyTitle','pkgTitle'],['pkgCopyDesc','pkgDesc']])pkg(id).onclick=async()=>{try{await navigator.clipboard.writeText(pkg(source).value);pkg(id).textContent='Copied';}catch(_){pkg(source).select();}setTimeout(()=>{pkg(id).textContent=id==='pkgCopyTitle'?'Copy title':'Copy description';},1800);};
+          async function applySuggestion(){const id=videoSelect.value;if(!id||videoSelect.disabled)return;const note=pkg('pkgStatus');note.textContent='Preparing title, description and thumbnail from the finished video…';
+            try{const response=await fetch('/api/publishing/jobs/'+encodeURIComponent(id)+'/suggestion');if(!response.ok)throw Error((await response.json().catch(()=>({}))).detail||response.status);const s=await response.json();if(videoSelect.value!==id)return;
+              if(!pkg('pkgTitle').dataset.edited)pkg('pkgTitle').value=s.title;if(!pkg('pkgDesc').dataset.edited)pkg('pkgDesc').value=s.description;if(!pkg('pkgTags').dataset.edited)pkg('pkgTags').value=s.tags.join(', ');propagate();
+              const titles=pkg('pkgTitles');titles.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Suggested: '+s.title}));s.title_options.forEach(t=>titles.append(Object.assign(document.createElement('option'),{value:t,textContent:t})));
+              renderThumb(s.thumbnail);note.textContent='Review and edit anything below, then save the draft. The thumbnail is attached to the YouTube upload.';}
+            catch(error){note.textContent='Could not prepare the package: '+error.message+'. You can still type the title and description yourself.';}}
+          pkg('pkgTitles').onchange=event=>{if(!event.target.value)return;pkg('pkgTitle').value=event.target.value;pkg('pkgTitle').dataset.edited='1';propagate();};
+          pkg('pkgUpdate').onclick=async()=>{const id=videoSelect.value,button=pkg('pkgUpdate');button.disabled=true;button.textContent='Composing…';try{const body={text:pkg('pkgText').value.trim()||null,frame_time:Number(pkg('pkgFrame').value),logo:pkg('pkgLogo').value||null};const response=await fetch('/api/publishing/jobs/'+encodeURIComponent(id)+'/thumbnail',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!response.ok)throw Error((await response.json().catch(()=>({}))).detail||response.status);renderThumb(await response.json());}catch(error){pkg('pkgStatus').textContent='Thumbnail not updated: '+error.message;}finally{button.disabled=false;button.textContent='Update thumbnail';}};
+          pkg('pkgFile').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const response=await fetch('/api/publishing/jobs/'+encodeURIComponent(videoSelect.value)+'/thumbnail/upload',{method:'POST',headers:{'content-type':file.type||'image/jpeg'},body:file});if(!response.ok)throw Error((await response.json().catch(()=>({}))).detail||response.status);renderThumb(await response.json());pkg('pkgStatus').textContent='Your image is the thumbnail (cropped to 16:9).';}catch(error){pkg('pkgStatus').textContent='Image not used: '+error.message;}event.target.value='';};
+          destinations.addEventListener('input',event=>{event.target.dataset.edited='1';});videoSelect.addEventListener('change',()=>{for(const id of ['pkgTitle','pkgDesc','pkgTags'])delete pkg(id).dataset.edited;for(const row of rows.values())for(const f of [row.title,row.caption,row.tags])if(f)delete f.dataset.edited;applySuggestion();});
           function inputField(labelText,kind){const label=document.createElement('label');label.textContent=labelText;const input=document.createElement(kind);input.maxLength=kind==='textarea'?5000:500;label.append(input);return {label,input};}
           async function requestDeliveryAction(item,action,button){if(action==='resume'&&!window.confirm('Continue only this saved remote upload session? No new session will be opened.'))return;button.disabled=true;status.textContent=action==='inspect'?'Requesting read-only remote inspection…':action==='resume'?'Requesting saved-session continuation…':'Checking the reconnected destination…';try{const response=await fetch('/api/publishing/deliveries/'+encodeURIComponent(item.id)+'/actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action})});if(!response.ok)throw Error(await response.text());const result=await response.json();status.textContent=action==='retry_after_reconnect'?'Destination moved to '+result.state.replaceAll('_',' ')+'. Refresh activity for the worker result.':'Action queued. Refresh publishing activity to see the durable result.';await loadDrafts();}catch(error){status.textContent='Could not request action: '+error.message;button.disabled=false;}}
           async function loadDrafts(){try{
@@ -962,8 +1105,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           refreshHistory.onclick=async()=>{refreshHistory.disabled=true;refreshHistory.textContent='Refreshing activity…';await loadDrafts();refreshHistory.disabled=false;refreshHistory.textContent='Refresh publishing activity';};
           function applyVideoIntent(){const video=videosById.get(videoSelect.value);planned.replaceChildren();for(const row of rows.values()){row.check.checked=false;row.caption.value='';if(row.title)row.title.value='';if(row.tags)row.tags.value='';}if(!video)return;const intents=video.destination_intents||[];if(!intents.length){planned.textContent='This video has no saved destination plan. Choose a connected account below to prepare a draft.';for(const row of rows.values()){if(video.video_description&&video.video_description.length<=row.caption.maxLength)row.caption.value=video.video_description;if(row.title)row.title.value=video.title.slice(0,100);}return;}const heading=document.createElement('strong');heading.textContent='Saved creation plan';planned.append(heading);for(const intent of intents){const account=accountsById.get(intent.account_id),row=rows.get(intent.account_id),fits=row&&intent.description.length<=row.caption.maxLength;const line=document.createElement('p');line.textContent=intent.platform+' · '+intent.account_name+' · '+intent.category+(fits?' — ready for draft review':row?' — description exceeds this platform’s limit; shorten it before selecting':' — '+(account?.status||'account unavailable')+'; connection or platform draft support required');planned.append(line);if(row){row.check.checked=Boolean(fits);row.caption.value=fits?intent.description:'';if(row.title)row.title.value=video.title.slice(0,100);}}}
           videoSelect.onchange=applyVideoIntent;
-          async function loadChoices(){try{const [videosResponse,accountsResponse]=await Promise.all([fetch('/api/publishing/ready-videos'),fetch('/api/social-accounts')]);if(!videosResponse.ok||!accountsResponse.ok)throw Error();const videos=await videosResponse.json(),allAccounts=await accountsResponse.json(),accounts=allAccounts.filter(item=>item.status==='connected'&&!item.disabled&&item.external_account_id&&['youtube','instagram'].includes(item.platform));videosById.clear();accountsById.clear();rows.clear();for(const video of videos)videosById.set(video.job_id,video);for(const account of allAccounts)accountsById.set(account.id,account);videoSelect.replaceChildren();if(!videos.length){videoSelect.append(Object.assign(document.createElement('option'),{textContent:'No finished videos available'}));planned.textContent='Saved destination plans appear when a final video is ready.';}else{for(const video of videos)videoSelect.append(Object.assign(document.createElement('option'),{value:video.job_id,textContent:video.title+' · '+video.state.replaceAll('_',' ')}));videoSelect.disabled=false;preview.disabled=false;}destinations.replaceChildren();if(!accounts.length){destinations.textContent='No verified YouTube or Instagram accounts available for a manual publishing draft. Planned accounts remain visible above.';}for(const account of accounts){const card=document.createElement('fieldset');card.style.border='1px solid #31415f';card.style.borderRadius='9px';card.style.marginTop='10px';const legend=document.createElement('legend');const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Publish to '+account.display_name);legend.append(check,document.createTextNode(' '+account.platform+' · '+account.display_name+' · '+account.external_account_id));card.append(legend);const caption=inputField(account.platform==='youtube'?'YouTube description':'Instagram caption','textarea');caption.input.maxLength=account.platform==='youtube'?5000:2200;card.append(caption.label);let title=null,tags=null;if(account.platform==='youtube'){title=inputField('YouTube title','input');title.input.maxLength=100;tags=inputField('YouTube keyword tags, comma separated','input');card.append(title.label,tags.label);}destinations.append(card);rows.set(account.id,{account,check,caption:caption.input,title:title?.input,tags:tags?.input});}save.disabled=!videos.length||!accounts.length;applyVideoIntent();}catch(_){videoSelect.replaceChildren();destinations.textContent='Could not load videos or accounts. Reload to retry.';preview.disabled=true;save.disabled=true;}}
-          save.onclick=async()=>{const selected=[...rows.values()].filter(row=>row.check.checked);if(!selected.length){status.textContent='Select at least one destination account.';return;}const destinationData={};for(const row of selected){const metadata={caption:row.caption.value.trim()};if(row.account.platform==='youtube'){metadata.title=row.title.value.trim();metadata.tags=row.tags.value.split(',').map(value=>value.trim()).filter(Boolean);}destinationData[row.account.id]=metadata;}save.disabled=true;save.textContent='Saving draft…';status.textContent='Validating and copying the selected video…';try{const response=await fetch('/api/publishing/drafts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({job_id:videoSelect.value,destinations:destinationData})});if(!response.ok)throw Error(await response.text());const draft=await response.json();status.textContent='Draft '+draft.id.slice(0,8)+' saved for '+draft.destinations.length+' destination(s). No upload was started.';await loadDrafts();}catch(error){status.textContent='Could not save draft: '+error.message;}finally{save.disabled=false;save.textContent='Save publishing draft';}};
+          async function loadChoices(){try{const [videosResponse,accountsResponse]=await Promise.all([fetch('/api/publishing/ready-videos'),fetch('/api/social-accounts')]);if(!videosResponse.ok||!accountsResponse.ok)throw Error();const videos=await videosResponse.json(),allAccounts=await accountsResponse.json(),accounts=allAccounts.filter(item=>item.status==='connected'&&!item.disabled&&item.external_account_id&&['youtube','instagram'].includes(item.platform));videosById.clear();accountsById.clear();rows.clear();for(const video of videos)videosById.set(video.job_id,video);for(const account of allAccounts)accountsById.set(account.id,account);videoSelect.replaceChildren();if(!videos.length){videoSelect.append(Object.assign(document.createElement('option'),{textContent:'No finished videos available'}));planned.textContent='Saved destination plans appear when a final video is ready.';}else{for(const video of videos)videoSelect.append(Object.assign(document.createElement('option'),{value:video.job_id,textContent:video.title+' · '+video.state.replaceAll('_',' ')}));videoSelect.disabled=false;preview.disabled=false;}destinations.replaceChildren();if(!accounts.length){destinations.textContent='No verified YouTube or Instagram accounts available for a manual publishing draft. Planned accounts remain visible above.';}for(const account of accounts){const card=document.createElement('fieldset');card.style.border='1px solid #31415f';card.style.borderRadius='9px';card.style.marginTop='10px';const legend=document.createElement('legend');const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Publish to '+account.display_name);legend.append(check,document.createTextNode(' '+account.platform+' · '+account.display_name+' · '+account.external_account_id));card.append(legend);const caption=inputField(account.platform==='youtube'?'YouTube description':'Instagram caption','textarea');caption.input.maxLength=account.platform==='youtube'?5000:2200;card.append(caption.label);let title=null,tags=null;if(account.platform==='youtube'){title=inputField('YouTube title','input');title.input.maxLength=100;tags=inputField('YouTube keyword tags, comma separated','input');card.append(title.label,tags.label);}destinations.append(card);rows.set(account.id,{account,check,caption:caption.input,title:title?.input,tags:tags?.input});}save.disabled=!videos.length||!accounts.length;applyVideoIntent();applySuggestion();}catch(_){videoSelect.replaceChildren();destinations.textContent='Could not load videos or accounts. Reload to retry.';preview.disabled=true;save.disabled=true;}}
+          save.onclick=async()=>{const selected=[...rows.values()].filter(row=>row.check.checked);if(!selected.length){status.textContent='Select at least one destination account.';return;}const destinationData={};for(const row of selected){const metadata={caption:row.caption.value.trim()};if(row.account.platform==='youtube'){metadata.title=row.title.value.trim();metadata.tags=row.tags.value.split(',').map(value=>value.trim()).filter(Boolean);if(currentThumb)metadata.thumbnail_sha256=currentThumb.sha256;}destinationData[row.account.id]=metadata;}save.disabled=true;save.textContent='Saving draft…';status.textContent='Validating and copying the selected video…';try{const response=await fetch('/api/publishing/drafts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({job_id:videoSelect.value,destinations:destinationData})});if(!response.ok)throw Error(await response.text());const draft=await response.json();status.textContent='Draft '+draft.id.slice(0,8)+' saved for '+draft.destinations.length+' destination(s). No upload was started.';await loadDrafts();}catch(error){status.textContent='Could not save draft: '+error.message;}finally{save.disabled=false;save.textContent='Save publishing draft';}};
           loadChoices();loadDrafts();loadWorkerState();setInterval(loadWorkerState,20000);
         })();
         </script>"""
