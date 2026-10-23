@@ -86,6 +86,9 @@ Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 - Show the comment in the publication review (`publication_package.metadata.engagement_comment`) with copy button; posting it needs a `commentThreads.insert` call and the YouTube `youtube.force-ssl` scope, neither implemented (manual paste for now).
 - Script-writer picker already exists in the API (`script_model`); the UI selector for Claude Sonnet 5.5 / Opus 5.5 / Codex is the earlier follow-up.
 
+## Operator-requested UI/API edits on `dev` (23 Oct) — merge carefully with the Codex UI branch
+- `api/app.py`: a source URL with an empty excerpt (title optional) is now read in full by `SourceIngestor` at request time (HTTPS, public hosts, no redirects, 24k chars); the form labels say so. `studio-record` returns `generation` (owner/model/effort/tokens/cost) and a reconstructed Claude command; the Generation record dialog (`generation_ui.py`) shows them. Job diagnostics line is formatted (durations, GiB/MiB, trivial stages hidden).
+
 ## Gotchas learned
 - Kill/restart the Claude runner after *any* change to prompts/layout (it imports code at start): `scripts/run_claude_runner.sh`.
   Restart `web` and `worker` too after schema changes (they import `src` once).
