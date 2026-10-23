@@ -25,8 +25,8 @@ def grab_frame(ffmpeg: str, video: Path, seconds: float) -> Image.Image:
 
 
 def candidate_times(duration: float) -> list[float]:
-    """Spread of moments past the hook text, shown to the operator as choices."""
-    return [round(max(0.5, min(duration - 0.5, duration * share)), 2) for share in (0.08, 0.2, 0.32, 0.44, 0.56, 0.68, 0.8)]
+    """Spread of moments after the opening hook (whose text the headline would repeat), shown as choices."""
+    return [round(max(0.5, min(duration - 0.5, duration * share)), 2) for share in (0.2, 0.32, 0.44, 0.56, 0.68, 0.8, 0.9)]
 
 
 def best_time(ffmpeg: str, video: Path, duration: float) -> float:
@@ -43,35 +43,50 @@ def best_time(ffmpeg: str, video: Path, duration: float) -> float:
     return best
 
 
-def _fit(text: str, width: int, height: int, lines: int) -> tuple[ImageFont.FreeTypeFont, list[str]]:
+def _tokens(text: str) -> list[tuple[str, bool]]:
+    """Words with an accent flag: everything after the first ? ! or : is the yellow payoff, else only the last word."""
+    for mark in "?!:":
+        head, found, tail = text.partition(mark)
+        if found and tail.strip():
+            return [(w, False) for w in (head + found).split()] + [(w, True) for w in tail.split()]
     words = text.split()
-    for size in range(260, 60, -6):
-        face = ImageFont.truetype(str(FONTS / "Anton-Regular.ttf"), size)
-        rows = _wrap(words, face, width, lines)
-        if rows and len(rows) * size * 1.05 <= height:
-            return face, rows
-    face = ImageFont.truetype(str(FONTS / "Anton-Regular.ttf"), 60)
-    return face, _wrap(words, face, width, 99) or [text]
+    return [(w, i == len(words) - 1) for i, w in enumerate(words)]
 
 
-def _wrap(words: list[str], face, width: int, lines: int) -> list[str] | None:
-    rows, row = [], ""
-    for word in words:
-        trial = f"{row} {word}".strip()
+def _wrap(tokens: list[tuple[str, bool]], face, width: int) -> list[list[tuple[str, bool]]] | None:
+    rows: list[list[tuple[str, bool]]] = [[]]
+    payoff = sum(accent for _, accent in tokens) >= 2  # a multi-word payoff starts on its own line
+    for index, token in enumerate(tokens):
+        if payoff and token[1] and index and not tokens[index - 1][1]:
+            rows.append([])
+        trial = " ".join(w for w, _ in rows[-1] + [token])
         if face.getlength(trial) <= width:
-            row = trial
-        else:
-            if not row:
+            rows[-1].append(token)
+        elif rows[-1]:
+            rows.append([token])
+            if face.getlength(token[0]) > width:
                 return None
-            rows.append(row)
-            row = word
-    rows.append(row)
-    return rows if len(rows) <= lines and all(face.getlength(r) <= width for r in rows) else None
+        else:
+            return None
+    return rows
+
+
+def _fit(text: str, width: int, height: int, lines: int):
+    """Largest Anton size that fits in three rows (four only when it cannot)."""
+    tokens = _tokens(text)
+    for limit in (min(lines, 3), lines):
+        for size in range(260, 60, -6):
+            face = ImageFont.truetype(str(FONTS / "Anton-Regular.ttf"), size)
+            rows = _wrap(tokens, face, width)
+            if rows and len(rows) <= limit and len(rows) * size * 1.05 <= height:
+                return face, rows
+    face = ImageFont.truetype(str(FONTS / "Anton-Regular.ttf"), 60)
+    return face, _wrap(tokens, face, width) or [tokens]
 
 
 def compose(frame: Image.Image, text: str, logo: str | None = None) -> Image.Image:
     """Dark blurred backdrop, the sharp frame as a card, outlined headline with an accent word, optional logo badge."""
-    text = " ".join(text.upper().split())[:40]
+    text = " ".join(text.upper().split())[:48]
     canvas = ImageOps.fit(frame, SIZE, Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(26))
     canvas = Image.blend(canvas, Image.new("RGB", SIZE, "#0b1220"), .55)
     portrait = frame.height > frame.width
@@ -88,12 +103,14 @@ def compose(frame: Image.Image, text: str, logo: str | None = None) -> Image.Ima
     draw = ImageDraw.Draw(canvas)
     draw.rounded_rectangle((x, 40, x + card_w, 40 + card_h), radius=34, outline="#53e0ef", width=6)
     box_w, top = x - 100, 120 if logo else 90
-    face, rows = _fit(text, box_w, SIZE[1] - top - 80, 3)
+    face, rows = _fit(text, box_w, SIZE[1] - top - 80, 4)
     step = round(face.size * 1.05)
     y = top + max(0, (SIZE[1] - top - 80 - step * len(rows)) // 2)
     for index, row in enumerate(rows):
-        accent = index == len(rows) - 1
-        draw.text((60, y + index * step), row, font=face, fill=YELLOW if accent else WHITE, stroke_width=max(6, face.size // 16), stroke_fill="#05080f")
+        x_cursor = 60
+        for word, accent in row:
+            draw.text((x_cursor, y + index * step), word, font=face, fill=YELLOW if accent else WHITE, stroke_width=max(6, face.size // 16), stroke_fill="#05080f")
+            x_cursor += face.getlength(word + " ")
     if logo in LOGO_NAMES:
         badge = logo_badge(logo, 150)
         canvas.alpha_composite(badge, (50, 30))
