@@ -66,6 +66,7 @@ lower ~25% of the frame is platform-reserved space. The operator has **not** wat
 Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 
 ## Next step
+0. **Video-quality plan (24 Oct):** `docs/MILESTONES_VIDEO_QUALITY.md` (milestones M0–M9 learned from 3 reference videos + the lyric-video process guide). Suggested order: M0 reference benchmark, M1 60–90 s explainer profile, M2 concept/screenplay stage; Codex branch: M4 motion engine, M5 timing/audio gates. Operator decisions listed at its end.
 1. Operator watches `preview.mp4` (Studio → job → Watch preview) and gives creative feedback.
 2. Operator watches `final.mp4` of job `8c23e099…` and decides on the publication gate (do NOT approve until watched). Then: real thumbnail from a final-video frame (current one is a placeholder), orchestrator-level test for the reference final→publication path.
 3. Operator watches previews of `c93f4c29…` (fresh Microsoft Copilot-to-Rust story, real source screenshots) vs `90625bb5…` vs `b1c3a6b5…` vs `8c23e099…`. Next verify the editor pass applies in a live job (run a new brief, check `provenance.writers_room.editor.applied`). Then content review §9 steps 3–4: sound (A1 whole-narration synthesis, A4 voice/processing, A5 licensed music, A6 SFX) and visual depth (diagrams, versus template, beat-synced cuts, Claude frame review).
