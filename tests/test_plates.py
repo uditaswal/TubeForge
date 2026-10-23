@@ -72,3 +72,41 @@ def test_prepare_never_fails_the_job(tmp_path):
     assert json.loads((tmp_path / "plates" / "manifest.json").read_text())["scenes"]["2"]["reason"]
     plates = Plates(topic, tmp_path, manifest)
     assert plates.background(2, 0.5, 4.0) is None and plates.card(1, 1.0, 4.0, None) is not None
+
+
+def test_logo_scene_renders_a_light_badge_and_rejects_unknown_slugs():
+    from PIL import Image
+    from tubeforge.rendering.shorts.logos import LOGO_NAMES, logo_badge
+
+    assert {"php", "nodedotjs", "docker", "rust"} <= set(LOGO_NAMES)
+    badge = logo_badge("php", 200)
+    assert badge.size == (200, 200) and badge.getpixel((100, 100))[3] == 255
+    assert badge.getpixel((100, 6))[:3] != (0, 0, 0)  # disc is light, not black
+    data = topic_data()
+    data["scenes"][1]["logo"] = "php"
+    assert json.loads(ShortsTopic.model_validate(data).model_dump_json())["scenes"][1]["logo"] == "php"
+    data["scenes"][1]["logo"] = "not-a-logo"
+    with pytest.raises(ValidationError):
+        ShortsTopic.model_validate(data)
+    with pytest.raises(ValueError):
+        logo_badge("not-a-logo", 100)
+
+
+def test_stock_library_serves_repeated_queries_without_network(tmp_path):
+    from tubeforge.core.config import PixabayConfig
+    from tubeforge.providers.media.pixabay import PixabayClient, StockAsset
+
+    client = PixabayClient(PixabayConfig(cache_root=tmp_path), api_key="")
+    assert not client.available
+    asset = StockAsset("video", "42", "https://pixabay.com/videos/42", "someone", "server, data center, network, racks", "https://cdn.pixabay.com/x.mp4", 1080, 1920, 12.0)
+    file = client.library.files / "video-42.mp4"
+    file.write_bytes(b"x")
+    client.library.add(asset, file, "server room racks")
+    found = client.library.find("server racks", "video", min_duration=4.0)
+    assert found is not None and found[0].asset_id == "42" and found[1] == file
+    assert client.library.find("server racks", "video", exclude={"42"}) is None
+    assert client.library.find("rocket launch", "video") is None
+    assert client.library.find("server racks", "video", min_duration=30.0) is None
+    manifest = prepare_plates(topic_with({1: {"kind": "stock", "query": "server racks", "media": "video"}}), tmp_path / "job", pixabay=client, capture=None)
+    entry = manifest["scenes"]["1"]
+    assert entry["kind"] == "stock" and entry["origin"] == "local-library" and client.requests_made == 0

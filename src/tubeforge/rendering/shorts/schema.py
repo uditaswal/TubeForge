@@ -6,8 +6,10 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_serializer, model_validator
 
 from .icons import ICON_NAMES
+from .logos import LOGO_NAMES
 
 IconName = Literal[ICON_NAMES]  # type: ignore[valid-type]
+LogoName = Literal[LOGO_NAMES]  # type: ignore[valid-type]
 
 
 class StrictModel(BaseModel):
@@ -60,6 +62,8 @@ class Scene(StrictModel):
     reveal_words: tuple[int, ...] = Field(min_length=1, max_length=3)
     # Optional badge from the fixed procedural icon set; never a file or URL.
     icon: IconName | None = None
+    # Optional brand logo for a named technology; replaces the icon glyph in the badge.
+    logo: LogoName | None = None
     # Optional real imagery for the scene; None keeps the code-drawn template only.
     visual: Visual | None = None
 
@@ -68,6 +72,8 @@ class Scene(StrictModel):
         value = handler(self)
         if self.visual is None:
             value.pop("visual", None)
+        if self.logo is None:
+            value.pop("logo", None)
         return value
 
     @model_validator(mode="after")

@@ -52,20 +52,31 @@ def prepare_plates(topic: ShortsTopic, directory: Path, *, pixabay: PixabayClien
 
 
 def _stock(visual: StockVisual, index: int, out: Path, pixabay: PixabayClient | None, used: set[str]) -> dict:
-    if pixabay is None or not pixabay.available:
-        return {"kind": "none", "reason": "pixabay disabled or no API key"}
-    wanted = [visual.media, "photo" if visual.media == "video" else "video"]
-    for media in wanted:
-        assets = pixabay.search_videos(visual.query) if media == "video" else pixabay.search_images(visual.query)
-        asset = pixabay.best(assets, min_duration=ESTIMATED_SCENE_SECONDS, exclude=used, query=visual.query)
-        if asset is None:
+    """Local library first (no network, topics repeat); Pixabay only for what the library cannot match."""
+    if pixabay is None:
+        return {"kind": "none", "reason": "pixabay disabled"}
+    other = "photo" if visual.media == "video" else "video"
+    for media, online in ((visual.media, False), (visual.media, True), (other, False), (other, True)):
+        kind = "video" if media == "video" else "image"
+        if online:
+            if not pixabay.available:
+                continue
+            assets = pixabay.search_videos(visual.query) if media == "video" else pixabay.search_images(visual.query)
+            asset = pixabay.best(assets, min_duration=ESTIMATED_SCENE_SECONDS, exclude=used, query=visual.query)
+            source = pixabay.download(asset) if asset is not None else None
+            origin = "pixabay"
+        else:
+            found = pixabay.library.find(visual.query, kind, min_duration=ESTIMATED_SCENE_SECONDS, exclude=used)
+            asset, source = found if found else (None, None)
+            origin = "local-library"
+        if asset is None or source is None:
             continue
-        source = pixabay.download(asset)
+        pixabay.library.add(asset, source, visual.query)
         target = out / f"stock-{index}{source.suffix}"
         shutil.copyfile(source, target)
         used.add(asset.asset_id)
-        return {"kind": "stock", "media": media, "file": f"plates/{target.name}", "query": visual.query, "evidence": asset.evidence()}
-    return {"kind": "none", "reason": f"no Pixabay result for {visual.query!r}"}
+        return {"kind": "stock", "media": media, "file": f"plates/{target.name}", "query": visual.query, "origin": origin, "evidence": asset.evidence()}
+    return {"kind": "none", "reason": f"no stock match for {visual.query!r}" + ("" if pixabay.available else " (no API key; local library only)")}
 
 
 def _source(visual: SourceVisual, index: int, source_id: str, sources: dict[str, str], out: Path,

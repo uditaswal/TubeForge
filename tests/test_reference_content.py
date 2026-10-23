@@ -84,6 +84,7 @@ def test_reference_schema_and_prompt_preserve_legacy_boundary():
     for scene in topic["scenes"]:
         scene.pop("vo")
         scene["visual"] = None  # strict model output states every field explicitly
+        scene["logo"] = None
     raw = {"status": "ready", "package": package, "reason": None}
     jsonschema.validate(raw, schema)
     legacy = codex_output_schema(envelope=True)
