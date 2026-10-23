@@ -79,7 +79,8 @@ def test_layout_rejects_overlaps_and_safe_zone_intrusions():
 
 
 def test_source_labels_and_reveals_are_real_pixels():
-    renderer = SceneRenderer(ShortsTopic.model_validate(topic_data()))
+    from tubeforge.rendering.shorts.layout import RenderOptions
+    renderer = SceneRenderer(ShortsTopic.model_validate(topic_data()), options=RenderOptions(show_sources=True))
     for index in range(1, 6):
         hidden, shown = renderer.frame(index, 0), renderer.frame(index, 3)
         assert hidden.tobytes() != shown.tobytes()
@@ -148,3 +149,37 @@ def test_compress_pauses_shortens_only_long_internal_silences():
     out = compress_pauses(audio, sr, .15)
     assert len(out) == 200 * 3 + 150 + 100
     assert np.count_nonzero(out) == 600
+
+
+def test_source_credit_is_off_by_default_and_watermark_is_optional(tmp_path):
+    import json
+
+    from tubeforge.domain.contracts import ContentRequest
+    from tubeforge.pipeline import reference_short
+    from tubeforge.rendering.shorts.layout import RenderOptions, SceneRenderer
+    from tubeforge.rendering.shorts.schema import ShortsTopic
+
+    topic = ShortsTopic.model_validate(topic_data())
+    index = next(i for i, scene in enumerate(topic.scenes) if scene.source_ids)
+
+    def keys(options):
+        return {m.key for m in SceneRenderer(topic, options=options).compose(index).marks}
+
+    assert not any(k.startswith("source") for k in keys(RenderOptions()))
+    assert any(k.startswith("source") for k in keys(RenderOptions(show_sources=True)))
+    plain = SceneRenderer(topic).compose(index).image.crop((0, 120, 1080, 200))
+    marked = SceneRenderer(topic, options=RenderOptions(watermark="TubeForge")).compose(index).image.crop((0, 120, 1080, 200))
+    assert plain.tobytes() != marked.tobytes()
+    assert SceneRenderer(topic, options=RenderOptions()).compose(index).image.tobytes() == SceneRenderer(topic).compose(index).image.tobytes()
+
+    reference_short.write_options(tmp_path, show_sources=False, watermark=None)
+    assert reference_short.options_identity(tmp_path) == "none" and reference_short.load_options(tmp_path) == RenderOptions()
+    reference_short.write_options(tmp_path, show_sources=True, watermark="TubeForge")
+    assert reference_short.load_options(tmp_path) == RenderOptions(True, "TubeForge") and reference_short.options_identity(tmp_path) != "none"
+
+    base = dict(topic="t", angle="a", target_duration_seconds=36, language="en", audience="g", prompt_version="m6-content-v8", aspect_ratio="9:16",
+                sources=[{"source_id": "s", "url": "https://example.com/", "title": "T", "excerpt": "x"}])
+    plain_request, marked_request = ContentRequest(**base), ContentRequest(**base, show_source_credit=True, channel_watermark="TubeForge")
+    assert "show_source_credit" not in json.loads(plain_request.model_dump_json()) and "channel_watermark" not in plain_request.model_dump()
+    from tubeforge.domain.contracts import generation_request_key_payload
+    assert generation_request_key_payload(plain_request) == generation_request_key_payload(marked_request)

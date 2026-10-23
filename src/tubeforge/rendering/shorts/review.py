@@ -8,13 +8,13 @@ from pathlib import Path
 
 from PIL import Image
 
-from .layout import SceneRenderer
+from .layout import RenderOptions, SceneRenderer
 from .schema import ShortsTopic
 
 
-def write_layout_review(topic: ShortsTopic, output: Path) -> Path:
+def write_layout_review(topic: ShortsTopic, output: Path, options: RenderOptions = RenderOptions()) -> Path:
     output.mkdir(parents=True, exist_ok=True)
-    renderer = SceneRenderer(topic)
+    renderer = SceneRenderer(topic, options=options)
     report = renderer.validate()
     report["topic_sha256"] = hashlib.sha256(topic.model_dump_json().encode()).hexdigest()
     report["scope"] = "Fully revealed layout and all caption chunks; not audiovisual acceptance or operator approval"

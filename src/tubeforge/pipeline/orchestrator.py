@@ -801,6 +801,7 @@ class PipelineOrchestrator:
     def _reference_assets(self, job: PipelineJob, package: ContentPackage, cancellation_requested=None) -> None:
         """Prepare optional real-imagery plates (never failing the job), then keep the contact sheet for review."""
         topic = package.reference_short
+        reference_short.write_options(self._reference_dir(job), show_sources=job.request.show_source_credit, watermark=job.request.channel_watermark)
         plates = self._reference_plates(job, topic, cancellation_requested)
         directory = self._reference_dir(job) / "layout"
         for index, page in enumerate(reference_short.layout_review(topic, directory), 1):
@@ -871,12 +872,15 @@ class PipelineOrchestrator:
         plates = reference_short.plates_identity(directory)
         if plates != "none":
             inputs["plates"] = plates
+        options = reference_short.options_identity(directory)
+        if options != "none":
+            inputs["options"] = options
         return inputs, hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
     def _reference_source_identity(self, job: PipelineJob, package: ContentPackage, inputs: dict, name: str, approval_identity: str | None) -> str:
         return reference_short.render_identity(package.reference_short, str(inputs["narration"]), str(inputs["timing_map"]),
                                                draft=name == "preview", approval_identity=approval_identity,
-                                               plates_sha=str(inputs.get("plates", "none")))
+                                               plates_sha=str(inputs.get("plates", "none")), options_sha=str(inputs.get("options", "none")))
 
     def _reference_render_checkpoint(self, job: PipelineJob, stage: JobState, name: str, filename: str, cancellation_requested, *, approval_identity: str | None, approval_id: str | None) -> tuple[Artifact, str]:
         package = self._reference_package(job)

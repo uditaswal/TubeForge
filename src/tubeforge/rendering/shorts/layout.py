@@ -25,6 +25,13 @@ WHITE, CYAN, MUTED = "#f4f7ff", "#53e0ef", "#a4b3ca"
 PANEL, GREEN, AMBER = "#101e32", "#79e8b0", "#ffc46b"
 
 
+@dataclass(frozen=True)
+class RenderOptions:
+    """Operator display choices that are not part of the approved script."""
+    show_sources: bool = False      # on-screen "Source: ..." credit under each scene
+    watermark: str | None = None    # very small channel name in the top margin
+
+
 class LayoutError(ValueError):
     def __init__(self, code: str, element: str, detail: str):
         self.issue = {"code": code, "element": element, "detail": detail}
@@ -147,8 +154,9 @@ class SceneRenderer:
     The caller supplies aligned reveal/word events. Repeated event keys return
     the same image without recomposition; memory does not grow with duration.
     """
-    def __init__(self, topic: ShortsTopic, cards: frozenset[int] = frozenset()):
+    def __init__(self, topic: ShortsTopic, cards: frozenset[int] = frozenset(), options: RenderOptions = RenderOptions()):
         self.topic = topic
+        self.options = options
         self.cards = cards  # scene indices whose body is replaced by a code/screenshot card
         self.groups = [caption_groups(s.caption) for s in topic.scenes]
         self._base_key = self._frame_key = None
@@ -243,10 +251,14 @@ class SceneRenderer:
                     c.text(f"line{j}", prefix + line.text, (495, 700 + dy + j * 160), size=48,
                            minimum=40, width=770, mono=True, parent="terminal",
                            color=GREEN if line.kind == "output" else WHITE)
-        sources = {source.source_id: source for source in self.topic.sources}
-        for j, source_id in enumerate(scene.source_ids):
-            c.text(f"source{j}", "Source: " + sources[source_id].name, (495, 1200 + 32 * j),
-                   size=26, minimum=26, color=MUTED, role="source")
+        if self.options.show_sources:
+            sources = {source.source_id: source for source in self.topic.sources}
+            for j, source_id in enumerate(scene.source_ids):
+                c.text(f"source{j}", "Source: " + sources[source_id].name, (495, 1200 + 32 * j),
+                       size=26, minimum=26, color=MUTED, role="source")
+        if self.options.watermark:
+            # Decorative and deliberately small; sits in the top margin above the progress bar, outside the QA safe box.
+            c.draw.text((70, 168), self.options.watermark, font=font(30), fill="#8798b3", anchor="ls")
         return c
 
     def icon(self, c, name, center, diameter, logo=False):
