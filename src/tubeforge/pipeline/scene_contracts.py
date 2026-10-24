@@ -42,6 +42,14 @@ EXPLICIT_SCENE_LAYOUTS = frozenset(layout.value for layout in SceneLayout)
 SUPPORTED_SOURCE_PACKET_VERSIONS = frozenset({"1.0", "1.1"})
 
 
+def _scene_heading(plan, layout: SceneLayout) -> str:
+    if layout is SceneLayout.TERMINAL:
+        return plan.visual_subject or plan.on_screen_text or plan.search_queries[0]
+    if plan.card_cues is not None:
+        return _card_heading(plan)
+    return plan.on_screen_text or plan.visual_subject or plan.search_queries[0]
+
+
 class SceneContractRow(DomainModel):
     scene_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     layout: SceneLayout
@@ -111,15 +119,10 @@ class ScriptBoundSceneContract(DomainModel):
             plan = approved_plans[row.scene_id]
             if plan.visual_type in EXPLICIT_SCENE_LAYOUTS:
                 expected_layout = SceneLayout(plan.visual_type)
-                expected_heading = (
-                    (plan.visual_subject or plan.on_screen_text or plan.search_queries[0])
-                    if expected_layout is SceneLayout.TERMINAL
-                    else (plan.on_screen_text or plan.visual_subject or plan.search_queries[0])
-                )
                 expected_command = plan.on_screen_text if expected_layout is SceneLayout.TERMINAL else None
                 if (
                     row.layout is not expected_layout
-                    or row.heading != expected_heading
+                    or row.heading != _scene_heading(plan, expected_layout)
                     or row.command != expected_command
                     or row.display_elements != plan.visual_elements
                 ):
@@ -219,7 +222,7 @@ def compile_scene_contract(
         rows.append(SceneContractRow(
             scene_id=scene.scene_id,
             layout=layout,
-            heading=(scene.visual_subject or scene.on_screen_text or scene.search_queries[0]) if layout is SceneLayout.TERMINAL else _card_heading(scene) if scene.card_cues is not None else (scene.on_screen_text or scene.visual_subject or scene.search_queries[0]),
+            heading=_scene_heading(scene, layout),
             command=scene.on_screen_text if layout is SceneLayout.TERMINAL else None,
             display_elements=scene.visual_elements,
             source_ids=sources,
