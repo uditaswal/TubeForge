@@ -99,3 +99,25 @@ class StockLibrary:
         allowed = {f.name for f in fields(StockAsset)}
         asset = StockAsset(**{k: v for k, v in json.loads(row["evidence"]).items() if k in allowed})
         return asset, self.files / row["file"]
+
+    def candidates(self, kind: str, *, min_duration: float = 0.0,
+                   exclude: frozenset[str] | set[str] = frozenset()) -> list[tuple[StockAsset, Path]]:
+        """Read locally cached candidates without mutating use counts before ranking."""
+        if kind not in EXTENSIONS:
+            return []
+        allowed = {field.name for field in fields(StockAsset)}
+        result = []
+        with self._db() as db:
+            for row in db.execute("SELECT * FROM assets WHERE kind=? ORDER BY asset_id", (kind,)):
+                path = self.files / row["file"]
+                if row["asset_id"] in exclude or not path.is_file():
+                    continue
+                try:
+                    evidence = json.loads(row["evidence"])
+                    asset = StockAsset(**{key: value for key, value in evidence.items() if key in allowed})
+                except (ValueError, TypeError, KeyError):
+                    continue
+                if kind == "video" and (asset.duration or 0) < min_duration:
+                    continue
+                result.append((asset, path))
+        return result

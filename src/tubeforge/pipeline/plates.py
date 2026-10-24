@@ -14,6 +14,7 @@ from pathlib import Path
 
 from tubeforge.core.errors import ProviderAuthenticationError, ProviderValidationError, RetryableProviderError
 from tubeforge.providers.media.pixabay import PixabayClient
+from tubeforge.providers.media.stock_rank import VERSION as STOCK_RANK_VERSION, rank_assets
 from tubeforge.rendering.shorts.plates import MANIFEST
 from tubeforge.rendering.shorts.schema import CodeVisual, ShortsTopic, SourceVisual, StockVisual
 
@@ -30,6 +31,7 @@ def prepare_plates(topic: ShortsTopic, directory: Path, *, pixabay: PixabayClien
     sources = {source.source_id: str(source.url) for source in topic.sources}
     scenes: dict[str, dict] = {}
     used: set[str] = set()
+    previous_tags: list[str] = []
     for index, scene in enumerate(topic.scenes):
         if cancelled():
             break
@@ -40,7 +42,7 @@ def prepare_plates(topic: ShortsTopic, directory: Path, *, pixabay: PixabayClien
             if isinstance(visual, CodeVisual):
                 scenes[str(index)] = {"kind": "code", "language": visual.language, "lines": len(visual.lines)}
             elif isinstance(visual, StockVisual):
-                scenes[str(index)] = _stock(visual, index, out, pixabay, used)
+                scenes[str(index)] = _stock(visual, scene.vo, index, out, pixabay, used, previous_tags)
             elif isinstance(visual, SourceVisual):
                 scenes[str(index)] = _source(visual, index, scene.source_ids[0], sources, out, capture)
         except (ProviderValidationError, RetryableProviderError, ProviderAuthenticationError, OSError) as error:
@@ -51,7 +53,8 @@ def prepare_plates(topic: ShortsTopic, directory: Path, *, pixabay: PixabayClien
     return manifest
 
 
-def _stock(visual: StockVisual, index: int, out: Path, pixabay: PixabayClient | None, used: set[str]) -> dict:
+def _stock(visual: StockVisual, scene_text: str, index: int, out: Path,
+           pixabay: PixabayClient | None, used: set[str], previous_tags: list[str]) -> dict:
     """Local library first (no network, topics repeat); Pixabay only for what the library cannot match."""
     if pixabay is None:
         return {"kind": "none", "reason": "pixabay disabled"}
@@ -62,20 +65,35 @@ def _stock(visual: StockVisual, index: int, out: Path, pixabay: PixabayClient | 
             if not pixabay.available:
                 continue
             assets = pixabay.search_videos(visual.query) if media == "video" else pixabay.search_images(visual.query)
-            asset = pixabay.best(assets, min_duration=ESTIMATED_SCENE_SECONDS, exclude=used, query=visual.query)
-            source = pixabay.download(asset) if asset is not None else None
+            local_sources = {}
             origin = "pixabay"
         else:
-            found = pixabay.library.find(visual.query, kind, min_duration=ESTIMATED_SCENE_SECONDS, exclude=used)
-            asset, source = found if found else (None, None)
+            found = pixabay.library.candidates(kind, min_duration=ESTIMATED_SCENE_SECONDS, exclude=used)
+            assets = [asset for asset, _ in found]
+            local_sources = {asset.asset_id: path for asset, path in found}
             origin = "local-library"
-        if asset is None or source is None:
-            continue
-        pixabay.library.add(asset, source, visual.query)
-        target = out / f"stock-{index}{source.suffix}"
-        shutil.copyfile(source, target)
-        used.add(asset.asset_id)
-        return {"kind": "stock", "media": media, "file": f"plates/{target.name}", "query": visual.query, "origin": origin, "evidence": asset.evidence()}
+        ranked = rank_assets(assets, query=visual.query, scene_text=scene_text,
+                             used_ids=used, previous_tags=tuple(previous_tags),
+                             min_duration=ESTIMATED_SCENE_SECONDS)
+        for choice in ranked[:3]:
+            asset = choice["asset"]
+            try:
+                source = pixabay.download(asset) if online else local_sources[asset.asset_id]
+                target = out / f"stock-{index}{source.suffix}"
+                shutil.copyfile(source, target)
+            except (ProviderValidationError, RetryableProviderError, ProviderAuthenticationError, OSError) as error:
+                LOG.warning("stock candidate %s unavailable: %s", asset.asset_id, error)
+                continue
+            pixabay.library.add(asset, source, visual.query)
+            used.add(asset.asset_id)
+            previous_tags.append(asset.tags)
+            return {"kind": "stock", "media": media, "file": f"plates/{target.name}",
+                    "query": visual.query, "origin": origin, "evidence": asset.evidence(),
+                    "ranking": {"version": STOCK_RANK_VERSION,
+                                "selected": {key: value for key, value in choice.items() if key != "asset"},
+                                "candidates": [{key: value for key, value in item.items() if key != "asset"}
+                                               for item in ranked[:3]],
+                                "scope": "tag-and-metadata relevance; requires visual inspection"}}
     return {"kind": "none", "reason": f"no stock match for {visual.query!r}" + ("" if pixabay.available else " (no API key; local library only)")}
 
 

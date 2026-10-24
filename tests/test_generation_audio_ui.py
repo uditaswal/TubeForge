@@ -1,4 +1,4 @@
-"""Signed-in Studio exposes audio health only through durable QA artifacts."""
+"""Signed-in Studio exposes audio and video health through durable QA artifacts."""
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +26,9 @@ def test_signed_in_generation_record_exposes_audio_report_states(tmp_path):
             assert page.status_code == 200
             assert 'id="generationAudio"' in page.text
             assert "Audio report pending" in page.text and "Could not load audio report" in page.text
+            assert 'id="generationVideo"' in page.text
+            assert "Video report pending" in page.text and "Could not load video report" in page.text
+            assert "Black frames" in page.text and "Frozen frames" in page.text
             assert "final_qa" in page.text and "preview_qa" in page.text
             assert (await client.get("/api/jobs/missing/artifacts/final_qa")).status_code == 404
 

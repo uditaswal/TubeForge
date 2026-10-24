@@ -709,6 +709,14 @@ its approvals remain unchanged. Review and approve the child's exact script
 before its worker rebuild, then inspect and approve its new preview. Unchanged
 accepted scene assets and phrase audio are reused only after their hashes and
 request identities are revalidated.
+The generation record also shows audio and video signal diagnostics from the
+durable render QA artifact. Video diagnostics identify sustained black intervals
+and possible frozen intervals by time and scene; a static card can be intentional.
+The final render fails on sustained black output before artifact promotion.
+When a reference Short requests stock, eligible local Pixabay assets are ranked
+by visual-query tag coverage and prior-shot variety. Its plate manifest retains
+the chosen asset's source, license and ranking explanation for visual review;
+metadata matching alone does not establish that the footage illustrates a claim.
 This scene-revision flow is currently **IMPLEMENTED**; its real production
 artifact acceptance is tracked in the current project plan.
 

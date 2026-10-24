@@ -77,6 +77,15 @@ display-word timing; missing or extra words fail closed. Grouped synthesis and
 voice-only processing are opt-in render settings, not writer instructions or
 approval. Any changed audio requires a new listener review of the exact render.
 
+Reference Short stock selection may rank locally cached Pixabay assets using
+the scene's accepted visual query, source tags, rights metadata and prior-shot
+diversity. Ranking is a candidate review signal, not evidence that a clip proves
+the narration. Record the selected asset, license, source URL, ranking version
+and fallback reason in the plate manifest. Inspect selected pixels and the
+complete encoded video before creative acceptance. Encoded-frame black intervals
+are a render failure; frozen intervals are advisory because intentional static
+cards may be valid. Keep temporal QA bound to the exact rendered file hash.
+
 
 ### Topic research before narration
 

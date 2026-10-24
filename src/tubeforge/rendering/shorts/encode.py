@@ -179,14 +179,20 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
             audio_health = scan_samples(np.frombuffer(decoded_audio, dtype="<f4"), 48000,
                                         scene_starts=tuple(t.start for t in timeline.timings))
             audio_health["artifact_sha256"] = file_hash(temporary)
+            from .temporal_qa import inspect_encoded_video
+            temporal_qa = inspect_encoded_video(temporary, duration=duration,
+                scene_starts=tuple(t.start for t in timeline.timings), ffmpeg=ffmpeg,
+                deadline=qa_deadline, cancelled=cancelled)
             report.update(probe=probe, loudness=loudness, full_decode=True,
-                          audio_health=audio_health,
+                          audio_health=audio_health, temporal_qa=temporal_qa,
                           render_seconds=render_seconds, realtime_factor=render_seconds / duration,
                           distinct_frame_events=events, frames=round(timeline.duration * 30),
                           peak_process_rss_kib=peak_rss, peak_child_rss_kib=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
                           swap_growth_kib=swap_used_kib() - initial_swap)
             if not -15 <= loudness["input_i"] <= -13 or loudness["input_tp"] > -1.5:
                 raise ValueError(f"encoded audio fails reference gate: {loudness}")
+            if temporal_qa["black_intervals"]:
+                raise ValueError("encoded video contains a sustained black interval")
             if report["swap_growth_kib"] > max_swap_growth_kib:
                 raise MemoryError("host swap grew during render")
             if cancelled():

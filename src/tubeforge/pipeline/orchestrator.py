@@ -930,7 +930,7 @@ class PipelineOrchestrator:
             findings.append({"code": "reference_qa_missing", "severity": "error", "message": "render QA report is missing"})
         else:
             qa = json.loads(qa_path.read_text())
-            report["reference_qa"] = {key: qa.get(key) for key in ("passed", "loudness", "probe", "realtime_factor", "alignment", "narration_health", "audio_health")}
+            report["reference_qa"] = {key: qa.get(key) for key in ("passed", "loudness", "probe", "realtime_factor", "alignment", "narration_health", "audio_health", "temporal_qa")}
             if not qa.get("passed") or qa.get("draft") or qa.get("video_sha256") != final.checksum_sha256:
                 findings.append({"code": "reference_qa_failed", "severity": "error", "message": "render QA did not pass for this exact final file"})
         report["findings"] = findings
