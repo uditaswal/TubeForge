@@ -29,7 +29,7 @@ tubeforge = "tubeforge.cli:main"
 
 [project.optional-dependencies]
 reference-renderer = [
-  "Pillow>=11,<13",
+  "Pillow>=11,<14",
   "numpy>=2,<3",
   "soundfile>=0.13,<1",
   "pygments>=2.17,<3",
