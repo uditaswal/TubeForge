@@ -251,6 +251,11 @@ def _with_page_text(source: SourceReference) -> SourceReference:
     return source.model_copy(update={"title": title, "excerpt": excerpt})
 
 
+def _reject_retired_format(request: ContentRequest, settings: Settings) -> None:
+    if request.production_mode != "source_clip" and request.prompt_version in settings.pipeline.video_generation.retired_prompt_versions:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"the {request.prompt_version} video format is retired; use a current preset")
+
+
 def _video_request(value: VideoBriefRequest, settings: Settings, *, available_music: set[str] | None = None) -> ContentRequest:
     generation = settings.pipeline.video_generation
     name = value.preset or generation.default_preset
@@ -946,6 +951,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/jobs", status_code=status.HTTP_201_CREATED, tags=["jobs"])
     def create_job(request: ContentRequest) -> dict[str, object]:
         """Create a durable job; a separate worker advances it."""
+        _reject_retired_format(request, application_settings)
         job = runtime.jobs.create(uuid4().hex, request)
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
         return _job_payload(job)
@@ -954,7 +960,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def create_video(brief: VideoBriefRequest) -> dict[str, object]:
         available_music = runtime.orchestrator.music_catalog.names() if runtime.orchestrator.music_catalog else set()
         try:
-            job = runtime.jobs.create(uuid4().hex, _video_request(brief, application_settings, available_music=available_music), destination_account_ids=brief.destination_account_ids, video_description=brief.description)
+            video_request = _video_request(brief, application_settings, available_music=available_music)
+            _reject_retired_format(video_request, application_settings)
+            job = runtime.jobs.create(uuid4().hex, video_request, destination_account_ids=brief.destination_account_ids, video_description=brief.description)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
@@ -985,9 +993,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           if (!form) return;
           const presetLabel=document.createElement('label'); presetLabel.textContent='Format preset';
           const presetSelect=document.createElement('select'); presetSelect.name='preset'; presetSelect.id='presetSelect';
-          presetSelect.append(Object.assign(document.createElement('option'),{value:'default',textContent:'Default — 16:9'}));
+          presetSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading formats…'}));
           presetLabel.append(presetSelect); form.insertBefore(presetLabel,form.querySelector('[name=duration_seconds]').closest('label'));
-          fetch('/api/presets').then(response=>response.ok?response.json():[]).then(presets=>{presetSelect.replaceChildren();presets.forEach(preset=>{const option=document.createElement('option');option.value=preset.name;option.textContent=preset.label;Object.assign(option.dataset,{duration:preset.duration_seconds,min:preset.minimum_duration_seconds,max:preset.maximum_duration_seconds,aspect:preset.aspect_ratio});presetSelect.append(option);});presetSelect.value=presets.some(value=>value.name==='default')?'default':presets[0]?.name||'default';presetSelect.onchange=()=>{const option=presetSelect.selectedOptions[0],duration=form.querySelector('[name=duration_seconds]');if(!option)return;duration.value=option.dataset.duration;duration.min=option.dataset.min;duration.max=option.dataset.max;};presetSelect.onchange();});
+          fetch('/api/presets').then(response=>response.ok?response.json():[]).then(presets=>{presetSelect.replaceChildren();presets.forEach(preset=>{const option=document.createElement('option');option.value=preset.name;option.textContent=preset.label;Object.assign(option.dataset,{duration:preset.duration_seconds,min:preset.minimum_duration_seconds,max:preset.maximum_duration_seconds,aspect:preset.aspect_ratio});presetSelect.append(option);});presetSelect.value=(presets.find(value=>value.default)||presets[0]||{}).name||'';presetSelect.onchange=()=>{const option=presetSelect.selectedOptions[0],duration=form.querySelector('[name=duration_seconds]');if(!option)return;duration.value=option.dataset.duration;duration.min=option.dataset.min;duration.max=option.dataset.max;};presetSelect.onchange();});
           const visualLabel=document.createElement('label'); visualLabel.textContent='Visuals';
           const visualSelect=document.createElement('select'); visualSelect.name='visual_source'; visualSelect.id='visualSource';
           visualSelect.append(Object.assign(document.createElement('option'),{value:'generated',textContent:'Generate local scene art'}),Object.assign(document.createElement('option'),{value:'stock',textContent:'Rights-safe stock (Wikimedia Commons; local fallback if unavailable)'}));
@@ -1378,6 +1386,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValidationError as error:
             detail = "; ".join(f"{'.'.join(str(part) for part in item['loc']) or 'request'}: {item['msg']}" for item in error.errors())
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from error
+        _reject_retired_format(new_request, application_settings)
         destinations = tuple(item["account_id"] for item in runtime.jobs.destination_intents(job_id))
         try:
             created = runtime.jobs.create(uuid4().hex, new_request, destination_account_ids=destinations, video_description=runtime.jobs.video_description(job_id))
@@ -1447,6 +1456,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "minimum_duration_seconds": preset.minimum_duration_seconds,
                 "maximum_duration_seconds": preset.maximum_duration_seconds,
                 "aspect_ratio": preset.aspect_ratio,
+                "default": name == application_settings.pipeline.video_generation.default_preset,
             }
             for name, preset in application_settings.pipeline.video_generation.presets.items()
         ]

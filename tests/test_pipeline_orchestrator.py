@@ -1219,3 +1219,12 @@ def test_topic_research_checkpoint_survives_restart_without_regeneration(pipelin
     assert job.request == request
     assert len(effective.notes) == 30
     assert all(original in actual for original, actual in zip(request.notes, effective.notes))
+
+
+def test_retired_format_stops_before_any_script_call(pipeline) -> None:
+    runner, content, *_ = pipeline
+    runner.retired_prompt_versions = frozenset({"test-v1"})
+    runner.jobs.create("retired-format", request())
+    result = runner.run("retired-format")
+    assert result.state is JobState.FAILED_VALIDATION and "retired" in (result.failure_message or "")
+    assert content.calls == 0

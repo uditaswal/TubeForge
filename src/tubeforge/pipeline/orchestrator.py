@@ -102,6 +102,7 @@ class PipelineOrchestrator:
         self.visual_router = VisualRouter()
         self.music_catalog = music_catalog
         self.reference_config = ReferenceShortConfig()
+        self.retired_prompt_versions: frozenset[str] = frozenset()
 
     @classmethod
     def from_settings(cls, settings: Settings, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, external_operations: ExternalOperationRepository | None = None) -> "PipelineOrchestrator":
@@ -116,6 +117,7 @@ class PipelineOrchestrator:
             music_catalog=MusicCatalog(settings.pipeline.voice.artifact_root.parent / "music", settings.pipeline.video_generation.music_catalog, ffprobe=str(settings.pipeline.voice.ffprobe_executable)),
         )
         orchestrator.reference_config = settings.pipeline.reference_short
+        orchestrator.retired_prompt_versions = frozenset(settings.pipeline.video_generation.retired_prompt_versions)
         orchestrator.pixabay_config = settings.pipeline.pixabay
         orchestrator.capture_config = settings.pipeline.source_capture
         return orchestrator
@@ -204,6 +206,8 @@ class PipelineOrchestrator:
 
     def _run_stage(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None = None) -> None:
         if job.state is JobState.TOPIC_CREATED:
+            if job.request.production_mode != "source_clip" and job.request.prompt_version in self.retired_prompt_versions:
+                raise ProviderValidationError(f"the {job.request.prompt_version} video format is retired; create a new video with a current preset")
             self._transition(job, JobState.SOURCE_INSPECTING if job.request.production_mode == "source_clip" else JobState.CONTENT_GENERATING); return
         if job.state is JobState.SOURCE_INSPECTING:
             if not self.source_clips.enabled:

@@ -581,11 +581,16 @@ class VideoGenerationConfig(BaseModel):
     default_preset: str = Field(default="default", min_length=1, max_length=100)
     presets: dict[str, VideoPresetConfig] = Field(default_factory=lambda: {"default": VideoPresetConfig()})
     music_catalog: tuple[MusicTrackConfig, ...] = ()
+    # Script/scene formats that may no longer start a job (e.g. the old 16:9 box-and-caption layouts).
+    retired_prompt_versions: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def require_default_preset(self) -> "VideoGenerationConfig":
         if self.default_preset not in self.presets:
             raise ValueError("video_generation.default_preset must name a configured preset")
+        retired = [name for name, preset in self.presets.items() if preset.prompt_version in self.retired_prompt_versions]
+        if retired:
+            raise ValueError(f"video_generation presets use a retired prompt version: {', '.join(retired)}")
         if len({track.name for track in self.music_catalog}) != len(self.music_catalog):
             raise ValueError("video_generation.music_catalog track names must be unique")
         return self
