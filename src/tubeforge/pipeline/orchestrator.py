@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, PublicationPreparationConfig, PublicationVerificationConfig, Settings, ShortsFinalRenderConfig, ShortsPreviewRenderConfig, SourceClipConfig, VoicePipelineConfig, YouTubePublishingConfig
 from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RemoteResourceMissingError, RepairableAlignmentResult, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
-from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobEventRepository, JobRepository, PipelineJob, PublicationRepository, SourceMedia, SourceMediaRepository
+from tubeforge.db.repositories import PAUSABLE_STATES, ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobEventRepository, JobRepository, PipelineJob, PublicationRepository, SourceMedia, SourceMediaRepository
 from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, ContentRequest, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, SourceReference, VideoMetadata, VoiceRequest, video_plan_from_package
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
@@ -32,7 +32,7 @@ from tubeforge.pipeline.music import MusicCatalog
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
 from tubeforge.pipeline.quality import validate_final_artifact
 from tubeforge.pipeline.storyboard import render_contact_sheets, storyboard_manifest
-from tubeforge.pipeline.scene_contracts import EXPLICIT_SCENE_LAYOUTS, ScriptBoundSceneContract, compile_scene_contract
+from tubeforge.pipeline.scene_contracts import EXPLICIT_SCENE_LAYOUTS, SceneContractDriftError, ScriptBoundSceneContract, compile_scene_contract
 from tubeforge.providers.media.local_graphics import storyboard_style_for
 from tubeforge.pipeline.visual_router import VisualRouter
 from tubeforge.pipeline.variants import plan_variants
@@ -102,6 +102,7 @@ class PipelineOrchestrator:
         self.visual_router = VisualRouter()
         self.music_catalog = music_catalog
         self.reference_config = ReferenceShortConfig()
+        self.retired_prompt_versions: frozenset[str] = frozenset()
 
     @classmethod
     def from_settings(cls, settings: Settings, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, external_operations: ExternalOperationRepository | None = None) -> "PipelineOrchestrator":
@@ -116,6 +117,7 @@ class PipelineOrchestrator:
             music_catalog=MusicCatalog(settings.pipeline.voice.artifact_root.parent / "music", settings.pipeline.video_generation.music_catalog, ffprobe=str(settings.pipeline.voice.ffprobe_executable)),
         )
         orchestrator.reference_config = settings.pipeline.reference_short
+        orchestrator.retired_prompt_versions = frozenset(settings.pipeline.video_generation.retired_prompt_versions)
         orchestrator.pixabay_config = settings.pipeline.pixabay
         orchestrator.capture_config = settings.pipeline.source_capture
         return orchestrator
@@ -157,7 +159,7 @@ class PipelineOrchestrator:
             if cancellation_requested is not None and cancellation_requested():
                 self._ensure_ownership(force=True)
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
-                self._update_state(job.id, cancelled.state, cancelled.resume_state)
+                self._update_state(job.id, cancelled.state, job.state if job.state in PAUSABLE_STATES else None)
                 return self.jobs.get(job.id)
             if job.state in {JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED}:
                 target = job.resume_state
@@ -188,7 +190,7 @@ class PipelineOrchestrator:
             except (PipelineCancellation, ProviderCancellation, AssetAcquisitionCancelled, PreviewRenderCancelled):
                 self._ensure_ownership(force=True)
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
-                self._update_state(job.id, cancelled.state, cancelled.resume_state)
+                self._update_state(job.id, cancelled.state, job.state if job.state in PAUSABLE_STATES else None)
                 return self.jobs.get(job.id)
             except (RetryableProviderError, ProviderValidationError, ProviderAuthenticationError, ValidationError) as error:
                 self._ensure_ownership(force=True)
@@ -204,6 +206,8 @@ class PipelineOrchestrator:
 
     def _run_stage(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None = None) -> None:
         if job.state is JobState.TOPIC_CREATED:
+            if job.request.production_mode != "source_clip" and job.request.prompt_version in self.retired_prompt_versions:
+                raise ProviderValidationError(f"the {job.request.prompt_version} video format is retired; create a new video with a current preset")
             self._transition(job, JobState.SOURCE_INSPECTING if job.request.production_mode == "source_clip" else JobState.CONTENT_GENERATING); return
         if job.state is JobState.SOURCE_INSPECTING:
             if not self.source_clips.enabled:
@@ -327,6 +331,9 @@ class PipelineOrchestrator:
                         Path(script_artifact.path).read_bytes(), Path(source_artifact.path).read_bytes(),
                         accepted_script_identity=script_gate_identity,
                     )
+                except SceneContractDriftError as error:
+                    # Deterministic from the approved script: a retry recompiles with current code instead of failing the job.
+                    raise RetryableProviderError(str(error)) from error
                 except ValueError as error:
                     raise ProviderValidationError(str(error)) from error
                 if scene_contract is None:
@@ -801,7 +808,7 @@ class PipelineOrchestrator:
     def _reference_assets(self, job: PipelineJob, package: ContentPackage, cancellation_requested=None) -> None:
         """Prepare optional real-imagery plates (never failing the job), then keep the contact sheet for review."""
         topic = package.reference_short
-        reference_short.write_options(self._reference_dir(job), show_sources=job.request.show_source_credit, watermark=job.request.channel_watermark)
+        reference_short.write_options(self._reference_dir(job), show_sources=job.request.show_source_credit, watermark=job.request.channel_watermark, mascot=job.request.show_mascot)
         plates = self._reference_plates(job, topic, cancellation_requested)
         directory = self._reference_dir(job) / "layout"
         for index, page in enumerate(reference_short.layout_review(topic, directory), 1):
@@ -1092,8 +1099,17 @@ class PipelineOrchestrator:
                 decision = self.approvals.approved(job.id, ApprovalGate.SCRIPT, reviewed_identity=content.checksum_sha256)
                 approved_identity = decision.reviewed_identity if decision else None
             try:
-                scene_contract = ScriptBoundSceneContract.model_validate_json(Path(contract_artifact.path).read_bytes())
-                scene_contract.validate_against(Path(content.path).read_bytes(), Path(source_artifact.path).read_bytes(), accepted_script_identity=approved_identity)
+                try:
+                    scene_contract = ScriptBoundSceneContract.model_validate_json(Path(contract_artifact.path).read_bytes())
+                    scene_contract.validate_against(Path(content.path).read_bytes(), Path(source_artifact.path).read_bytes(), accepted_script_identity=approved_identity)
+                except SceneContractDriftError:
+                    # The stored contract was compiled by older code; rebuild it from the exact approved script and retry the check once.
+                    scene_contract = compile_scene_contract(Path(content.path).read_bytes(), Path(source_artifact.path).read_bytes(), accepted_script_identity=approved_identity)
+                    if scene_contract is None: raise
+                    self._replace_json(job.id, JobState.ASSET_ACQUISITION, "scene_contract", scene_contract.model_dump(mode="json"))
+                    contract_artifact = self._required_artifact(job.id, JobState.ASSET_ACQUISITION, "scene_contract")
+            except SceneContractDriftError as error:
+                raise RetryableProviderError(str(error)) from error
             except ValueError as error:
                 raise ProviderValidationError(str(error)) from error
         segments = build_timeline(package, timing, assets, tolerance=renderer.config.sync_tolerance_seconds, scene_contract=scene_contract)

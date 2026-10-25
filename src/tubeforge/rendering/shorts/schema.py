@@ -155,7 +155,19 @@ class CTA(Scene):
         return self
 
 
-ShortScene = Annotated[Hook | BigStat | BeforeAfter | Flow | Checklist | Terminal | CTA, Field(discriminator="template")]
+class Loop(Hook):
+    """Closing scene that replays the hook's frame so the video loops; no follow or subscribe request anywhere on it."""
+    template: Literal["loop"]
+
+    @model_validator(mode="after")
+    def no_follow_request(self):
+        text = " ".join([self.vo, self.caption, *self.headline, *self.chips]).casefold()
+        if re.search(r"\b(follow|subscribe|subscribing|hit the bell|turn on notifications)\b", text):
+            raise ValueError("a loop scene must not ask viewers to follow or subscribe; the video simply loops")
+        return self
+
+
+ShortScene = Annotated[Hook | BigStat | BeforeAfter | Flow | Checklist | Terminal | CTA | Loop, Field(discriminator="template")]
 
 
 class ShortsTopic(StrictModel):
@@ -166,24 +178,24 @@ class ShortsTopic(StrictModel):
 
     @model_validator(mode="after")
     def complete_story(self):
-        if self.scenes[0].template != "hook" or self.scenes[-1].template != "cta":
-            raise ValueError("first scene must be hook and last scene must be CTA")
-        if any(s.template in {"hook", "cta"} for s in self.scenes[1:-1]):
-            raise ValueError("hook/CTA cannot replace a teaching scene")
+        if self.scenes[0].template != "hook" or self.scenes[-1].template not in {"cta", "loop"}:
+            raise ValueError("first scene must be hook and last scene must be the loop (or a legacy CTA)")
+        if any(s.template in {"hook", "cta", "loop"} for s in self.scenes[1:-1]):
+            raise ValueError("hook/loop/CTA cannot replace a teaching scene")
         ids = {s.source_id for s in self.sources}
         if len(ids) != len(self.sources) or len({s.scene_id for s in self.scenes}) != len(self.scenes):
             raise ValueError("scene and source identities must be unique")
         for number, scene in enumerate(self.scenes, 1):
             visual = scene.visual
-            if visual is not None and visual.kind in {"source", "code"} and scene.template in {"hook", "cta"}:
-                raise ValueError(f"scene {number}: only stock visuals may sit on the hook or CTA scene")
+            if visual is not None and visual.kind in {"source", "code"} and scene.template in {"hook", "cta", "loop"}:
+                raise ValueError(f"scene {number}: only stock visuals may sit on the hook, loop or CTA scene")
             if visual is not None and visual.kind == "source" and not scene.source_ids:
                 raise ValueError(f"scene {number}: a source screenshot needs the scene to cite a source")
             if not set(scene.source_ids) <= ids:
                 raise ValueError(f"scene {number} cites an unknown source")
-            if scene.template not in {"hook", "cta"} and not scene.source_ids:
+            if scene.template not in {"hook", "cta", "loop"} and not scene.source_ids:
                 raise ValueError(f"every teaching scene requires a source: scene {number} ({scene.template}) has none; "
-                                 "give it a factual claim with a source, or move pure opinion into the hook or CTA scene")
+                                 "give it a factual claim with a source, or move pure opinion into the hook or loop scene")
             count = (len(scene.nodes) if isinstance(scene, Flow) else len(scene.items) if isinstance(scene, Checklist)
                      else len(scene.lines) if isinstance(scene, Terminal) else 2 if isinstance(scene, (BigStat, BeforeAfter))
                      else len(scene.chips) if isinstance(scene, CTA) else 1)

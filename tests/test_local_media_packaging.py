@@ -50,7 +50,7 @@ def test_production_paths_are_not_tied_to_container_filesystem() -> None:
     assert piper["config_path"] == f'{piper["model_path"]}.json'
     assert piper["cache_root"] == "./data/cache/tts"
     kokoro = production["pipeline"]["kokoro"]
-    assert production["pipeline"]["voice_provider"] == "piper-http"
+    assert production["pipeline"]["voice_provider"] == "hybrid-http"
     assert kokoro["model_path"] == "./models/kokoro-v1.0.int8.onnx"
     assert kokoro["voices_path"] == "./models/voices-v1.0.bin"
     for section in (production["database"], production["pipeline"]["voice"], production["pipeline"]["media"]):

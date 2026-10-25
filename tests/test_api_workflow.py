@@ -567,3 +567,103 @@ def test_dashboard_removes_published_local_artifacts_without_losing_audit(tmp_pa
         assert client.get(f"/api/jobs/{job_id}").status_code == 200
         assert client.app.state.runtime.artifacts.list_for_job(job_id) == []
         assert client.get(f"/api/jobs/{job_id}/events").json()[-1]["event_type"] == "local_artifacts_removed"
+
+
+def test_failed_job_retry_creates_new_job_with_edited_request(tmp_path: Path) -> None:
+    database_path = tmp_path / "retry-new.db"
+    _migrate(database_path)
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"), auth=AuthConfig(enabled=True))
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("retry-operator", "correct-horse-battery-staple")
+        assert client.post("/login", json={"username": "retry-operator", "password": "correct-horse-battery-staple"}).status_code == 200
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+        base = ContentPackage.model_validate_json((Path(__file__).parent / "fixtures" / "production" / "docker_images_containers" / "content_package.json").read_bytes()).request
+        runtime.jobs.create("failed-one", base.model_copy(update={"topic": "Original topic"}))
+        runtime.jobs.create("busy-one", base.model_copy(update={"topic": "Still running"}))
+        assert client.post("/api/jobs/busy-one/retry", json={}).status_code == 409
+        runtime.jobs.update_state("failed-one", JobState.FAILED_EXHAUSTED, JobState.CONTENT_GENERATING, "script attempts exhausted")
+        listed = {item["id"]: item for item in client.get("/api/jobs").json()}
+        assert listed["failed-one"]["can_retry_as_new"] is True and listed["busy-one"]["can_retry_as_new"] is False
+        assert "Retry generation" in client.get("/").text
+        bad = client.post("/api/jobs/failed-one/retry", json={"request": {"topic": "x", "nonsense": 1}})
+        assert bad.status_code == 422 and "nonsense" in bad.json()["detail"]
+        edited = json.loads(runtime.jobs.get("failed-one").request.model_dump_json()) | {"topic": "Edited topic"}
+        created = client.post("/api/jobs/failed-one/retry", json={"request": edited})
+        assert created.status_code == 201 and created.json()["request_edited"] is True
+        new = runtime.jobs.get(created.json()["id"])
+        assert new.request.topic == "Edited topic" and new.state is JobState.TOPIC_CREATED
+        assert runtime.jobs.get("failed-one").state is JobState.FAILED_EXHAUSTED
+        same = client.post("/api/jobs/failed-one/retry", json={})
+        assert same.status_code == 201 and same.json()["request_edited"] is False
+
+
+def test_pause_parks_idle_and_running_jobs_and_resume_restores_the_stage(tmp_path: Path) -> None:
+    database_path = tmp_path / "pause.db"
+    _migrate(database_path)
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"), auth=AuthConfig(enabled=True))
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("pause-operator", "correct-horse-battery-staple")
+        assert client.post("/login", json={"username": "pause-operator", "password": "correct-horse-battery-staple"}).status_code == 200
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+        base = ContentPackage.model_validate_json((Path(__file__).parent / "fixtures" / "production" / "docker_images_containers" / "content_package.json").read_bytes()).request
+        runtime.jobs.create("idle-job", base)
+        runtime.jobs.create("done-job", base)
+        runtime.jobs.update_state("done-job", JobState.FAILED_EXHAUSTED, JobState.CONTENT_GENERATING, "x")
+        assert client.post("/api/jobs/done-job/pause").status_code == 409
+        listed = {item["id"]: item for item in client.get("/api/jobs").json()}
+        assert listed["idle-job"]["can_pause"] is True and listed["done-job"]["can_pause"] is False
+
+        assert client.post("/api/jobs/idle-job/pause").json() == {"status": "paused"}
+        paused = {item["id"]: item for item in client.get("/api/jobs").json()}["idle-job"]
+        assert paused["paused"] is True and paused["can_resume"] is True and paused["deletable"] is True
+        assert runtime.jobs.claim_oldest_eligible("w", now=datetime.now(UTC), lease_seconds=30) is None
+        assert client.post("/api/jobs/idle-job/resume").status_code == 200
+        assert runtime.jobs.get("idle-job").state is JobState.TOPIC_CREATED
+        assert client.post("/api/jobs/idle-job/resume").status_code == 409
+
+        claimed = runtime.jobs.claim_oldest_eligible("w", now=datetime.now(UTC), lease_seconds=300)
+        assert claimed is not None and claimed.id == "idle-job"
+        assert client.post("/api/jobs/idle-job/pause").json() == {"status": "pausing"}
+        assert runtime.jobs.get("idle-job").cancellation_requested_at is not None
+        assert client.delete("/api/jobs/idle-job").status_code == 409
+        assert client.post("/api/jobs/idle-job/resume").status_code == 409
+
+
+def test_source_card_scene_without_a_cited_claim_is_rejected_at_script_time() -> None:
+    from tubeforge.core.errors import ProviderValidationError
+    from tubeforge.providers.content.prompts import validate_video_package
+
+    package = ContentPackage.model_validate_json((Path(__file__).parent / "fixtures" / "production" / "docker_images_containers" / "content_package.json").read_bytes())
+    first = package.script_sections[0]
+    claims = tuple(claim.model_copy(update={"source_ids": ()}) if claim.claim_id in first.claim_ids else claim for claim in package.claims)
+    scenes = (package.scene_plans[0].model_copy(update={"visual_type": "source_card"}), *package.scene_plans[1:])
+    broken = package.model_copy(update={"claims": claims, "scene_plans": scenes})
+    with pytest.raises(ProviderValidationError, match="source_card scenes must narrate a claim that cites a source"):
+        validate_video_package(broken, broken.request, provider_name="Claude")
+
+
+def test_retired_formats_cannot_start_from_studio_api_or_retry(tmp_path: Path) -> None:
+    from tubeforge.core.config import PipelineConfig, VideoGenerationConfig
+
+    database_path = tmp_path / "retired.db"
+    _migrate(database_path)
+    generation = VideoGenerationConfig(default_preset="legacy", presets={"legacy": VideoPresetConfig()}, retired_prompt_versions=("m6-content-v7",))
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"), auth=AuthConfig(enabled=True), pipeline=PipelineConfig(video_generation=generation))
+    with pytest.raises(ValueError, match="retired prompt version"):
+        VideoGenerationConfig(default_preset="old", presets={"old": VideoPresetConfig(prompt_version="m6-content-v7")}, retired_prompt_versions=("m6-content-v7",))
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("retired-operator", "correct-horse-battery-staple")
+        assert client.post("/login", json={"username": "retired-operator", "password": "correct-horse-battery-staple"}).status_code == 200
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+        brief = client.post("/api/videos", json={"title": "Old format", "notes": ["one", "two"]})
+        assert brief.status_code == 422 and "retired" in brief.json()["detail"]
+        base = ContentPackage.model_validate_json((Path(__file__).parent / "fixtures" / "production" / "docker_images_containers" / "content_package.json").read_bytes()).request
+        legacy = base.model_copy(update={"prompt_version": "m6-content-v7"})
+        assert client.post("/api/jobs", json=json.loads(legacy.model_dump_json())).status_code == 422
+        runtime.jobs.create("legacy-failed", legacy)
+        runtime.jobs.update_state("legacy-failed", JobState.FAILED_VALIDATION, JobState.PREVIEW_RENDERING, "x")
+        assert client.post("/api/jobs/legacy-failed/retry", json={}).status_code == 422
+        assert runtime.jobs.get("legacy-failed").state is JobState.FAILED_VALIDATION

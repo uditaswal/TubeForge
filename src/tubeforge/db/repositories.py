@@ -32,6 +32,15 @@ class PipelineJob:
     created_at: datetime | None = None
 
 
+# Stages a worker may stop at between checkpoints; approval waits, failures and anything near a publish side effect are excluded.
+PAUSABLE_STATES = frozenset(JobState) - frozenset({
+    JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.PUBLICATION_APPROVAL_REQUIRED, JobState.PUBLICATION_READY,
+    JobState.CANCELLED, JobState.FAILED_VALIDATION, JobState.FAILED_RETRYABLE, JobState.FAILED_EXHAUSTED, JobState.AUTH_REQUIRED,
+    JobState.PUBLICATION_VERIFICATION_PENDING, JobState.PUBLISHING, JobState.PUBLICATION_RECONCILING, JobState.PREVIEW_APPROVAL_REQUIRED,
+    JobState.PRIVATE_UPLOAD_READY, JobState.PRIVATE_UPLOADING, JobState.PUBLISH_APPROVAL_REQUIRED, JobState.PUBLISHED,
+})
+
+
 @dataclass(frozen=True, slots=True)
 class Topic:
     id: str
@@ -364,6 +373,35 @@ class JobRepository:
     def release_claim(self, job_id: str, worker_id: str) -> None:
         with self._session_factory.begin() as session:
             session.execute(update(PipelineJobRecord).where(PipelineJobRecord.id == job_id, PipelineJobRecord.claim_owner == worker_id).values(claim_owner=None, claimed_at=None, heartbeat_at=None, lease_expires_at=None))
+
+    def pause(self, job_id: str, *, now: datetime) -> str:
+        """Pause at the next checkpoint: "paused" when idle, "pausing" when a worker holds it and will park it itself."""
+        with self._session_factory.begin() as session:
+            record = session.get(PipelineJobRecord, job_id)
+            if record is None:
+                raise KeyError(f"job not found: {job_id}")
+            state = JobState(record.state)
+            if state not in PAUSABLE_STATES:
+                raise ValueError("this job is not in a stage that can be paused")
+            if record.claim_owner is None:
+                record.state, record.resume_state, record.failure_message = JobState.CANCELLED.value, state.value, None
+                record.next_retry_at, record.updated_at = None, now
+                return "paused"
+            record.cancellation_requested_at, record.updated_at = now, now
+            return "pausing"
+
+    def resume_paused(self, job_id: str) -> PipelineJob:
+        """Return a parked job to the stage it stopped in; that stage restarts from its saved checkpoints."""
+        with self._session_factory.begin() as session:
+            record = session.get(PipelineJobRecord, job_id)
+            if record is None:
+                raise KeyError(f"job not found: {job_id}")
+            if record.state != JobState.CANCELLED.value or record.resume_state is None or record.claim_owner is not None:
+                raise ValueError("only a paused job that no worker is stopping can be resumed")
+            record.state, record.resume_state, record.failure_message = record.resume_state, None, None
+            record.cancellation_requested_at, record.next_retry_at, record.updated_at = None, None, datetime.now(UTC)
+            session.flush()
+            return _job_from_record(record)
 
     def request_cancellation(self, job_id: str, *, now: datetime) -> None:
         with self._session_factory.begin() as session:

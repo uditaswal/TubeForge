@@ -1,4 +1,4 @@
-"""Deterministic script-craft checks for reference Shorts (anti-slop, payoff position, comment CTA).
+"""Deterministic script-craft checks for reference Shorts (anti-slop, payoff position, loop ending).
 
 These are repairable writer errors, not quality scores: each problem names what to change so the
 script writer can fix it in its repair loop. They never rewrite creative text.
@@ -20,7 +20,6 @@ BANNED_PHRASES = (
 )
 # Written forms the voice reads badly: currency symbols, thousands commas, "3.4x", unit abbreviations, operators.
 SPEECH_UNSAFE = re.compile(r"[$€£¥&@#=+<>/\\]|\d,\d{3}|\d\s?[x×](?![\w])|\b\d+(?:\.\d+)?\s?(?:KB|MB|GB|TB|ms|kHz|MHz|GHz|fps)\b", re.I)
-COMMENT_PROMPT = re.compile(r"\?|\b(comment|tell me|defend|prove me wrong|fight me|change my mind|disagree|agree)\b", re.I)
 STOPWORDS = frozenset("a an the and or but so of to in on for with by is are was were be it its this that your you we our at as from".split())
 
 
@@ -54,6 +53,28 @@ def visual_problems(package) -> list[str]:
             excerpts = " ".join(_norm(sources[s].excerpt) for s in scene.source_ids if s in sources)
             if _norm(visual.quote) not in excerpts:
                 problems.append(f"scene {index} visual quote is not an exact passage of its cited source excerpt; copy the words verbatim")
+    return problems
+
+
+GREETING = re.compile(r"^\W*(hi|hello|hey|yo|welcome|what'?s up|good (morning|evening)|in this video|today (we|i)|so today|guys)\b", re.I)
+OPEN_ENDING = re.compile(r"[.!?\u2026]\W*$")
+
+
+def loop_problems(package) -> list[str]:
+    """The video ends by looping into its own first sentence: no follow request, an open last sentence, a matching last frame."""
+    scenes = package.reference_short.scenes
+    first, last = scenes[0], scenes[-1]
+    problems: list[str] = []
+    if GREETING.search(first.vo):
+        problems.append(f"scene 1 opens with a greeting or channel intro ({first.vo.split()[0]!r}); open on the concrete fact or stake itself")
+    if last.template != "loop":
+        problems.append("the final scene must use template loop (no follow or subscribe request); the video ends by looping back into scene 1")
+        return problems
+    if OPEN_ENDING.search(last.vo.strip()):
+        problems.append("the loop scene's narration must be an open-ended sentence with no final full stop, question mark or exclamation mark, "
+                        "so it hands straight into scene 1's first words")
+    if (tuple(last.headline), tuple(last.chips), last.icon, last.logo) != (tuple(first.headline), tuple(first.chips), first.icon, first.logo):
+        problems.append("the loop scene must copy scene 1's headline lines, chips, icon and logo exactly so the last frame equals the first frame")
     return problems
 
 
@@ -126,12 +147,7 @@ def craft_problems(package) -> list[str]:
     if stat_positions and stat_positions[-1] < 2:
         problems.append(f"the big_stat payoff is scene {stat_positions[-1] + 1} of {len(scenes)}; move the strongest number/twist "
                         "to scene 3 or later so the hook's question stays open longer")
-    # Comment CTA: the closing line must provoke a reply, not only ask for a follow.
-    final = scenes[-1].vo
-    before_follow = re.split(r"(?i)\bfollow\b", final, maxsplit=1)[0]
-    if not COMMENT_PROMPT.search(before_follow):
-        problems.append("the CTA scene must open with a one-sided challenge viewers can answer in the comments "
-                        "(a question or 'tell me I'm wrong') before the follow request")
+    problems += loop_problems(package)
     problems += visual_problems(package)
     problems += thumbnail_problems(package)
     # One copy of the words: a heading that just repeats the narration adds nothing to the frame.

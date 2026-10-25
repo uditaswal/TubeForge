@@ -22,6 +22,7 @@ Return a review table: timecode/scene, evidence inspected, expected behavior, ob
 
 Run `python .agents/skills/om-video-quality/qa_check.py data/artifacts/<job_id>` first. It prints PASS/WARN/FAIL for the failures we have already hit; a FAIL blocks acceptance, a WARN needs a human look. Passing it is not creative acceptance: still view the contact sheet and listen.
 
+0. **Loop, no follow line.** Reference Shorts end with the `loop` template: open-ended last sentence (no final full stop) that continues into scene 1's first words, last frame identical to the first, no follow/subscribe request anywhere. No greeting openers.
 1. **Duration vs voice.** The writer's word budget is spoken words ÷ speaking rate, and the rate depends on the voice (Kokoro ≈ 2.3 words/s, Piper ≈ 2.7). 60 s ≈ 140 words, not 190. Landscape jobs must land within ±40 % of the target; Shorts within 25–45 s. If a script is long, shorten the script; do not widen the gate again.
 2. **Card text length.** Animated-card headings must be ≤ 30 characters (a label, never a sentence) and elements ≤ 32. Long hook sentences belong in the narration, not the heading.
 3. **No repeated words on screen.** The thumbnail headline, the on-frame headline and the narration must not say the same thing twice. Thumbnail text is 2–3 words (or a short question plus payoff) and the thumbnail's video frame comes from after the opening hook.

@@ -29,7 +29,7 @@ def legacy_cli_config(**overrides) -> CodexProviderConfig:
 
 
 def package(value: ContentRequest) -> dict[str, object]:
-    sections = [{"section_id": f"section-{index}", "narration": f"Rain scene {index} explains how clouds produce weather, using clear sourced details for curious viewers today.", "scene_id": f"scene-{index}", "claim_ids": ["claim-1"], "contains_factual_claims": True} for index in range(1, 7)]
+    sections = [{"section_id": f"section-{index}", "narration": f"Rain scene {index} explains how clouds produce weather, using clear sourced details for curious viewers who want the real story behind every storm today.", "scene_id": f"scene-{index}", "claim_ids": ["claim-1"], "contains_factual_claims": True} for index in range(1, 7)]
     scenes = [{"scene_id": f"scene-{index}", "visual_type": "illustration", "search_queries": [f"rain clouds {index}"], "fallback_visual": "text_card"} for index in range(1, 7)]
     return {"schema_version": "1.0", "request": value.model_dump(mode="json"), "claims": [{"claim_id": "claim-1", "text": "Rain falls from clouds.", "source_ids": ["source-1"], "confidence": "high", "review_status": "verified", "human_review_required": False}], "script_sections": sections, "scene_plans": scenes, "metadata": {"title_options": ["Rain"], "description": "A cited explanation."}, "thumbnail_brief": {"text_options": ["RAIN"], "visual_direction": "Blue rain clouds", "accessibility_description": "Rain clouds"}, "clip_candidates": []}
 
@@ -194,8 +194,8 @@ def test_prompt_is_versioned_and_source_bounded() -> None:
 def test_widescreen_prompt_states_the_enforced_narration_budget() -> None:
     value = request()
     prompt = build_content_prompt(value, template_version="m6-content-v4", max_chars=60_000)
-    assert "90 to 240 words" in prompt
-    assert "about 162 spoken words" in prompt
+    assert "102 to 180 words" in prompt
+    assert "about 144 spoken words" in prompt
     assert "Count narration only" in prompt
 
 

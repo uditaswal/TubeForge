@@ -62,6 +62,9 @@ class HostRunnerContentProvider:
             hashes = preflight(template_version=request.prompt_version)
             try:
                 readiness = HostRunnerResponse.model_validate_json(self._transport(str(self.config.socket_path), GenerateShortsScriptRequest(operation="PreflightContentV1", request=host_request).model_dump_json().encode(), self.config.socket_timeout_seconds))
+            except OSError as error:
+                # The runner socket is down or restarting (connection refused, missing socket, timeout): wait and retry, don't fail the job.
+                raise RetryableProviderError(f"Script runner is not reachable ({error}); retrying automatically") from error
             except Exception as error:
                 raise ProviderValidationError(f"Host skill preflight failed before invocation: {error}") from error
             if not readiness.ok or readiness.result is None or readiness.result.provenance.get("resource_hashes") != hashes:
