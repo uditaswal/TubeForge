@@ -92,6 +92,8 @@ issues.md
 !tests/fixtures/**/*.wav
 !examples/**/*.mp4
 !examples/**/*.wav
+# Licensed, vendored sound-effect library (Pixabay Content License; see assets/sfx/LICENSE-pixabay.md)
+!src/tubeforge/assets/sfx/*.mp3
 
 # --- Editors and OS ---
 .DS_Store

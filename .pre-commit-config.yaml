@@ -27,7 +27,7 @@ repos:
         language: fail
         entry: "Generated/runtime/secret file staged; add it to .gitignore instead"
         files: '(\.(log|db|sqlite3?|onnx|safetensors|gguf|mp4|mov|wav|mp3)$|(^|/)\.env($|\.)|^(data|models|artifacts|autonomous_logs)/|AUTONOMOUS_PROGRESS\.md)'
-        exclude: '^(tests/fixtures|examples)/|\.env\.example$'
+        exclude: '^(tests/fixtures|examples|src/tubeforge/assets/sfx)/|\.env\.example$'
       - id: no-ai-attribution
         name: reject AI attribution trailers in commit messages
         language: pygrep

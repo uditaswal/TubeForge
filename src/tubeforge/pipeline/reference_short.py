@@ -26,7 +26,7 @@ from tubeforge.rendering.shorts.review import write_layout_review
 from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
-RENDERER_VERSION = "reference-short-v1/render-1"
+RENDERER_VERSION = "reference-short-v1/render-2"  # bumped: mood-varied music + caused SFX (26 Oct)
 
 
 def is_reference(package: ContentPackage) -> bool:
@@ -133,8 +133,10 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
            draft: bool, cancelled: Callable[[], bool]) -> dict:
     """Master audio then encode; returns the library's QA report (passed)."""
     starts = tuple(t.start for t in timeline.timings)
+    templates = tuple(scene.template for scene in timeline.topic.scenes)
     try:
-        mix = master(directory / "narration.wav", starts, directory / "mix", cancelled=cancelled,
+        mix = master(directory / "narration.wav", starts, directory / "mix",
+                     templates=templates, title=timeline.topic.title, cancelled=cancelled,
                      ffmpeg=config.ffmpeg_executable)
         narration_health = json.loads((directory / "mix" / "audio-provenance.json").read_text())["narration_health"]
         return encode(timeline, mix, destination, draft=draft, cancelled=cancelled,

@@ -25,6 +25,7 @@ Agents: start with [HANDOFF.md](HANDOFF.md) and [AGENTS.md](../AGENTS.md); open 
 - [video-quality/milestones.md](video-quality/milestones.md) — Codex milestones M1–M4 and status
 - [video-quality/evidence.md](video-quality/evidence.md) — M1–M3 acceptance evidence
 - [video-quality/plan-m0-m9.md](video-quality/plan-m0-m9.md) — broader M0–M9 plan from reference videos
+- [video-quality/av-quality-implementation-log.md](video-quality/av-quality-implementation-log.md) — phases 0–2 of the 26 Oct A/V review: HyperFrames host benchmark, mood-varied music + licensed SFX, Kokoro fp32 A/B
 
 ## Reviews (point-in-time, read on demand)
 - [reviews/2026-10-21-end-to-end.md](reviews/2026-10-21-end-to-end.md), [reviews/2026-10-22-content-quality.md](reviews/2026-10-22-content-quality.md), [reviews/2026-10-23-reference-codebases.md](reviews/2026-10-23-reference-codebases.md)

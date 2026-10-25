@@ -1,0 +1,135 @@
+{
+  "chime": {
+    "description": "Soft melodic chime \u2014 gentle positive beat: success/confirmation or a lighthearted transition. Sync to the visual moment.",
+    "duration_s": 2.5,
+    "file": "chime.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "click": {
+    "description": "Crisp UI click \u2014 button press, toggle, selection. Short accent, sync exactly to the on-screen action.",
+    "duration_s": 0.37,
+    "file": "click.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "click-soft": {
+    "description": "Quiet short click \u2014 low-key UI tap / soft selection. Short accent, sync exactly to the on-screen action.",
+    "duration_s": 0.37,
+    "file": "click-soft.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "error": {
+    "description": "Negative / error tone \u2014 failure state, a 'wrong' beat, or a glitchy interruption.",
+    "duration_s": 1.62,
+    "file": "error.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "glitch-1": {
+    "description": "Punchy digital glitch \u2014 hard-cut accent or sudden reveal. Trigger on the hit; let the decay bleed into the next shot (J-cut).",
+    "duration_s": 2.64,
+    "file": "glitch-1.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "glitch-2": {
+    "description": "Harsh, longer glitch \u2014 chaotic / jarring transition or a distorted reveal.",
+    "duration_s": 3.5,
+    "file": "glitch-2.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "glitch-3": {
+    "description": "Low-key glitch texture \u2014 subtle digital shift, minimal transition that sits under other audio.",
+    "duration_s": 3.1,
+    "file": "glitch-3.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "impact-bass-1": {
+    "description": "Bass impact hit \u2014 logo/hero snap, headline slam. Trigger on the visual landing; decay carries into the next shot (J-cut).",
+    "duration_s": 2.12,
+    "file": "impact-bass-1.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "impact-bass-2": {
+    "description": "Bass impact with a short swell \u2014 brief anticipation then a deep hit. Place so the peak lands on the reveal.",
+    "duration_s": 2.59,
+    "file": "impact-bass-2.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "key-press": {
+    "description": "Single key press \u2014 one keystroke / terminal-input beat. Short accent, sync to the typed character.",
+    "duration_s": 0.4,
+    "file": "key-press.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "notification": {
+    "description": "Notification chime \u2014 alert, message-in, toast/badge appears. Sync to the element entering.",
+    "duration_s": 2.46,
+    "file": "notification.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "ping": {
+    "description": "Sharp electronic ping \u2014 punchy accent on a key reveal or data point. Sync to the beat.",
+    "duration_s": 1.32,
+    "file": "ping.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "pop": {
+    "description": "Quick pop \u2014 element appear/spawn, chip/tag/badge in. Small precise accent, sync to the pop-in.",
+    "duration_s": 0.72,
+    "file": "pop.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "riser": {
+    "description": "Long cinematic riser (~10s build, peak at the end). Trigger at (climax_time \u2212 10.03s) so it crests exactly on the reveal.",
+    "duration_s": 10.03,
+    "file": "riser.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "sparkle": {
+    "description": "Bright sparkle / shimmer \u2014 magical reveal or 'shine' highlight on a hero element. Sync to the highlight.",
+    "duration_s": 1.8,
+    "file": "sparkle.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "typing": {
+    "description": "Typing burst (~1.5s of keys) \u2014 keyboard / code typing reveal, text-being-typed beat. Start as the text begins typing.",
+    "duration_s": 1.5,
+    "file": "typing.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "whoosh": {
+    "description": "Punchy whoosh/impact \u2014 fast reveal or hard transition accent. Sync to the motion.",
+    "duration_s": 0.57,
+    "file": "whoosh.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "whoosh-cinematic": {
+    "description": "Cinematic whoosh build (~5.5s) \u2014 sweeping scene transition. Align so the swell peaks on the cut.",
+    "duration_s": 5.54,
+    "file": "whoosh-cinematic.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  },
+  "whoosh-short": {
+    "description": "Short whoosh \u2014 quick swipe/slide accent, fast element move, snappy transition. Sync to the motion.",
+    "duration_s": 0.57,
+    "file": "whoosh-short.mp3",
+    "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 free for commercial use, no attribution required",
+    "source": "Pixabay (https://pixabay.com/sound-effects/)"
+  }
+}
