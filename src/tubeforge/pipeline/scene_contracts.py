@@ -50,6 +50,10 @@ def _scene_heading(plan, layout: SceneLayout) -> str:
     return plan.on_screen_text or plan.visual_subject or plan.search_queries[0]
 
 
+class SceneContractDriftError(ValueError):
+    """A stored or compiled contract no longer matches the accepted ScenePlan; it can be recompiled from the approved script."""
+
+
 class SceneContractRow(DomainModel):
     scene_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     layout: SceneLayout
@@ -126,13 +130,13 @@ class ScriptBoundSceneContract(DomainModel):
                     or row.command != expected_command
                     or row.display_elements != plan.visual_elements
                 ):
-                    raise ValueError(f"scene {row.scene_id} visuals differ from the accepted scene plan")
+                    raise SceneContractDriftError(f"scene {row.scene_id} visuals differ from the accepted scene plan")
             if row.terminal_cues != approved_plans[row.scene_id].terminal_cues:
-                raise ValueError(f"scene {row.scene_id} reveal cues differ from the accepted script revision")
+                raise SceneContractDriftError(f"scene {row.scene_id} reveal cues differ from the accepted script revision")
             if row.card_cues != approved_plans[row.scene_id].card_cues:
-                raise ValueError(f"scene {row.scene_id} card cues differ from the accepted script revision")
+                raise SceneContractDriftError(f"scene {row.scene_id} card cues differ from the accepted script revision")
             if row.teaching_cues != approved_plans[row.scene_id].teaching_cues:
-                raise ValueError(f"scene {row.scene_id} teaching cues differ from the accepted script revision")
+                raise SceneContractDriftError(f"scene {row.scene_id} teaching cues differ from the accepted script revision")
             cited = {source_id for claim_id in section.claim_ids for source_id in claims[claim_id].source_ids}
             if cited and not row.source_ids:
                 raise ValueError(f"scene {row.scene_id} omits its narrated claim sources")

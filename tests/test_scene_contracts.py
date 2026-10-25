@@ -16,7 +16,7 @@ from tubeforge.domain.contracts import CardRevealCues, ContentPackage, ContentRe
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import scene_request
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
-from tubeforge.pipeline.scene_contracts import SceneContractRow, ScriptBoundSceneContract, compile_scene_contract, scene_media_request
+from tubeforge.pipeline.scene_contracts import SceneContractDriftError, SceneContractRow, ScriptBoundSceneContract, compile_scene_contract, scene_media_request
 from tubeforge.providers.fake import FakePublisher, FakeVoiceProvider
 from tubeforge.providers.media.local_graphics import LocalMotionGraphicsProvider, NEW_LAYOUT_STYLE_VERSION, STYLE_VERSION, _fit_heading, _terminal_outputs, storyboard_style_for
 from tubeforge.api.scene_ui import SCENE_CONTROLS
@@ -337,7 +337,7 @@ def test_explicit_contract_visual_fields_must_match_exact_approved_scene_plan() 
     contract = compile_scene_contract(package_bytes, packet_bytes, accepted_script_identity=identity)
     assert contract is not None
     row = contract.scenes[0]
-    with pytest.raises(ValueError, match="visuals differ from the accepted scene plan"):
+    with pytest.raises(SceneContractDriftError, match="visuals differ from the accepted scene plan"):
         contract.model_copy(update={"scenes": (row.model_copy(update={"layout": "flow_diagram"}), *contract.scenes[1:])}).validate_against(
             package_bytes, packet_bytes, accepted_script_identity=identity,
         )

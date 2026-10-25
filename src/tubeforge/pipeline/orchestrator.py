@@ -32,7 +32,7 @@ from tubeforge.pipeline.music import MusicCatalog
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
 from tubeforge.pipeline.quality import validate_final_artifact
 from tubeforge.pipeline.storyboard import render_contact_sheets, storyboard_manifest
-from tubeforge.pipeline.scene_contracts import EXPLICIT_SCENE_LAYOUTS, ScriptBoundSceneContract, compile_scene_contract
+from tubeforge.pipeline.scene_contracts import EXPLICIT_SCENE_LAYOUTS, SceneContractDriftError, ScriptBoundSceneContract, compile_scene_contract
 from tubeforge.providers.media.local_graphics import storyboard_style_for
 from tubeforge.pipeline.visual_router import VisualRouter
 from tubeforge.pipeline.variants import plan_variants
@@ -327,6 +327,9 @@ class PipelineOrchestrator:
                         Path(script_artifact.path).read_bytes(), Path(source_artifact.path).read_bytes(),
                         accepted_script_identity=script_gate_identity,
                     )
+                except SceneContractDriftError as error:
+                    # Deterministic from the approved script: a retry recompiles with current code instead of failing the job.
+                    raise RetryableProviderError(str(error)) from error
                 except ValueError as error:
                     raise ProviderValidationError(str(error)) from error
                 if scene_contract is None:
@@ -1092,8 +1095,17 @@ class PipelineOrchestrator:
                 decision = self.approvals.approved(job.id, ApprovalGate.SCRIPT, reviewed_identity=content.checksum_sha256)
                 approved_identity = decision.reviewed_identity if decision else None
             try:
-                scene_contract = ScriptBoundSceneContract.model_validate_json(Path(contract_artifact.path).read_bytes())
-                scene_contract.validate_against(Path(content.path).read_bytes(), Path(source_artifact.path).read_bytes(), accepted_script_identity=approved_identity)
+                try:
+                    scene_contract = ScriptBoundSceneContract.model_validate_json(Path(contract_artifact.path).read_bytes())
+                    scene_contract.validate_against(Path(content.path).read_bytes(), Path(source_artifact.path).read_bytes(), accepted_script_identity=approved_identity)
+                except SceneContractDriftError:
+                    # The stored contract was compiled by older code; rebuild it from the exact approved script and retry the check once.
+                    scene_contract = compile_scene_contract(Path(content.path).read_bytes(), Path(source_artifact.path).read_bytes(), accepted_script_identity=approved_identity)
+                    if scene_contract is None: raise
+                    self._replace_json(job.id, JobState.ASSET_ACQUISITION, "scene_contract", scene_contract.model_dump(mode="json"))
+                    contract_artifact = self._required_artifact(job.id, JobState.ASSET_ACQUISITION, "scene_contract")
+            except SceneContractDriftError as error:
+                raise RetryableProviderError(str(error)) from error
             except ValueError as error:
                 raise ProviderValidationError(str(error)) from error
         segments = build_timeline(package, timing, assets, tolerance=renderer.config.sync_tolerance_seconds, scene_contract=scene_contract)
