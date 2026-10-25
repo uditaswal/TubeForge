@@ -569,7 +569,7 @@ repairs a failed domain validation once (each call counts against the limit). Th
 binary is resolved from `TUBEFORGE_CLAUDE_BIN`, `PATH`, or the VS Code extension.
 
 **Reference Shorts** (`reference-short` preset, prompt `m6-content-v8`): 9:16,
-6–16 scenes (scaled to length), about 1.9–2.15 narration words per target second, 30–90 seconds (default 60, 25–90 enforced by the renderer). The writer returns only semantic scene
+6–20 scenes (scaled to length), about 2.5–2.85 narration words per target second (measured speech rate ~2.9 words/s), 30–90 seconds (default 60, 25–90 enforced by the renderer). The writer returns only semantic scene
 JSON (template, text, optional `icon` from a fixed set, reveal anchors). The shared
 `rendering/shorts` library owns all geometry, Kokoro speech + Whisper forced alignment,
 motion (entrances, count-ups, scene transitions, push-in, moving background), audio

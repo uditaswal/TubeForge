@@ -180,7 +180,7 @@ class ShortsTopic(StrictModel):
     schema_version: Literal["reference-short-v1"] = "reference-short-v1"
     title: str = Field(min_length=1, max_length=120)
     sources: tuple[Source, ...] = Field(min_length=1, max_length=8)
-    scenes: tuple[ShortScene, ...] = Field(min_length=6, max_length=16)
+    scenes: tuple[ShortScene, ...] = Field(min_length=6, max_length=20)
 
     @model_validator(mode="after")
     def complete_story(self):

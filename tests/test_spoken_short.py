@@ -75,3 +75,12 @@ def test_production_config_enables_the_operator_heard_speech_profile():
     raw = yaml.safe_load((Path(__file__).resolve().parents[1] / "config" / "production.yaml").read_text())
     short = ReferenceShortConfig.model_validate(raw["pipeline"]["reference_short"])
     assert (short.spoken_profile, short.speech_group_size, short.voice_processing) == ("spoken-v1", 2, "gentle-v1")
+
+
+def test_overlap_alignment_repair_makes_word_times_monotonic_and_inside_the_phrase():
+    from tubeforge.pipeline.alignment import _regularize_overlap
+    spoken = [("a", 0.0, 0.0, 1.0), ("b", 0.05, 0.3, 1.0), ("c", 0.28, 0.5, 1.0), ("d", 0.45, 2.04, 1.0)]
+    fixed = _regularize_overlap(spoken, 2.0)
+    assert all(end - start >= 0.0199 for _, start, end, _ in fixed)
+    assert all(fixed[i][2] <= fixed[i + 1][1] + 1e-9 for i in range(len(fixed) - 1))
+    assert fixed[0][1] >= 0 and fixed[-1][2] <= 2.0

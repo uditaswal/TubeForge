@@ -167,6 +167,28 @@ def map_spoken_words(
     return tuple(result)
 
 
+def _regularize_overlap(spoken, phrase_seconds: float, minimum: float = 0.02):
+    """Make the overlap-decoded words monotonic, at least ``minimum`` long and inside the phrase.
+
+    The overlapped clause windows can report the same boundary word twice or push the last word a few
+    hundredths past the audio; those are decoder artefacts, not different speech, so only the times move.
+    """
+    words = [list(item) for item in spoken]
+    previous = 0.0
+    for item in words:
+        item[1] = max(item[1], previous)
+        item[2] = max(item[2], item[1] + minimum)
+        previous = item[2]
+    limit = phrase_seconds
+    for item in reversed(words):
+        item[2] = min(item[2], limit)
+        item[1] = min(item[1], item[2] - minimum)
+        limit = item[1]
+    if words and words[0][1] < 0:
+        raise ProviderValidationError("audio-grounded alignment has no room for the recognized words")
+    return [tuple(item) for item in words]
+
+
 def alignment_model_sha256(model_path: Path) -> str:
     """Hash the exact local model, configuration, vocabulary and tokenizer."""
     digest = hashlib.sha256()
@@ -292,6 +314,8 @@ class LocalWhisperDTWAligner:
             raise RetryableProviderError("audio-grounded alignment model execution failed") from error
         except Exception as error:
             raise ProviderValidationError("audio-grounded alignment execution failed") from error
+        if configuration == "normalized-overlap-v1":
+            spoken = _regularize_overlap(spoken, phrase_end_seconds - phrase_start_seconds)
         if configuration == "primary" and any(end <= start for _, start, end, _ in spoken):
             normalized = lambda value: re.sub(r"[^\w]", "", value.casefold(), flags=re.UNICODE)
             approved = tuple(_WORD.findall(text))

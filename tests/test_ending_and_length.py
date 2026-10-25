@@ -47,9 +47,10 @@ def test_reference_shorts_accept_up_to_ninety_seconds_and_no_more():
 
 def test_word_budget_scales_with_the_target_and_stays_inside_the_limits():
     short, long = reference_word_budget(40), reference_word_budget(90)
-    assert (short["aim_low"], short["aim_high"]) == (76, 86)
-    assert long["aim_low"] > 160 and long["max"] <= 205
-    assert long["scenes_high"] <= 16 and short["scenes_low"] >= 6
+    assert (short["aim_low"], short["aim_high"]) == (100, 114)
+    assert long["aim_low"] > 200 and long["max"] <= 270
+    assert long["scenes_high"] <= 20 and short["scenes_low"] >= 6
+    assert long["aim_high"] / long["scenes_low"] <= 15 + 1  # 8-15 words per scene stays achievable
     low, high = narration_word_limits(request(60))
     assert low < reference_word_budget(60)["aim_low"] < reference_word_budget(60)["aim_high"] < high
 
@@ -66,11 +67,11 @@ def test_prompt_states_the_target_length_and_the_chosen_ending():
 def test_schema_takes_sixteen_scenes_and_a_comment_prompt_cta():
     data = debate_data()
     middle = data["scenes"][1:-1]
-    for index in range(8):
+    for index in range(13):
         extra = copy.deepcopy(middle[index % len(middle)])
         extra["scene_id"] = f"extra-{index}"
         data["scenes"].insert(-1, extra)
-    assert len(data["scenes"]) == 15 and ShortsTopic.model_validate(data)
+    assert len(data["scenes"]) == 20 and ShortsTopic.model_validate(data)
     bad = debate_data()
     bad["scenes"][-1].update(headline="Buy it now", vo="Buy it now and test each idea yourself.")
     with pytest.raises(ValidationError):

@@ -122,12 +122,12 @@ def incomplete_sections(package: ContentPackage) -> list[str]:
 
 
 def reference_word_budget(target_seconds: int) -> dict[str, int]:
-    """Words and scene counts for a reference Short of ``target_seconds`` (the voice plus tails run ~2.1-2.4 words/s)."""
-    aim_low, aim_high = round(target_seconds * 1.9), round(target_seconds * 2.15)
-    scenes_low = max(6, round(aim_low / 13))
-    return {"aim_low": aim_low, "aim_high": aim_high, "max": round(target_seconds * 2.25),
-            "floor": round(target_seconds * 1.3), "ceiling": round(target_seconds * 2.6),
-            "scenes_low": scenes_low, "scenes_high": min(16, max(8, scenes_low + 2))}
+    """Words and scene counts for a reference Short of ``target_seconds`` (measured: Kokoro at speed 1.15 with grouped speech and compressed pauses runs ~2.9-3.0 words/s overall)."""
+    aim_low, aim_high = round(target_seconds * 2.5), round(target_seconds * 2.85)
+    scenes_low = max(6, round(aim_low / 14))
+    return {"aim_low": aim_low, "aim_high": aim_high, "max": round(target_seconds * 2.95),
+            "floor": round(target_seconds * 1.5), "ceiling": round(target_seconds * 3.3),
+            "scenes_low": scenes_low, "scenes_high": min(20, max(8, scenes_low + 3))}
 
 
 def narration_word_limits(request: ContentRequest) -> tuple[int, int]:
