@@ -197,6 +197,7 @@ def test_diagnostics_survive_worker_restart_and_cancel_without_lease_leak(pipeli
     runner.jobs.request_cancellation("cancelled-diagnostic", now=datetime.now(UTC))
     cancelled = restarted.run_once()
     assert cancelled is not None and cancelled.state is JobState.CANCELLED
+    assert runner.jobs.get("cancelled-diagnostic").resume_state is JobState.TOPIC_CREATED  # parked, so Resume can restore it
     assert runner.jobs.get("cancelled-diagnostic").claim_owner is None
     assert content.calls == 1
 

@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from tubeforge.core.config import FinalRenderConfig, PreviewRenderConfig, PublicationPreparationConfig, PublicationVerificationConfig, Settings, ShortsFinalRenderConfig, ShortsPreviewRenderConfig, SourceClipConfig, VoicePipelineConfig, YouTubePublishingConfig
 from tubeforge.core.errors import AmbiguousProviderError, ProviderAuthenticationError, ProviderCancellation, ProviderValidationError, RemoteResourceMissingError, RepairableAlignmentResult, RetryableProviderError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
-from tubeforge.db.repositories import ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobEventRepository, JobRepository, PipelineJob, PublicationRepository, SourceMedia, SourceMediaRepository
+from tubeforge.db.repositories import PAUSABLE_STATES, ApprovalRepository, Artifact, ArtifactRepository, AssetCacheRepository, ExternalOperationRepository, JobEventRepository, JobRepository, PipelineJob, PublicationRepository, SourceMedia, SourceMediaRepository
 from tubeforge.domain.contracts import AssetCandidate, AssetSearchRequest, ContentPackage, ContentRequest, PublishPrivacy, PublishRequest, RemoteProcessingState, RemotePublicationSnapshot, SourceReference, VideoMetadata, VoiceRequest, video_plan_from_package
 from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher, VoiceProvider
 from tubeforge.domain.states import ApprovalGate, JobState
@@ -157,7 +157,7 @@ class PipelineOrchestrator:
             if cancellation_requested is not None and cancellation_requested():
                 self._ensure_ownership(force=True)
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
-                self._update_state(job.id, cancelled.state, cancelled.resume_state)
+                self._update_state(job.id, cancelled.state, job.state if job.state in PAUSABLE_STATES else None)
                 return self.jobs.get(job.id)
             if job.state in {JobState.FAILED_RETRYABLE, JobState.FAILED_VALIDATION, JobState.AUTH_REQUIRED}:
                 target = job.resume_state
@@ -188,7 +188,7 @@ class PipelineOrchestrator:
             except (PipelineCancellation, ProviderCancellation, AssetAcquisitionCancelled, PreviewRenderCancelled):
                 self._ensure_ownership(force=True)
                 cancelled = self.machine.transition(PipelineSnapshot(job.state, job.resume_state), JobState.CANCELLED)
-                self._update_state(job.id, cancelled.state, cancelled.resume_state)
+                self._update_state(job.id, cancelled.state, job.state if job.state in PAUSABLE_STATES else None)
                 return self.jobs.get(job.id)
             except (RetryableProviderError, ProviderValidationError, ProviderAuthenticationError, ValidationError) as error:
                 self._ensure_ownership(force=True)

@@ -596,3 +596,36 @@ def test_failed_job_retry_creates_new_job_with_edited_request(tmp_path: Path) ->
         assert runtime.jobs.get("failed-one").state is JobState.FAILED_EXHAUSTED
         same = client.post("/api/jobs/failed-one/retry", json={})
         assert same.status_code == 201 and same.json()["request_edited"] is False
+
+
+def test_pause_parks_idle_and_running_jobs_and_resume_restores_the_stage(tmp_path: Path) -> None:
+    database_path = tmp_path / "pause.db"
+    _migrate(database_path)
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"), auth=AuthConfig(enabled=True))
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("pause-operator", "correct-horse-battery-staple")
+        assert client.post("/login", json={"username": "pause-operator", "password": "correct-horse-battery-staple"}).status_code == 200
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+        base = ContentPackage.model_validate_json((Path(__file__).parent / "fixtures" / "production" / "docker_images_containers" / "content_package.json").read_bytes()).request
+        runtime.jobs.create("idle-job", base)
+        runtime.jobs.create("done-job", base)
+        runtime.jobs.update_state("done-job", JobState.FAILED_EXHAUSTED, JobState.CONTENT_GENERATING, "x")
+        assert client.post("/api/jobs/done-job/pause").status_code == 409
+        listed = {item["id"]: item for item in client.get("/api/jobs").json()}
+        assert listed["idle-job"]["can_pause"] is True and listed["done-job"]["can_pause"] is False
+
+        assert client.post("/api/jobs/idle-job/pause").json() == {"status": "paused"}
+        paused = {item["id"]: item for item in client.get("/api/jobs").json()}["idle-job"]
+        assert paused["paused"] is True and paused["can_resume"] is True and paused["deletable"] is True
+        assert runtime.jobs.claim_oldest_eligible("w", now=datetime.now(UTC), lease_seconds=30) is None
+        assert client.post("/api/jobs/idle-job/resume").status_code == 200
+        assert runtime.jobs.get("idle-job").state is JobState.TOPIC_CREATED
+        assert client.post("/api/jobs/idle-job/resume").status_code == 409
+
+        claimed = runtime.jobs.claim_oldest_eligible("w", now=datetime.now(UTC), lease_seconds=300)
+        assert claimed is not None and claimed.id == "idle-job"
+        assert client.post("/api/jobs/idle-job/pause").json() == {"status": "pausing"}
+        assert runtime.jobs.get("idle-job").cancellation_requested_at is not None
+        assert client.delete("/api/jobs/idle-job").status_code == 409
+        assert client.post("/api/jobs/idle-job/resume").status_code == 409
