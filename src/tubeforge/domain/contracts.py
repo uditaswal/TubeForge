@@ -8,7 +8,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator, model_serializer
 
-from tubeforge.rendering.shorts.schema import ShortsTopic
+from tubeforge.rendering.shorts.schema import REFERENCE_SHORT_MAX_SECONDS, ShortsTopic
 
 
 class DomainModel(BaseModel):
@@ -81,6 +81,10 @@ class ContentRequest(DomainModel):
     show_source_credit: bool = False
     show_mascot: bool = False
     channel_watermark: str | None = Field(default=None, min_length=1, max_length=40, pattern=r"^[^\x00-\x1f<>]+$")
+    # How a reference Short ends: "loop" replays into the hook for retention (no follow ask);
+    # "debate" closes on a pointed comment question. Changes the script, so it is part of the
+    # generation identity, but the default is omitted to keep existing jobs and cache keys unchanged.
+    ending: str = Field(default="loop", pattern=r"^(loop|debate)$")
 
     @model_serializer(mode="wrap")
     def omit_default_script_fields(self, handler):
@@ -91,6 +95,8 @@ class ContentRequest(DomainModel):
             value.pop("show_mascot", None)
         if self.channel_watermark is None:
             value.pop("channel_watermark", None)
+        if self.ending == "loop":
+            value.pop("ending", None)
         if self.script_owner == "codex":
             value.pop("script_owner", None)
         if self.script_model is None:
@@ -100,8 +106,8 @@ class ContentRequest(DomainModel):
     @model_validator(mode="after")
     def require_unique_source_ids(self) -> ContentRequest:
         if self.prompt_version == "m6-content-v8":
-            if self.aspect_ratio != "9:16" or not 25 <= self.target_duration_seconds <= 45:
-                raise ValueError("reference Shorts require 9:16 and a 25–45 second target")
+            if self.aspect_ratio != "9:16" or not 25 <= self.target_duration_seconds <= REFERENCE_SHORT_MAX_SECONDS:
+                raise ValueError(f"reference Shorts require 9:16 and a 25–{REFERENCE_SHORT_MAX_SECONDS} second target")
         elif self.target_duration_seconds < 30:
             raise ValueError("legacy requests require at least 30 seconds")
         _require_unique_ids(self.sources, "source_id")

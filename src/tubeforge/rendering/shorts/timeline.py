@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 
 from .layout import RenderOptions, SceneRenderer
-from .schema import ShortsTopic
+from .schema import REFERENCE_SHORT_MAX_SECONDS, REFERENCE_SHORT_MIN_SECONDS, ShortsTopic
 
 
 @dataclass(frozen=True)
@@ -62,8 +62,8 @@ class Timeline:
             if not .119 <= timing.end - voice_end <= .401:
                 raise ValueError("each scene requires a 0.12–0.4 second speech tail")
             previous = timing.end
-        if not 25 <= previous <= 45:
-            raise ValueError("reference Shorts duration must be 25–45 seconds")
+        if not REFERENCE_SHORT_MIN_SECONDS <= previous <= REFERENCE_SHORT_MAX_SECONDS:
+            raise ValueError(f"reference Shorts duration must be {REFERENCE_SHORT_MIN_SECONDS}–{REFERENCE_SHORT_MAX_SECONDS} seconds")
         if timings[-1].end - timings[-1].start < 2.5:
             raise ValueError("closing CTA needs at least 2.5 seconds")
         self.topic, self.timings, self.duration = topic, timings, previous

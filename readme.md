@@ -569,7 +569,7 @@ repairs a failed domain validation once (each call counts against the limit). Th
 binary is resolved from `TUBEFORGE_CLAUDE_BIN`, `PATH`, or the VS Code extension.
 
 **Reference Shorts** (`reference-short` preset, prompt `m6-content-v8`): 9:16,
-6–8 scenes, ≤84 narration words, 30–45 seconds. The writer returns only semantic scene
+6–16 scenes (scaled to length), about 1.9–2.15 narration words per target second, 30–90 seconds (default 60, 25–90 enforced by the renderer). The writer returns only semantic scene
 JSON (template, text, optional `icon` from a fixed set, reveal anchors). The shared
 `rendering/shorts` library owns all geometry, Kokoro speech + Whisper forced alignment,
 motion (entrances, count-ups, scene transitions, push-in, moving background), audio
@@ -922,7 +922,7 @@ integrated in `tubeforge.rendering.shorts`. Its semantic templates, local speech
 preparation, alignment, music and encoder are native Python components. Install
 their optional dependencies with `pip install -e '.[dev,reference-renderer,kokoro,alignment]'`
 in the project virtual environment; model weights remain local configuration.
-The profile targets 25–45 seconds, 1080×1920 finals and 720×1280 drafts. It is
+The profile targets 25–90 seconds (preset default 60), 1080×1920 finals and 720×1280 drafts. It is
 **not yet available as a verified dashboard workflow**; see the current plan for
 integration and real-video acceptance. Existing approved jobs keep their original
 contracts. Updated narration/production skills require rebuilding and checking

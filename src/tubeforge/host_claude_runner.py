@@ -37,6 +37,7 @@ from tubeforge.host_codex_runner import (
 from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess
 from tubeforge.providers.content.prompts import (
     ANGLE_INSTRUCTIONS, CONTENT_ENVELOPE_TEMPLATES, RECIPES, build_content_prompt, normalize_content_request, prompt_evidence,
+    reference_word_budget,
 )
 
 MAX_MESSAGE_BYTES = 65_536
@@ -197,7 +198,14 @@ def editor_pass(request, root, raw, *, model, effort, schema, version, usage_tot
     """One edit call over a valid draft; keep the draft unless the edited output validates too."""
     note: dict = {"applied": False, "calls": 0}
     encoded = json.dumps(normalize_content_request(request.request), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    task = EDITOR_INSTRUCTIONS + "\nREQUEST=" + encoded + "\nDRAFT=" + json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+    request_content = request.request
+    words_low, words_high = (lambda b: (b["aim_low"], b["aim_high"]))(reference_word_budget(request_content.target_duration_seconds))
+    instructions = EDITOR_INSTRUCTIONS.replace("78-92 words total", f"{words_low}-{words_high} words total")
+    if request_content.ending == "debate":
+        instructions += (" ENDING OVERRIDE: this request's ending is 'debate', so ignore point (5) about a loop: the final scene stays template cta, "
+                         "its narration ends with a question that makes viewers pick a side in the comments (no follow or subscribe request), "
+                         "and its headline starts with comment, vote, pick, tell or argue and appears word for word in that narration.")
+    task = instructions + "\nREQUEST=" + encoded + "\nDRAFT=" + json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
     for attempt in range(2):  # one edit, plus one repair of that edit; the draft is the fallback either way
         try:
             consume_invocation(request, root, salt="editor", limit=2)

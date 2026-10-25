@@ -92,10 +92,48 @@ ANGLE_INSTRUCTIONS = (
 )
 
 
+def ending_clause_template(request: ContentRequest) -> str:
+    return "cta (a comment-debate scene, not a follow request)" if request.ending == "debate" else "loop (not cta)"
+
+
+def ending_instructions(request: ContentRequest) -> str:
+    if request.ending == "debate":
+        return (
+            "DEBATE ENDING: the last scene (template cta) closes the verdict and starts an argument in the comments. There is no follow, subscribe or like request anywhere. "
+            "Its narration is one or two complete sentences that end with a question mark and force a side: it states the video's stance in a few words, then asks viewers to pick a side in the comments "
+            "(for example 'I say rotate every key today. Comment rotate or wait, and tell me why.'). "
+            "The cta headline must be a short imperative that starts with the word comment, vote, pick, tell or argue and appears word for word in the last scene's narration (at most 48 characters); "
+            "chips are 1-3 short option words viewers can answer with (for example 'ROTATE', 'WAIT'); subline is a short line under the headline. "
+            "Set metadata.call_to_action to that same comment question and metadata.engagement_comment to a provocative-but-fair pinned-comment question. "
+        )
+    return (
+        "LOOP ENDING: there is no follow, subscribe or like request anywhere in the video; the last scene's narration is one open-ended sentence "
+        "with no final full stop that hands straight back into scene 1's first words (for example '...and that is exactly why the real question is' then scene 1 opens 'Run a PHP website?'), "
+        "so the video replays seamlessly. The loop scene copies scene 1's headline lines, chips, icon and logo exactly, so its last frame equals the first frame. "
+        "Set metadata.call_to_action to a short teaser line without any follow or subscribe request. "
+    )
+
+
+def incomplete_sections(package: ContentPackage) -> list[str]:
+    """Sections that do not end in sentence punctuation; a loop ending is open-ended on purpose so its last line flows into the hook."""
+    topic = package.reference_short
+    sections = package.script_sections[:-1] if topic is not None and topic.scenes[-1].template == "loop" else package.script_sections
+    return [section.section_id for section in sections if not re.search(r"[.!?…][\"')\]]*$", section.narration.strip())]
+
+
+def reference_word_budget(target_seconds: int) -> dict[str, int]:
+    """Words and scene counts for a reference Short of ``target_seconds`` (the voice plus tails run ~2.1-2.4 words/s)."""
+    aim_low, aim_high = round(target_seconds * 1.9), round(target_seconds * 2.15)
+    scenes_low = max(6, round(aim_low / 13))
+    return {"aim_low": aim_low, "aim_high": aim_high, "max": round(target_seconds * 2.25),
+            "floor": round(target_seconds * 1.3), "ceiling": round(target_seconds * 2.6),
+            "scenes_low": scenes_low, "scenes_high": min(16, max(8, scenes_low + 2))}
+
+
 def narration_word_limits(request: ContentRequest) -> tuple[int, int]:
     """Keep the writer's instructions and acceptance bounds in agreement."""
     if request.prompt_version == "m6-content-v8":
-        return 48, 120
+        return reference_word_budget(request.target_duration_seconds)["floor"], reference_word_budget(request.target_duration_seconds)["ceiling"]
     if request.aspect_ratio == "9:16":
         return max(72, round(request.target_duration_seconds * 2.4)), round(request.target_duration_seconds * 3.7)
     # Kokoro speaks ~2.3 words/s and Piper ~2.7; the host runner never sees the chosen voice, so one range serves both.
@@ -109,18 +147,17 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
     validate_untrusted_request(request)
     encoded = json.dumps(normalize_content_request(request), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     if template_version == "m6-content-v8":
+        budget = reference_word_budget(request.target_duration_seconds)
         prompt = (
             "Return ContentGenerationResult schema JSON only: ready with package and null reason, "
             "or insufficient_sources with null package and a specific reason. "
-            "This is the reference-short-v1 profile. Create 6–8 ordered script_sections and matching "
+            "This is the reference-short-v1 profile. Create " + f"{budget['scenes_low']}–{budget['scenes_high']}" + " ordered script_sections and matching "
             "reference_short.scenes. Each narration contains 8–15 whitespace-separated spoken words; "
-            "aim for 78–92 words total and never more than 96 (the local voice speaks about 2.5 words per second, and the whole video must stay under 45 seconds including short scene tails). "
+            + f"aim for {budget['aim_low']}–{budget['aim_high']} words total and never more than {budget['max']} "
+            + f"(the local voice speaks about 2.5 words per second, and the whole video must stay under {request.target_duration_seconds} seconds including short scene tails). "
             "Use complete sentences, a specific first-sentence hook matching one of five distinct hook_options, "
-            "source-grounded escalation, concrete payoff and a final scene with template loop (not cta). "
-            "LOOP ENDING: there is no follow, subscribe or like request anywhere in the video; the last scene's narration is one open-ended sentence "
-            "with no final full stop that hands straight back into scene 1's first words (for example '...and that is exactly why the real question is' then scene 1 opens 'Run a PHP website?'), "
-            "so the video replays seamlessly. The loop scene copies scene 1's headline lines, chips, icon and logo exactly, so its last frame equals the first frame. "
-            "Set metadata.call_to_action to a short teaser line without any follow or subscribe request. "
+            "source-grounded escalation, concrete payoff and a final scene with template " + ending_clause_template(request) + ". "
+            + ending_instructions(request) +
             "The narrator may state opinions in first person ('I'd bet on Rust', 'I think this is wrong') but never invent personal experience or insider access. "
             "STANCE: take one clear, hard side on the topic's real trade-off and defend it without hedging in the voice-over "
             "(no 'might', 'some say', 'around', 'in one study' in narration; attribution lives in the on-screen source line). "
@@ -128,7 +165,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Every middle (teaching) scene must narrate at least one sourced claim and cite it, so put the verdict on top of a sourced fact "
             "('Android's data says new code is the danger. Stop rewriting old C.'); unsourced opinion lines belong only in the hook or CTA scene. "
             "PAYOFF: keep the hook's question open; the strongest number or twist (the big_stat scene, if any) lands in the second half of the video, "
-            "and the last line before the CTA lands a verdict that echoes the hook's words so the loop rewards a rewatch. "
+            "and the last line before the closing scene lands a verdict that echoes the hook's words so the ending rewards attention. "
             "VISUALS: every reference scene has a visual field that is null or one of: "
             "{kind:'stock', query, media} real B-roll or photo (query = 2-4 concrete filmable English words such as 'server room racks' or 'rocket launch', never abstract words like 'success'; media is 'video' or 'photo'), "
             "{kind:'source', quote} a screenshot of the cited source page, where quote is an exact 8-160 character passage copied word for word from that scene's cited source excerpt, "
@@ -157,11 +194,11 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "Chain scenes with turns (but, so, until, then) so each scene answers the previous open question and opens the next. "
             "Speak to the viewer in second person, sentences of at most 12 words, one idea per scene, concrete nouns, no hedging filler; "
             "attribute briefly instead ('Google's data shows'). Escalate: hook, why it hits you, proof number, twist or limit ('but'), what to do, "
-            "a payoff line that echoes the hook, then the loop sentence that bridges back into scene 1. Never invent facts to make a hook stronger. "
+            "a payoff line that echoes the hook, then the closing scene. Never invent facts to make a hook stronger. "
             "Phone-fit text budgets (the renderer rejects overflow): hook headline lines at most 14 characters each, "
             "chips at most 9 characters each when there are three chips (14 for two, 24 for one), big_stat/flow/checklist/before_after headings at most 26, big_stat labels at most 18, "
             "flow nodes, checklist items and before/after texts at most 26, terminal lines at most 30, "
-            "the loop scene reuses scene 1's headline and chips unchanged. Prefer lower-case words over wide capitals. "
+            "the loop scene (loop ending only) reuses scene 1's headline and chips unchanged. Prefer lower-case words over wide capitals. "
             "Use numbers as figures/bars, arrows for relationships, real or explicitly illustrative terminal output. "
             "Every teaching scene must reveal a meaningful change tied to ordered zero-based reveal_words indices "
             "into that scene's whitespace-separated narration. One anchor per node, item, terminal line or CTA chip; "
@@ -245,8 +282,9 @@ def validate_video_package(package: ContentPackage, request: ContentRequest, *, 
             reject_instruction_spoofing(getattr(scene, field), field=f"scene_plans.{scene.scene_id}.{field}")
     if package.reference_short is not None:
         words = sum(len(section.narration.split()) for section in package.script_sections)
-        if words > 96:
-            raise ProviderValidationError(f"{provider_name} narration has {words} words; reference Shorts need at most 96 so the video stays under 45 seconds")
+        cap = reference_word_budget(request.target_duration_seconds)["max"] + 4
+        if words > cap:
+            raise ProviderValidationError(f"{provider_name} narration has {words} words; reference Shorts of {request.target_duration_seconds} seconds need at most {cap} so the video stays within the target")
         from tubeforge.providers.content.youtube_skills import hook_gate
         weak = hook_gate(package)
         if weak:
@@ -362,7 +400,7 @@ def validate_video_package(package: ContentPackage, request: ContentRequest, *, 
     if request.aspect_ratio == "9:16":
         if not any(source.excerpt and source.excerpt.strip() for source in request.sources):
             raise ProviderValidationError(f"{provider_name} Shorts require at least one approved source excerpt")
-        incomplete = [section.section_id for section in package.script_sections if not re.search(r"[.!?…][\"')\]]*$", section.narration.strip())]
+        incomplete = incomplete_sections(package)
         if incomplete:
             raise ProviderValidationError(f"{provider_name} Shorts sections must end with complete sentence punctuation")
         opening = package.script_sections[0].narration.strip()

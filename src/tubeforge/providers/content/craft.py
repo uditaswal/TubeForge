@@ -60,6 +60,23 @@ GREETING = re.compile(r"^\W*(hi|hello|hey|yo|welcome|what'?s up|good (morning|ev
 OPEN_ENDING = re.compile(r"[.!?\u2026]\W*$")
 
 
+FOLLOW_ASK = re.compile(r"\b(follow|subscribe|subscribing|hit the bell|turn on notifications)\b", re.I)
+
+
+def debate_problems(last) -> list[str]:
+    """The debate ending: a cta scene whose narration is a pointed comment question, with no follow ask."""
+    problems: list[str] = []
+    if last.template != "cta":
+        return ["the final scene must use template cta: a comment-debate close (this video's ending is 'debate', not a loop)"]
+    if not last.vo.strip().endswith("?"):
+        problems.append("the closing narration must end with a question that makes viewers pick a side in the comments")
+    if FOLLOW_ASK.search(" ".join([last.vo, last.caption, last.headline, *last.chips])):
+        problems.append("the debate ending must not ask viewers to follow or subscribe; ask them to comment and pick a side")
+    if not re.search(r"\bcomment", last.vo, re.I):
+        problems.append("the closing narration must tell viewers to comment their side")
+    return problems
+
+
 def loop_problems(package) -> list[str]:
     """The video ends by looping into its own first sentence: no follow request, an open last sentence, a matching last frame."""
     scenes = package.reference_short.scenes
@@ -67,6 +84,9 @@ def loop_problems(package) -> list[str]:
     problems: list[str] = []
     if GREETING.search(first.vo):
         problems.append(f"scene 1 opens with a greeting or channel intro ({first.vo.split()[0]!r}); open on the concrete fact or stake itself")
+    if getattr(getattr(package, "request", None), "ending", "loop") == "debate":
+        problems += debate_problems(last)
+        return problems
     if last.template != "loop":
         problems.append("the final scene must use template loop (no follow or subscribe request); the video ends by looping back into scene 1")
         return problems

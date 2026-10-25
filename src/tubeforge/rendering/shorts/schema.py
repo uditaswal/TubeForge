@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_serializer, mo
 from .icons import ICON_NAMES
 from .logos import LOGO_NAMES
 
+REFERENCE_SHORT_MIN_SECONDS = 25
+REFERENCE_SHORT_MAX_SECONDS = 90  # YouTube Shorts allow longer, but retention drops; the preset and gates stop here
 IconName = Literal[ICON_NAMES]  # type: ignore[valid-type]
 LogoName = Literal[LOGO_NAMES]  # type: ignore[valid-type]
 
@@ -141,6 +143,9 @@ class Terminal(Scene):
     evidence_label: Literal["CAPTURED OUTPUT", "ILLUSTRATIVE OUTPUT", "COMMAND"]
 
 
+CTA_VERBS = {"follow", "comment", "vote", "pick", "tell", "argue", "drop", "reply"}  # follow ask, or the debate ending's comment prompt
+
+
 class CTA(Scene):
     template: Literal["cta"]
     chips: tuple[str, ...] = Field(min_length=1, max_length=3)
@@ -150,8 +155,9 @@ class CTA(Scene):
     @model_validator(mode="after")
     def spoken_follow(self):
         normalize = lambda s: " ".join(re.findall(r"\w+", s.casefold()))
-        if not normalize(self.headline).startswith("follow") or normalize(self.headline) not in normalize(self.vo):
-            raise ValueError("CTA headline must be the follow request present in narration")
+        words = normalize(self.headline).split()
+        if not words or words[0] not in CTA_VERBS or normalize(self.headline) not in normalize(self.vo):
+            raise ValueError("CTA headline must be the follow request or comment prompt present in narration")
         return self
 
 
@@ -174,7 +180,7 @@ class ShortsTopic(StrictModel):
     schema_version: Literal["reference-short-v1"] = "reference-short-v1"
     title: str = Field(min_length=1, max_length=120)
     sources: tuple[Source, ...] = Field(min_length=1, max_length=8)
-    scenes: tuple[ShortScene, ...] = Field(min_length=6, max_length=8)
+    scenes: tuple[ShortScene, ...] = Field(min_length=6, max_length=16)
 
     @model_validator(mode="after")
     def complete_story(self):

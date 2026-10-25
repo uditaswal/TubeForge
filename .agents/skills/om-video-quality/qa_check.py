@@ -101,6 +101,10 @@ def check(job: Path) -> list[tuple[str, str, str]]:
             open_end = not re.search(r"[.!?\u2026]\W*$", last.get("vo", "").strip())
             ok = same and open_end and not follow
             add("PASS" if ok else "FAIL", "loop-ending", f"last scene repeats scene 1 frame: {same}; open-ended sentence: {open_end}; no follow request: {not follow}")
+        elif last.get("template") == "cta" and re.match(r"^\W*(comment|vote|pick|tell|argue|drop|reply)\b", " ".join(last.get("headline", [last.get("headline", "")]) if isinstance(last.get("headline"), list) else [last.get("headline", "")]), re.I):
+            follow = re.search(r"\b(follow|subscribe)\b", " ".join([last.get("vo", ""), str(last.get("headline", ""))]), re.I)
+            ok = last.get("vo", "").strip().endswith("?") and not follow
+            add("PASS" if ok else "FAIL", "debate-ending", f"closing comment question: {last.get('vo', '').strip().endswith('?')}; no follow request: {not follow}")
         else:
             add("WARN", "loop-ending", f"ends with a {last.get('template')} scene, not a loop (legacy follow ending)")
     for text in brief.get("text_options", []):

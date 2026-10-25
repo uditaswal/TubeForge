@@ -42,11 +42,11 @@ pipeline:
     # and no job (Studio, API, retry or scheduler) can start with them. Old jobs stay viewable.
     retired_prompt_versions: ["m6-content-v1", "m6-content-v2", "m6-content-v3", "m6-content-v4", "m6-content-v5", "m6-content-v6", "m6-content-v7"]
     presets:
-      # Reference Shorts: 9:16, 6–8 scenes, shared renderer (rendering/shorts).
+      # Reference Shorts: 9:16, 6–16 scenes depending on length, shared renderer (rendering/shorts).
       reference-short:
-        duration_seconds: 36
+        duration_seconds: 60
         minimum_duration_seconds: 30
-        maximum_duration_seconds: 45
+        maximum_duration_seconds: 90
         aspect_ratio: "9:16"
         prompt_version: "m6-content-v8"
         captions_enabled: true

@@ -28,7 +28,7 @@ strict JSON script + scene plan; all pixels, audio and encoding are local and co
     (`src/tubeforge/host_claude_runner.py`; CLI binary resolved from the VS Code extension or `TUBEFORGE_CLAUDE_BIN`).
     Start it before using Claude jobs (`systemctl --user` unit in `docs/tubeforge-claude-runner.service`).
   - Routing: `providers/content/factory.py::ScriptOwnerRouter`. Config: `pipeline.claude` in `config/production.yaml`.
-- **Reference Shorts path** (`m6-content-v8`, 9:16, 25–45 s): package carries `reference_short` scenes.
+- **Reference Shorts path** (`m6-content-v8`, 9:16, 25–90 s, default 60): package carries `reference_short` scenes.
   Orchestrator branches to `pipeline/reference_short.py` → `rendering/shorts/` (layout, timeline, audio, encode).
   Legacy path (`rendering/preview.py`, `providers/media/local_graphics.py`) remains only for old jobs.
 - Preview = 720×1280 draft; final = 1080×1920. Both pass the library's QA (decode, loudness −15..−13 LUFS, TP ≤ −1.5).
@@ -69,6 +69,7 @@ lower ~25% of the frame is platform-reserved space. The operator has **not** wat
 Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 
 ## Next step
+-2. **Ending choice + length (25 Oct):** Studio has "How the video ends" (`ending`: `loop` default | `debate` = cta scene whose narration is a comment question; headline starts comment/vote/pick/tell/argue). Preset `reference-short` is now 60 s default, 30–90 s allowed (scenes 6–16, words scale via `prompts.reference_word_budget`). Fixed: the loop line deliberately has no final punctuation but the generic Shorts check demanded it (job `e66186d8…` failed validation twice); `prompts.incomplete_sections` now exempts a loop scene. Not yet rendered live at 60/90 s or with a debate ending: restart the Claude runner, then run a job and check memory/RTF on a 90 s render.
 -1. **Open visual defect (25 Oct):** in landscape (16:9) jobs the burned-in captions sit mid-frame and overlap the animated diagram boxes (job `7646d2e9…` contact sheet). Check caption `MarginV`/font size vs the animated-layout safe area in `rendering/preview.py` before calling landscape output good. Also keep the Claude runner running (`scripts/run_claude_runner.sh`; it had died, which surfaced as "preflight Connection refused"; now retried automatically).
 0. **Video-quality plan (24 Oct):** `docs/MILESTONES_VIDEO_QUALITY.md` (milestones M0–M9 learned from 3 reference videos + the lyric-video process guide). Suggested order: M0 reference benchmark, M1 60–90 s explainer profile, M2 concept/screenplay stage; Codex branch: M4 motion engine, M5 timing/audio gates. Operator decisions listed at its end.
 1. Operator watches `preview.mp4` (Studio → job → Watch preview) and gives creative feedback.

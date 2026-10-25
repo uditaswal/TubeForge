@@ -11,6 +11,7 @@ import soundfile as sf
 from tubeforge.rendering.loudness import analyze
 from .audio_health import scan_wav
 from .encode import checked, file_hash
+from .schema import REFERENCE_SHORT_MAX_SECONDS, REFERENCE_SHORT_MIN_SECONDS
 
 SR = 48000
 
@@ -48,8 +49,8 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
            cancelled=lambda: False, ffmpeg="ffmpeg"):
     """Mix locally, retain separate stems, then leave AAC true-peak headroom."""
     voice, sample_rate = sf.read(narration, dtype="float32")
-    if sample_rate != SR or voice.ndim != 1 or not 25 <= len(voice) / SR <= 45 or not np.isfinite(voice).all():
-        raise ValueError("mastering requires finite mono 48 kHz narration, 25–45 seconds")
+    if sample_rate != SR or voice.ndim != 1 or not REFERENCE_SHORT_MIN_SECONDS <= len(voice) / SR <= REFERENCE_SHORT_MAX_SECONDS or not np.isfinite(voice).all():
+        raise ValueError("mastering requires finite mono 48 kHz narration, 25–90 seconds")
     peak = float(np.max(np.abs(voice)))
     if peak < .001:
         raise ValueError("cannot master silent narration")

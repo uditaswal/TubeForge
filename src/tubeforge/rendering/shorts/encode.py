@@ -17,6 +17,7 @@ from PIL import Image
 
 from tubeforge.rendering.loudness import analyze
 from .audio_health import scan_samples
+from .schema import REFERENCE_SHORT_MAX_SECONDS, REFERENCE_SHORT_MIN_SECONDS
 from .timeline import Timeline
 
 
@@ -166,7 +167,7 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
             if sound["codec_name"] != "aac" or int(sound["sample_rate"]) != 48000:
                 raise ValueError("encoded audio must be AAC at 48 kHz")
             duration = float(probe["format"]["duration"])
-            if not 25 <= duration <= 45 or abs(duration - timeline.duration) > .1:
+            if not REFERENCE_SHORT_MIN_SECONDS <= duration <= REFERENCE_SHORT_MAX_SECONDS or abs(duration - timeline.duration) > .1:
                 raise ValueError("encoded duration differs from accepted timeline")
             checked([ffmpeg, "-v", "error", "-xerror", "-i", str(temporary), "-f", "null", "-"],
                     deadline=qa_deadline, cancelled=cancelled)

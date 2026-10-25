@@ -126,6 +126,8 @@ class VideoBriefRequest(BaseModel):
     show_source_credit: bool = False
     show_mascot: bool = False
     channel_watermark: str | None = Field(default=None, max_length=40)
+    # How a reference Short ends: replay into the hook (retention) or a comment-debate question.
+    ending: str = Field(default="loop", pattern=r"^(loop|debate)$")
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus|gpt-sol)$")
@@ -311,7 +313,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     owner, claude_model = SCRIPT_MODELS[choice]
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     return ContentRequest(
-        script_owner=owner, script_model=claude_model,
+        script_owner=owner, script_model=claude_model, ending=value.ending,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
@@ -1009,6 +1011,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const ownerSelect=document.createElement('select');ownerSelect.name='script_model';ownerSelect.id='scriptModel';
           ownerSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading models…'}));ownerLabel.append(ownerSelect);form.insertBefore(ownerLabel,presetLabel);
           fetch('/api/content-profiles').then(r=>r.ok?r.json():null).then(data=>{if(!data||!data.script_models)return;ownerSelect.replaceChildren();data.script_models.forEach(o=>ownerSelect.append(Object.assign(document.createElement('option'),{value:o.id,textContent:o.label,disabled:!o.enabled})));ownerSelect.value=data.default_script_model;}).catch(()=>{ownerSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Server default'}));});
+          const endingLabel=document.createElement('label');endingLabel.textContent='How the video ends';
+          const endingSelect=document.createElement('select');endingSelect.name='ending';endingSelect.id='videoEnding';
+          [['loop','Loop: the last line flows back into the first (better retention)'],['debate','Debate: close on a question that starts an argument in the comments']].forEach(([value,text])=>endingSelect.append(Object.assign(document.createElement('option'),{value,textContent:text})));
+          const endingHelp=document.createElement('span');endingHelp.className='sub';endingHelp.textContent='Applies to 9:16 Shorts. Neither asks viewers to follow or subscribe.';endingLabel.append(endingSelect,endingHelp);form.insertBefore(endingLabel,presetLabel);
           const intentField=document.createElement('fieldset');intentField.id='videoDestinationIntent';intentField.style.marginTop='18px';
           intentField.style.minWidth='0';intentField.style.border='1px solid #31415f';intentField.style.borderRadius='9px';intentField.style.padding='14px';
           const intentLegend=document.createElement('legend');intentLegend.textContent='Where this video should go';
@@ -1022,7 +1028,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           async function loadIntentAccounts(){const selected=new Set([...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value));try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=(await response.json()).filter(account=>!account.disabled);intentAccounts.replaceChildren();if(!accounts.length){intentAccounts.textContent='No account profiles yet. Add one in Accounts, or create this video without a destination.';return;}for(const account of accounts){const label=document.createElement('label');label.className='checkbox';const check=document.createElement('input');check.type='checkbox';check.value=account.id;check.checked=accountChoicesLoaded?selected.has(account.id):account.is_default;check.defaultChecked=check.checked;check.setAttribute('aria-label','Plan for '+account.platform+' account '+account.display_name);const details=document.createElement('span');details.textContent=account.platform+' · '+account.display_name+' · '+account.category+' ('+account.status.replaceAll('_',' ')+')'+(account.is_default?' · default':'');label.append(check,details);intentAccounts.append(label);}accountChoicesLoaded=true;}catch(_){if(intentAccounts.textContent==='Loading account profiles…')intentAccounts.textContent='Could not load account profiles. Reload before selecting destinations.';}}
           window.addEventListener('tubeforge:default-changed',()=>{accountChoicesLoaded=false;});window.addEventListener('tubeforge:accounts-changed',loadIntentAccounts);loadIntentAccounts();
           const originalFetch=window.fetch;
-          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.script_model=ownerSelect.value||null;body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.channel_identity=channelSelect.value||null;body.music_track=document.querySelector('#musicSelect')?.value||null;body.destination_account_ids=[...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value);body.description=descriptionInput.value.trim()||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
+          window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.script_model=ownerSelect.value||null;body.ending=endingSelect.value||'loop';body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.channel_identity=channelSelect.value||null;body.music_track=document.querySelector('#musicSelect')?.value||null;body.destination_account_ids=[...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value);body.description=descriptionInput.value.trim()||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
           const panel = document.createElement('fieldset');
           panel.style.marginTop = '18px'; panel.style.border = '1px solid #31415f'; panel.style.borderRadius = '9px';
           panel.innerHTML = '<legend>Clip existing video / stream</legend><label>Source URL<input id="sourceClipUrl" type="url" placeholder="https://…"></label><label>Number of clips<input id="sourceClipCount" type="number" value="1" min="1" max="12"></label><label class="checkbox"><input id="sourceClipCaptions" type="checkbox"> Burn available captions</label><button id="sourceClipCreate" type="button" class="secondary">Create clip job</button>';
