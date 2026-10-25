@@ -46,3 +46,32 @@ def test_alignment_collapse_rejects_missing_or_extra_spoken_words():
     for spans in (((0, 3), (4, 5)), ((0, 2), (2, 4)), ((0, 3), (2, 5))):
         with pytest.raises(ValueError, match="spoken"):
             collapse_alignment(words, spans)
+
+
+def test_legacy_per_scene_manifest_resumes_as_default_profile():
+    from tubeforge.rendering.shorts.prepare import _upgrade_legacy_manifest
+    scenes = [SimpleNamespace(scene_id="s0", vo="PHP fixed 50% of bugs."), SimpleNamespace(scene_id="s1", vo="Try it.")]
+    records = [{"scene_id": "s0", "file": "voice-00.wav", "sha256": "a", "provider": "kokoro", "warning": None, "duration": 1.0},
+               {"scene_id": "s1", "file": "voice-01.wav", "sha256": "b", "provider": "kokoro", "warning": None, "duration": 1.0}]
+    manifest = _upgrade_legacy_manifest(SimpleNamespace(scenes=scenes), records)
+    assert manifest["profile_sha256"] == profile_hash(profile="off", lexicon={}, group_size=1, voice_processing="off")
+    first = manifest["groups"][0]
+    assert first["spoken_text"] == scenes[0].vo and first["scene_ids"] == ["s0"]
+    assert first["display_spans"] == [[[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]]
+    assert first["file"] == first["raw_file"] and first["sha256"] == first["raw_sha256"]
+    with pytest.raises(ValueError, match="no longer matches"):
+        _upgrade_legacy_manifest(SimpleNamespace(scenes=scenes), records[:1])
+    records[1]["scene_id"] = "other"
+    with pytest.raises(ValueError, match="no longer matches"):
+        _upgrade_legacy_manifest(SimpleNamespace(scenes=scenes), records)
+
+
+def test_production_config_enables_the_operator_heard_speech_profile():
+    from pathlib import Path
+
+    import yaml
+
+    from tubeforge.core.config import ReferenceShortConfig
+    raw = yaml.safe_load((Path(__file__).resolve().parents[1] / "config" / "production.yaml").read_text())
+    short = ReferenceShortConfig.model_validate(raw["pipeline"]["reference_short"])
+    assert (short.spoken_profile, short.speech_group_size, short.voice_processing) == ("spoken-v1", 2, "gentle-v1")

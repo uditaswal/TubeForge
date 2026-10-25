@@ -191,8 +191,11 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
                           swap_growth_kib=swap_used_kib() - initial_swap)
             if not -15 <= loudness["input_i"] <= -13 or loudness["input_tp"] > -1.5:
                 raise ValueError(f"encoded audio fails reference gate: {loudness}")
+            # Advisory until proven on real videos: dark navy backgrounds sit near the
+            # black threshold, so a false positive must not fail a whole job.
             if temporal_qa["black_intervals"]:
-                raise ValueError("encoded video contains a sustained black interval")
+                report.setdefault("warnings", []).append(
+                    {"code": "temporal_black_interval", "intervals": temporal_qa["black_intervals"]})
             if report["swap_growth_kib"] > max_swap_growth_kib:
                 raise MemoryError("host swap grew during render")
             if cancelled():

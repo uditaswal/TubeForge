@@ -1,6 +1,6 @@
 # Video quality milestones
 
-Branch: `codex/video-quality-implementation` in `/tmp/tubeforge-video-quality` (isolated because a concurrent thumbnail commit landed in the original shared worktree). Inputs: [five-codebase review](REVIEW_2026-10-23_REFERENCE_CODEBASES.md), [Shorts rulebook](SHORT_FORM_VIDEO_RULEBOOK.md), and the operator's 60-second 16:9 PHP brief (attached to the task, used only after its factual claims and format are reviewed). This plan covers video and audio creation quality; publishing, upload automation, and retention analytics are outside this run.
+Branch: `codex/video-quality-implementation` (merged with `dev` on 25 Oct; see also Claude's broader plan in [MILESTONES_VIDEO_QUALITY.md](MILESTONES_VIDEO_QUALITY.md), whose M0–M9 numbering is separate from the four milestones here). Inputs: [five-codebase review](REVIEW_2026-10-23_REFERENCE_CODEBASES.md), [Shorts rulebook](SHORT_FORM_VIDEO_RULEBOOK.md), and the operator's 60-second 16:9 PHP brief (attached to the task, used only after its factual claims and format are reviewed). This plan covers video and audio creation quality; publishing, upload automation, and retention analytics are outside this run.
 
 Work sequentially. Finish each milestone's implementation before running its focused tests. Then render a real video end to end through the changed path, run the delivery QA helper, probe and decode the result, inspect frames and listen to the full mix. A unit test or a synthetic signal is insufficient for **VERIFIED**. Preserve exact reviewed narration, leases, cancellation, checkpoint identity and atomic promotion. Use `yt-script` alone for production narration; external repositories provide algorithms and review ideas, not competing script authority.
 
@@ -22,3 +22,14 @@ Milestone 2 implementation boundary: `Scene.vo` is the reviewed display narratio
 Milestone 2 is **VERIFIED**. [Evidence](VIDEO_QUALITY_M2_EVIDENCE.md) records the passing focused tests, same-topic videos, measured alignment, decoded audio, corrected sample-level group seams, inspected cut frames and the operator's review of both candidate versions. The operator preferred the first candidate over baseline and reported no audible difference after the sole four-millisecond taper edit. Next: implement milestone 3 visual ranking/diversity and temporal video QA, then render and inspect another complete video.
 
 Milestone 3 is **IMPLEMENTED** pending the operator's full watch/listen. [Evidence](VIDEO_QUALITY_M3_EVIDENCE.md) records 24 focused pipeline/QA tests, one signed-in Studio test, four inspected local stock candidates, the complete 29.6-second 1080×1920 render, full decode, −14.3 LUFS/−2.43 dBTP, zero encoded black/freeze intervals, delivery QA and inspected one-second/cut contact sheets. One “Android”-tagged clip shows generic code rather than an identifiable Android interface; it is thematic background, not factual illustration. Next: incorporate full-video creative review and repair any defect before marking VERIFIED or starting milestone 4.
+
+## Pre-merge fixes (25 Oct)
+
+Review of the branch before merging into `dev` found four items, all addressed on this branch:
+
+1. **Speech settings were off by default.** `config/production.yaml` now sets `spoken_profile: spoken-v1`, `speech_group_size: 2`, `voice_processing: gentle-v1` and an empty lexicon (the settings heard and accepted in milestone 2). Revert by setting them to `off`/`1`/`off`.
+2. **Black-frame check could fail a job.** `encode.py` now records a `temporal_black_interval` warning in the QA report instead of raising; the Studio video-diagnostics panel still lists the intervals. Promote it back to a gate only after it is proven on real videos with the dark navy backgrounds.
+3. **Jobs paused before the grouped voice format.** `prepare.align` upgrades an old per-scene `voice-manifest.json` (bare list) to one-scene groups under the default "off" profile, still checking each audio hash; a job whose settings now differ from the old audio is rejected with "speech settings changed", so such a job must re-run voice generation.
+4. **Conflicts with `dev`** in `generation_ui.py` (the Retry dialog and the new Video diagnostics section now coexist), `orchestrator.py`, `encode.py`, the smoke script and docs resolved.
+
+Still open: the operator's listen/watch of a real Short rendered with the new production defaults, the operator's full watch of the milestone-3 stock video, and milestone 4 (the 16:9 case).

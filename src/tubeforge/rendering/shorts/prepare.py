@@ -110,9 +110,39 @@ def synthesize(topic, settings, output, voice):
         "groups": groups}, indent=2) + "\n")
 
 
+def _upgrade_legacy_manifest(topic, records):
+    """Express a pre-speech-prep per-scene manifest (a bare list) as one-scene groups.
+
+    Jobs paused after voice generation before the grouped format landed must resume.
+    Legacy audio was made with no spoken expansion, grouping or processing, so it maps
+    to the default ("off") profile; a changed profile is still rejected by `align`.
+    """
+    if len(records) != len(topic.scenes):
+        raise ValueError("voice manifest no longer matches scene audio")
+    groups = []
+    for index, (scene, record) in enumerate(zip(topic.scenes, records, strict=True)):
+        if record.get("scene_id") != scene.scene_id:
+            raise ValueError("voice manifest no longer matches scene audio")
+        form = prepare_spoken(scene.vo, profile="off", lexicon={})
+        groups.append({"first_scene": index, "scene_ids": [scene.scene_id], "spoken_text": form.text,
+                       "spoken_sha256": hashlib.sha256(form.text.encode()).hexdigest(),
+                       "alignment_text": form.alignment_text,
+                       "display_spans": [[list(span) for span in form.display_spans]],
+                       "applied": [[]], "file": record["file"], "sha256": record["sha256"],
+                       "raw_file": record["file"], "raw_sha256": record["sha256"],
+                       "provider": record.get("provider"), "warning": record.get("warning"),
+                       "duration": record.get("duration")})
+    return {"version": "speech-prep-v1", "legacy": True,
+            "profile_sha256": profile_hash(profile="off", lexicon={}, group_size=1, voice_processing="off"),
+            "topic_sha256": None, "groups": groups}
+
+
 def align(topic, output, model_path, tail=.18, *, pacing=None):
     manifest = json.loads((output / "voice-manifest.json").read_text())
-    if manifest.get("version") != "speech-prep-v1" or manifest.get("topic_sha256") != file_hash(output / "topic.json"):
+    if isinstance(manifest, list):
+        manifest = _upgrade_legacy_manifest(topic, manifest)
+    if manifest.get("version") != "speech-prep-v1" or (
+            not manifest.get("legacy") and manifest.get("topic_sha256") != file_hash(output / "topic.json")):
         raise ValueError("voice manifest no longer matches reviewed topic")
     if pacing is not None and manifest.get("profile_sha256") != profile_hash(
             profile=pacing.spoken_profile, lexicon=pacing.pronunciation_lexicon,

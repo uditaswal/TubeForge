@@ -87,6 +87,14 @@ pipeline:
     alignment_model_path: "./data/benchmark/models/models--Systran--faster-whisper-base.en/snapshots/3d3d5dee26484f91867d81cb899cfcf72b96be6c"
     voice: "af_bella"
     budget_realtime_factor: 20
+    # Speech quality (video-quality milestone 2, operator-heard): numbers/acronyms are spoken
+    # in full while captions keep the reviewed text, two scenes are voiced per utterance, and
+    # the voice gets a gentle high-pass/compressor. Set spoken_profile/voice_processing to
+    # "off" and speech_group_size to 1 for the original per-scene path.
+    spoken_profile: "spoken-v1"
+    speech_group_size: 2
+    voice_processing: "gentle-v1"
+    pronunciation_lexicon: {}
   media:
     # Each job can select local generated art or rights-safe Wikimedia stock.
     # Google Image results are never used because they have no reuse proof.

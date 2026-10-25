@@ -29,7 +29,7 @@ def _intervals(mask, *, sample_fps: int, minimum_seconds: float, scene_starts: t
 
 def inspect_encoded_video(path, *, duration: float, scene_starts: tuple[float, ...],
                           ffmpeg: str, deadline: float, cancelled):
-    """Inspect every quarter-second sample; freeze is advisory, black is a gate.
+    """Inspect every quarter-second sample; both freeze and black are advisory (reported, never fail the render).
 
     Small, fast grayscale frames detect failed encoded output, not semantic
     relevance or readable text. Deliberately static cards can be freeze warnings.
