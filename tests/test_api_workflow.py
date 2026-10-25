@@ -567,3 +567,32 @@ def test_dashboard_removes_published_local_artifacts_without_losing_audit(tmp_pa
         assert client.get(f"/api/jobs/{job_id}").status_code == 200
         assert client.app.state.runtime.artifacts.list_for_job(job_id) == []
         assert client.get(f"/api/jobs/{job_id}/events").json()[-1]["event_type"] == "local_artifacts_removed"
+
+
+def test_failed_job_retry_creates_new_job_with_edited_request(tmp_path: Path) -> None:
+    database_path = tmp_path / "retry-new.db"
+    _migrate(database_path)
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"), auth=AuthConfig(enabled=True))
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("retry-operator", "correct-horse-battery-staple")
+        assert client.post("/login", json={"username": "retry-operator", "password": "correct-horse-battery-staple"}).status_code == 200
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+        base = ContentPackage.model_validate_json((Path(__file__).parent / "fixtures" / "production" / "docker_images_containers" / "content_package.json").read_bytes()).request
+        runtime.jobs.create("failed-one", base.model_copy(update={"topic": "Original topic"}))
+        runtime.jobs.create("busy-one", base.model_copy(update={"topic": "Still running"}))
+        assert client.post("/api/jobs/busy-one/retry", json={}).status_code == 409
+        runtime.jobs.update_state("failed-one", JobState.FAILED_EXHAUSTED, JobState.CONTENT_GENERATING, "script attempts exhausted")
+        listed = {item["id"]: item for item in client.get("/api/jobs").json()}
+        assert listed["failed-one"]["can_retry_as_new"] is True and listed["busy-one"]["can_retry_as_new"] is False
+        assert "Retry generation" in client.get("/").text
+        bad = client.post("/api/jobs/failed-one/retry", json={"request": {"topic": "x", "nonsense": 1}})
+        assert bad.status_code == 422 and "nonsense" in bad.json()["detail"]
+        edited = json.loads(runtime.jobs.get("failed-one").request.model_dump_json()) | {"topic": "Edited topic"}
+        created = client.post("/api/jobs/failed-one/retry", json={"request": edited})
+        assert created.status_code == 201 and created.json()["request_edited"] is True
+        new = runtime.jobs.get(created.json()["id"])
+        assert new.request.topic == "Edited topic" and new.state is JobState.TOPIC_CREATED
+        assert runtime.jobs.get("failed-one").state is JobState.FAILED_EXHAUSTED
+        same = client.post("/api/jobs/failed-one/retry", json={})
+        assert same.status_code == 201 and same.json()["request_edited"] is False
