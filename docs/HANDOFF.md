@@ -1,9 +1,9 @@
 # HANDOFF — read this first (Codex and Claude)
 
-Last updated: 2026-10-25 (repo cleanup) · branches `dev` and `main` · see `git log -3` for the checkpoint.
+Last updated: 2026-10-26 (A/V reference review) · branches `dev` and `main` · see `git log -3` for the checkpoint.
 Rules: `AGENTS.md`. Detailed status table, render evidence and per-feature notes: `docs/handoff-notes.md` (read a section only when needed).
 Plan/status of record: `design_doc/tubeforge-publishing-design.md`. Docs index: `docs/README.md`.
-Reviews (read on demand): `docs/reviews/2026-10-21-end-to-end.md` (why videos looked bad), `2026-10-22-content-quality.md` (script/hook/voice/music/visual steps, "§9"), `2026-10-23-reference-codebases.md`.
+Reviews (read on demand): `docs/reviews/2026-10-21-end-to-end.md` (why videos looked bad), `2026-10-22-content-quality.md` (script/hook/voice/music/visual steps, "§9"), `2026-10-23-reference-codebases.md`, `2026-10-26-av-quality-hyperframes-voicestudio.md` (why Codex's M1–M3 changed nothing visible/audible; HyperFrames renderer, real music + SFX, Kokoro fp32, UTMOS; phases 0–5 in §7).
 Video-quality work: `docs/video-quality/milestones.md` (Codex M1–M4: M1, M2 VERIFIED; M3 IMPLEMENTED, operator's full-video review pending; M4 NOT STARTED), evidence in `docs/video-quality/evidence.md`; broader M0–M9 plan in `docs/video-quality/plan-m0-m9.md`.
 
 ## Goal
@@ -39,6 +39,7 @@ strict JSON script + scene plan; all pixels, audio and encoding are local and co
 IMPLEMENTED, not operator-watched: Claude script owner + model picker, hook/craft gates, writers' room (editor applied-path not yet seen live), real-imagery plates (Pixabay + local stock library + source screenshots + code cards), brand logos, motion/icons, preview→final→publication prep (job `8c23e099…`), upload-ready title/description/thumbnail, Shorts thumbnails, display options, mascot, loop/debate ending. Nothing approved or published.
 
 ## Next step
+0. **A/V quality plan (26 Oct review, NOT STARTED, operator decisions pending in its §8):** start with phase 0 of `docs/reviews/2026-10-26-av-quality-hyperframes-voicestudio.md` §7 (baseline metrics on job `e53f4e83…` + HyperFrames benchmark on this host), then phase 1 (real music bed + caused SFX).
 1. **Ending choice + length (25 Oct):** Studio "How the video ends" (`ending`: `loop` default | `debate`). Preset `reference-short` is 60 s default, 30–90 s allowed (scenes 6–20, `prompts.reference_word_budget`). Not yet rendered live at 60/90 s or with a debate ending: restart the Claude runner, run a job, check memory/RTF on a 90 s render.
 2. Keep the Claude runner running (`scripts/run_claude_runner.sh`; a dead runner shows as "preflight Connection refused", now retried automatically). The old landscape caption-overlap defect (job `7646d2e9…`) only affects the retired 16:9 renderer.
 3. Operator reviews: M3 full video (`docs/video-quality/evidence.md`); previews of `c93f4c29…`, `90625bb5…`, `b1c3a6b5…`, `8c23e099…`; `final.mp4` of `8c23e099…` before any publication gate (do NOT approve until watched).

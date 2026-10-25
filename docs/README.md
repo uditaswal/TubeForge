@@ -28,6 +28,7 @@ Agents: start with [HANDOFF.md](HANDOFF.md) and [AGENTS.md](../AGENTS.md); open 
 
 ## Reviews (point-in-time, read on demand)
 - [reviews/2026-10-21-end-to-end.md](reviews/2026-10-21-end-to-end.md), [reviews/2026-10-22-content-quality.md](reviews/2026-10-22-content-quality.md), [reviews/2026-10-23-reference-codebases.md](reviews/2026-10-23-reference-codebases.md)
+- [reviews/2026-10-26-av-quality-hyperframes-voicestudio.md](reviews/2026-10-26-av-quality-hyperframes-voicestudio.md) — HyperFrames/VoiceStudio review: what to take for audio and video quality, phased plan
 - [reviews/stream-clipper-assessment.md](reviews/stream-clipper-assessment.md) — MIT attribution for adapted clipping algorithms
 - [reviews/openmontage/](reviews/openmontage/README.md) — OpenMontage review (provenance for `om-*` skills)
 - [CLAUDE_PIPELINE_REVIEW.md](CLAUDE_PIPELINE_REVIEW.md), [DOCKER_SHORT_BENCHMARK_REVIEW.md](DOCKER_SHORT_BENCHMARK_REVIEW.md), [../design_doc/docker-short-benchmark.md](../design_doc/docker-short-benchmark.md) — kept at these paths because `.agents/skills` reference them (skills are hash-pinned)
