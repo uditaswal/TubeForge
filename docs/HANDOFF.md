@@ -67,6 +67,7 @@ lower ~25% of the frame is platform-reserved space. The operator has **not** wat
 Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 
 ## Next step
+-1. **Open visual defect (25 Oct):** in landscape (16:9) jobs the burned-in captions sit mid-frame and overlap the animated diagram boxes (job `7646d2e9…` contact sheet). Check caption `MarginV`/font size vs the animated-layout safe area in `rendering/preview.py` before calling landscape output good. Also keep the Claude runner running (`scripts/run_claude_runner.sh`; it had died, which surfaced as "preflight Connection refused"; now retried automatically).
 0. **Video-quality plan (24 Oct):** `docs/MILESTONES_VIDEO_QUALITY.md` (milestones M0–M9 learned from 3 reference videos + the lyric-video process guide). Suggested order: M0 reference benchmark, M1 60–90 s explainer profile, M2 concept/screenplay stage; Codex branch: M4 motion engine, M5 timing/audio gates. Operator decisions listed at its end.
 1. Operator watches `preview.mp4` (Studio → job → Watch preview) and gives creative feedback.
 2. Operator watches `final.mp4` of job `8c23e099…` and decides on the publication gate (do NOT approve until watched). Then: real thumbnail from a final-video frame (current one is a placeholder), orchestrator-level test for the reference final→publication path.
