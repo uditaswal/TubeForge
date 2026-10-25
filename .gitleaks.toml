@@ -1,0 +1,16 @@
+# gitleaks configuration: default rules plus project allowlist.
+# Scan history: gitleaks git --log-opts="--all" --redact
+# Scan working tree: gitleaks dir . --redact
+title = "TubeForge gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignored runtime trees and deterministic test hashes"
+paths = [
+  '''(^|/)\.venv[^/]*/''',
+  '''(^|/)data/''',
+  '''(^|/)models/''',
+  '''(^|/)\.(pytest|safety|review|m\d+)[^/]*/''',
+]

@@ -4,7 +4,7 @@ You are developing TubeForge, an automated YouTube-video generation system. This
 
 ## Project records (keep consistent; never copy status between them)
 
-- `design_doc/tubeforge-publishing-design.md` — single current plan/status: contracts, phases, release state, blockers, next five actions. Full former text: `docs/archive/` (do not read unless needed). Update affected stages, status, evidence and next action after each coherent stage.
+- `design_doc/tubeforge-publishing-design.md` — single current plan/status: contracts, phases, release state, blockers, next five actions. Removed historical docs live only in git history. Update affected stages, status, evidence and next action after each coherent stage.
 - `AUTONOMOUS_PROGRESS.md` — local-only (gitignored) append-only evidence log: scope, validation commands/results, artifacts inspected, blocker, next action, **≤ ~15 lines per entry**. Append with `cat >> AUTONOMOUS_PROGRESS.md <<'EOF'`; never Read/grep/cat it whole. **Rotate** when it exceeds 40 KB (`wc -c`) or a new calendar month starts: rename to the next free `AUTONOMOUS_PROGRESS.md_N`, create a fresh file with a short summary of the archive plus the last entry. Never read `AUTONOMOUS_PROGRESS.md_*` unless the operator asks. Do not claim a milestone complete there unless its plan stage is **VERIFIED** with linked evidence.
 - `readme.md` — operator setup/workflow guide; update when supported setup, configuration or workflow changes.
 - `docs/SHORT_FORM_VIDEO_RULEBOOK.md` — video quality and creative review.
@@ -37,7 +37,7 @@ Use Codex CLI or Claude for production scripts; no local LLM for production gene
 
 ## Repository hygiene
 
-Before every commit review `git status --short` for generated, machine-local or sensitive files, and update `.gitignore` in the same change for any new ignorable path (media/artifacts, model weights/caches, local DBs, logs, venvs, build/test output, credentials, editor/OS files). Verify with `git check-ignore -v`; find tracked-but-ignored files with `git ls-files -ci --exclude-standard`. Avoid broad rules that hide source, migrations, fixtures or intentionally versioned config. Never untrack files merely to make an ignore rule apply; flag that to the operator.
+Secret/large-file guards: `pre-commit` with gitleaks runs on every commit and in CI (`SECURITY.md`); never use `--no-verify`, never commit AI-attribution trailers (Co-Authored-By/"Generated with"). Before every commit review `git status --short` for generated, machine-local or sensitive files, and update `.gitignore` in the same change for any new ignorable path (media/artifacts, model weights/caches, local DBs, logs, venvs, build/test output, credentials, editor/OS files). Verify with `git check-ignore -v`; find tracked-but-ignored files with `git ls-files -ci --exclude-standard`. Avoid broad rules that hide source, migrations, fixtures or intentionally versioned config. Never untrack files merely to make an ignore rule apply; flag that to the operator.
 
 ## Dashboard UI contract
 

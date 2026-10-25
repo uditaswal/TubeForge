@@ -1,101 +1,103 @@
+# TubeForge .gitignore — source, migrations, tests, skills, config and docs stay tracked.
+# Everything generated at runtime, downloaded, machine-local or secret stays out.
+
+# --- Secrets and credentials (template .env.example stays tracked) ---
 .env
-.venv/
-.venv312/
-.deps/
-.tmp/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-*.egg-info/
-data/
-*.db
-*.db-shm
-*.db-wal
-# Pytest / test-generated artifacts
-.pytest-*
-.m*-pytest-*
-.m*-focused-tmp*
-.m*-full-tmp*
-.review-*
-.safety-pytest-*
-.test-tmp/
-**/__pycache__/
-autonomous_logs/
-models/*.onnx
-models/*.bin
-# Downloaded Piper voice configuration accompanies its ignored ONNX model.
-models/*.onnx.json
-issues.md
-
-# Generated acceptance media; retain and inspect locally, but do not commit it.
-artifacts/smoke/
-artifacts/benchmark/
-.venv-benchmark/
-# Locally built deployment wheels
-artifacts/wheels/
-
-# Machine-local credentials and interactive agent state; project skills stay tracked.
-/.aws/
-/.codex/
-/.codex-overnight/
-/git-repos/
-/build/
-/dist/
-/o/
-/:memory:.ses
-/src/tubeforge/core/r
-# Root-level downloaded previews and session output.
-/preview*.mp4
-/final-*.mp4
-/*.log
-
-# Local-only agent progress logs (rotated archives are AUTONOMOUS_PROGRESS.md_N)
-AUTONOMOUS_PROGRESS.md
-AUTONOMOUS_PROGRESS.md_*
-
-# Other local env files (the template .env.example stays tracked), keys and credentials.
 .env.*
 !.env.example
 *.pem
 *.key
+*.p12
+*.pfx
 client_secret*.json
 service-account*.json
+*token*.json
+/.aws/
+gitleaks-report*.json
+
+# --- Python environments, caches, build output ---
+.venv*/
+.deps/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Test and review scratch directories (pytest --basetemp etc.) ---
+.tmp/
+.test-tmp/
+.pytest-*
+.safety-*
+.review-*
+.m*-pytest-*
+.m*-focused-tmp*
+.m*-full-tmp*
+.playwright/
+test-results/
+playwright-report/
+
+# --- Runtime data: database, jobs, caches, rendered artifacts, models ---
+data/
+/artifacts/
+/models/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+:memory:*
+*.sock
+*.pid
+
+# --- Logs and agent run state (AUTONOMOUS_PROGRESS.md is a local-only log) ---
+*.log
+nohup.out
+autonomous_logs/
+/.codex/
+/.codex-overnight/
+AUTONOMOUS_PROGRESS.md
+AUTONOMOUS_PROGRESS.md_*
+OVERNIGHT_MISSION.md
+issues.md
+/git-repos/
+/o/
+/src/tubeforge/core/r
 
 # Per-machine Claude Code state; the shared .claude/settings.json stays tracked.
 /.claude/*
 !/.claude/settings.json
 
-# Editors, OS and tool caches.
+# --- Generated media and model weights anywhere (small fixtures/examples stay trackable) ---
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.wav
+*.mp3
+*.m4a
+*.onnx
+*.onnx.json
+*.safetensors
+*.gguf
+*.pt
+*.npz
+*.bin
+!tests/fixtures/**/*.mp4
+!tests/fixtures/**/*.wav
+!examples/**/*.mp4
+!examples/**/*.wav
+
+# --- Editors and OS ---
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 *.swp
 *~
-.ruff_cache/
-.coverage
-htmlcov/
-.playwright/
-test-results/
-playwright-report/
-
-# Larger model/weight formats and generated media anywhere (fixtures/examples stay trackable).
-models/*.safetensors
-models/*.pt
-models/*.gguf
-models/*.npz
-*.mp4
-*.mov
-*.webm
-*.wav
-*.mp3
-!tests/fixtures/**/*.mp4
-!examples/**/*.mp4
-!tests/fixtures/**/*.mov
-!examples/**/*.mov
-!tests/fixtures/**/*.webm
-!examples/**/*.webm
-!tests/fixtures/**/*.wav
-!examples/**/*.wav
-!tests/fixtures/**/*.mp3
-!examples/**/*.mp3
+*.bundle

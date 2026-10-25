@@ -1,7 +1,7 @@
 # TubeForge Shorts workflow
 
 This record defines the product decisions and validation gates for good-quality
-YouTube Shorts. It complements `docs/STATUS.md`, while the current release status is in `design_doc/tubeforge-publishing-design.md`.
+YouTube Shorts. The current release status is in `design_doc/tubeforge-publishing-design.md`.
 
 ## Output contract
 
@@ -143,6 +143,6 @@ resources from the wheel. Application Python scores five hooks, selects a
 format-compatible finalist, checks ten title/thumbnail pairings and retains
 reports for exact-script review. Channel voice profiles are snapshotted in the
 request; older jobs and supported widescreen formats remain readable. See
-README and `docs/YOUTUBE_SKILLS_PLAN.md`. Local integration tests are separate
+README and `docs/CONTENT_SKILLS_CONTRACT.md`. Local integration tests are separate
 from real host Codex generation, finished-video inspection and browser acceptance;
 none of those production gates is upgraded by a synthetic fixture.
