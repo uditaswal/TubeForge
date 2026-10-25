@@ -16,7 +16,7 @@ from tubeforge.domain.contracts import CardRevealCues, ContentPackage, ContentRe
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import scene_request
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
-from tubeforge.pipeline.scene_contracts import SceneContractRow, ScriptBoundSceneContract, compile_scene_contract, scene_media_request
+from tubeforge.pipeline.scene_contracts import SceneContractDriftError, SceneContractRow, ScriptBoundSceneContract, compile_scene_contract, scene_media_request
 from tubeforge.providers.fake import FakePublisher, FakeVoiceProvider
 from tubeforge.providers.media.local_graphics import LocalMotionGraphicsProvider, NEW_LAYOUT_STYLE_VERSION, STYLE_VERSION, _fit_heading, _terminal_outputs, storyboard_style_for
 from tubeforge.api.scene_ui import SCENE_CONTROLS
@@ -337,7 +337,7 @@ def test_explicit_contract_visual_fields_must_match_exact_approved_scene_plan() 
     contract = compile_scene_contract(package_bytes, packet_bytes, accepted_script_identity=identity)
     assert contract is not None
     row = contract.scenes[0]
-    with pytest.raises(ValueError, match="visuals differ from the accepted scene plan"):
+    with pytest.raises(SceneContractDriftError, match="visuals differ from the accepted scene plan"):
         contract.model_copy(update={"scenes": (row.model_copy(update={"layout": "flow_diagram"}), *contract.scenes[1:])}).validate_against(
             package_bytes, packet_bytes, accepted_script_identity=identity,
         )
@@ -450,3 +450,26 @@ def test_card_heading_shortens_long_hook_sentences_to_fit_the_card() -> None:
     assert heading("Every PHP version affected") == "Every PHP version affected"
     long_hook = "Watch this if you run a PHP website, because a critical flaw could let attackers run commands."
     assert 0 < len(heading(long_hook)) <= CARD_HEADING_LIMIT and long_hook.startswith(heading(long_hook))
+
+
+def test_shortened_card_heading_remains_bound_to_approved_scene_plan() -> None:
+    package_bytes, packet_bytes = _explicit_fixture_bytes()
+    value = json.loads(package_bytes)
+    scene = value["scene_plans"][-1]
+    scene.update({
+        "on_screen_text": "Rotate keys. Comment your host.",
+        "visual_subject": "Revoke, rotate, comment steps",
+        "card_cues": {"kind": "close", "first_word_index": 0, "second_word_index": 1, "third_word_index": 2},
+    })
+    package_bytes = json.dumps(ContentPackage.model_validate(value).model_dump(mode="json"), sort_keys=True).encode()
+    identity = hashlib.sha256(package_bytes).hexdigest()
+    contract = compile_scene_contract(package_bytes, packet_bytes, accepted_script_identity=identity)
+    assert contract is not None
+    assert contract.scenes[-1].heading == "Revoke, rotate, comment steps"
+    contract.validate_against(package_bytes, packet_bytes, accepted_script_identity=identity)
+
+    altered = contract.scenes[-1].model_copy(update={"heading": "A different instruction"})
+    with pytest.raises(ValueError, match="visuals differ from the accepted scene plan"):
+        contract.model_copy(update={"scenes": (*contract.scenes[:-1], altered)}).validate_against(
+            package_bytes, packet_bytes, accepted_script_identity=identity,
+        )

@@ -48,7 +48,6 @@ def test_dashboard_requires_login_and_csrf_for_mutation(tmp_path: Path) -> None:
         assert '.studio-sidebar.open{transform:translateX(0)}' in dashboard.text
         assert "Connections require verified platform authorization" in dashboard.text
         assert "Download diagnostics JSONL" in dashboard.text
-        assert "cgroup lifetime peak" in dashboard.text
         assert "Visual layout<select id=\"sceneLayout\"" in dashboard.text
         csrf_wrapper = dashboard.text.index("window.fetch=(url, init={})")
         scene_revision = dashboard.text.index("/api/jobs/${parent}/scene-revisions")

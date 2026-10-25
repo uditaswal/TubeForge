@@ -42,6 +42,18 @@ EXPLICIT_SCENE_LAYOUTS = frozenset(layout.value for layout in SceneLayout)
 SUPPORTED_SOURCE_PACKET_VERSIONS = frozenset({"1.0", "1.1"})
 
 
+def _scene_heading(plan, layout: SceneLayout) -> str:
+    if layout is SceneLayout.TERMINAL:
+        return plan.visual_subject or plan.on_screen_text or plan.search_queries[0]
+    if plan.card_cues is not None:
+        return _card_heading(plan)
+    return plan.on_screen_text or plan.visual_subject or plan.search_queries[0]
+
+
+class SceneContractDriftError(ValueError):
+    """A stored or compiled contract no longer matches the accepted ScenePlan; it can be recompiled from the approved script."""
+
+
 class SceneContractRow(DomainModel):
     scene_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     layout: SceneLayout
@@ -111,25 +123,20 @@ class ScriptBoundSceneContract(DomainModel):
             plan = approved_plans[row.scene_id]
             if plan.visual_type in EXPLICIT_SCENE_LAYOUTS:
                 expected_layout = SceneLayout(plan.visual_type)
-                expected_heading = (
-                    (plan.visual_subject or plan.on_screen_text or plan.search_queries[0])
-                    if expected_layout is SceneLayout.TERMINAL
-                    else (plan.on_screen_text or plan.visual_subject or plan.search_queries[0])
-                )
                 expected_command = plan.on_screen_text if expected_layout is SceneLayout.TERMINAL else None
                 if (
                     row.layout is not expected_layout
-                    or row.heading != expected_heading
+                    or row.heading != _scene_heading(plan, expected_layout)
                     or row.command != expected_command
                     or row.display_elements != plan.visual_elements
                 ):
-                    raise ValueError(f"scene {row.scene_id} visuals differ from the accepted scene plan")
+                    raise SceneContractDriftError(f"scene {row.scene_id} visuals differ from the accepted scene plan")
             if row.terminal_cues != approved_plans[row.scene_id].terminal_cues:
-                raise ValueError(f"scene {row.scene_id} reveal cues differ from the accepted script revision")
+                raise SceneContractDriftError(f"scene {row.scene_id} reveal cues differ from the accepted script revision")
             if row.card_cues != approved_plans[row.scene_id].card_cues:
-                raise ValueError(f"scene {row.scene_id} card cues differ from the accepted script revision")
+                raise SceneContractDriftError(f"scene {row.scene_id} card cues differ from the accepted script revision")
             if row.teaching_cues != approved_plans[row.scene_id].teaching_cues:
-                raise ValueError(f"scene {row.scene_id} teaching cues differ from the accepted script revision")
+                raise SceneContractDriftError(f"scene {row.scene_id} teaching cues differ from the accepted script revision")
             cited = {source_id for claim_id in section.claim_ids for source_id in claims[claim_id].source_ids}
             if cited and not row.source_ids:
                 raise ValueError(f"scene {row.scene_id} omits its narrated claim sources")
@@ -219,7 +226,7 @@ def compile_scene_contract(
         rows.append(SceneContractRow(
             scene_id=scene.scene_id,
             layout=layout,
-            heading=(scene.visual_subject or scene.on_screen_text or scene.search_queries[0]) if layout is SceneLayout.TERMINAL else _card_heading(scene) if scene.card_cues is not None else (scene.on_screen_text or scene.visual_subject or scene.search_queries[0]),
+            heading=_scene_heading(scene, layout),
             command=scene.on_screen_text if layout is SceneLayout.TERMINAL else None,
             display_elements=scene.visual_elements,
             source_ids=sources,
