@@ -164,7 +164,7 @@ The review checks source references and overlap against the local snapshots. It 
 
 ## Addendum 24 Oct 2026: operator retention rules and overlap with this review
 
-Added by Claude on `dev` (append-only, to keep merge conflicts with the Codex branch small). Full mapping and measurements: `docs/MILESTONES_VIDEO_QUALITY.md` §1b and milestone M1b. No code from this review was imported and no performance improvement is claimed.
+Added by Claude on `dev` (append-only, to keep merge conflicts with the Codex branch small). Full mapping and measurements: `docs/video-quality/plan-m0-m9.md` §1b and milestone M1b. No code from this review was imported and no performance improvement is claimed.
 
 The operator's four rules: (R1) a visual hook in the first 2 seconds and no greeting openers, (R2) a last sentence that connects back into the first, (R3) no pauses in the voiceover and a visual change every 1.5–2.5 s, (R4) avoid low-effort/identical templates. Their stated effects (retention above 100 %, faster distribution) are unverified hypotheses.
 

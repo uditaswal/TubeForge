@@ -211,8 +211,8 @@ def test_bubblewrap_uses_only_the_pinned_root_owned_runtime(monkeypatch: pytest.
 
 def test_runtime_contract_matches_the_fixed_bubblewrap_layout() -> None:
     repository = Path(__file__).resolve().parents[1]
-    instructions = (repository / "docs" / "tubeforge-codex-runner-runtime.md").read_text(encoding="utf-8")
-    unit = (repository / "docs" / "tubeforge-codex-runner.service").read_text(encoding="utf-8")
+    instructions = (repository / "docs" / "deploy" / "codex-runner-runtime.md").read_text(encoding="utf-8")
+    unit = (repository / "docs" / "deploy" / "tubeforge-codex-runner.service").read_text(encoding="utf-8")
 
     assert "/opt/tubeforge-codex-runner/codex-runtime/node/bin/node" in instructions
     assert "@openai/codex@0.149.0" in instructions

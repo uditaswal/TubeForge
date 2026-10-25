@@ -1,11 +1,10 @@
 # HANDOFF — read this first (Codex and Claude)
 
-Last updated: 2026-10-22 by Claude · branch `dev` · see `git log -3` for the checkpoint.
-Rules live in `AGENTS.md`. Evidence log `AUTONOMOUS_PROGRESS.md` is local-only and small (append-only; archives `_N` — do **not** read them).
-Full review of the project (why videos look bad, phases): `docs/REVIEW_2026-10-21_END_TO_END.md`.
-Content-quality review (script, hook, engagement, voice, music, visuals → actionable steps): `docs/REVIEW_2026-10-22_CONTENT_QUALITY.md`.
-Reference-codebase comparison (23 Oct; review only, missing capabilities and adoption experiments): `docs/REVIEW_2026-10-23_REFERENCE_CODEBASES.md`. Current review status and next action remain in the publishing design plan.
-Video-quality implementation worktree: `codex/video-quality-implementation` (merged with `dev` 25 Oct; speech profile now on in `production.yaml`, black-frame QA advisory, legacy voice manifests resume); milestones in `docs/VIDEO_QUALITY_MILESTONES.md`. Milestones 1 and 2 are VERIFIED; evidence in `docs/VIDEO_QUALITY_M1_EVIDENCE.md` and `docs/VIDEO_QUALITY_M2_EVIDENCE.md`. The operator accepted milestone 2's first candidate over baseline and heard no difference after its four-millisecond seam taper. Milestone 3 is IMPLEMENTED with [technical and visual evidence](VIDEO_QUALITY_M3_EVIDENCE.md): 25 focused tests, full 29.6-second stock-backed video, encode/decode/audio/temporal gates, and inspected contact/boundary sheets passed. The operator's full-video creative review is pending before VERIFICATION. Live browser interaction remains an operational follow-up after two earlier worker-browser launch failures. Milestone 4 has not started.
+Last updated: 2026-10-25 (repo cleanup) · branches `dev` and `main` · see `git log -3` for the checkpoint.
+Rules: `AGENTS.md`. Detailed status table, render evidence and per-feature notes: `docs/handoff-notes.md` (read a section only when needed).
+Plan/status of record: `design_doc/tubeforge-publishing-design.md`. Docs index: `docs/README.md`.
+Reviews (read on demand): `docs/reviews/2026-10-21-end-to-end.md` (why videos looked bad), `2026-10-22-content-quality.md` (script/hook/voice/music/visual steps, "§9"), `2026-10-23-reference-codebases.md`.
+Video-quality work: `docs/video-quality/milestones.md` (Codex M1–M4: M1, M2 VERIFIED; M3 IMPLEMENTED, operator's full-video review pending; M4 NOT STARTED), evidence in `docs/video-quality/evidence.md`; broader M0–M9 plan in `docs/video-quality/plan-m0-m9.md`.
 
 ## Goal
 Scheduled/user-briefed AI Shorts → local render (Kokoro TTS, Python/FFmpeg) → review → upload to
@@ -15,90 +14,36 @@ strict JSON script + scene plan; all pixels, audio and encoding are local and co
 ## Working rules for the relay
 1. Start: `git status`, `git log -5 --oneline`, read this file. One agent on the branch at a time.
 2. Commit at every green checkpoint; before stopping (or near your token limit) commit and edit
-   **Next step** below with a concrete file/command.
+   **Next step** below with a concrete file/command. Commit messages carry no AI attribution trailers.
 3. Judge video work by looking at frames: `ffmpeg -i x.mp4 -vf "fps=1/3,scale=270:480,tile=6x2" -frames:v 1 sheet.png`, then view the PNG.
 4. Python with renderer deps: `.venv-benchmark/bin/python` (`PYTHONPATH=src`). Heavy renders: run in background.
 5. Do not publish anything. Do not reset script-attempt allowances.
+6. `pre-commit` (gitleaks + large-file/generated-file guards) runs on every commit; never bypass it with `--no-verify`.
 
 ## Architecture in one screen
 - Dashboard (`api/app.py`, port 62065) → durable job → worker (`workers/`, Docker) → `pipeline/orchestrator.py` state machine.
 - **Script owner** is per job (`ContentRequest.script_owner`, `codex` default | `claude`), chosen in the Creator Studio form.
-  - Codex: root-owned host runner behind `/run/tubeforge-codex/codex.sock` (needs sudo to redeploy).
+  - Codex: root-owned host runner behind `/run/tubeforge-codex/codex.sock` (needs sudo to redeploy; `docs/deploy/codex-runner-runtime.md`).
   - Claude: user-level runner `scripts/run_claude_runner.sh` → `data/run/claude/claude.sock`
     (`src/tubeforge/host_claude_runner.py`; CLI binary resolved from the VS Code extension or `TUBEFORGE_CLAUDE_BIN`).
-    Start it before using Claude jobs (`systemctl --user` unit in `docs/tubeforge-claude-runner.service`).
+    Start it before using Claude jobs (`systemctl --user` unit in `docs/deploy/tubeforge-claude-runner.service`).
   - Routing: `providers/content/factory.py::ScriptOwnerRouter`. Config: `pipeline.claude` in `config/production.yaml`.
-- **Reference Shorts path** (`m6-content-v8`, 9:16, 25–90 s, default 60): package carries `reference_short` scenes.
-  Orchestrator branches to `pipeline/reference_short.py` → `rendering/shorts/` (layout, timeline, audio, encode).
-  Legacy path (`rendering/preview.py`, `providers/media/local_graphics.py`) remains only for old jobs.
+- **Reference Shorts path** (`m6-content-v8`, 9:16, 30–90 s, default 60): package carries `reference_short` scenes.
+  Orchestrator branches to `pipeline/reference_short.py` → `rendering/shorts/` (layout, timeline, audio, encode, motion, icons, logos, mascot).
+  Legacy v1–v7 / 16:9 box-and-caption jobs are refused.
 - Preview = 720×1280 draft; final = 1080×1920. Both pass the library's QA (decode, loudness −15..−13 LUFS, TP ≤ −1.5).
+- Publishing page: title/description suggestion (`pipeline/publication_suggest.py`), thumbnails (`pipeline/thumbnail.py`). Instagram publisher NOT STARTED.
 
-## Status (use AGENTS.md labels)
-| Item | Status | Evidence |
-|---|---|---|
-| Claude as script owner (runner, router, API field, Studio selector) | IMPLEMENTED | Live Claude scripts through the dashboard API (3 jobs, ~$0.4–0.8 list price each); `tests/test_script_owner.py`. Studio selector exists but was not browser-tested. |
-| Orchestrator uses `rendering/shorts` for `m6-content-v8` jobs | IMPLEMENTED | Dashboard job `41e2ee9a…` rendered through it (below) |
-| Dashboard-generated Rust Short, 720×1280 preview, motion + icons | IMPLEMENTED (preview only) | below; creative acceptance by the operator is still open |
-| Script-writer picker in Studio: Sonnet 5.5 medium (default), Opus 5.5 high, Codex GPT-5.6 Sol | IMPLEMENTED | `script_model` on `/api/videos`; `/api/content-profiles` lists models; Sonnet job `8c23e099…` end to end |
-| Hook/script craft: prompt block + scored hook gate (≥58) + repairable skill/layout checks | IMPLEMENTED | Sonnet hooks scored 56–70 vs 42 before; selected "76% memory bugs, then what?" (67). Gate lives in `providers/content/youtube_skills.hook_gate` and `validate_video_package` |
-| Motion layer (`rendering/shorts/motion.py`) + 22 procedural icons (`icons.py`) | IMPLEMENTED | stills + full encode inspected |
-| Preview approval → 1080×1920 final → quality gate for reference jobs | IMPLEMENTED | Job `8c23e099…` (22 Oct): final.mp4 1080×1920, 34.2 s, library QA + `quality_report` passed; contact sheet `final-sheet.png`. Operator has not watched it. |
-| Publication prep for reference jobs | IMPLEMENTED | Same job reached `publication_approval_required` (metadata, thumbnail, platform variants built; `_reference_timing`, thumbnail bound to final checksum). Nothing approved or published. Thumbnail is still the legacy bitmap-text placeholder. |
-| Engagement debate comment (`metadata.engagement_comment`) | IMPLEMENTED (backend only) | Writer prompt (v8 only) asks for one provocative-but-fair pinned-comment question; contract rejects links/@/#/non-questions; carried into `publication_package.metadata`. Not generated in a live job yet; nothing posts it. |
-| Content quality step 1 (review §9: pacing, craft gate, comment CTA, fonts, no placeholders) | IMPLEMENTED | Job `b1c3a6b5…` (Sonnet, 1 attempt, $0.21): 92 words, 35.6 s, −14.2 LUFS, 6 narration gaps ≥0.25 s (was 14), ~155 wpm (was 139); stance + challenge CTA + counter-argument pinned comment; `review-sheet.png` inspected. 2/7 scenes on estimated alignment — needs a listen. Operator has not watched it. |
-| Real-imagery plates (review §6/§9a: Pixabay B-roll, source-page screenshots with marker highlight, typed code cards) | IMPLEMENTED | Job `90625bb5…` (Sonnet, 1 attempt): hook/CTA on Pixabay video, 3 scenes with captured source paragraphs, 1 Rust code card, 76→24 % stat kept as animated chart; preview 33.9 s, −14.2 LUFS, RTF 13.4, 844 MB RSS; `review-sheet.png` inspected. Later change (not re-rendered): screenshot viewport 820→540 px so quoted text is large — verified separately on Google's post. Operator has not watched it. |
-| Writers' room (review §3 S1–S5, R1–R4): angle pass → draft with format recipe → editor pass, Claude runner only | IMPLEMENTED | Own one-call allowances (`salt` `angle`/`editor`, limit 1) on top of the 2-attempt draft allowance; angle failure or an editor output that fails validation silently keeps the draft (`provenance.writers_room`). Hook floor 30 (hookscore only a floor; report voice is now a craft error). Acceptance jobs on fresh GitHub blog/DevClass/InfoQ sources: `74c809b2…` (draft only), `c93f4c29…` (angle ok; editor rejected for a 7-word scene — the editor now gets one repair and the prompt keeps scenes at 8–15 words; **editor applied-path not yet seen in a live job**). Previews 37.6 s / −14.25 LUFS / 786 MB; 4 of 5 source screenshots captured, 1 fell back (quote not found). `socket_timeout_seconds` raised to 900 and `reservation_seconds` to 1800 for the longer run. |
-| Brand logos + local stock library | IMPLEMENTED | `assets/logos` (110 Simple Icons, CC0 files, svg + 512 px png masks, `index.json`; trademarks only name the subject). Scene field `logo` (slug, null otherwise) replaces the icon glyph in a light badge (`rendering/shorts/logos.py`); the v8 prompt lists the slugs. `providers/media/library.py` indexes every downloaded Pixabay file (`library.sqlite` next to `files/`); `pipeline/plates.py` tries the local library (tag match ≥ 50 % of the query words) before any Pixabay call and records `origin` per plate. Job `0072a2f4…` (9:16, PHP): PHP badge on hook and CTA, 2 stock plates from the library with no API request, 3 source screenshots. Codex-owned v8 jobs need the host redeploy for the new prompt text. |
-| Upload-ready title / 2-line description / thumbnail on the Publishing page | IMPLEMENTED | `pipeline/publication_suggest.py` (best of the writer's 10 titles by a stakes/length score, exactly two description lines + 3 hashtags), `pipeline/thumbnail.py` (1280×720 JPEG ≤ 2 MB: blurred backdrop, rounded video-frame card, outlined 2–3-word headline, logo badge), endpoints `/api/publishing/jobs/{id}/suggestion`, `/thumbnail` (regenerate: text, video moment, logo), `/thumbnail/upload` (own image), `/thumbnail.jpg`. The Publishing page shows editable title/description/tags + thumbnail controls, copies them into each destination card and sends `thumbnail_sha256` with the draft; the draft stages the JPEG and `AccountYouTubeAdapter` sets it best-effort after the upload (restart the publisher worker to load it). Inspected on job `0072a2f4…` in headless Chromium, no JS errors; a real upload with a thumbnail has not been run (no verified account here). |
-| Studio display options: source credit on screen (checkbox, off by default) and optional small channel name | IMPLEMENTED | `ContentRequest.show_source_credit` / `channel_watermark` (omitted while default, excluded from the script cache key), written to `reference/render_options.json`, part of the render identity only when set; `rendering/shorts/layout.py::RenderOptions`. 9:16 Shorts only; the legacy 16:9 renderer ignores them. Frame inspected (default vs both on). |
-| Shorts thumbnails 1080×1920 (ProTech brand) | IMPLEMENTED | `pipeline/thumbnail.py::compose_portrait` for 9:16 jobs: dark navy + cyan glow, centred Anton headline (question white, payoff cyan), tech-logo badge, bundled ProTech circuit-P tile (`assets/brand/protech-logo.webp`, 230 px). Config `pipeline.shorts_thumbnail` (`safe_region` default 90,200,990,1560, `headline_margin`, `brand_logo_enabled/path/size`, colours), validated; tests assert every key element lies inside the region. Publishing page has a "Show Shorts safe-area guides" toggle (`?guides=1` overlay of the region + approximate Shorts UI zones). Region was not checked against real Shorts screenshots — do that on a phone and adjust `safe_region`. Reference mock: `docs/shorts-thumbnail-reference.webp`. |
-| Chip mascot (single static sprite) | IMPLEMENTED | `assets/brand/mascot.png` (original art, regenerate with `scripts/make_mascot.py`), `rendering/shorts/mascot.py`: one cached sprite pasted into the first free corner slot of each scene (never overlaps a mark, hidden when the scene is full), Studio checkbox `show_mascot` (off by default, not part of the script cache key), render identity changes only when on. Standalone for any finished video: `python -m tubeforge.rendering.overlay_mascot in.mp4 out.mp4 --position bottom-right --size 0.16` (one ffmpeg overlay, audio copied). Frames inspected on job `0072a2f4…` scenes and on a 16:9 and a 9:16 video. Not animated by design (no extra processing). |
-| Loop ending instead of follow CTA (R2) | IMPLEMENTED | Operator decision 24 Oct: no follow request, the video loops. `rendering/shorts/schema.py::Loop` (template `loop`, rejects follow/subscribe, copies the hook frame in `layout.py`), writer prompt + Claude rules, `craft.py::loop_problems` (also bans greeting openers), `qa_check.py` loop/greeting checks, descriptions drop follow lines. Legacy `cta` jobs still render. Not yet generated in a live job or listened to; Claude runner and Codex host need the new prompt (restart runner; Codex v8 needs the root redeploy anyway). Work done in a separate `dev` worktree to avoid disturbing Codex. |
-| Instagram publisher | NOT STARTED | |
-
-## Render evidence
-Latest (Sonnet 5.5 medium, new hook gate): job `8c23e099f53640688fb8c26957ea4e57`, preview 720×1280, 34.2 s, −14.3 LUFS, `review-sheet.png` next to it; script generation 2.2 min, ~$0.38 list price.
-Earlier: job `41e2ee9a44d6428885a387714a4788e8` (Claude-owned, preset `reference-short`, created/approved/rendered via the
-signed-in dashboard API on 22 Oct; script approved only for a local test render, **nothing published**):
-`data/artifacts/41e2…/preview.mp4` — 720×1280, 30 fps, 34.0 s, H.264/AAC 48 kHz, −14.3 LUFS, TP −2.5 dBFS,
-full decode OK, Whisper forced alignment on 6/7 scenes (1 estimated — needs listening review),
-render 11× realtime, peak RSS 0.64 GB. Review images next to it: `review-sheet.png` (2-s timeline), `motion-stills.png`.
-Observed: readable hook, big count-up stats, icon badges, placeholders before each reveal, captions below the
-graphics, sources on screen, CTA. Still weak: only boxes/stats/icons (no photos or illustrations), DejaVu type,
-lower ~25% of the frame is platform-reserved space. The operator has **not** watched it yet.
-Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
+## Status in one line each (details: `docs/handoff-notes.md`)
+IMPLEMENTED, not operator-watched: Claude script owner + model picker, hook/craft gates, writers' room (editor applied-path not yet seen live), real-imagery plates (Pixabay + local stock library + source screenshots + code cards), brand logos, motion/icons, preview→final→publication prep (job `8c23e099…`), upload-ready title/description/thumbnail, Shorts thumbnails, display options, mascot, loop/debate ending. Nothing approved or published.
 
 ## Next step
--2. **Ending choice + length (25 Oct):** Studio has "How the video ends" (`ending`: `loop` default | `debate` = cta scene whose narration is a comment question; headline starts comment/vote/pick/tell/argue). Preset `reference-short` is now 60 s default, 30–90 s allowed (scenes 6–20, words scale via `prompts.reference_word_budget`). Fixed: the loop line deliberately has no final punctuation but the generic Shorts check demanded it (job `e66186d8…` failed validation twice); `prompts.incomplete_sections` now exempts a loop scene. Not yet rendered live at 60/90 s or with a debate ending: restart the Claude runner, then run a job and check memory/RTF on a 90 s render.
--1. **Open visual defect (25 Oct):** in landscape (16:9) jobs the burned-in captions sit mid-frame and overlap the animated diagram boxes (job `7646d2e9…` contact sheet). Check caption `MarginV`/font size vs the animated-layout safe area in `rendering/preview.py` before calling landscape output good. Also keep the Claude runner running (`scripts/run_claude_runner.sh`; it had died, which surfaced as "preflight Connection refused"; now retried automatically).
-0. **Video-quality plan (24 Oct):** `docs/MILESTONES_VIDEO_QUALITY.md` (milestones M0–M9 learned from 3 reference videos + the lyric-video process guide). Suggested order: M0 reference benchmark, M1 60–90 s explainer profile, M2 concept/screenplay stage; Codex branch: M4 motion engine, M5 timing/audio gates. Operator decisions listed at its end.
-1. Operator watches `preview.mp4` (Studio → job → Watch preview) and gives creative feedback.
-2. Operator watches `final.mp4` of job `8c23e099…` and decides on the publication gate (do NOT approve until watched). Then: real thumbnail from a final-video frame (current one is a placeholder), orchestrator-level test for the reference final→publication path.
-3. Operator watches previews of `c93f4c29…` (fresh Microsoft Copilot-to-Rust story, real source screenshots) vs `90625bb5…` vs `b1c3a6b5…` vs `8c23e099…`. Next verify the editor pass applies in a live job (run a new brief, check `provenance.writers_room.editor.applied`). Then content review §9 steps 3–4: sound (A1 whole-narration synthesis, A4 voice/processing, A5 licensed music, A6 SFX) and visual depth (diagrams, versus template, beat-synced cuts, Claude frame review).
-4. Image layer beyond icons: Wikimedia/stock photo slot per scene (rights path exists in `providers/media/`), better fonts.
-5. Scheduler → private YouTube, then Instagram (hook gate/recipes are superseded by the content review's S1–S3).
-6. **Codex v8 jobs now REQUIRE the host redeploy** (22 Oct): v8 prompts no longer embed the om-* skills, so the old wheel's preflight hashes differ from the worker's and the job stops before any model call. Codex (gpt-sol) host runner is the old wheel — its prompts lack the craft block/icons until redeployed, so the worker's new hook gate may reject Codex scripts: icons/phone-fit prompt text only reach Codex after the root redeploy
-   (`docs/tubeforge-codex-runner-runtime.md`); Codex output is still validated by the worker (fit/word-count checks).
-
-## Merge of `codex/multi-account-setup` into `dev` (22 Oct)
-- Merged (commit `7266e5f`): account profiles, per-video/per-schedule destination snapshots, account-owned topic queues and schedules (migrations `20261022_0029`, `_0030`; head is `20261022_0030`), Studio shell/Scheduling/Generations UI. The Studio form now has both the script-writer picker and the destination fields in one `/api/videos` request wrapper.
-- Post-merge full suite: 525 passed, 6 failed. Fixed (stale expectations/regression): migration head assertion, schedule script assertion (`channel_identity:voice.value`), Dockerfile install-line assertion, and an over-broad prompt-size wrapper in `host_runner.py`. Still failing, **already failing before this work** (checked at `f5497db`): `test_voice_preview_is_synthesized_once…` (host has no `piper` executable; passes in the worker image) and `test_shorts_renderer_is_portrait_30fps_and_caps_visual_holds` (legacy renderer filter graph vs expected `MarginV=470`).
-- UI follow-ups for the Codex branch: the Generations view (`/api/jobs/{id}/studio-record`) shows exact CLI argv only for Codex CLI runs; Claude-owned jobs (writers' room, plates, `provenance.writers_room`, `plates_prepared` events) are not shown there yet.
-
-## Plates / Pixabay (22 Oct) — operator notes
-- Key lives in the untracked `.env` (`TUBEFORGE_PIXABAY_API_KEY`, template in `.env.example`); compose passes it to the **worker** only. Shared limiter state: `data/cache/pixabay/ratelimit.json` (80 req/min default, honours `X-RateLimit-*` and 429). Search results cached 24 h, files cached by asset id; per-asset evidence (id, page, author, licence) is in `reference/plates/manifest.json` and the job's `asset_manifest.plates`.
-- Worker image now ships Chromium + Playwright (rebuild took ~38 min on this host: `docker compose build worker web migrate scheduler`). Capture only opens the job's own source URLs, refuses non-public addresses, and falls back to the template when blocked/quote not found. Screenshots show real page content incl. embedded images — commentary use, not a legal guarantee.
-- Pixabay music is NOT used (Content ID risk); stock visuals only. Codex-owned jobs get no visuals until the Codex host runner is redeployed (old prompts).
-- Not done: Pixabay credit in descriptions (not required), diagrams (review V6), animated line/cost charts beyond the existing big_stat bars, per-job visual toggle.
-
-## UI follow-ups for the Codex UI branch (no UI was touched here)
-- Show each scene's visual (stock query/clip, source quote + screenshot, code) in script review, allow removing a scene's visual, and show `plates_prepared` fallbacks (`events`, `reference/plates/manifest.json`) in the job activity. Show Pixabay evidence in publication review.
-- Show `package.metadata.engagement_comment` in script review as an editable "Pinned comment (debate starter)" field; script approval covers it. Automatic/auto-review mode needs no extra step, so it is bypassed there. A per-job "skip comment" toggle would need an API field — not added.
-- Show the comment in the publication review (`publication_package.metadata.engagement_comment`) with copy button; posting it needs a `commentThreads.insert` call and the YouTube `youtube.force-ssl` scope, neither implemented (manual paste for now).
-- Script-writer picker already exists in the API (`script_model`); the UI selector for Claude Sonnet 5.5 / Opus 5.5 / Codex is the earlier follow-up.
-
-## Source/voice/record UI edits (23 Oct; the Codex UI branch is merged, UI edits on `dev` are fine)
-- `api/app.py`: the single-source fields and the JSON packet textarea are replaced by repeatable Sources rows in the Studio form (URL required; title and passage optional); a source with an empty passage is now read in full by `SourceIngestor` at request time (HTTPS, public hosts, no redirects, 24k chars); the form labels say so. `studio-record` returns `generation` (owner/model/effort/tokens/cost) and a reconstructed Claude command; the Generation record dialog (`generation_ui.py`) shows them. `voice_provider` is now `hybrid-http` (Kokoro voices + Piper HTTP fallback) so Kokoro voices with preview appear in the Narrator picker again. Job diagnostics line is formatted (durations, GiB/MiB, trivial stages hidden).
+1. **Ending choice + length (25 Oct):** Studio "How the video ends" (`ending`: `loop` default | `debate`). Preset `reference-short` is 60 s default, 30–90 s allowed (scenes 6–20, `prompts.reference_word_budget`). Not yet rendered live at 60/90 s or with a debate ending: restart the Claude runner, run a job, check memory/RTF on a 90 s render.
+2. Keep the Claude runner running (`scripts/run_claude_runner.sh`; a dead runner shows as "preflight Connection refused", now retried automatically). The old landscape caption-overlap defect (job `7646d2e9…`) only affects the retired 16:9 renderer.
+3. Operator reviews: M3 full video (`docs/video-quality/evidence.md`); previews of `c93f4c29…`, `90625bb5…`, `b1c3a6b5…`, `8c23e099…`; `final.mp4` of `8c23e099…` before any publication gate (do NOT approve until watched).
+4. Verify the writers' room editor applies in a live job (`provenance.writers_room.editor.applied`), then content review §9 steps 3–4: sound (A1 whole-narration synthesis, A4 voice processing, A5 licensed music, A6 SFX) and visual depth (diagrams, versus template, beat-synced cuts).
+5. Scheduler → private YouTube, then Instagram.
+6. **Codex v8 jobs REQUIRE the host redeploy** (`docs/deploy/codex-runner-runtime.md`): the old wheel's preflight hashes differ from the worker's, so Codex jobs stop before any model call until redeployed.
 
 ## Gotchas learned
 - Kill/restart the Claude runner after *any* change to prompts/layout (it imports code at start): `scripts/run_claude_runner.sh`.
@@ -107,8 +52,8 @@ Earlier job `6ddea03e…` (before motion) is the baseline for comparison.
 - Voice+alignment run fine at 2 GB; under heavy host swap Whisper can fail (now retried once, then logged estimate fallback).
 - Worker image needs extras `alignment,reference-renderer` (`docker compose build worker web migrate scheduler` after pulling).
 - Dashboard test login: create a temporary admin (`tubeforge create-admin`), delete it and its sessions afterwards.
+- Known pre-existing test failures on the host: `test_voice_preview_is_synthesized_once…` (no `piper` on host; passes in the worker image).
 
 ## Open decisions for the operator
-- Free stock media key (Pexels/Pixabay)? Not needed for icon/procedural visuals.
 - Auto-fallback Codex⇄Claude when quota is exhausted (currently manual per-job choice only).
-- Commit/branch policy for the large uncommitted working tree (nothing has been committed by Claude).
+- Check the Shorts thumbnail `safe_region` against real phone screenshots.

@@ -34,3 +34,7 @@ final-*.mp4
 !.env.example
 .claude
 AUTONOMOUS_PROGRESS.md*
+*.log
+.github
+.pre-commit-config.yaml
+.gitleaks.toml

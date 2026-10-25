@@ -48,10 +48,10 @@ sudo python3 -m venv /opt/tubeforge-codex-runner/venv
 sudo /opt/tubeforge-codex-runner/venv/bin/pip install .
 sudo chown -R root:root /opt/tubeforge-codex-runner/venv
 sudo chmod -R go-w /opt/tubeforge-codex-runner/venv
-sudo install -o root -g root -m 0644 docs/tubeforge-codex-runner.tmpfiles.conf /etc/tmpfiles.d/tubeforge-codex-runner.conf
+sudo install -o root -g root -m 0644 docs/deploy/tubeforge-codex-runner.tmpfiles.conf /etc/tmpfiles.d/tubeforge-codex-runner.conf
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/tubeforge-codex-runner.conf
-sudo install -o root -g root -m 0644 docs/tubeforge-codex-runner.service /etc/systemd/system/
-sudo install -o root -g root -m 0644 docs/tubeforge-codex-runner.socket /etc/systemd/system/
+sudo install -o root -g root -m 0644 docs/deploy/tubeforge-codex-runner.service /etc/systemd/system/
+sudo install -o root -g root -m 0644 docs/deploy/tubeforge-codex-runner.socket /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl reset-failed tubeforge-codex-runner.socket tubeforge-codex-runner.service
 sudo systemctl enable --now tubeforge-codex-runner.socket

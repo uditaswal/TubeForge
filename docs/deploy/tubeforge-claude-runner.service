@@ -1,5 +1,5 @@
 # User-level unit (no root needed):
-#   install -m 0644 docs/tubeforge-claude-runner.service ~/.config/systemd/user/
+#   install -m 0644 docs/deploy/tubeforge-claude-runner.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload && systemctl --user enable --now tubeforge-claude-runner
 [Unit]
 Description=TubeForge Claude script runner (user-level)

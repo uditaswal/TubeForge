@@ -3,7 +3,7 @@
 Author: Claude (Opus 5.5). Scope: why the reference Shorts are "acceptable but AI slop", and what to change.
 Constraints honoured: all rendering/TTS/processing stays on the homeserver (4 cores, 3.7 GB RAM, no GPU);
 the only paid AI is the existing Codex and Claude subscriptions; free APIs/assets are allowed where noted.
-Companion to `docs/REVIEW_2026-10-21_END_TO_END.md` (architecture). Status labels per `AGENTS.md`.
+Companion to `docs/reviews/2026-10-21-end-to-end.md` (architecture). Status labels per `AGENTS.md`.
 
 ## 1. TL;DR
 

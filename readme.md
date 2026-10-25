@@ -16,9 +16,8 @@ OAuth applications and credentials.
 See the [current project plan and release status](design_doc/tubeforge-publishing-design.md#11-current-release-status-and-next-action)
 for validation evidence, blockers, and next tasks. See
 `AUTONOMOUS_PROGRESS.md` (local-only, gitignored; rotated per `AGENTS.md`) for the append-only work log.
-The same project plan defines forward work and acceptance checks. The [earlier delivery plan](docs/planning/publishing-delivery-plan.md)
-retains inventory and acceptance evidence. The [dashboard prototype](design_doc/tubeforge-dashboard.html)
-is illustrative; it is not the current Creator Studio interface.
+The same project plan defines forward work and acceptance checks. Superseded plans,
+reviews and the old dashboard prototype were removed on 25 Oct 2026 and remain in git history.
 
 ## Included capabilities
 
@@ -95,7 +94,7 @@ database and create the first administrator:
 
 For the repeatable homeserver boot, service check, SSH tunnel, and recovery
 procedure, use the
-[`TubeForge homeserver operator guide`](docs/HOMESERVER_OPERATOR_GUIDE.md).
+[`TubeForge homeserver operator guide`](docs/operations/homeserver.md).
 
 ```bash
 tubeforge create-admin --username <name>
@@ -438,7 +437,7 @@ Each video in Creator Studio has a **Visuals** choice:
   scripts without the new fields use search terms as fallback labels and need
   visual review. FFmpeg adds paced camera moves and crisp cuts.
   Deploy the updated host wheel and rebuild the web/worker image before using
-  these new fields in production; see [visual pipeline handoff](docs/VIDEO_VISUAL_INVENTORY.md).
+  these new fields in production.
 - **Rights-safe stock (Wikimedia Commons)** searches only Wikimedia Commons and
   accepts only public-domain or CC0 candidates that satisfy the asset policy.
   If the search is unavailable or none qualify, the hybrid provider falls back
@@ -554,7 +553,7 @@ recorded in
 `script_model` (`sonnet-medium` | `opus` | `gpt-sol`) on `POST /api/videos`. Reference Shorts also
 reject weak hooks (yt-script hook score below 58) and scenes whose text will not fit the phone layout;
 Claude repairs such rejections once within its two-attempt limit. Codex runs through
-the root-owned host runner (`docs/tubeforge-codex-runner-runtime.md`). Claude runs
+the root-owned host runner (`docs/deploy/codex-runner-runtime.md`). Claude runs
 through a user-level runner that uses the installed Claude Code CLI with **no tools**
 (research alone gets web search):
 
@@ -619,8 +618,8 @@ report with concrete evidence.
 Portrait highlighted captions preserve punctuation in technical tokens such as
 `--name`, `-d` and `nginx:alpine`, stay within their narration phrase, and wrap
 within the configured safe-area line width. The first corrected Docker example
-and its unresolved final-render gate are recorded in
-[`docs/TASK4_VIDEO_REVIEW.md`](docs/TASK4_VIDEO_REVIEW.md).
+and its unresolved final-render gate were recorded in the former
+`docs/TASK4_VIDEO_REVIEW.md` (git history).
 
 ## Creator Studio UI contract
 
@@ -832,7 +831,7 @@ rendering. Production job `9df50ade54724d3ba7dd9e96e6521e88` passed signed-in
 script and exact-preview approval, then registered a 43.033s 1080×1920 final
 under the unchanged 1 GiB limit. Its manifest binds the approved preview and
 accepted script/audio/captions/assets; visual, caption and technical checks are
-recorded in [`docs/TASK4_VIDEO_REVIEW.md`](docs/TASK4_VIDEO_REVIEW.md). The full
+recorded in the former `docs/TASK4_VIDEO_REVIEW.md` (git history). The full
 Shorts workflow is **VERIFIED** for this finished local Short: the operator
 watched and listened to the complete final and reported good voice, pacing,
 captions and visuals with no defect. The job is at publication approval; no
@@ -865,8 +864,7 @@ transcription, rendering, narration and live publishing require their own
 application dependencies, supplied data and authorization. Skills provide
 content instructions and supporting tools, not those integrations.
 
-See [the integration plan](docs/YOUTUBE_SKILLS_PLAN.md) and
-[current project status](design_doc/tubeforge-publishing-design.md#11-current-release-status-and-next-action) for acceptance evidence and next actions.
+See [current project status](design_doc/tubeforge-publishing-design.md#11-current-release-status-and-next-action) for acceptance evidence and next actions.
 
 ## Repository layout and local artifacts
 
