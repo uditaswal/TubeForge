@@ -347,3 +347,26 @@ def test_bounded_render_preserves_scene_pauses_and_late_caption_cues(tmp_path: P
         check=True, capture_output=True, timeout=30,
     )
     assert sum(value > 120 for value in cue.stdout) > 100
+
+
+def test_true_peak_overshoot_re_encodes_once_with_headroom_instead_of_failing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    asset = tmp_path / "asset.png"; asset.write_bytes(b"asset")
+    narration = tmp_path / "narration.wav"; narration.write_bytes(b"speech")
+    captions = tmp_path / "captions.ass"; captions.write_text("[Script Info]\n", encoding="utf-8")
+    measurements = iter([{"input_i": -22.0, "input_tp": -0.5, "input_lra": 2.0, "input_thresh": -32.0, "target_offset": 2.0},
+                         {"input_i": -15.1, "input_tp": -0.9, "input_lra": 2.0, "input_thresh": -30.0, "target_offset": 0.0},
+                         {"input_i": -15.9, "input_tp": -2.5, "input_lra": 2.0, "input_thresh": -30.0, "target_offset": 0.0}])
+    monkeypatch.setattr("tubeforge.rendering.preview.analyze_loudness", lambda *_a, **_k: next(measurements))
+    renderer = PreviewRenderer(PreviewRenderConfig(audio_normalization_enabled=True, minimum_free_bytes=1, bounded_memory=False))
+    filters: list[str | None] = []
+
+    def fake_command(*_args, audio_filter=None, **_kwargs):
+        filters.append(audio_filter)
+        return ["true"]
+
+    monkeypatch.setattr(renderer, "command", fake_command)
+    monkeypatch.setattr(renderer, "_run_command", lambda *_a, **_k: (tmp_path / "preview.part.mp4").write_bytes(b"video"))
+    monkeypatch.setattr(renderer, "validate", lambda *_a, **_k: {})
+    result = renderer.render((TimelineSegment("scene", "section", 0, 1, asset, "a" * 64, "image"),), narration, captions, tmp_path / "preview.mp4")
+    assert len(filters) == 2 and "limit=0.77" in filters[0] and "limit=0.6" in filters[1]
+    assert result["metadata"]["audio_loudness"]["limiter_ceiling"] == 0.6

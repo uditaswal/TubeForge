@@ -629,3 +629,16 @@ def test_pause_parks_idle_and_running_jobs_and_resume_restores_the_stage(tmp_pat
         assert runtime.jobs.get("idle-job").cancellation_requested_at is not None
         assert client.delete("/api/jobs/idle-job").status_code == 409
         assert client.post("/api/jobs/idle-job/resume").status_code == 409
+
+
+def test_source_card_scene_without_a_cited_claim_is_rejected_at_script_time() -> None:
+    from tubeforge.core.errors import ProviderValidationError
+    from tubeforge.providers.content.prompts import validate_video_package
+
+    package = ContentPackage.model_validate_json((Path(__file__).parent / "fixtures" / "production" / "docker_images_containers" / "content_package.json").read_bytes())
+    first = package.script_sections[0]
+    claims = tuple(claim.model_copy(update={"source_ids": ()}) if claim.claim_id in first.claim_ids else claim for claim in package.claims)
+    scenes = (package.scene_plans[0].model_copy(update={"visual_type": "source_card"}), *package.scene_plans[1:])
+    broken = package.model_copy(update={"claims": claims, "scene_plans": scenes})
+    with pytest.raises(ProviderValidationError, match="source_card scenes must narrate a claim that cites a source"):
+        validate_video_package(broken, broken.request, provider_name="Claude")

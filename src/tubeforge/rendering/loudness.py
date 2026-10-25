@@ -79,11 +79,14 @@ def analyze_mix(narration: Path, music: Path, *, duration: float, ffmpeg: str, d
     return _analysis([ffmpeg, "-nostdin", "-hide_banner", "-i", str(narration), "-stream_loop", "-1", "-i", str(music), "-filter_complex", graph, "-map", "[measured]", "-t", f"{duration:.6f}", "-f", "null", "-"], deadline=deadline, cancelled=cancelled, poll_seconds=poll_seconds)
 
 
-def second_pass_filter(measured: dict[str, float]) -> str:
+def second_pass_filter(measured: dict[str, float], *, ceiling: float = 0.77) -> str:
     return (f"loudnorm=I={TARGET_I}:TP={TARGET_TP}:LRA={TARGET_LRA}"
             f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
             f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
-            f":offset={measured['target_offset']}:linear=true,alimiter=limit=0.77:level=false")
+            f":offset={measured['target_offset']}:linear=true,alimiter=limit={ceiling}:level=false")
+
+
+TIGHTER_CEILING = 0.60  # about 2.2 dB lower (0.66 still landed at -1.1 dBTP on the measured job): AAC encoding overshoots the limiter by up to ~1.4 dB on peaky voices
 
 
 def validate_encoded(measured: dict[str, float]) -> None:

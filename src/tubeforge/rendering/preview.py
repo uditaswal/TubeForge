@@ -13,7 +13,7 @@ from tubeforge.pipeline.scene_contracts import ScriptBoundSceneContract
 from tubeforge.rendering.animated_card import ANIMATED_CARD_VERSION, AnimatedCardScene, prepare_card_visual_command, resolve_card_cues
 from tubeforge.rendering.animated_teaching import ANIMATED_TEACHING_PANELS_FIRST_VERSION, ANIMATED_TEACHING_VERSION, AnimatedTeachingScene, prepare_teaching_visual_command, resolve_teaching_cues
 from tubeforge.rendering.animated_terminal import ANIMATED_TERMINAL_HEADING_VERSION, ANIMATED_TERMINAL_LONG_VERSION, ANIMATED_TERMINAL_THIRD_VERSION, ANIMATED_TERMINAL_VERSION, AnimatedTerminalScene, prepare_terminal_visual_command, resolve_cues
-from tubeforge.rendering.loudness import LOUDNESS_VERSION, MUSIC_LOUDNESS_VERSION, LoudnessCancelled, analyze as analyze_loudness, analyze_mix as analyze_music_mix, second_pass_filter, validate_encoded
+from tubeforge.rendering.loudness import LOUDNESS_VERSION, MUSIC_LOUDNESS_VERSION, TIGHTER_CEILING, LoudnessCancelled, analyze as analyze_loudness, analyze_mix as analyze_music_mix, second_pass_filter, validate_encoded
 
 class PreviewRenderCancelled(RuntimeError): pass
 RENDERER_TEMPLATE_VERSION = "m15-authored-ass-caption-style-v1"
@@ -361,18 +361,28 @@ class PreviewRenderer:
                 )
                 audio_filter = second_pass_filter(before)
             bounded = self.config.bounded_memory or any(segment.animation is not None for segment in segments)
-            if bounded:
-                command=self._render_bounded(segments,narration,captions,temporary,music,cancellation_requested,deadline,audio_filter)
-            else:
-                command=self.command(segments,narration,captions,temporary,music=music,audio_filter=audio_filter)
-                self._run_command(command,cancellation_requested,deadline)
-            if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview validation")
-            metadata=self.validate(temporary,segments[-1].end_seconds)
-            if self.config.audio_normalization_enabled:
+            for ceiling in ((None,) if audio_filter is None else (None, TIGHTER_CEILING)):
+                if ceiling is not None:
+                    # AAC encoding overshot the limiter past the true-peak gate: re-encode once with more headroom instead of failing the job.
+                    audio_filter = second_pass_filter(before, ceiling=ceiling)
+                if bounded:
+                    command=self._render_bounded(segments,narration,captions,temporary,music,cancellation_requested,deadline,audio_filter)
+                else:
+                    command=self.command(segments,narration,captions,temporary,music=music,audio_filter=audio_filter)
+                    self._run_command(command,cancellation_requested,deadline)
+                if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview validation")
+                metadata=self.validate(temporary,segments[-1].end_seconds)
+                if not self.config.audio_normalization_enabled: break
                 after = analyze_loudness(temporary, ffmpeg=self.ffmpeg, deadline=deadline, cancelled=cancellation_requested, poll_seconds=self.poll_seconds)
-                validate_encoded(after)
+                try:
+                    validate_encoded(after)
+                except ProviderValidationError:
+                    if ceiling is not None: raise
+                    continue
                 audio_loudness = {"version": MUSIC_LOUDNESS_VERSION if music is not None else LOUDNESS_VERSION, "before": before, "encoded": after}
+                if ceiling is not None: audio_loudness["limiter_ceiling"] = ceiling
                 metadata["audio_loudness"] = audio_loudness
+                break
             if cancellation_requested and cancellation_requested(): raise PreviewRenderCancelled("cancelled before preview acceptance")
             temporary.replace(output); return {"command":command,"metadata":metadata,"checksum_sha256":checksum(output),"render_strategy":"bounded-segments" if bounded else "single-graph"}
         except subprocess.TimeoutExpired as error: raise RetryableProviderError("FFmpeg preview render timed out") from error
