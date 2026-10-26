@@ -37,6 +37,7 @@ from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
 from tubeforge.scheduling.service import next_run, schedule_destination_options
 from tubeforge.providers.content.prompts import validate_video_package
 from tubeforge.pipeline.manual_publish import ManualPublishService
+from tubeforge.pipeline.music import NO_MUSIC_NAME, RESERVED_MUSIC_NAMES, SYNTHESIZED_MUSIC_NAME
 from tubeforge.pipeline.scene_revisions import StaleSceneRevision, create_scene_revision
 from tubeforge.pipeline.diagnostics import summarize_stage_events
 from tubeforge.pipeline.delivery_queue import DeliveryQueue
@@ -270,7 +271,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{name} duration must be between {preset.minimum_duration_seconds} and {preset.maximum_duration_seconds} seconds")
     music = value.music_track if value.music_track is not None else preset.music_track
     catalog = available_music if available_music is not None else {track.name for track in generation.music_catalog}
-    if music is not None and music not in catalog:
+    if music is not None and music not in catalog and music not in RESERVED_MUSIC_NAMES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"unknown approved music track: {music}")
     mcp = value.mcp_servers if value.mcp_servers is not None else preset.mcp_servers
     # The Codex CLI remains the authority for actual configured MCP servers;
@@ -1040,12 +1041,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           voiceSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Default local voice'})); voiceLabel.append(voiceSelect,voicePreview,previewStatus);
           form.querySelector('button[type="submit"]').before(voiceLabel);
           fetch('/api/voices').then(response=>response.ok?response.json():[]).then(voices=>voices.forEach(voice=>voiceSelect.append(Object.assign(document.createElement('option'),{value:voice.id,textContent:voice.label+(voice.provider==='kokoro'?' — natural':'')}))));
-          const musicLabel=document.createElement('label');musicLabel.textContent='Background music';const musicSelect=document.createElement('select');musicSelect.name='music_track';musicSelect.id='musicSelect';musicLabel.append(musicSelect);form.querySelector('button[type="submit"]').before(musicLabel);
-          async function loadMusic(){const response=await fetch('/api/music');if(!response.ok)return;const selected=musicSelect.value;musicSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'No background music'}));(await response.json()).forEach(track=>musicSelect.append(Object.assign(document.createElement('option'),{value:track.name,textContent:track.name+' — '+track.license_name+(track.attribution_required?' (credit required)':'')})));musicSelect.value=selected;}
+          const musicLabel=document.createElement('label');musicLabel.textContent='Background music';const musicSelect=document.createElement('select');musicSelect.name='music_track';musicSelect.id='musicSelect';musicLabel.append(musicSelect);
+          const musicPreviewRow=document.createElement('div');musicPreviewRow.style.marginTop='8px';const musicPreviewButton=Object.assign(document.createElement('button'),{type:'button',id:'musicPreviewButton',className:'secondary',textContent:'▶ Preview'});const musicPreviewAudio=Object.assign(document.createElement('audio'),{id:'musicPreviewAudio',controls:true});musicPreviewAudio.style.display='none';musicPreviewAudio.style.verticalAlign='middle';musicPreviewAudio.style.marginLeft='8px';musicPreviewRow.append(musicPreviewButton,musicPreviewAudio);musicLabel.append(musicPreviewRow);
+          form.querySelector('button[type="submit"]').before(musicLabel);
+          let musicIndex={};
+          function updateMusicPreviewButton(){const track=musicIndex[musicSelect.value];const previewable=track&&track.previewable;musicPreviewButton.disabled=!previewable;musicPreviewButton.title=previewable?'Listen to this track before you pick it':'Nothing to preview — '+(track?track.license_name:'');musicPreviewAudio.style.display='none';musicPreviewAudio.pause();musicPreviewAudio.removeAttribute('src');}
+          musicSelect.onchange=updateMusicPreviewButton;
+          musicPreviewButton.onclick=()=>{const track=musicIndex[musicSelect.value];if(!track||!track.previewable)return;musicPreviewAudio.src='/api/music/'+encodeURIComponent(track.name)+'/preview';musicPreviewAudio.style.display='inline-block';musicPreviewAudio.play();};
+          async function loadMusic(){const response=await fetch('/api/music');if(!response.ok)return;const selected=musicSelect.value;const tracks=await response.json();musicIndex=Object.fromEntries(tracks.map(track=>[track.name,track]));musicSelect.replaceChildren(...tracks.map(track=>Object.assign(document.createElement('option'),{value:track.name,textContent:track.name+' — '+track.license_name+(track.attribution_required?' (credit required)':'')})));if(selected&&musicIndex[selected])musicSelect.value=selected;updateMusicPreviewButton();}
           loadMusic();
           const musicPanel=document.createElement('fieldset');musicPanel.style.marginTop='18px';musicPanel.style.border='1px solid #31415f';musicPanel.style.borderRadius='9px';musicPanel.innerHTML='<legend>Add licensed music</legend><p class="sub">Upload only a track whose actual licence permits this publishing use. “Royalty-free” alone is not a licence.</p><label>Track name<input id="musicName" maxlength="200"></label><label>Audio file<input id="musicFile" type="file" accept="audio/*"></label><label>Source URL<input id="musicSource" type="url" placeholder="https://…"></label><label>Actual licence name<input id="musicLicenseName" placeholder="e.g. CC BY 4.0"></label><label>Licence terms URL<input id="musicLicenseUrl" type="url" placeholder="https://…"></label><label class="checkbox"><input id="musicPublishingAllowed" type="checkbox"> I verified these terms permit the intended YouTube publishing use</label><label class="checkbox"><input id="musicAttributionRequired" type="checkbox"> Attribution is required</label><label>Attribution text<textarea id="musicAttribution" placeholder="Creator and required credit line"></textarea></label><button id="musicUpload" type="button" class="secondary">Upload approved track</button><div id="musicStatus" class="notice" role="status"></div>';
           form.append(musicPanel);
-          document.querySelector('#musicUpload').onclick=async()=>{const file=document.querySelector('#musicFile').files[0],status=document.querySelector('#musicStatus');if(!file){status.textContent='Choose an audio file.';return;}const query=new URLSearchParams({name:document.querySelector('#musicName').value,filename:file.name,source_url:document.querySelector('#musicSource').value,license_name:document.querySelector('#musicLicenseName').value,license_url:document.querySelector('#musicLicenseUrl').value,attribution_required:String(document.querySelector('#musicAttributionRequired').checked),attribution:document.querySelector('#musicAttribution').value,publishing_allowed:String(document.querySelector('#musicPublishingAllowed').checked)});status.textContent='Validating and uploading…';const response=await fetch('/api/music?'+query,{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});const data=response.ok?await response.json():null;status.textContent=response.ok?'Approved track added to the catalog.':'Could not add track: '+await response.text();if(data){await loadMusic();musicSelect.value=data.name;}};
+          document.querySelector('#musicUpload').onclick=async()=>{const file=document.querySelector('#musicFile').files[0],status=document.querySelector('#musicStatus');if(!file){status.textContent='Choose an audio file.';return;}const query=new URLSearchParams({name:document.querySelector('#musicName').value,filename:file.name,source_url:document.querySelector('#musicSource').value,license_name:document.querySelector('#musicLicenseName').value,license_url:document.querySelector('#musicLicenseUrl').value,attribution_required:String(document.querySelector('#musicAttributionRequired').checked),attribution:document.querySelector('#musicAttribution').value,publishing_allowed:String(document.querySelector('#musicPublishingAllowed').checked)});status.textContent='Validating and uploading…';const response=await fetch('/api/music?'+query,{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});const data=response.ok?await response.json():null;status.textContent=response.ok?'Approved track added to the catalog.':'Could not add track: '+await response.text();if(data){await loadMusic();musicSelect.value=data.name;updateMusicPreviewButton();}};
           voicePreview.onclick=async()=>{const voice=voiceSelect.value;if(!voice){previewStatus.textContent='Choose a voice first.';return;}voicePreview.disabled=true;voicePreview.textContent='Loading preview…';previewStatus.textContent='';try{const audio=new Audio(`/api/voices/${encodeURIComponent(voice)}/preview`);await audio.play();previewStatus.textContent='Playing local sample.';audio.onended=()=>previewStatus.textContent='';audio.onerror=()=>previewStatus.textContent='Voice preview could not be played.';}catch(_){previewStatus.textContent='Voice preview could not be loaded.';}finally{voicePreview.disabled=false;voicePreview.textContent='Preview voice';}};
           document.querySelector('#sourceClipCreate').addEventListener('click', async () => {
             const notice = document.querySelector('#notice');
@@ -1469,11 +1476,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/music", tags=["music"])
     def list_music() -> list[dict[str, object]]:
+        """The two reserved, always-available entries first (no licence to show, nothing to
+        preview — one is generated per video, the other is no track at all), then every
+        approved catalog track, previewable via GET /api/music/{name}/preview."""
+        reserved = [
+            {"name": SYNTHESIZED_MUSIC_NAME, "reserved": True, "previewable": False,
+             "license_name": "Not a licensed track — generated locally for this video", "duration_seconds": None},
+            {"name": NO_MUSIC_NAME, "reserved": True, "previewable": False,
+             "license_name": "No track is mixed in", "duration_seconds": None},
+        ]
         catalog = runtime.orchestrator.music_catalog
         if catalog is None:
-            return []
-        return [
-            track.model_dump(mode="json", exclude={"path"})
+            return reserved
+        return reserved + [
+            {**track.model_dump(mode="json", exclude={"path"}), "reserved": False, "previewable": True}
             for track in catalog.list()
         ]
 
@@ -1512,6 +1528,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ProviderValidationError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
         return record.model_dump(mode="json", exclude={"path"})
+
+    @app.get("/api/music/{name}/preview", tags=["music"])
+    def preview_music(name: str) -> FileResponse:
+        """Stream a real, operator-approved catalog track so it can be heard before selecting
+        it — the synthesized default and "no background music" have no fixed file to stream
+        (synthesized is generated per video, picked from the topic; "none" means no track)."""
+        if name in RESERVED_MUSIC_NAMES:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="this entry has no fixed audio to preview")
+        catalog = runtime.orchestrator.music_catalog
+        if catalog is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="music catalog is not configured")
+        try:
+            record = catalog.resolve(name)
+        except ProviderValidationError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        return FileResponse(record.path, filename=Path(record.path).name)
 
     @app.get("/api/voices/{voice_id}/preview", tags=["voices"])
     def preview_voice(voice_id: str) -> FileResponse:

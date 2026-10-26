@@ -130,13 +130,18 @@ def srt_from_timeline(timeline: Timeline) -> str:
 
 
 def render(timeline: Timeline, directory: Path, destination: Path, config: ReferenceShortConfig, *,
-           draft: bool, cancelled: Callable[[], bool]) -> dict:
-    """Master audio then encode; returns the library's QA report (passed)."""
+           draft: bool, cancelled: Callable[[], bool], bed: "Path | str | None" = "synthesized") -> dict:
+    """Master audio then encode; returns the library's QA report (passed).
+
+    ``bed`` is the resolved music choice (``music.resolve_bed``'s caller passes the concrete
+    source through): ``"synthesized"`` (default, preserves prior behavior for any caller that
+    does not pass it), ``None`` for real silence, or a ``Path`` to an approved catalog file.
+    """
     starts = tuple(t.start for t in timeline.timings)
     templates = tuple(scene.template for scene in timeline.topic.scenes)
     try:
         mix = master(directory / "narration.wav", starts, directory / "mix",
-                     templates=templates, title=timeline.topic.title, cancelled=cancelled,
+                     templates=templates, title=timeline.topic.title, bed=bed, cancelled=cancelled,
                      ffmpeg=config.ffmpeg_executable)
         narration_health = json.loads((directory / "mix" / "audio-provenance.json").read_text())["narration_health"]
         return encode(timeline, mix, destination, draft=draft, cancelled=cancelled,
@@ -151,7 +156,8 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
 
 
 def render_identity(topic: ShortsTopic, narration_sha: str, timeline_sha: str, *, draft: bool,
-                    approval_identity: str | None, plates_sha: str = "none", options_sha: str = "none") -> str:
+                    approval_identity: str | None, plates_sha: str = "none", options_sha: str = "none",
+                    music_sha: str = "none") -> str:
     material = {"renderer": RENDERER_VERSION, "draft": draft, "topic": hashlib.sha256(
         topic.model_dump_json().encode()).hexdigest(), "narration": narration_sha,
         "timeline": timeline_sha, "approval": approval_identity}
@@ -159,4 +165,6 @@ def render_identity(topic: ShortsTopic, narration_sha: str, timeline_sha: str, *
         material["plates"] = plates_sha
     if options_sha != "none":
         material["options"] = options_sha
+    if music_sha != "none":
+        material["music"] = music_sha
     return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

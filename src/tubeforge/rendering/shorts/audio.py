@@ -65,18 +65,53 @@ def synth_music(count: int, title: str) -> tuple[np.ndarray, dict]:
     seconds = np.arange(count, dtype=np.float32) / SR
     music *= np.minimum(seconds, 1) * np.minimum((count / SR - seconds) / 1.2, 1)
     normalized = music * (.12 / max(float(np.max(np.abs(music))), 1e-6))
-    return normalized, {"mood": name, "bpm": bpm, "plucks_per_bar": plucks_per_bar,
+    return normalized, {"mode": "synthesized", "mood": name, "bpm": bpm, "plucks_per_bar": plucks_per_bar,
                         "progression_roots": [root for root, _ in progression]}
 
 
+def load_track_bed(path: Path, count: int, *, ffmpeg: str, deadline: float, cancelled) -> np.ndarray:
+    """Decode a real catalog track to mono float32 at ``SR``, looped or trimmed to ``count``
+    samples, with a 0.4 s fade-in and a 1.5 s fade-out (library-loop practice, video-quality
+    review §4.5), peak-matched to the synthesized bed's own target so ducking and the final
+    loudness gate behave the same regardless of which bed is playing.
+
+    A track shorter than the render is tiled without a crossfade at the internal seam(s) —
+    fine for a real song (always longer than a 25–90 s Short); a short looped clip may click
+    at the seam, a known simplification.
+    """
+    raw = checked([ffmpeg, "-y", "-v", "error", "-i", str(path), "-ar", str(SR), "-ac", "1",
+                   "-f", "f32le", "-"], deadline=deadline, cancelled=cancelled)
+    track = np.frombuffer(raw, dtype=np.float32).copy()
+    peak = float(np.max(np.abs(track))) if track.size else 0.0
+    if peak < 1e-6:
+        raise ValueError("music track decoded to silence")
+    track = track / peak
+    bed = track[:count].copy() if len(track) >= count else np.tile(track, -(-count // len(track)))[:count]
+    fade_in, fade_out = min(round(.4 * SR), count), min(round(1.5 * SR), count)
+    if fade_in:
+        bed[:fade_in] *= np.linspace(0, 1, fade_in, dtype=np.float32)
+    if fade_out:
+        bed[-fade_out:] *= np.linspace(1, 0, fade_out, dtype=np.float32)
+    return bed * .12  # match synth_music's pre-duck peak
+
+
 def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
-           templates: tuple[str, ...], title: str, cancelled=lambda: False, ffmpeg="ffmpeg"):
+           templates: tuple[str, ...], title: str, bed: "Path | str | None" = "synthesized",
+           cancelled=lambda: False, ffmpeg="ffmpeg"):
     """Mix locally, retain separate stems, then leave AAC true-peak headroom.
 
     ``templates`` names each scene's template (same order/length as ``scene_starts``);
     ``title`` seeds the music mood. Both come from the topic being rendered, so each cut's
     sound effect has a cause on screen (video-quality review §4.5) instead of the identical
     filtered-noise accent that used to play on every scene change.
+
+    ``bed`` selects the music: the string ``"synthesized"`` (default — the mood-varied
+    generator, picked deterministically from ``title``), ``None`` for real silence (no music
+    track at all), or a ``Path`` to a real, operator-approved catalog file. Before this, every
+    render got the synthesized bed unconditionally, regardless of what the operator selected
+    (video-quality review §4.5 finding, 26 Oct) — the default here preserves that exact
+    behavior for any caller that does not pass ``bed``, so nothing already in flight changes;
+    only an explicit choice does.
     """
     if len(templates) != len(scene_starts):
         raise ValueError("templates must name every scene (one per scene_starts entry)")
@@ -90,7 +125,14 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     voice = voice * (.75 / peak)
     n = len(voice)
     deadline = time.monotonic() + 240
-    bed, music_provenance = synth_music(n, title)
+    if bed == "synthesized":
+        bed_audio, music_provenance = synth_music(n, title)
+    elif bed is None:
+        bed_audio, music_provenance = np.zeros(n, np.float32), {"mode": "silence"}
+    else:
+        bed_audio = load_track_bed(bed, n, ffmpeg=ffmpeg, deadline=deadline, cancelled=cancelled)
+        music_provenance = {"mode": "track", "source_path": str(bed), "source_sha256": file_hash(bed)}
+    bed = bed_audio  # from here on, `bed` is the audio array, matching the pre-existing name
     effects = np.zeros(n, np.float32)
     levels = np.array([np.sqrt(np.mean(voice[i:i + 480] ** 2)) for i in range(0, n, 480)])
     smooth = np.convolve(levels, np.ones(15) / 15, mode="same")
@@ -139,9 +181,11 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
         temporary.replace(final)
     finally:
         temporary.unlink(missing_ok=True)
-    provenance = {"algorithm": "mood-varied synthesized pad/bass/plucks bed plus licensed scene-cause sound effects",
-                  "origin": "Music: original synthesized signals, no sampled recording. "
-                            "Sound effects: Pixabay Content License, see assets/sfx/LICENSE-pixabay.md",
+    music_origin = {"synthesized": "Music: original synthesized signals, no sampled recording.",
+                    "silence": "Music: none selected; no bed was mixed in.",
+                    "track": "Music: an operator-approved catalog track; see its own licence record."}[music_provenance["mode"]]
+    provenance = {"algorithm": f"{music_provenance['mode']} music bed plus licensed scene-cause sound effects",
+                  "origin": f"{music_origin} Sound effects: Pixabay Content License, see assets/sfx/LICENSE-pixabay.md",
                   "music": music_provenance, "music_peak_before_duck": .12, "speech_duck_maximum": .75,
                   "sound_effects": cues_placed, "sound_effect_peak": sfx.CUE_PEAK,
                   "master_target_lufs": -14, "master_target_dbtp": -2.5,

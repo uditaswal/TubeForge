@@ -8,8 +8,9 @@ import os
 import re
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -20,6 +21,20 @@ from tubeforge.core.errors import ProviderValidationError
 
 GENERIC_LICENSE_LABELS = {"free", "royalty free", "royalty-free", "unknown", "n/a"}
 ALLOWED_AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"}
+
+# Reserved `music_track` values for the reference-short (Shorts) renderer, shown as the first
+# two entries in the Studio music picker alongside real catalog tracks. Before this, "No
+# background music" did nothing — every Short always got the code-synthesized bed regardless
+# of selection (video-quality review §4.5 / operator finding, 26 Oct). Now that bed is an
+# explicit, named, selectable choice instead of a silent default: an unset `music_track`
+# (any caller that predates this field, or never touches it) still resolves to this name, so
+# existing behavior does not change for anyone who does not pick a track.
+# No comma or other punctuation outside upload()'s own name character class (`[\w .()&+-]+`):
+# this name must be a legal catalog name too, so a stray edit here can't reopen the "music
+# name contains unsupported characters" failure a reserved-name upload is meant to avoid.
+SYNTHESIZED_MUSIC_NAME = "Synthesized Ambient (auto-generated mood-matched bed)"
+NO_MUSIC_NAME = "No background music"
+RESERVED_MUSIC_NAMES = frozenset({SYNTHESIZED_MUSIC_NAME, NO_MUSIC_NAME})
 
 
 class MusicTrackRecord(BaseModel):
@@ -86,6 +101,8 @@ class MusicCatalog:
 
     def upload(self, *, name: str, filename: str, payload: bytes, source_url: str, license_name: str, license_url: str, attribution_required: bool, attribution: str, publishing_allowed: bool) -> MusicTrackRecord:
         name = name.strip()
+        if name in RESERVED_MUSIC_NAMES:
+            raise ProviderValidationError(f"music track name {name!r} is reserved")
         if not name or len(name) > 200 or not re.fullmatch(r"[\w .()&+-]+", name, flags=re.UNICODE):
             raise ProviderValidationError("music name contains unsupported characters")
         suffix = Path(filename).suffix.casefold()
@@ -184,4 +201,30 @@ def _atomic_json(path: Path, value: object) -> None:
     temporary.replace(path)
 
 
-__all__ = ["MusicCatalog", "MusicTrackRecord"]
+@dataclass(frozen=True)
+class MusicSelection:
+    """What a job's ``music_track`` resolves to: the synthesized bed, real silence, or a
+    specific approved track (with its full licence record, for mixing and attribution)."""
+    kind: Literal["synthesized", "silence", "track"]
+    record: MusicTrackRecord | None = None
+
+
+def resolve_bed(catalog: "MusicCatalog | None", music_track: str | None) -> MusicSelection:
+    """Classify a job's requested music into synthesized / silence / a real catalog track.
+
+    ``None`` (a job that predates this field, or an API caller that never sets it) resolves to
+    the synthesized bed — the exact default every reference-short render already had, now named
+    and selectable instead of silent and unconditional.
+    """
+    name = music_track if music_track is not None else SYNTHESIZED_MUSIC_NAME
+    if name == SYNTHESIZED_MUSIC_NAME:
+        return MusicSelection("synthesized")
+    if name == NO_MUSIC_NAME:
+        return MusicSelection("silence")
+    if catalog is None:
+        raise ProviderValidationError("music was selected but no approved catalog is configured")
+    return MusicSelection("track", catalog.resolve(name))
+
+
+__all__ = ["MusicCatalog", "MusicTrackRecord", "MusicSelection", "resolve_bed",
+          "SYNTHESIZED_MUSIC_NAME", "NO_MUSIC_NAME", "RESERVED_MUSIC_NAMES"]

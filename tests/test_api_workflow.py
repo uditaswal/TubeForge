@@ -280,6 +280,7 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert "Target duration (seconds)" in dashboard.text
         assert "musicUpload" in dashboard.text
         assert "/api/music" in dashboard.text
+        assert "musicPreviewButton" in dashboard.text and "musicPreviewAudio" in dashboard.text
         presets = client.get("/api/presets").json()
         assert next(value for value in presets if value["name"] == "shorts")["aspect_ratio"] == "9:16"
         short = client.post("/api/videos", json={"title": "A short", "notes": ["Open with a hook"], "preset": "shorts", "duration_seconds": 45})
@@ -439,11 +440,23 @@ def test_dashboard_uploads_only_verified_licensed_music_and_selects_it_for_a_job
         assert accepted.status_code == 201
         assert accepted.json()["license_name"] == "CC BY 4.0"
         listed = client.get("/api/music").json()
-        assert listed[0]["name"] == "Quiet Circuit" and "path" not in listed[0]
+        # The two reserved, always-available entries (video-quality review §4.5 / operator
+        # finding, 26 Oct) come first, named and with nothing to preview; the uploaded track
+        # follows, real and previewable.
+        by_name = {track["name"]: track for track in listed}
+        assert by_name["Synthesized Ambient (auto-generated mood-matched bed)"]["previewable"] is False
+        assert by_name["No background music"]["previewable"] is False
+        assert by_name["Quiet Circuit"]["previewable"] is True and "path" not in by_name["Quiet Circuit"]
+        preview = client.get("/api/music/Quiet Circuit/preview")
+        assert preview.status_code == 200 and preview.content == _music_wave()
+        assert client.get("/api/music/Synthesized Ambient (auto-generated mood-matched bed)/preview").status_code == 404
         created = client.post("/api/videos", json={"title": "Music test", "notes": ["A source-backed note"], "music_track": "Quiet Circuit"})
         assert created.status_code == 201
         job = client.app.state.runtime.jobs.get(created.json()["id"])
         assert job.request.music_track == "Quiet Circuit"
+        reserved_job = client.post("/api/videos", json={"title": "Silent test", "notes": ["A source-backed note"], "music_track": "No background music"})
+        assert reserved_job.status_code == 201
+        assert client.app.state.runtime.jobs.get(reserved_job.json()["id"]).request.music_track == "No background music"
 
 
 def test_source_clip_api_records_a_durable_source_job(tmp_path: Path) -> None:

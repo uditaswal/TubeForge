@@ -28,7 +28,7 @@ from tubeforge.domain.video_duration import SHORTS_MAX_DURATION_SECONDS, SHORTS_
 from tubeforge.pipeline.alignment import LocalWhisperDTWAligner, LocalWordAligner, WordTiming, verify_word_alignment
 from tubeforge.pipeline.captions import render_highlighted_ass, render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
-from tubeforge.pipeline.music import MusicCatalog
+from tubeforge.pipeline.music import MusicCatalog, MusicSelection, resolve_bed
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
 from tubeforge.pipeline.quality import validate_final_artifact
 from tubeforge.pipeline.storyboard import render_contact_sheets, storyboard_manifest
@@ -884,15 +884,33 @@ class PipelineOrchestrator:
             inputs["options"] = options
         return inputs, hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
-    def _reference_source_identity(self, job: PipelineJob, package: ContentPackage, inputs: dict, name: str, approval_identity: str | None) -> str:
+    def _reference_music(self, job: PipelineJob) -> MusicSelection:
+        return resolve_bed(self.music_catalog, job.request.music_track)
+
+    @staticmethod
+    def _music_identity(music: MusicSelection) -> str:
+        return f"track:{music.record.checksum_sha256}" if music.kind == "track" else music.kind
+
+    @staticmethod
+    def _music_bed(music: MusicSelection) -> "Path | str | None":
+        if music.kind == "synthesized":
+            return "synthesized"
+        if music.kind == "silence":
+            return None
+        return Path(music.record.path)
+
+    def _reference_source_identity(self, job: PipelineJob, package: ContentPackage, inputs: dict, name: str, approval_identity: str | None, *, music_sha: str = "none") -> str:
         return reference_short.render_identity(package.reference_short, str(inputs["narration"]), str(inputs["timing_map"]),
                                                draft=name == "preview", approval_identity=approval_identity,
-                                               plates_sha=str(inputs.get("plates", "none")), options_sha=str(inputs.get("options", "none")))
+                                               plates_sha=str(inputs.get("plates", "none")), options_sha=str(inputs.get("options", "none")),
+                                               music_sha=music_sha)
 
     def _reference_render_checkpoint(self, job: PipelineJob, stage: JobState, name: str, filename: str, cancellation_requested, *, approval_identity: str | None, approval_id: str | None) -> tuple[Artifact, str]:
         package = self._reference_package(job)
         inputs, input_identity = self._reference_inputs(job, package)
-        source_identity = self._reference_source_identity(job, package, inputs, name, approval_identity)
+        music = self._reference_music(job)
+        music_sha = self._music_identity(music)
+        source_identity = self._reference_source_identity(job, package, inputs, name, approval_identity, music_sha=music_sha)
         existing = self._valid_artifact(job.id, stage, name)
         manifest = self._load_json_artifact(job.id, stage, f"{name}_manifest")
         if existing and manifest and manifest.get("source_render_identity") == source_identity and manifest.get("input_identity") == input_identity:
@@ -903,7 +921,7 @@ class PipelineOrchestrator:
         self._ensure_ownership(force=True)
         self.events.append(job.id, "render_started", render=name, renderer=reference_short.RENDERER_VERSION)
         report = reference_short.render(timeline, directory, output, self.reference_config, draft=name == "preview",
-                                        cancelled=cancellation_requested or (lambda: False))
+                                        cancelled=cancellation_requested or (lambda: False), bed=self._music_bed(music))
         self._ensure_ownership(force=True)
         checksum = self._checksum(output)
         identity = hashlib.sha256(json.dumps({"source_render_identity": source_identity, "artifact_checksum": checksum, "render_instance": uuid.uuid4().hex}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -922,8 +940,9 @@ class PipelineOrchestrator:
             preview = self._required_artifact(job.id, JobState.PREVIEW_RENDERING, "preview")
             manifest = self._required_json(job.id, JobState.PREVIEW_RENDERING, "preview_manifest")
             inputs, input_identity = self._reference_inputs(job, package)
+            music_sha = self._music_identity(self._reference_music(job))
             return (manifest.get("artifact_checksum") == preview.checksum_sha256 and manifest.get("input_identity") == input_identity
-                    and manifest.get("source_render_identity") == self._reference_source_identity(job, package, inputs, "preview", None)
+                    and manifest.get("source_render_identity") == self._reference_source_identity(job, package, inputs, "preview", None, music_sha=music_sha)
                     and self._checksum(Path(preview.path)) == preview.checksum_sha256)
         except (ProviderValidationError, OSError):
             return False

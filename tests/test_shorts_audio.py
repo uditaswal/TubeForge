@@ -106,6 +106,42 @@ def test_master_places_one_real_cue_per_cut_and_riser_on_the_payoff(tmp_path):
     assert abs(provenance["mastered_measurement"]["input_i"] - (-14)) <= 1.0
 
 
+def test_master_bed_none_mixes_real_silence_not_the_synthesized_default(tmp_path):
+    """Before this, "No background music" did nothing — every render got the synthesized bed
+    regardless of selection (video-quality review §4.5 / operator finding, 26 Oct)."""
+    narration = _synthetic_narration(tmp_path, 26.0)
+    scene_starts = (0.0, 4.0, 9.0, 14.0, 19.0, 24.0)
+    templates = ("hook", "big_stat", "before_after", "flow", "checklist", "loop")
+
+    mix = master(narration, scene_starts, tmp_path / "mix", templates=templates, title="Railway breach", bed=None)
+
+    bed_track = sf.read(mix.parent / "music-ducked.wav", dtype="float32")[0]
+    assert np.max(np.abs(bed_track)) == 0.0  # literally no music, not a quiet synth bed
+    provenance = json.loads((mix.parent / "audio-provenance.json").read_text())
+    assert provenance["music"] == {"mode": "silence"}
+    assert "mastered_measurement" in provenance  # narration + SFX still mastered normally
+
+
+def test_master_bed_path_mixes_the_real_track_not_a_synthesized_one(tmp_path):
+    narration = _synthetic_narration(tmp_path, 26.0)
+    scene_starts = (0.0, 4.0, 9.0, 14.0, 19.0, 24.0)
+    templates = ("hook", "big_stat", "before_after", "flow", "checklist", "loop")
+    track_sr = SR
+    track = (np.sin(2 * np.pi * 330 * np.arange(track_sr * 40) / track_sr)).astype(np.float32)
+    track_path = tmp_path / "track.wav"
+    sf.write(track_path, track, track_sr, subtype="PCM_16")
+
+    mix = master(narration, scene_starts, tmp_path / "mix", templates=templates, title="Railway breach", bed=track_path)
+
+    provenance = json.loads((mix.parent / "audio-provenance.json").read_text())
+    assert provenance["music"]["mode"] == "track"
+    assert provenance["music"]["source_path"] == str(track_path)
+    from tubeforge.rendering.shorts.encode import file_hash
+    assert provenance["music"]["source_sha256"] == file_hash(track_path)
+    bed_track = sf.read(mix.parent / "music-ducked.wav", dtype="float32")[0]
+    assert np.max(np.abs(bed_track)) > 0  # the real track is actually audible
+
+
 def test_master_rejects_a_template_count_mismatch(tmp_path):
     narration = _synthetic_narration(tmp_path, 26.0)
     with pytest.raises(ValueError, match="templates must name every scene"):
@@ -132,9 +168,10 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
 
     captured = {}
 
-    def fake_master(narration, scene_starts, output, *, templates, title, cancelled=lambda: False, ffmpeg="ffmpeg"):
+    def fake_master(narration, scene_starts, output, *, templates, title, bed="synthesized", cancelled=lambda: False, ffmpeg="ffmpeg"):
         captured["templates"] = templates
         captured["title"] = title
+        captured["bed"] = bed
         output.mkdir(parents=True, exist_ok=True)
         (output / "audio-provenance.json").write_text(json.dumps({"narration_health": {}}))
         return output / "mix.wav"
@@ -152,3 +189,4 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
 
     assert captured["title"] == topic.title
     assert captured["templates"] == tuple(s.template for s in topic.scenes)
+    assert captured["bed"] == "synthesized"  # default: unchanged behavior for a caller that picks no track
