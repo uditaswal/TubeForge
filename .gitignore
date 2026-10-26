@@ -27,6 +27,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+# Scratch for the real-render HyperFrames-prototype test (tests/test_hyperframes_proto.py) —
+# needs real disk, not tmpfs /tmp; cleaned up by the test itself, this just covers crashes.
+.hyperframes-proto-test-tmp/
 htmlcov/
 
 # --- Test and review scratch directories (pytest --basetemp etc.) ---

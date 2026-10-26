@@ -231,12 +231,13 @@ reports a preference** — per the review's own acceptance criteria for this pha
 prefers by blind listen") and AGENTS.md ("Accept a script only after reviewing... not test
 results alone", applied here to voice).
 
-### Next action if fp32 is preferred
+### Decision (26 Oct)
 
-Swap `pipeline.kokoro.model_path` in `config/production.yaml` to the fp32 file (vendor it under
-`models/`, outside this session's git changes since `models/` holds operator-supplied binaries
-per the existing convention), bump `pipeline.kokoro.adapter_version` so the voice cache key
-changes and no stale int8 renders are served from cache, and re-run a real job to confirm.
+The operator listened to both files and **kept the current int8 model**: "int8.wav is better
+sound, but not much difference." **No config change made** — `pipeline.kokoro.model_path`
+stays `kokoro-v1.0.int8.onnx`. Phase 2 is closed; the downloaded fp32 weights were already
+only ever in the host's `/tmp` scratch space and deleted during that session to relieve tmpfs
+pressure — nothing to clean up.
 
 ## Phase 2b — Kokoro voice blending (VoiceStudio competitive-analysis Action 12)
 
@@ -305,16 +306,144 @@ This is **IMPLEMENTED, not operator-watched**: nobody has asked for a blended ch
 and nobody has heard this one. It is a capability, demonstrated working, waiting on a decision
 about whether any channel wants it and what ratio.
 
+## Phase 3 — HyperFrames' craft-gate checks in our own QA
+
+**Outcome: done, two new checks, real findings on real input.** `.agents/skills/om-video-quality/qa_check.py`
+gained `line-unread` and `dead-stretch`, ported from HyperFrames' own `craftAudit.ts` and its
+measured `motion.md`/`review.md` thresholds (review §4.1/§4.6), plus `sfx-variety` (checks the
+phase 1 SFX work stays diverse). Full detail and the real bug found and fixed while building it
+(word timestamps in `timeline.json` are absolute, not scene-relative — an early version of
+`dead-stretch` summed across the whole video's position) is in commit `c07d2a4`'s message;
+validated against the real job `e53f4e8387424f65b6a6b50fbb166efa` and a crafted fixture
+exercising every WARN/PASS/fallback branch (this repository has no precedent for pytest-testing
+`.agents/skills/*.py` scripts — SKILL.md's own instruction is to run them for real, which this
+followed).
+
+## Phase 4 — the HyperFrames renderer: one template proven end to end, not production-wired
+
+**Outcome: the technical chain works, for real content, on this host — one of seven templates,
+deliberately scoped, not wired into any job's rendering.** This was always going to be the
+largest item (the review's own estimate: "2–3 weeks"). Rather than rush partial, untested
+coverage of all seven scene templates into production code — which risks shipping something
+that *looks* complete but silently breaks on templates nobody carefully checked — this session
+built one template completely, for real, and documents the rest as the next, now-proven slice.
+
+### What exists
+
+`src/tubeforge/rendering/hyperframes_proto/` (new, self-contained, imported by nothing in
+production): `compose.py` builds a real HyperFrames project for one `hook` scene — the exact
+palette (`#f4f7ff`/`#53e0ef`/`#101e32`…), the exact vendored fonts (`Anton-Regular.ttf`,
+`Inter-Variable.ttf` — the same files `rendering/shorts/layout.py` already uses), the exact
+icon/logo badge art (reused via `rendering.shorts.icons.badge`/`logos.logo_badge`, not
+reinvented), and the exact 2–3-word caption grouping `rendering.shorts.layout.caption_groups`
+already produces, now driven by *real measured word timestamps* instead of static PIL frames.
+`cli.py` wraps the real `hyperframes` CLI (`check`, `render`), mirroring OpenMontage's own
+wrapper pattern reviewed on 26 Oct. GSAP is vendored locally (`assets/hyperframes/gsap.min.js`,
+pinned 3.14.2, MIT) — no CDN fetch at render time, per the HyperFrames contract.
+
+### What was proven, with a real artifact
+
+The hook scene from job `e53f4e8387424f65b6a6b50fbb166efa` (title "You host on Railway?", icon
+`warning`, chips "Rotate/keys/today") was built into a real project and rendered through the
+real `hyperframes` CLI installed in phase 0's benchmark:
+
+- `hyperframes check --json` passed clean (`ok: true`, zero errors in every category) after
+  two real, substantive findings were found and fixed on the first pass — not synthetic test
+  cases, the tool's own craft/layout analysis of this real composition:
+  - **`craft`: "Frame 0 shows only the background… have the title or key image already on
+    screen at 0 s"** — true: the original composition faded everything in from nothing, which
+    is exactly the fault the review's §1 cited HyperFrames for calling out ("frame 0 is the
+    thumbnail, never black"). Fixed: the badge and the hook's first headline line are now on
+    screen at t=0; only the accent (punchline) line and the chips still animate in.
+  - **`layout`: "Two text blocks overlap and may render unreadable"** (`content_overlap`,
+    real pixel rects) — two adjacent caption groups with no gap between their measured word
+    timings briefly double-exposed during the crossfade. Fixed: each group's exit is now
+    clamped to strictly before the next group's entrance (with a floor so a group is never
+    hidden before it's had at least 0.08 s on screen).
+- The fixed composition re-rendered clean: `hyperframes check` reports zero errors **and**
+  zero layout/craft warnings (one harmless Studio-UX lint note about a nested `<img>` remains
+  — a timeline-editing nicety, irrelevant since nothing here uses Studio).
+- Rendered at `--quality high`: 1080×1920, 30 fps, 3.63 s (the scene's exact real duration),
+  in 42 s wall time (RTF ≈ 11.7×, inside the 20× production budget). A full-resolution contact
+  sheet was inspected frame by frame: clean, legible, matches the existing look, no occlusion,
+  no empty opening frame, captions cycle correctly with no overlap.
+- The silent render was muxed with the **real mastered audio** for that exact time range (a
+  0–3.63 s slice of `reference/mix/mix.wav` — the actual phase-1 voice, mood music and SFX for
+  this job), full-decoded clean (`ffmpeg -xerror`), measured −14.4 LUFS / −2.55 dBTP (a 3.6 s
+  excerpt, so this number is indicative, not a full-video gate pass).
+
+Evidence on this host, not committed (large binary renders, reproducible from the commands
+below): `/home/uditaswal/docker/tubeforge/hf-proto-test/{hookproj/,hook-silent.mp4,hook-final.mp4}`.
+
+### Tests
+
+6 new tests (`tests/test_hyperframes_proto.py`): the caption-grouping/real-timing mapping
+(including the word-count-mismatch guard), the project-writer's file tree (including that no
+`<script>` tag points anywhere but the vendored local copy — no CDN fetch), the no-icon case,
+vendored-asset presence, and a **real-binary integration test** (project build → real
+`hyperframes check` → real `hyperframes render` → real `ffprobe`/`ffmpeg -xerror` decode) that
+skips cleanly when no `hyperframes` CLI is available (checks PATH, then the phase-0 benchmark
+install) — matching this repository's existing convention of skipping render-dependent tests
+rather than mocking the renderer. All 6 pass; the real-binary one also needed a real-disk
+scratch directory (under the repository's own working tree, gitignored) since pytest's default
+`tmp_path` lives on this host's 1.9 GB tmpfs `/tmp` and the CLI refuses to render there (the
+same phase-0 finding, now hit by a test instead of a human).
+
+### What a full production swap still needs (not started, in order)
+
+1. **The other six templates** — `before_after`, `flow`, `checklist`, `terminal`, `big_stat`,
+   `cta`/`loop` — each the *same* pattern this session just proved: a `<name>_composition_html`
+   string builder in `compose.py`, real content in, real `hyperframes check` findings fixed,
+   one real render inspected. `big_stat`/`loop` are the natural next two (loop reuses hook's
+   own layout per the PIL renderer's own comment; big_stat needs a count-up, the one new motion
+   idea). Rough order of magnitude: comparable effort per template to this one, so most of a
+   day each once the first one (the hardest, since the whole chain had to be built) is done.
+2. **Multi-scene composition.** Everything proven above is one scene as a standalone clip. A
+   real job is 6–20 scenes with transitions between them — the next real engineering question
+   (not yet looked at): one HyperFrames project with sub-compositions per scene and a cue sheet
+   stitching them (`data-composition-src`, matching the contract's own sub-composition model),
+   or N separate single-scene renders concatenated by FFmpeg (simpler, loses GSAP's own
+   stagger/overlap *across* a scene boundary, likely the pragmatic first choice).
+3. **A `rendering/shorts/hyperframes_encode.py`-shaped module** that mixes a HyperFrames
+   silent render with the (unchanged) phase-1 mastered audio and runs the *existing* QA
+   pipeline (`analyze`, `scan_samples`, `inspect_encoded_video` from `rendering/shorts/encode.py`
+   — all reusable as-is, since they operate on a finished MP4 regardless of how it was made).
+   Not written this session: the muxing above was a one-off FFmpeg command, not this module.
+4. **A `pipeline.reference_short.renderer: "pil" | "hyperframes"` config flag**, default
+   `"pil"`, threaded through `reference_short.render()` exactly the way `bed` was threaded
+   through `master()` in phase 1 — so nothing already in production changes until this is
+   explicitly turned on for a channel. Not started.
+5. **Node 22+ and `chrome-headless-shell` (or system Chromium, which already works — see
+   phase 0) in the worker Docker image.** The current `Dockerfile` already installs `chromium`
+   (phase 0 used it directly, via `HYPERFRAMES_BROWSER_PATH` falling back to the system
+   binary). Node is the only gap. **Proposed, untested — no Docker daemon in this sandbox to
+   build or run it against:**
+
+   ```dockerfile
+   # after the existing `RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg …` block
+   RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+       && apt-get install -y --no-install-recommends nodejs \
+       && rm -rf /var/lib/apt/lists/*
+   # hyperframes is an npm package pinned per-project (npx hyperframes@0.8.192), not a
+   # system install — no further Dockerfile line needed for it specifically.
+   ```
+
+   Someone with Docker access needs to apply this, build the image, and confirm
+   `npx hyperframes@0.8.192 doctor --json` reports Node/Chrome/FFmpeg all OK inside the
+   container before relying on it.
+6. **UTMOS and inline pause/emphasis tags** (VoiceStudio, deferred in phase 2b for the reasons
+   given there) remain separate, unrelated follow-ups.
+
 ## Summary: state per phase
 
 | Phase | State | Evidence | Next action |
 |---|---|---|---|
-| 0. Benchmark | **VERIFIED** — go decision made | this log, §Phase 0 | none (informs phase 4 go/no-go) |
-| 1. Sound (music variety + SFX) | **IMPLEMENTED**, not operator-watched | this log, §Phase 1; 9 new tests, full-suite 586/607 at this commit, zero regressions | render one real job end to end through the orchestrator (not just `master()`), watch/listen to the full video, then mark VERIFIED |
-| 2. Voice (Kokoro fp32 A/B) | Evidence gathered, **decision pending** | this log, §Phase 2; two WAVs on disk | operator listens, reports a preference; if fp32, make the two-line config change above |
-| 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests, full-suite 596/607 at this commit, zero regressions; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
-| 3. Craft gate (HyperFrames thresholds in our QA) | **NOT STARTED** | — | port `line_unread`/`dead_stretch`/transition-variety checks into `qa_check.py` |
-| 4. Renderer trial (HyperFrames for Shorts) | **NOT STARTED**, go/no-go resolved by phase 0 | — | the full §4.2–§4.3 integration: Node+Chrome in the worker image, ≈25 registry components ported to portrait, GSAP/fonts vendored off-CDN, compose step in `reference_short.py` |
+| 0. Benchmark | **VERIFIED** — go decision made | this log, §Phase 0 | none (informed phase 4's go decision) |
+| 1. Sound (music variety + SFX) | **IMPLEMENTED**, not operator-watched | this log, §Phase 1; 9 new tests | render one real job end to end through the orchestrator, watch/listen to the full video, then mark VERIFIED |
+| 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
+| 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
+| 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
+| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — one of 7 templates proven end to end with a real artifact; **not wired into any job** | this log, §Phase 4; 6 new tests, real render inspected | the 6 remaining templates, multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
 | 5. Per-channel look | **NOT STARTED** | — | — |
 | — UTMOS naturalness scoring (VoiceStudio §5.2) | **NOT STARTED** — judged too heavy/risky to rush on this host | this log, §Phase 2b rationale | its own plan: source the checkpoint, install CPU-only `torch`, verify host memory headroom before running it anywhere near the live services |
 | — Inline pause/emphasis tags (VoiceStudio §5.3) | **NOT STARTED** — needs a schema change, not an audio change | this log, §Phase 2b rationale | its own plan: new `Scene` field or bracket-tag parsing, updated word-count validators, yt-script prompt changes, writers'-room review |
@@ -332,11 +461,15 @@ about whether any channel wants it and what ratio.
   skips here as a result; it was exercised directly instead (§Phase 2b), and would run for real
   in a normal checkout or in CI. Not a code defect — a one-time environment gap, worth a
   symlink or a documented setup step if this worktree stays in use.
-- **Two throwaway, uncommitted directories hold evidence**, both outside git:
+- **Three throwaway, uncommitted directories hold evidence**, all outside git:
   `/home/uditaswal/docker/tubeforge/hf-bench/` (the HyperFrames benchmark project and renders,
-  phase 0) and `/home/uditaswal/docker/tubeforge/kokoro-ab/` (every A/B voice WAV, phases 2 and
-  2b). Both are safe to delete once their evidence has been reviewed; neither is referenced by
-  anything that survives a `git clone`.
+  phase 0 — also the `node_modules/.bin/hyperframes` install `test_hyperframes_proto.py`'s
+  real-binary test falls back to when `hyperframes` isn't on PATH), `/home/uditaswal/docker/tubeforge/kokoro-ab/`
+  (every A/B voice WAV, phases 2 and 2b) and `/home/uditaswal/docker/tubeforge/hf-proto-test/`
+  (the real hook-scene render and its muxed-audio final, phase 4). Safe to delete once their
+  evidence has been reviewed, except `hf-bench` if the real-binary prototype test should keep
+  working without a fresh `npm install`; none is referenced by anything that survives a
+  `git clone`.
 
 ## How to reproduce
 
@@ -352,8 +485,18 @@ cd testproj && npx hyperframes check --json && npx hyperframes render --quality 
 cd Youtube_Video_Producer   # or this worktree
 PYTHONPATH=src .venv-benchmark/bin/python -m pytest tests/test_shorts_audio.py -v
 
-# Phase 2 A/B:
+# Phase 2 A/B (closed 26 Oct; kept int8, nothing to re-run):
 curl -L -o kokoro-v1.0.fp32.onnx \
   https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
 # then synthesize the same text with both models via kokoro_onnx.Kokoro(model_path, voices_path)
+
+# Phase 2b voice-blend tests:
+PYTHONPATH=src .venv-benchmark/bin/python -m pytest tests/test_voice_blend.py -v
+
+# Phase 3 craft-gate check, against any real job:
+python .agents/skills/om-video-quality/qa_check.py data/artifacts/<job_id>
+
+# Phase 4 prototype: build + check + render one real hook scene (needs a hyperframes install,
+# e.g. phase 0's ~/hf-bench, or a fresh `npm install hyperframes@0.8.192`):
+PYTHONPATH=src .venv-benchmark/bin/python -m pytest tests/test_hyperframes_proto.py -v
 ```
