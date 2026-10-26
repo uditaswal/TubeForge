@@ -89,15 +89,14 @@ def _synthetic_narration(tmp_path: Path, duration_s: float) -> Path:
     return path
 
 
-def test_sfx_is_off_by_default_matching_the_operators_26_oct_preference(tmp_path):
-    """"The voice effect itself were fine but don't add such [sound effects] to the video" —
-    a real render was heard and sound effects were asked off; a caller that does not opt in
-    gets voice + music only, same as the mix ever has."""
+def test_sfx_can_be_explicitly_turned_off(tmp_path):
+    """A caller that explicitly opts out (e.g. a future per-job preference) gets voice + music
+    only, with a literally silent effects track, not just a quiet one."""
     narration = _synthetic_narration(tmp_path, 30.0)
     scene_starts = (0.0, 4.0, 9.0, 14.0, 19.0, 24.0, 28.0)
     templates = ("hook", "big_stat", "before_after", "flow", "checklist", "terminal", "loop")
 
-    mix = master(narration, scene_starts, tmp_path / "mix", templates=templates, title="Railway breach")
+    mix = master(narration, scene_starts, tmp_path / "mix", templates=templates, title="Railway breach", sfx_enabled=False)
 
     provenance = json.loads((mix.parent / "audio-provenance.json").read_text())
     assert provenance["sfx_enabled"] is False
@@ -106,12 +105,15 @@ def test_sfx_is_off_by_default_matching_the_operators_26_oct_preference(tmp_path
     assert np.max(np.abs(effects_track)) == 0.0  # literally silent, not just quiet
 
 
-def test_master_places_one_real_cue_per_cut_and_riser_on_the_payoff_when_opted_in(tmp_path):
+def test_master_places_one_real_cue_per_cut_and_riser_on_the_payoff_by_default(tmp_path):
+    """26-27 Oct: sound effects were heard, turned off, heard without them, and turned back on
+    by the operator so audio work could close out and effort move to the renderer (phase 4) —
+    ``sfx_enabled`` defaults to True, matching the first real render the operator approved of."""
     narration = _synthetic_narration(tmp_path, 30.0)
     scene_starts = (0.0, 4.0, 9.0, 14.0, 19.0, 24.0, 28.0)
     templates = ("hook", "big_stat", "before_after", "flow", "checklist", "terminal", "loop")
 
-    mix = master(narration, scene_starts, tmp_path / "mix", templates=templates, title="Railway breach", sfx_enabled=True)
+    mix = master(narration, scene_starts, tmp_path / "mix", templates=templates, title="Railway breach")
 
     assert mix.is_file()
     provenance = json.loads((mix.parent / "audio-provenance.json").read_text())
@@ -186,7 +188,7 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
 
     captured = {}
 
-    def fake_master(narration, scene_starts, output, *, templates, title, bed="synthesized", sfx_enabled=False, cancelled=lambda: False, ffmpeg="ffmpeg"):
+    def fake_master(narration, scene_starts, output, *, templates, title, bed="synthesized", sfx_enabled=True, cancelled=lambda: False, ffmpeg="ffmpeg"):
         captured["templates"] = templates
         captured["title"] = title
         captured["bed"] = bed
@@ -209,4 +211,4 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
     assert captured["title"] == topic.title
     assert captured["templates"] == tuple(s.template for s in topic.scenes)
     assert captured["bed"] == "synthesized"  # default: unchanged behavior for a caller that picks no track
-    assert captured["sfx_enabled"] is False  # default: off, per the operator's 26 Oct preference
+    assert captured["sfx_enabled"] is True  # default: on, per the operator's 27 Oct preference

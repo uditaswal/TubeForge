@@ -97,7 +97,7 @@ def load_track_bed(path: Path, count: int, *, ffmpeg: str, deadline: float, canc
 
 def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
            templates: tuple[str, ...], title: str, bed: "Path | str | None" = "synthesized",
-           sfx_enabled: bool = False, cancelled=lambda: False, ffmpeg="ffmpeg"):
+           sfx_enabled: bool = True, cancelled=lambda: False, ffmpeg="ffmpeg"):
     """Mix locally, retain separate stems, then leave AAC true-peak headroom.
 
     ``templates`` names each scene's template (same order/length as ``scene_starts``);
@@ -112,12 +112,12 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     only an explicit choice does.
 
     ``sfx_enabled`` places one scene-cause sound effect per cut (§4.5's intent: a cause on
-    screen instead of the old filtered-noise accent) when ``True``. **Default False**: the
-    operator heard a first real render on 26 Oct and asked for it off — "the voice effect
-    itself were fine but don't add such [sound effects] to the video" — so a render with no
-    explicit opinion gets voice + music only, same as before this flag existed. The selection
-    machinery (``sfx.py``, the vendored licensed library, its tests) stays in place for a
-    better-placed, sparser attempt later; nothing here was deleted, only turned off.
+    screen instead of the old filtered-noise accent) when ``True`` (the default). Briefly
+    defaulted to ``False`` on 26 Oct after the operator heard a first real render and asked
+    for it off; after hearing the no-SFX version too and finding it wasn't an improvement on
+    its own, the operator asked for SFX back on 27 Oct so audio work could be closed out and
+    effort moved to the renderer (phase 4). ``sfx.py`` and its vendored licensed library are
+    unchanged either way — this flag only decides whether ``master`` calls them.
     """
     if len(templates) != len(scene_starts):
         raise ValueError("templates must name every scene (one per scene_starts entry)")

@@ -131,15 +131,15 @@ def srt_from_timeline(timeline: Timeline) -> str:
 
 def render(timeline: Timeline, directory: Path, destination: Path, config: ReferenceShortConfig, *,
            draft: bool, cancelled: Callable[[], bool], bed: "Path | str | None" = "synthesized",
-           sfx_enabled: bool = False) -> dict:
+           sfx_enabled: bool = True) -> dict:
     """Master audio then encode; returns the library's QA report (passed).
 
     ``bed`` is the resolved music choice (``music.resolve_bed``'s caller passes the concrete
     source through): ``"synthesized"`` (default, preserves prior behavior for any caller that
     does not pass it), ``None`` for real silence, or a ``Path`` to an approved catalog file.
 
-    ``sfx_enabled`` defaults to **False** — the operator heard scene-cause sound effects in a
-    real render on 26 Oct and asked for them off; see ``audio.master``'s docstring.
+    ``sfx_enabled`` defaults to **True**; see ``audio.master``'s docstring for the 26-27 Oct
+    back-and-forth that settled on this.
     """
     starts = tuple(t.start for t in timeline.timings)
     templates = tuple(scene.template for scene in timeline.topic.scenes)

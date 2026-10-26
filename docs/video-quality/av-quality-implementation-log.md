@@ -236,6 +236,29 @@ served at `http://localhost:8082/review/railway-breach-no-sfx.mp4`.
 **IMPLEMENTED**, not **VERIFIED**, until they have. Music (the mood-varied bed) was not
 criticized and stays on by default.
 
+### Reversed the next day (27 Oct): SFX back on, closing out audio
+
+The operator pointed out, correctly, that with SFX off the no-SFX render is audibly almost the
+original (the only remaining difference — which of four chord progressions/tempos the music
+uses — isn't something you'd notice from one video; it only shows up comparing different
+*topics*). Decision: **put SFX back on (`sfx_enabled` defaults to `True` again) and stop
+iterating on audio** — move effort to phase 4 (the renderer), where an actual visible
+difference is possible. `master()`/`reference_short.render()` reverted to `sfx_enabled: bool =
+True`; the capability to turn it off stays (now the explicit-opt-out path, tested). Nothing
+needed re-rendering: the original `railway-breach-new-audio.mp4` (still served at
+`http://localhost:8082/review/railway-breach-new-audio.mp4`) already matches this default.
+
+Also noted for future work on this branch: **large downloads should be flagged to the operator
+to run themselves, not done silently from the session's own token/time budget** — applies
+directly to phase 4's next steps (an `npm install` per template-render session, and the
+Dockerfile's proposed Node addition).
+
+Phase 1 is **closed** (not pursuing further audio polish this round): music variety +
+SFX-with-a-cause, as originally built and as the operator approved on hearing it. Still
+**IMPLEMENTED**, not **VERIFIED** — no one has watched the complete real video end to end yet,
+only listened to the audio in isolation via the served file; a full watch is optional before
+moving on, at the operator's discretion.
+
 ## Phase 2 — Kokoro voice model A/B (evidence gathered, not decided)
 
 **Outcome: both renders produced; the two are close enough by every available objective
@@ -483,7 +506,7 @@ same phase-0 finding, now hit by a test instead of a human).
 | Phase | State | Evidence | Next action |
 |---|---|---|---|
 | 0. Benchmark | **VERIFIED** — go decision made | this log, §Phase 0 | none (informed phase 4's go decision) |
-| 1. Sound (music variety; **SFX off by operator request**, 26 Oct) | **IMPLEMENTED**, real job re-rendered with the new default, **not yet confirmed** | this log, §Phase 1; 12 tests (2 new: default-off, opt-in); real render passed QA (−14.28 LUFS/−2.50 dBTP), effects track at −91 dB (true silence); file at `http://localhost:8082/review/railway-breach-no-sfx.mp4` | operator confirms the no-SFX version, then mark VERIFIED |
+| 1. Sound (music variety + SFX) | **CLOSED** — heard, SFX toggled off then back on by the operator (26→27 Oct); not pursuing further audio polish | this log, §Phase 1; 12 tests; real render file at `http://localhost:8082/review/railway-breach-new-audio.mp4` | none — effort moved to phase 4 |
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
