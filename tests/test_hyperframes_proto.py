@@ -21,11 +21,13 @@ from tubeforge.rendering.hyperframes_proto import cli
 from tubeforge.rendering.hyperframes_proto.compose import (
     ASSETS,
     FONTS,
+    _format_stat,
     _word_groups,
+    build_big_stat_project,
     build_hook_project,
     build_loop_project,
 )
-from tubeforge.rendering.shorts.schema import Hook, Loop
+from tubeforge.rendering.shorts.schema import BigStat, Hook, Loop
 
 
 def _hook_scene(**overrides) -> Hook:
@@ -44,10 +46,25 @@ def _loop_scene(**overrides) -> Loop:
     return Loop.model_validate(data)
 
 
+def _big_stat_scene(**overrides) -> BigStat:
+    data = {"scene_id": "scene-8", "template": "big_stat",
+           "vo": "Earlier this week, hackers took over 1 percent of OpenCode's customer keys.",
+           "caption": "Earlier this week, hackers took over 1 percent of OpenCode's customer keys.",
+           "reveal_words": [3, 6], "heading": "OpenCode hit days earlier",
+           "before": 0.0, "after": 1.0, "unit": "%", "before_label": "Before attack",
+           "after_label": "OpenCode keys", "icon": "chart_up", **overrides}
+    return BigStat.model_validate(data)
+
+
 WORDS_10 = [(0.0, 0.27), (0.27, 0.58), (0.58, 0.77), (0.77, 1.21), (1.21, 1.52),
            (1.52, 2.04), (2.04, 2.48), (2.48, 2.73), (2.73, 2.9), (2.9, 3.44)]
 WORDS_9 = [(0.0, 0.3), (0.3, 0.6), (0.6, 0.9), (0.9, 1.2), (1.2, 1.5),
           (1.5, 1.8), (1.8, 2.1), (2.1, 2.4), (2.4, 2.69)]
+# Real measured word timings from job e53f4e8387424f65b6a6b50fbb166efa's scene-8 (scene-relative
+# seconds, from reference/timeline.json), matching _big_stat_scene's caption and reveal_words.
+WORDS_12 = [(0.16, 0.18), (0.18, 0.5), (0.5, 0.72), (0.93, 1.27), (1.27, 1.47), (1.47, 1.63),
+           (1.63, 1.85), (1.85, 2.13), (2.13, 2.35), (2.35, 3.15), (3.15, 3.47), (3.47, 3.81)]
+BIG_STAT_DURATION = 4.403
 
 
 def test_word_groups_matches_the_pil_renderers_own_grouping_and_maps_real_timing():
@@ -98,6 +115,35 @@ def test_build_loop_project_reuses_the_hook_composition_with_its_own_id(tmp_path
     html = (project / "index.html").read_text()
     assert 'data-composition-id="loop"' in html and 'window.__timelines["loop"]' in html
     assert 'data-composition-id="hook"' not in html
+
+
+def test_format_stat_matches_the_pil_renderers_own_rule():
+    assert _format_stat(0.0, "%") == "0%"
+    assert _format_stat(1.0, "%") == "1%"
+    assert _format_stat(2.5, "x") == "2.5x"
+
+
+def test_build_big_stat_project_times_the_two_reveals_off_their_own_words(tmp_path):
+    project = tmp_path / "proj"
+    build_big_stat_project(_big_stat_scene(), WORDS_12, BIG_STAT_DURATION, project)
+    html = (project / "index.html").read_text()
+
+    assert 'data-composition-id="big_stat"' in html
+    assert "OpenCode hit days earlier" in html  # heading is static JS-free markup, unlike hook's
+    assert "Before attack" in html and "OpenCode keys" in html
+    # reveal_words = [3, 6]: word 3 starts at 0.93s (before stat), word 6 at 1.63s (after stat
+    # + its count-up), both scene-relative, matching the PIL renderer's timeline.py.
+    assert "}, 0.930);" in html
+    assert "}, 1.630);" in html
+    assert "AFTER_VALUE = 1.0" in html
+    srcs = re.findall(r'<script src="([^"]+)"', html)
+    assert srcs == ["assets/gsap.min.js"]
+
+
+def test_build_big_stat_project_omits_the_badge_image_when_the_scene_has_no_icon_or_logo(tmp_path):
+    project = tmp_path / "proj"
+    build_big_stat_project(_big_stat_scene(icon=None), WORDS_12, BIG_STAT_DURATION, project)
+    assert not (project / "assets" / "badge.png").is_file()
 
 
 def test_vendored_assets_exist_on_disk():
@@ -169,3 +215,9 @@ def test_real_hook_render_passes_check_and_decodes_to_the_right_spec():
 @needs_ffmpeg
 def test_real_loop_render_passes_check_and_decodes_to_the_right_spec():
     _real_check_render_decode(build_loop_project, _loop_scene(), WORDS_9, 2.69, "loop")
+
+
+@needs_hyperframes
+@needs_ffmpeg
+def test_real_big_stat_render_passes_check_and_decodes_to_the_right_spec():
+    _real_check_render_decode(build_big_stat_project, _big_stat_scene(), WORDS_12, BIG_STAT_DURATION, "big_stat")

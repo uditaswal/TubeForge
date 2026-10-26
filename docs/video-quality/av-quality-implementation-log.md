@@ -386,10 +386,10 @@ exercising every WARN/PASS/fallback branch (this repository has no precedent for
 `.agents/skills/*.py` scripts — SKILL.md's own instruction is to run them for real, which this
 followed).
 
-## Phase 4 — the HyperFrames renderer: two templates proven end to end, not production-wired
+## Phase 4 — the HyperFrames renderer: three templates proven end to end, not production-wired
 
-**Outcome: the technical chain works, for real content, on this host — two of seven templates
-(`hook`, `loop`), deliberately scoped, not wired into any job's rendering.** This was always
+**Outcome: the technical chain works, for real content, on this host — three of seven templates
+(`hook`, `loop`, `big_stat`), deliberately scoped, not wired into any job's rendering.** This was always
 going to be the
 largest item (the review's own estimate: "2–3 weeks"). Rather than rush partial, untested
 coverage of all seven scene templates into production code — which risks shipping something
@@ -481,16 +481,47 @@ Evidence on this host, not committed: `/home/uditaswal/docker/tubeforge/hf-proto
 2 more tests (8 total in the file): composition-id correctness for both templates (never
 collide), and the same real-binary check/render/decode path for `loop`. All 8 pass.
 
+### Third template: `big_stat` (27 Oct) — the one with a genuinely new move, the count-up
+
+The only template so far that isn't a layout variation on `hook`'s shape: a heading, two
+stacked stat figures (before/after) each with a proportional bar, an arrow once both are on
+screen, and a count-up on the newest figure. Built in `compose.py` as its own
+`big_stat_composition_html`/`build_big_stat_project` (not a `hook` reuse — the content shape is
+different), reusing only `_word_groups`/the caption block's own logic and the same palette/font
+constants. The count-up reproduces the PIL renderer's own animation exactly: `motion.py`'s
+`COUNT_SECONDS = 0.8` and `ease_out_cubic` (which is precisely GSAP's `power3.out`), driving
+both the number text and the bar width from one GSAP tween of a plain counter object so they
+stay in lockstep — not two separately-timed animations that could drift apart.
+
+Proven on the real `big_stat` scene from job `e53f4e8387424f65b6a6b50fbb166efa` (scene-8,
+"OpenCode hit days earlier", 0% → 1%, icon `chart_up`), with its real measured word timings
+from `reference/timeline.json` (12 words, 4.403 s): `hyperframes check` passed with **zero
+errors** on the first composition written — one harmless lint note about the badge `<img>`
+nesting, the same Studio-UX-only note the `hook` composition also carries, not a layout/craft
+finding. Rendered at `--quality draft`, decoded clean (1080×1920, 4.43 s). A full contact sheet
+(12 frames at 2 fps) was inspected: the heading and icon are static from frame 0, the "before"
+figure (0%) fades in on cue, the "after" figure counts up visibly (0.4% → 1.0% mid-tween → 1%
+settled) in sync with its bar, and the arrow appears once both are on screen — matching the PIL
+renderer's own reveal semantics (`timeline.py`'s `reveal_words`) exactly, just with real motion
+instead of a static frame. Muxed with the real mastered audio for that exact time range
+(`reference/mix/mix.wav`, 28.43–32.83 s of the job), full-decoded clean (`ffmpeg -xerror`).
+
+Evidence on this host, not committed: `/home/uditaswal/docker/tubeforge/hf-bigstat-test/{proj/,silent.mp4,big_stat-final.mp4,sheet.png}`,
+served at `http://localhost:8082/review/big_stat-scene.mp4`.
+4 more tests (12 total in the file): the display-formatting rule (`_format_stat`, matching the
+PIL renderer's own `f"{shown:.1f}".rstrip(...)` logic), the reveal-timing/counter wiring (the
+two reveal words' exact scene-relative seconds appear in the emitted JS), the no-icon case, and
+the real-binary check/render/decode path for `big_stat`. All 12 pass.
+
 ### What a full production swap still needs (not started, in order)
 
-1. **The remaining five templates** — `before_after`, `flow`, `checklist`, `terminal`,
-   `big_stat`, `cta` — each the *same* pattern `hook`/`loop` proved: a `<name>_composition_html`
-   string builder in `compose.py`, real content in, real `hyperframes check` findings fixed,
-   one real render inspected. `big_stat` is the natural next one — it needs a count-up, the
-   one genuinely new motion idea; the rest are mostly layout variations on the same contract.
-   Rough order of magnitude: comparable effort per template to `hook` (the hardest, since the
-   whole chain had to be built) or less (`loop` took far less, being a pure reuse) — call it
-   most of a day each.
+1. **The remaining four templates** — `before_after`, `flow`, `checklist`, `terminal` —
+   each the *same* pattern `hook`/`loop`/`big_stat` proved: a `<name>_composition_html` string
+   builder in `compose.py`, real content in, real `hyperframes check` findings fixed, one real
+   render inspected. All are layout variations on the same contract now that the one genuinely
+   new motion idea (`big_stat`'s count-up) is done. Rough order of magnitude: comparable effort
+   per template to `hook` (the hardest, since the whole chain had to be built) or less (`loop`
+   took far less, being a pure reuse) — call it most of a day each.
 2. **Multi-scene composition.** Everything proven above is one scene as a standalone clip. A
    real job is 6–20 scenes with transitions between them — the next real engineering question
    (not yet looked at): one HyperFrames project with sub-compositions per scene and a cue sheet
@@ -536,7 +567,7 @@ collide), and the same real-binary check/render/decode path for `loop`. All 8 pa
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
-| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — 2 of 7 templates (`hook`, `loop`) proven end to end with real artifacts; **not wired into any job** | this log, §Phase 4; 8 tests, two real renders inspected | `big_stat` next (needs a count-up), then the remaining 4; multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
+| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — 3 of 7 templates (`hook`, `loop`, `big_stat`) proven end to end with real artifacts; **not wired into any job** | this log, §Phase 4; 12 tests, three real renders inspected | the remaining 4 templates (`before_after`, `flow`, `checklist`, `terminal` — layout variations now that the count-up is done); multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
 | 5. Per-channel look | **NOT STARTED** | — | — |
 | — UTMOS naturalness scoring (VoiceStudio §5.2) | **NOT STARTED** — judged too heavy/risky to rush on this host | this log, §Phase 2b rationale | its own plan: source the checkpoint, install CPU-only `torch`, verify host memory headroom before running it anywhere near the live services |
 | — Inline pause/emphasis tags (VoiceStudio §5.3) | **NOT STARTED** — needs a schema change, not an audio change | this log, §Phase 2b rationale | its own plan: new `Scene` field or bracket-tag parsing, updated word-count validators, yt-script prompt changes, writers'-room review |
