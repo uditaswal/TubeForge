@@ -9,6 +9,13 @@ Companion to [2026-10-23-reference-codebases.md](2026-10-23-reference-codebases.
 review of five repos, which skipped HyperFrames) and [video-quality/milestones.md](../video-quality/milestones.md)
 (the Codex M1–M4 work merged on 25 Oct).
 
+> **Status (26 Oct, same day):** this review stays as the point-in-time document it was
+> written as — it is not edited after the fact. All three §8 decisions below were approved by
+> the operator the same day, and phases 0, 1 and 2b were implemented against that approval on
+> `claude/av-quality-phase1`. The live, updated state of every phase (including two VoiceStudio
+> items found and deliberately deferred, not in this review) is
+> [video-quality/av-quality-implementation-log.md](../video-quality/av-quality-implementation-log.md).
+
 ## 1. Summary
 
 **Why the Codex branch produced no visible or audible change.** Codex's milestones measured
