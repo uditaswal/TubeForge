@@ -39,7 +39,14 @@ def _word_groups(caption: str, words: list[tuple[float, float]]) -> list[dict]:
     return out
 
 
-def hook_composition_html(scene: Hook, words: list[tuple[float, float]], duration: float) -> str:
+def hook_composition_html(scene: Hook, words: list[tuple[float, float]], duration: float,
+                          composition_id: str = "hook") -> str:
+    """Builds the ``hook`` composition; also the ``loop`` scene's, unchanged — the PIL
+    compositor's own comment explains why (``rendering/shorts/layout.py``): "the loop scene
+    reuses the hook composition so the last frame matches the first". ``Loop`` is a `Hook`
+    subclass with identical fields (schema.py), so no scene-shape change is needed here, only
+    ``composition_id`` so the two don't collide if ever placed in one multi-scene project.
+    """
     captions = _word_groups(scene.caption, words)
     headline_js = json.dumps([html.escape(line) for line in scene.headline])
     chips_js = json.dumps([html.escape(chip) for chip in scene.chips])
@@ -85,7 +92,7 @@ def hook_composition_html(scene: Hook, words: list[tuple[float, float]], duratio
 </style>
 </head>
 <body>
-<div id="root" class="clip" data-composition-id="hook" data-start="0" data-duration="{duration:.3f}"
+<div id="root" class="clip" data-composition-id="{composition_id}" data-start="0" data-duration="{duration:.3f}"
      data-width="{WIDTH}" data-height="{HEIGHT}" data-fps="{FPS}">
   <div class="glow"></div>
   <div class="rail" id="rail"></div>
@@ -163,7 +170,7 @@ def hook_composition_html(scene: Hook, words: list[tuple[float, float]], duratio
     tl.set(el, {{ opacity: 0, visibility: "hidden" }}, end);
   }});
 
-  window.__timelines["hook"] = tl;
+  window.__timelines["{composition_id}"] = tl;
   tl.seek(0);
 }})();
 </script>
@@ -173,7 +180,9 @@ def hook_composition_html(scene: Hook, words: list[tuple[float, float]], duratio
 
 
 def build_hook_project(scene: Hook, words: list[tuple[float, float]], duration: float, project_dir: Path) -> None:
-    """Write a self-contained HyperFrames project for this one scene to ``project_dir``."""
+    """Write a self-contained HyperFrames project for one ``hook`` or ``loop`` scene to
+    ``project_dir`` (``scene.template`` names which — both use the identical composition;
+    see ``hook_composition_html``'s docstring)."""
     assets = project_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     shutil.copy(ASSETS / "hyperframes" / "gsap.min.js", assets / "gsap.min.js")
@@ -182,9 +191,17 @@ def build_hook_project(scene: Hook, words: list[tuple[float, float]], duration: 
     if scene.icon or scene.logo:
         sprite = logo_badge(scene.logo, 220) if scene.logo else badge(scene.icon, 220)
         sprite.save(assets / "badge.png")
-    (project_dir / "index.html").write_text(hook_composition_html(scene, words, duration), encoding="utf-8")
+    (project_dir / "index.html").write_text(
+        hook_composition_html(scene, words, duration, composition_id=scene.template), encoding="utf-8")
     (project_dir / "hyperframes.json").write_text(json.dumps({
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
         "media": {"autoProxy": False},
     }, indent=2), encoding="utf-8")
+
+
+# A Loop IS a Hook with a different template literal (schema.py) and the PIL compositor
+# already treats them identically ("the loop scene reuses the hook composition so the last
+# frame matches the first", layout.py). Named alias for callers building a loop scene, so
+# nothing reads as a hook-only function when it builds this one too.
+build_loop_project = build_hook_project

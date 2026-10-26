@@ -386,10 +386,11 @@ exercising every WARN/PASS/fallback branch (this repository has no precedent for
 `.agents/skills/*.py` scripts — SKILL.md's own instruction is to run them for real, which this
 followed).
 
-## Phase 4 — the HyperFrames renderer: one template proven end to end, not production-wired
+## Phase 4 — the HyperFrames renderer: two templates proven end to end, not production-wired
 
-**Outcome: the technical chain works, for real content, on this host — one of seven templates,
-deliberately scoped, not wired into any job's rendering.** This was always going to be the
+**Outcome: the technical chain works, for real content, on this host — two of seven templates
+(`hook`, `loop`), deliberately scoped, not wired into any job's rendering.** This was always
+going to be the
 largest item (the review's own estimate: "2–3 weeks"). Rather than rush partial, untested
 coverage of all seven scene templates into production code — which risks shipping something
 that *looks* complete but silently breaks on templates nobody carefully checked — this session
@@ -444,7 +445,7 @@ below): `/home/uditaswal/docker/tubeforge/hf-proto-test/{hookproj/,hook-silent.m
 
 ### Tests
 
-6 new tests (`tests/test_hyperframes_proto.py`): the caption-grouping/real-timing mapping
+6 tests (`tests/test_hyperframes_proto.py`): the caption-grouping/real-timing mapping
 (including the word-count-mismatch guard), the project-writer's file tree (including that no
 `<script>` tag points anywhere but the vendored local copy — no CDN fetch), the no-icon case,
 vendored-asset presence, and a **real-binary integration test** (project build → real
@@ -456,15 +457,40 @@ scratch directory (under the repository's own working tree, gitignored) since py
 `tmp_path` lives on this host's 1.9 GB tmpfs `/tmp` and the CLI refuses to render there (the
 same phase-0 finding, now hit by a test instead of a human).
 
+### Second template: `loop` (27 Oct) — same composition, named for both
+
+The PIL compositor's own comment (`rendering/shorts/layout.py`) says it already: "the loop
+scene reuses the hook composition so the last frame matches the first." Schema-wise `Loop` is
+a `Hook` subclass with identical fields, so `compose.py`'s `hook_composition_html` needed only
+one change — a `composition_id` parameter (was hardcoded `"hook"` everywhere) — and
+`build_loop_project` is a named alias for `build_hook_project`, not new logic.
+
+Proven the same way, on the real loop scene from job `e53f4e8387424f65b6a6b50fbb166efa`
+(the same headline/chips/icon as the hook, as the loop-ending QA rule requires; 2.69 s,
+9 words): `hyperframes check` passed with **zero errors**, but three real warnings this time —
+"the film's last line [a chip] is on screen 1.7–1.8 s, under the 2.0 s a closing line needs."
+This is a true artifact of rendering the scene **in isolation**: HyperFrames reads it as the
+whole film's last line because, as a standalone clip, it is. In a real multi-scene video this
+scene is not the film's only content, so the rule would apply differently (or not trigger) —
+not fixed here, since synthetically stretching this scene's real measured duration to silence
+the warning would be dishonest, and the real fix (multi-scene composition) is already item 2
+below. Rendered at `--quality high`: 1080×1920, 2.70 s, matching the hook frame exactly.
+Muxed with the real mastered audio for that exact time range, decoded clean.
+
+Evidence on this host, not committed: `/home/uditaswal/docker/tubeforge/hf-proto-test/{loopproj/,loop-silent.mp4,loop-final.mp4}`.
+2 more tests (8 total in the file): composition-id correctness for both templates (never
+collide), and the same real-binary check/render/decode path for `loop`. All 8 pass.
+
 ### What a full production swap still needs (not started, in order)
 
-1. **The other six templates** — `before_after`, `flow`, `checklist`, `terminal`, `big_stat`,
-   `cta`/`loop` — each the *same* pattern this session just proved: a `<name>_composition_html`
+1. **The remaining five templates** — `before_after`, `flow`, `checklist`, `terminal`,
+   `big_stat`, `cta` — each the *same* pattern `hook`/`loop` proved: a `<name>_composition_html`
    string builder in `compose.py`, real content in, real `hyperframes check` findings fixed,
-   one real render inspected. `big_stat`/`loop` are the natural next two (loop reuses hook's
-   own layout per the PIL renderer's own comment; big_stat needs a count-up, the one new motion
-   idea). Rough order of magnitude: comparable effort per template to this one, so most of a
-   day each once the first one (the hardest, since the whole chain had to be built) is done.
+   one real render inspected. `big_stat` is the natural next one — it needs a count-up, the
+   one genuinely new motion idea; the rest are mostly layout variations on the same contract.
+   Rough order of magnitude: comparable effort per template to `hook` (the hardest, since the
+   whole chain had to be built) or less (`loop` took far less, being a pure reuse) — call it
+   most of a day each.
 2. **Multi-scene composition.** Everything proven above is one scene as a standalone clip. A
    real job is 6–20 scenes with transitions between them — the next real engineering question
    (not yet looked at): one HyperFrames project with sub-compositions per scene and a cue sheet
@@ -510,7 +536,7 @@ same phase-0 finding, now hit by a test instead of a human).
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
-| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — one of 7 templates proven end to end with a real artifact; **not wired into any job** | this log, §Phase 4; 6 new tests, real render inspected | the 6 remaining templates, multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
+| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — 2 of 7 templates (`hook`, `loop`) proven end to end with real artifacts; **not wired into any job** | this log, §Phase 4; 8 tests, two real renders inspected | `big_stat` next (needs a count-up), then the remaining 4; multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
 | 5. Per-channel look | **NOT STARTED** | — | — |
 | — UTMOS naturalness scoring (VoiceStudio §5.2) | **NOT STARTED** — judged too heavy/risky to rush on this host | this log, §Phase 2b rationale | its own plan: source the checkpoint, install CPU-only `torch`, verify host memory headroom before running it anywhere near the live services |
 | — Inline pause/emphasis tags (VoiceStudio §5.3) | **NOT STARTED** — needs a schema change, not an audio change | this log, §Phase 2b rationale | its own plan: new `Scene` field or bracket-tag parsing, updated word-count validators, yt-script prompt changes, writers'-room review |
