@@ -271,6 +271,11 @@ class KokoroProviderConfig(BaseModel):
 
     enabled: bool = True
     voices: tuple[str, ...] = ("af_bella", "af_sarah", "am_michael")
+    # Named weighted blends of the voices above (VoiceStudio/Kokoro-FastAPI voice-mixing idea):
+    # {"blend-name": "af_bella:0.7+af_sarah:0.3"}. Not surfaced in the Studio voice picker yet
+    # (that reads `voices` directly) — set pipeline.reference_short.voice to a blend name to
+    # use one. A blend changes only acoustic timbre: same text, same timing, same alignment.
+    voice_blends: dict[str, str] = Field(default_factory=dict)
     model_path: Path | None = None
     voices_path: Path | None = None
     cache_root: Path = Path("./data/cache/kokoro")
@@ -285,6 +290,19 @@ class KokoroProviderConfig(BaseModel):
             raise ValueError("pipeline.kokoro.voices must be nonempty and unique")
         if any(not voice.strip() for voice in self.voices):
             raise ValueError("pipeline.kokoro.voices must be nonblank")
+        return self
+
+    @model_validator(mode="after")
+    def require_valid_voice_blends(self) -> "KokoroProviderConfig":
+        from tubeforge.providers.voice.voice_blend import parse_blend_spec
+
+        for name, spec in self.voice_blends.items():
+            if not name.strip() or name in self.voices:
+                raise ValueError(f"voice blend name {name!r} must be nonblank and not collide with a plain voice")
+            components = parse_blend_spec(spec)
+            unknown = {voice for voice, _ in components} - set(self.voices)
+            if unknown:
+                raise ValueError(f"voice blend {name!r} names unconfigured voices: {sorted(unknown)}")
         return self
 
 

@@ -238,16 +238,86 @@ Swap `pipeline.kokoro.model_path` in `config/production.yaml` to the fp32 file (
 per the existing convention), bump `pipeline.kokoro.adapter_version` so the voice cache key
 changes and no stale int8 renders are served from cache, and re-run a real job to confirm.
 
+## Phase 2b — Kokoro voice blending (VoiceStudio competitive-analysis Action 12)
+
+**Why this, and not more of VoiceStudio.** The operator asked directly whether VoiceStudio had
+actually contributed anything to this round of code, beyond being reviewed in writing — it
+had not; the music/SFX work (phase 1) is entirely from HyperFrames, and the Kokoro fp32 test
+(phase 2) is just the official weights, not a VoiceStudio technique. Two concrete VoiceStudio
+items were weighed for this session:
+
+- **UTMOS naturalness scoring** (review §5.2) was judged too large and too risky to rush here:
+  it needs the specific `UTMOS22Strong` architecture *and* a trained checkpoint (not just a pip
+  package), plus `torch` (a 178 MB CPU-only wheel, checked but not installed), and real
+  inference RAM on a host already at ~1.5–2 GB available alongside the live TubeForge services.
+  Left for a dedicated phase with its own plan, per AGENTS.md's multi-phase-work rule.
+- **`[pause]`/`[slow]`/`[emphasis]` inline tags** (review §5.3) were judged to need a schema
+  change, not an audio-code change: `Scene.vo` is the exact reviewed, word-counted narration
+  (`8 <= len(words) <= 15`, `reveal_words` indexed into it, display/spoken mapping validated by
+  exact word count at three separate stages in `prepare.py`/`spoken.py`). Making a tag system
+  safe means either a new schema field carrying pause positions (versioned, validated,
+  surfaced to the writers'-room/yt-script authoring flow) or bracket-tag parsing that every one
+  of those word-count validators must correctly see through. That is real, valuable, and
+  explicitly pending — but it touches script authorship and the approval contract, not just the
+  render path, so it is **not started** here rather than rushed.
+
+**What was safe to do now: weighted voice blending** (`docs/competitive-analysis.md:199,:917` —
+ported from Kokoro-FastAPI, Apache-2.0). A blend is a different Kokoro *style vector* — nothing
+about the text, its word count, its timing or its alignment changes; only the acoustic timbre
+does. `kokoro_onnx.Kokoro.create()` already accepts a raw `numpy.float32` array in place of a
+voice name (confirmed via `inspect.signature`), so this needed no new dependency.
+
+### What was built
+
+- `src/tubeforge/providers/voice/voice_blend.py` (new): `parse_blend_spec` validates a
+  `"name:weight+name:weight[+...]"` spec (≥2 distinct components, positive finite weights,
+  normalized to sum to 1); `resolve_blend` builds the weighted vector from
+  `Kokoro.get_voice_style`.
+- `KokoroProviderConfig.voice_blends: dict[str, str]` (new, default empty): named blends,
+  validated at config load so every referenced voice is in `voices` and no blend name collides
+  with a plain voice name. **Deliberately not added to `voices`** — the Studio voice picker
+  (`api/app.py:1447`) reads `voices` directly, so blends stay config-only/experimental until
+  someone decides they should be an operator-facing choice, which is a product call, not mine
+  to make unasked.
+- `KokoroVoiceProvider.synthesize()`: accepts a blend name alongside plain voice names; resolves
+  it to a style vector only at the point of a real synthesis call (cache hits never touch
+  Kokoro). The existing cache key (keyed on `request.voice_id`, which is the blend name) and
+  model-file-hash identity already make this correct with no further change.
+
+### Evidence
+
+11 new tests (`tests/test_voice_blend.py`): spec parsing/normalization; six malformed/degenerate
+specs rejected (one component, duplicate name, zero/negative/non-numeric weight, wrong
+separator); config rejects a blend naming an unconfigured voice or colliding with a plain voice
+name; a real-Kokoro integration test (skipped here only because this worktree has no local
+`models/` symlink — the sandbox's own file-access policy blocks creating one from this
+directory; the mechanism was exercised directly instead, see below) asserting a blend's output
+checksum differs from both pure voices and its duration is close to either one's.
+
+**Real audible evidence**, synthesized with the production int8 model and the exact text "Railway
+confirmed a cyberattack that let hackers reach some customer secrets.": a 60/40 `af_bella`/
+`af_sarah` blend produced genuinely distinct audio (different SHA-256 from either pure voice,
+4.71 s vs. 4.78 s / 4.48 s — the blended style vector changes pacing too, not just timbre).
+Files are on this host, not delivered this turn (see the operator reply): `pure-bella.wav`,
+`pure-sarah.wav`, `blend-bella60-sarah40.wav` in `/home/uditaswal/docker/tubeforge/kokoro-ab/`.
+
+This is **IMPLEMENTED, not operator-watched**: nobody has asked for a blended channel voice yet,
+and nobody has heard this one. It is a capability, demonstrated working, waiting on a decision
+about whether any channel wants it and what ratio.
+
 ## Summary: state per phase
 
 | Phase | State | Evidence | Next action |
 |---|---|---|---|
 | 0. Benchmark | **VERIFIED** — go decision made | this log, §Phase 0 | none (informs phase 4 go/no-go) |
 | 1. Sound (music variety + SFX) | **IMPLEMENTED**, not operator-watched | this log, §Phase 1; 9 new + 47 existing + 586/607 full-suite tests pass, zero regressions | render one real job end to end through the orchestrator (not just `master()`), watch/listen to the full video, then mark VERIFIED |
-| 2. Voice (Kokoro fp32 A/B) | Evidence gathered, **decision pending** | this log, §Phase 2; two WAVs delivered | operator listens, reports a preference; if fp32, make the two-line config change above |
+| 2. Voice (Kokoro fp32 A/B) | Evidence gathered, **decision pending** | this log, §Phase 2; two WAVs on disk | operator listens, reports a preference; if fp32, make the two-line config change above |
+| 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests, real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **NOT STARTED** | — | port `line_unread`/`dead_stretch`/transition-variety checks into `qa_check.py` |
 | 4. Renderer trial (HyperFrames for Shorts) | **NOT STARTED**, go/no-go resolved by phase 0 | — | the full §4.2–§4.3 integration: Node+Chrome in the worker image, ≈25 registry components ported to portrait, GSAP/fonts vendored off-CDN, compose step in `reference_short.py` |
 | 5. Per-channel look | **NOT STARTED** | — | — |
+| — UTMOS naturalness scoring (VoiceStudio §5.2) | **NOT STARTED** — judged too heavy/risky to rush on this host | this log, §Phase 2b rationale | its own plan: source the checkpoint, install CPU-only `torch`, verify host memory headroom before running it anywhere near the live services |
+| — Inline pause/emphasis tags (VoiceStudio §5.3) | **NOT STARTED** — needs a schema change, not an audio change | this log, §Phase 2b rationale | its own plan: new `Scene` field or bracket-tag parsing, updated word-count validators, yt-script prompt changes, writers'-room review |
 
 ## How to reproduce
 

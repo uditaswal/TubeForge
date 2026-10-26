@@ -28,7 +28,8 @@ class KokoroVoiceProvider:
         text = normalize_narration_text(request.text)
         if not text:
             raise ProviderValidationError("Kokoro narration text is empty")
-        if request.voice_id not in self.settings.voices:
+        blend_spec = self.settings.voice_blends.get(request.voice_id)
+        if blend_spec is None and request.voice_id not in self.settings.voices:
             raise ProviderValidationError(f"unsupported Kokoro voice: {request.voice_id}")
         model, voices = self._required_models()
         def digest(path):
@@ -52,7 +53,11 @@ class KokoroVoiceProvider:
             if self._pipeline_identity != model_identity:
                 self._pipeline = Kokoro(str(model), str(voices))
                 self._pipeline_identity = model_identity
-            samples, sample_rate = self._pipeline.create(text, voice=request.voice_id, speed=self.settings.speed, lang="en-us")
+            voice = request.voice_id
+            if blend_spec is not None:
+                from .voice_blend import resolve_blend
+                voice = resolve_blend(self._pipeline.get_voice_style, blend_spec)
+            samples, sample_rate = self._pipeline.create(text, voice=voice, speed=self.settings.speed, lang="en-us")
             if sample_rate != self.settings.sample_rate:
                 raise ProviderValidationError(f"Kokoro returned unexpected sample rate: {sample_rate}")
             chunks = [float(value) for value in samples]
