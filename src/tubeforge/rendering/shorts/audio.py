@@ -97,13 +97,11 @@ def load_track_bed(path: Path, count: int, *, ffmpeg: str, deadline: float, canc
 
 def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
            templates: tuple[str, ...], title: str, bed: "Path | str | None" = "synthesized",
-           cancelled=lambda: False, ffmpeg="ffmpeg"):
+           sfx_enabled: bool = False, cancelled=lambda: False, ffmpeg="ffmpeg"):
     """Mix locally, retain separate stems, then leave AAC true-peak headroom.
 
     ``templates`` names each scene's template (same order/length as ``scene_starts``);
-    ``title`` seeds the music mood. Both come from the topic being rendered, so each cut's
-    sound effect has a cause on screen (video-quality review §4.5) instead of the identical
-    filtered-noise accent that used to play on every scene change.
+    ``title`` seeds the music mood.
 
     ``bed`` selects the music: the string ``"synthesized"`` (default — the mood-varied
     generator, picked deterministically from ``title``), ``None`` for real silence (no music
@@ -112,6 +110,14 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     (video-quality review §4.5 finding, 26 Oct) — the default here preserves that exact
     behavior for any caller that does not pass ``bed``, so nothing already in flight changes;
     only an explicit choice does.
+
+    ``sfx_enabled`` places one scene-cause sound effect per cut (§4.5's intent: a cause on
+    screen instead of the old filtered-noise accent) when ``True``. **Default False**: the
+    operator heard a first real render on 26 Oct and asked for it off — "the voice effect
+    itself were fine but don't add such [sound effects] to the video" — so a render with no
+    explicit opinion gets voice + music only, same as before this flag existed. The selection
+    machinery (``sfx.py``, the vendored licensed library, its tests) stays in place for a
+    better-placed, sparser attempt later; nothing here was deleted, only turned off.
     """
     if len(templates) != len(scene_starts):
         raise ValueError("templates must name every scene (one per scene_starts entry)")
@@ -139,18 +145,19 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     duck = np.interp(np.arange(n) / 480, np.arange(len(smooth)), 1 - .75 * np.clip(smooth / .08, 0, 1))
     bed *= duck
     cues_placed = []
-    for index, at in enumerate(scene_starts[1:], start=1):
-        template = templates[index]
-        cue_name = sfx.cue_for_template(template)
-        cue = sfx.load(cue_name, SR, ffmpeg=ffmpeg, deadline=deadline, cancelled=cancelled)
-        # A short cue starts just before the cut, matching the previous noise accent's
-        # timing (peak lands a touch after the visual, per the sound guide). The riser
-        # (cta/loop payoff) instead crests exactly on the cut, so it starts (its own
-        # length) earlier, clipped at 0 if there isn't that much lead time.
-        start = round((at - (len(cue) / SR if cue_name == sfx.RISER_CUE else .035)) * SR)
-        sfx.place(effects, cue, start)
-        cues_placed.append({"scene_index": index, "template": template, "cue": cue_name,
-                            "at_seconds": at})
+    if sfx_enabled:
+        for index, at in enumerate(scene_starts[1:], start=1):
+            template = templates[index]
+            cue_name = sfx.cue_for_template(template)
+            cue = sfx.load(cue_name, SR, ffmpeg=ffmpeg, deadline=deadline, cancelled=cancelled)
+            # A short cue starts just before the cut, matching the previous noise accent's
+            # timing (peak lands a touch after the visual, per the sound guide). The riser
+            # (cta/loop payoff) instead crests exactly on the cut, so it starts (its own
+            # length) earlier, clipped at 0 if there isn't that much lead time.
+            start = round((at - (len(cue) / SR if cue_name == sfx.RISER_CUE else .035)) * SR)
+            sfx.place(effects, cue, start)
+            cues_placed.append({"scene_index": index, "template": template, "cue": cue_name,
+                                "at_seconds": at})
     mix = voice + bed + effects
     for name, samples in (("music-ducked", bed), ("effects", effects), ("mix-raw", mix)):
         sf.write(output / f"{name}.wav", samples, SR, subtype="FLOAT")
@@ -184,10 +191,12 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     music_origin = {"synthesized": "Music: original synthesized signals, no sampled recording.",
                     "silence": "Music: none selected; no bed was mixed in.",
                     "track": "Music: an operator-approved catalog track; see its own licence record."}[music_provenance["mode"]]
-    provenance = {"algorithm": f"{music_provenance['mode']} music bed plus licensed scene-cause sound effects",
-                  "origin": f"{music_origin} Sound effects: Pixabay Content License, see assets/sfx/LICENSE-pixabay.md",
+    sfx_origin = ("Sound effects: Pixabay Content License, see assets/sfx/LICENSE-pixabay.md" if sfx_enabled
+                 else "Sound effects: off (operator preference, 26 Oct).")
+    provenance = {"algorithm": f"{music_provenance['mode']} music bed" + (" plus licensed scene-cause sound effects" if sfx_enabled else ""),
+                  "origin": f"{music_origin} {sfx_origin}",
                   "music": music_provenance, "music_peak_before_duck": .12, "speech_duck_maximum": .75,
-                  "sound_effects": cues_placed, "sound_effect_peak": sfx.CUE_PEAK,
+                  "sfx_enabled": sfx_enabled, "sound_effects": cues_placed, "sound_effect_peak": sfx.CUE_PEAK,
                   "master_target_lufs": -14, "master_target_dbtp": -2.5,
                   "input_measurement": measured, "mastered_measurement": result, "mastering": "gain-matched true-peak limiter, up to 3 measured passes", "narration_sha256": file_hash(narration),
                   "mix_sha256": file_hash(final),

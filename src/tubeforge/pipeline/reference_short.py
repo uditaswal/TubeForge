@@ -130,19 +130,23 @@ def srt_from_timeline(timeline: Timeline) -> str:
 
 
 def render(timeline: Timeline, directory: Path, destination: Path, config: ReferenceShortConfig, *,
-           draft: bool, cancelled: Callable[[], bool], bed: "Path | str | None" = "synthesized") -> dict:
+           draft: bool, cancelled: Callable[[], bool], bed: "Path | str | None" = "synthesized",
+           sfx_enabled: bool = False) -> dict:
     """Master audio then encode; returns the library's QA report (passed).
 
     ``bed`` is the resolved music choice (``music.resolve_bed``'s caller passes the concrete
     source through): ``"synthesized"`` (default, preserves prior behavior for any caller that
     does not pass it), ``None`` for real silence, or a ``Path`` to an approved catalog file.
+
+    ``sfx_enabled`` defaults to **False** — the operator heard scene-cause sound effects in a
+    real render on 26 Oct and asked for them off; see ``audio.master``'s docstring.
     """
     starts = tuple(t.start for t in timeline.timings)
     templates = tuple(scene.template for scene in timeline.topic.scenes)
     try:
         mix = master(directory / "narration.wav", starts, directory / "mix",
-                     templates=templates, title=timeline.topic.title, bed=bed, cancelled=cancelled,
-                     ffmpeg=config.ffmpeg_executable)
+                     templates=templates, title=timeline.topic.title, bed=bed, sfx_enabled=sfx_enabled,
+                     cancelled=cancelled, ffmpeg=config.ffmpeg_executable)
         narration_health = json.loads((directory / "mix" / "audio-provenance.json").read_text())["narration_health"]
         return encode(timeline, mix, destination, draft=draft, cancelled=cancelled,
                       budget_rtf=config.budget_realtime_factor, ffmpeg=config.ffmpeg_executable,

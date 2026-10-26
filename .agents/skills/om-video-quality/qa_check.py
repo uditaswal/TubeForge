@@ -137,11 +137,14 @@ def check(job: Path) -> list[tuple[str, str, str]]:
             add("WARN", "line-unread", "no reference/timeline.json; scene hold times not checked")
         audio_provenance = load(job / "reference" / "mix" / "audio-provenance.json")
         cues = (audio_provenance or {}).get("sound_effects")
+        # sfx_enabled is off by default since 26 Oct (operator preference, heard on a real
+        # render and asked off) — an empty cue list then is the intended state, not a finding.
+        sfx_enabled = (audio_provenance or {}).get("sfx_enabled", True)
         if cues:
             distinct = {cue.get("cue") for cue in cues}
             ok = len(distinct) >= min(2, len(cues))
             add("PASS" if ok else "WARN", "sfx-variety", f"{len(cues)} cut(s), {len(distinct)} distinct sound effect(s) ({sorted(distinct)})")
-        elif audio_provenance is not None:
+        elif audio_provenance is not None and sfx_enabled:
             add("WARN", "sfx-variety", "audio-provenance.json has no sound_effects list (renderer predates the caused-SFX pipeline)")
     for text in brief.get("text_options", []):
         overlap = content(text) & content(hook)

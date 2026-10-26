@@ -79,9 +79,10 @@ this was the go/no-go check for attempting it, and the answer is go.
 
 ## Phase 1 — real music variety and licensed, caused sound effects
 
-**Outcome: implemented and tested on the feature branch; not yet merged or heard by the
-operator.** This is the §4.5 "cheapest large improvement" from the review, done without
-touching the renderer.
+**Outcome: implemented and tested on the feature branch; heard by the operator, who asked for
+the sound effects off (kept the music) — see "Delivery problem, then real operator feedback"
+below for the real listen and the resulting `sfx_enabled: bool = False` default.** This is the
+§4.5 "cheapest large improvement" from the review, done without touching the renderer.
 
 ### What changed
 
@@ -206,10 +207,34 @@ budget).
 
 File (not committed, 13.7 MB): `/home/uditaswal/docker/tubeforge/real-render-demo/railway-breach-new-audio.mp4`.
 
-**Still not done: the operator has not watched/listened to it yet.** Per AGENTS.md ("Creative
-work needs a real generated artifact inspected against the quality bar... tests alone are
-insufficient") phase 1 stays **IMPLEMENTED**, not **VERIFIED**, until that happens — the file
-above is ready for exactly that.
+### Delivery problem, then real operator feedback (26 Oct, later still)
+
+The first attempt to hand this file off failed silently from the operator's side — "no audio,"
+video looked unchanged. Investigation: the file itself was never broken (`astats` on the
+delivered bytes: peak −2.4 dB, RMS −13.5 dB, real signal; byte-identical to the source render;
+same AAC/mono/48 kHz format as every previously-reviewed `final.mp4`) — it had just been left
+at a raw path the operator had no way to open. `docker inspect tubeforge-video-viewer` found
+the operator's own local nginx file server (port 8082, bound to loopback, serving
+`Youtube_Video_Producer/artifacts/`, a directory I'd never put anything into). Copied the file
+there instead; it played.
+
+**Real feedback, heard on this real render:** "it's ok but not a huge improvement" — expected,
+since only audio changed, not the look. Then specifically: "the voice effect itself were fine
+but don't add such [sound effects] to the video." **Sound effects are now off by default.**
+`master()` gained `sfx_enabled: bool = False`; `reference_short.render()` threads it through
+the same way. The selection code, the vendored licensed library and its tests all stay —
+nothing was deleted, only turned off, in case a sparser, better-placed attempt is worth trying
+later. `qa_check.py`'s `sfx-variety` check now reads the new `sfx_enabled` provenance field so
+"off by choice" and "renderer predates this feature" no longer produce the same warning.
+
+Re-rendered the same real job with the new default: `passed: true`, −14.28 LUFS / −2.50 dBTP,
+mood still "bright", **effects track measured at −91 dB (true digital silence, not just
+quiet)**. File (not committed): `/home/uditaswal/docker/tubeforge/Youtube_Video_Producer/artifacts/review/railway-breach-no-sfx.mp4`,
+served at `http://localhost:8082/review/railway-breach-no-sfx.mp4`.
+
+**Still not done: the operator has not confirmed this version yet.** Phase 1 stays
+**IMPLEMENTED**, not **VERIFIED**, until they have. Music (the mood-varied bed) was not
+criticized and stays on by default.
 
 ## Phase 2 — Kokoro voice model A/B (evidence gathered, not decided)
 
@@ -458,7 +483,7 @@ same phase-0 finding, now hit by a test instead of a human).
 | Phase | State | Evidence | Next action |
 |---|---|---|---|
 | 0. Benchmark | **VERIFIED** — go decision made | this log, §Phase 0 | none (informed phase 4's go decision) |
-| 1. Sound (music variety + SFX) | **IMPLEMENTED**, real job rendered end to end, **not operator-watched** | this log, §Phase 1; 9 new tests; real render passed QA (−14.12 LUFS/−2.07 dBTP), file ready at `~/docker/tubeforge/real-render-demo/railway-breach-new-audio.mp4` | operator watches/listens to the file above, then mark VERIFIED |
+| 1. Sound (music variety; **SFX off by operator request**, 26 Oct) | **IMPLEMENTED**, real job re-rendered with the new default, **not yet confirmed** | this log, §Phase 1; 12 tests (2 new: default-off, opt-in); real render passed QA (−14.28 LUFS/−2.50 dBTP), effects track at −91 dB (true silence); file at `http://localhost:8082/review/railway-breach-no-sfx.mp4` | operator confirms the no-SFX version, then mark VERIFIED |
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
