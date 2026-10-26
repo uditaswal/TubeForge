@@ -186,11 +186,30 @@ install/runtime budget.
   effects peak −10.5 dB, music bed peak −29.1 dB, final mix peak −2.6 dB — effects are now
   genuinely audible, under the voice, above the bed, as intended.
 
-**Not done: the operator has not heard this.** Per AGENTS.md ("Creative work needs a real
-generated artifact inspected against the quality bar... tests alone are insufficient") this
-remains **IMPLEMENTED**, not **VERIFIED**, until a real rendered video with this audio path is
-watched end to end. Rendering a full real job through the orchestrator (not just `master()` in
-isolation) was not done this session — the next action.
+### Real end-to-end render (26 Oct, later)
+
+Rendered a complete real job through `reference_short.render()` (not just `master()` in
+isolation): job `e53f4e8387424f65b6a6b50fbb166efa`'s exact approved topic, narration and
+timeline (byte-identical copies, hash-checked by `load_timeline`'s own validation — no new
+script or voice generation, no attempt allowance spent), full 1080×1920/30 fps/10-scene
+render through the unchanged PIL visual path plus the new audio pipeline.
+
+`passed: true`. Mastered at −14.12 LUFS / −2.07 dBTP (gate: −15…−13 LUFS, ≤ −1.5 dBTP). Mood
+picked deterministically: **"bright", 104 BPM** (this exact title hashes there). Nine SFX
+cues across the cuts, varied by destination template — `whoosh-short ×5, click ×2, pop, riser`
+— not the same sound on every cut. Effects stem −10.5 dB peak (audible), music stem −18.6 dB
+peak (under the voice, as intended) — a real, measured jump from the original noise accent's
+≈ −26 dB-below-voice level. Contact sheet inspected: visuals unchanged from the existing
+renderer (expected — phase 4 isn't wired in), confirming the new audio path didn't disturb
+anything else. Render took 324 s for 40.4 s of video (RTF 7.5×, inside the 12× production
+budget).
+
+File (not committed, 13.7 MB): `/home/uditaswal/docker/tubeforge/real-render-demo/railway-breach-new-audio.mp4`.
+
+**Still not done: the operator has not watched/listened to it yet.** Per AGENTS.md ("Creative
+work needs a real generated artifact inspected against the quality bar... tests alone are
+insufficient") phase 1 stays **IMPLEMENTED**, not **VERIFIED**, until that happens — the file
+above is ready for exactly that.
 
 ## Phase 2 — Kokoro voice model A/B (evidence gathered, not decided)
 
@@ -439,7 +458,7 @@ same phase-0 finding, now hit by a test instead of a human).
 | Phase | State | Evidence | Next action |
 |---|---|---|---|
 | 0. Benchmark | **VERIFIED** — go decision made | this log, §Phase 0 | none (informed phase 4's go decision) |
-| 1. Sound (music variety + SFX) | **IMPLEMENTED**, not operator-watched | this log, §Phase 1; 9 new tests | render one real job end to end through the orchestrator, watch/listen to the full video, then mark VERIFIED |
+| 1. Sound (music variety + SFX) | **IMPLEMENTED**, real job rendered end to end, **not operator-watched** | this log, §Phase 1; 9 new tests; real render passed QA (−14.12 LUFS/−2.07 dBTP), file ready at `~/docker/tubeforge/real-render-demo/railway-breach-new-audio.mp4` | operator watches/listens to the file above, then mark VERIFIED |
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
