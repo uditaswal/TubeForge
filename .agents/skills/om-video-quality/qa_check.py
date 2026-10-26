@@ -18,6 +18,11 @@ TARGET_TOLERANCE = 0.40          # core/config.py target_duration_tolerance_rati
 SHORTS_SECONDS = (25.0, 45.0)    # reference-short-v1 profile
 WORDS_PER_SECOND = (1.9, 3.2)    # Kokoro ~2.3, Piper ~2.7
 LOUDNESS = {"reference": (-15.0, -13.0, -1.5), "legacy": (-16.5, -12.5, -1.0)}  # min LUFS, max LUFS, max true peak
+# HyperFrames craft thresholds, ported from its own check (video-quality review §4.1/§4.6):
+# a line meant to be read holds 0.5s + 0.3s/word; warn under 75% of that. A scene holding the
+# same thing on screen for over 3s with nothing changing reads as a slideshow.
+HOLD_BASE_SECONDS, HOLD_PER_WORD_SECONDS, HOLD_WARN_FRACTION = 0.5, 0.3, 0.75
+DEAD_STRETCH_SECONDS = 3.0
 STOP = frozenset("a an the and or but so of to in on for with by is are was were be it its this that your you we our at as from".split())
 
 
@@ -107,6 +112,37 @@ def check(job: Path) -> list[tuple[str, str, str]]:
             add("PASS" if ok else "FAIL", "debate-ending", f"closing comment question: {last.get('vo', '').strip().endswith('?')}; no follow request: {not follow}")
         else:
             add("WARN", "loop-ending", f"ends with a {last.get('template')} scene, not a loop (legacy follow ending)")
+        timeline = load(job / "reference" / "timeline.json")
+        if timeline and timeline.get("scenes"):
+            for index, (scene, timing) in enumerate(zip(scenes, timeline["scenes"], strict=False)):
+                hold = timing.get("end", 0) - timing.get("start", 0)
+                word_count = len(scene.get("vo", "").split())
+                required = HOLD_BASE_SECONDS + HOLD_PER_WORD_SECONDS * word_count
+                if hold < required * HOLD_WARN_FRACTION:
+                    add("WARN", "line-unread", f"scene {index + 1} ({scene.get('template')}): holds {hold:.1f}s for {word_count} words "
+                                               f"(wants ~{required:.1f}s; HyperFrames motion.md Holds)")
+                # Word timestamps in timeline.json are absolute (global) time; make them
+                # scene-relative before measuring gaps, or every later scene's gap grows with
+                # its position in the video instead of reflecting what actually changes on screen.
+                scene_start = timing.get("start", 0)
+                words = timing.get("words") or []
+                reveal_at = [words[i]["start"] - scene_start for i in scene.get("reveal_words", []) if i < len(words)]
+                checkpoints = [0.0, *reveal_at, hold]
+                gaps = [b - a for a, b in zip(checkpoints, checkpoints[1:])]
+                stretch = max(gaps) if gaps else 0.0
+                if stretch > DEAD_STRETCH_SECONDS:
+                    add("WARN", "dead-stretch", f"scene {index + 1} ({scene.get('template')}): {stretch:.1f}s with nothing new revealed "
+                                                f"(> {DEAD_STRETCH_SECONDS:.0f}s reads as a slideshow; HyperFrames review.md dead_stretch)")
+        else:
+            add("WARN", "line-unread", "no reference/timeline.json; scene hold times not checked")
+        audio_provenance = load(job / "reference" / "mix" / "audio-provenance.json")
+        cues = (audio_provenance or {}).get("sound_effects")
+        if cues:
+            distinct = {cue.get("cue") for cue in cues}
+            ok = len(distinct) >= min(2, len(cues))
+            add("PASS" if ok else "WARN", "sfx-variety", f"{len(cues)} cut(s), {len(distinct)} distinct sound effect(s) ({sorted(distinct)})")
+        elif audio_provenance is not None:
+            add("WARN", "sfx-variety", "audio-provenance.json has no sound_effects list (renderer predates the caused-SFX pipeline)")
     for text in brief.get("text_options", []):
         overlap = content(text) & content(hook)
         words_in = len(text.split())
