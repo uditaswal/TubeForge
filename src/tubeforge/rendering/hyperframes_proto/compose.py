@@ -1,11 +1,8 @@
-"""Build a real HyperFrames project for one ``hook`` scene (prototype; see package docstring).
+"""Standalone HyperFrames scene prototypes for all seven Shorts templates.
 
-Adding the next template means: write its own ``<name>.html`` string builder here, following
-the same shape as ``hook_composition_html`` (the same four moves — background, scene content,
-real-timed captions, one GSAP timeline — the same palette/font constants, the same contract
-checks), and a ``build_<name>_project`` that writes it plus that scene's own assets. Nothing
-about the caption pipeline, the font/asset vendoring or the CLI wrapper (``cli.py``) changes
-per template.
+Each builder keeps the PIL renderer's palette, geometry, font and word-anchored reveal
+contract. These projects render one scene at a time and are not wired into production.
+``terminal`` has only a labelled synthetic Kokoro/Whisper fixture so far.
 """
 from __future__ import annotations
 

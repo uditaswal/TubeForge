@@ -1,5 +1,7 @@
-"""The HyperFrames renderer prototype (video-quality review phase 4): two scene templates
-(``hook``, ``loop``) proven end to end — not wired into production rendering yet.
+"""The seven standalone HyperFrames scene templates (video-quality phase 4).
+
+Six use real-job scene evidence; ``terminal`` uses a labelled SYNTHETIC fixture with
+Kokoro audio and Whisper word timings. None is wired into production rendering.
 
 The real-binary integration test (project build -> ``hyperframes check`` -> ``hyperframes
 render`` -> real decode) only runs when a working ``hyperframes`` CLI is on PATH, matching
