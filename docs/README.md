@@ -25,6 +25,7 @@ Agents: start with [HANDOFF.md](HANDOFF.md) and [AGENTS.md](../AGENTS.md); open 
 - [video-quality/milestones.md](video-quality/milestones.md) — Codex milestones M1–M4 and status
 - [video-quality/evidence.md](video-quality/evidence.md) — M1–M3 acceptance evidence
 - [video-quality/plan-m0-m9.md](video-quality/plan-m0-m9.md) — broader M0–M9 plan from reference videos
+- [video-quality/reference-quality-plan.md](video-quality/reference-quality-plan.md) — 27 Oct: what the Cloudflare/Pingora reference Short does, the gap, and the 11-step plan to close it (sound budget, highlighted source screenshots, diagram/chart primitives)
 - [video-quality/av-quality-implementation-log.md](video-quality/av-quality-implementation-log.md) — phases 0–2 of the 26 Oct A/V review: HyperFrames host benchmark, mood-varied music + licensed SFX, Kokoro fp32 A/B
 
 ## Reviews (point-in-time, read on demand)
