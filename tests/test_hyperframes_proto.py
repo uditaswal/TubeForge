@@ -24,11 +24,12 @@ from tubeforge.rendering.hyperframes_proto.compose import (
     _format_stat,
     _word_groups,
     build_before_after_project,
+    build_flow_project,
     build_big_stat_project,
     build_hook_project,
     build_loop_project,
 )
-from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Hook, Loop
+from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Flow, Hook, Loop
 
 
 def _hook_scene(**overrides) -> Hook:
@@ -82,6 +83,22 @@ BEFORE_AFTER_WORDS = [(0.35, 0.43), (0.43, 0.89), (0.89, 1.13), (1.13, 1.61),
                       (1.61, 1.93), (1.93, 2.49), (2.49, 2.81), (2.81, 3.27),
                       (3.27, 3.45), (3.45, 3.51), (3.51, 3.67)]
 BEFORE_AFTER_DURATION = 4.005
+
+
+def _flow_scene(**overrides) -> Flow:
+    data = {"scene_id": "scene-2", "template": "flow",
+            "vo": "Railway confirmed a cyberattack that let hackers reach some customer secrets.",
+            "caption": "Railway confirmed a cyberattack that let hackers reach some customer secrets.",
+            "reveal_words": [3, 6, 9], "heading": "What happened",
+            "nodes": ["Cyberattack", "Hackers in", "Secrets taken"], "icon": "warning", **overrides}
+    return Flow.model_validate(data)
+
+
+# Job e53f4e8387424f65b6a6b50fbb166efa, scene-2, scene-relative measured word times.
+FLOW_WORDS = [(0.0, 0.44), (0.44, 0.957), (0.957, 1.081), (1.081, 1.671),
+              (1.671, 1.976), (1.976, 2.23), (2.23, 2.669), (2.669, 3.023),
+              (3.023, 3.328), (3.328, 3.807), (3.807, 4.247)]
+FLOW_DURATION = 4.427
 
 
 def test_word_groups_matches_the_pil_renderers_own_grouping_and_maps_real_timing():
@@ -181,6 +198,24 @@ def test_build_before_after_project_omits_badge_without_icon_or_logo(tmp_path):
     assert '<img src="assets/badge.png"' not in (project / "index.html").read_text()
 
 
+def test_build_flow_project_uses_three_real_reveal_words_and_its_own_id(tmp_path):
+    project = tmp_path / "proj"
+    build_flow_project(_flow_scene(), FLOW_WORDS, FLOW_DURATION, project)
+    html = (project / "index.html").read_text()
+    assert 'data-composition-id="flow"' in html and 'window.__timelines["flow"]' in html
+    assert all(node in html for node in ("Cyberattack", "Hackers in", "Secrets taken"))
+    assert all(f'}},{at:.3f});' in html for at in (1.081, 2.23, 3.328))
+    assert html.count('class="arrow"') == 2
+    assert re.findall(r'<script src="([^"]+)"', html) == ["assets/gsap.min.js"]
+
+
+def test_build_flow_project_omits_badge_without_icon_or_logo(tmp_path):
+    project = tmp_path / "proj"
+    build_flow_project(_flow_scene(icon=None), FLOW_WORDS, FLOW_DURATION, project)
+    assert not (project / "assets" / "badge.png").exists()
+    assert '<img src="assets/badge.png"' not in (project / "index.html").read_text()
+
+
 def test_vendored_assets_exist_on_disk():
     assert (ASSETS / "hyperframes" / "gsap.min.js").is_file()
     assert (ASSETS / "hyperframes" / "LICENSE-gsap.md").is_file()
@@ -263,3 +298,9 @@ def test_real_big_stat_render_passes_check_and_decodes_to_the_right_spec():
 def test_real_before_after_render_passes_check_and_decodes_to_the_right_spec():
     _real_check_render_decode(build_before_after_project, _before_after_scene(), BEFORE_AFTER_WORDS,
                               BEFORE_AFTER_DURATION, "before_after")
+
+
+@needs_hyperframes
+@needs_ffmpeg
+def test_real_flow_render_passes_check_and_decodes_to_the_right_spec():
+    _real_check_render_decode(build_flow_project, _flow_scene(), FLOW_WORDS, FLOW_DURATION, "flow")

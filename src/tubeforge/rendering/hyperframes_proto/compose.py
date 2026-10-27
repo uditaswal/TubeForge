@@ -17,7 +17,7 @@ from pathlib import Path
 from tubeforge.rendering.shorts.icons import badge
 from tubeforge.rendering.shorts.layout import AMBER, CYAN, MUTED, PANEL, WHITE, caption_groups
 from tubeforge.rendering.shorts.logos import logo_badge
-from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Hook
+from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Flow, Hook
 
 # The count-up duration + easing the PIL renderer uses for a big_stat's newest figure
 # (``motion.py``'s ``COUNT_SECONDS`` and ``ease_out_cubic``, which is exactly GSAP's
@@ -386,11 +386,28 @@ def build_big_stat_project(scene: BigStat, words: list[tuple[float, float]], dur
     }, indent=2), encoding="utf-8")
 
 
-def before_after_composition_html(scene: BeforeAfter, words: list[tuple[float, float]], duration: float) -> str:
-    """Two fixed PIL-layout slots, revealed at the corresponding narration words."""
+def _cards_composition_html(scene: BeforeAfter | Flow, words: list[tuple[float, float]],
+                            duration: float, *, kind: str, items: tuple[str, ...]) -> str:
+    """PIL's fixed card slots for before/after and flow; reveal never shifts neighbours."""
     captions = json.dumps(_word_groups(scene.caption, words))
     reveal = [words[i][0] for i in scene.reveal_words]
     has_badge = bool(scene.icon or scene.logo)
+    if len(reveal) != len(items):
+        raise ValueError(f"{kind} needs one reveal word per card")
+    height, gap = 170, 76
+    top = round(820 - (len(items) * height + (len(items) - 1) * gap) / 2)
+    item_css = "\n".join(f"#item{i} {{ top:{top + i * (height + gap)}px; "
+                         + (f"border-color:{CYAN}; " if i else "") + "}" for i in range(len(items)))
+    arrows_css = "\n".join(f"#arrow{i} {{ top:{top + i * (height + gap) - gap + 10}px; }}"
+                           for i in range(1, len(items)))
+    item_html = "\n".join(f'<div id="item{i}" class="item">{html.escape(value)}</div>'
+                          for i, value in enumerate(items))
+    arrows_html = "\n".join(f'<div id="arrow{i}" class="arrow"><div class="shaft"></div><div class="head"></div></div>'
+                            for i in range(1, len(items)))
+    reveals_js = "\n".join(
+        f'tl.to("#item{i}",{{opacity:1,y:0,duration:.3,ease:"back.out(1.2)"}},{at:.3f});'
+        + (f'tl.to("#arrow{i}",{{opacity:1,duration:.2}},{at:.3f});' if i else "")
+        for i, at in enumerate(reveal))
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="UTF-8" />
 <meta name="viewport" content="width={WIDTH}, height={HEIGHT}" />
@@ -407,27 +424,25 @@ html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:#08
 #badge img {{ width:100%; height:100%; }}
 #heading {{ position:absolute; left:60px; right:60px; top:390px; text-align:center; font:800 72px/1.2 Inter; color:{WHITE}; }}
 .item {{ position:absolute; left:90px; width:810px; height:170px; border:2px solid #536b87; border-radius:18px; background:{PANEL}; opacity:0; transform:translateY(16px); display:flex; align-items:center; justify-content:center; padding:20px 25px; text-align:center; font:800 66px/1.15 Inter; color:{WHITE}; }}
-#item0 {{ top:612px; }} #item1 {{ top:858px; border-color:{CYAN}; }}
-#arrow {{ position:absolute; left:525px; top:792px; width:30px; height:56px; opacity:0; }}
-#arrow .shaft {{ position:absolute; left:12px; width:6px; height:38px; background:{CYAN}; }}
-#arrow .head {{ position:absolute; top:32px; border-left:15px solid transparent; border-right:15px solid transparent; border-top:18px solid {CYAN}; }}
+{item_css}
+.arrow {{ position:absolute; left:525px; width:30px; height:56px; opacity:0; }}
+{arrows_css}
+.arrow .shaft {{ position:absolute; left:12px; width:6px; height:38px; background:{CYAN}; }}
+.arrow .head {{ position:absolute; top:32px; border-left:15px solid transparent; border-right:15px solid transparent; border-top:18px solid {CYAN}; }}
 #captions {{ position:absolute; left:40px; right:40px; top:1300px; text-align:center; }}
 .cap-group {{ position:absolute; left:0; right:0; font:96px/1 Anton; text-transform:uppercase; opacity:0; }}
 .cap-word {{ color:{WHITE}; -webkit-text-stroke:6px #0a0f1f; paint-order:stroke fill; }}
 </style></head><body>
-<div id="root" class="clip" data-composition-id="before_after" data-start="0" data-duration="{duration:.3f}" data-width="{WIDTH}" data-height="{HEIGHT}" data-fps="{FPS}">
+<div id="root" class="clip" data-composition-id="{kind}" data-start="0" data-duration="{duration:.3f}" data-width="{WIDTH}" data-height="{HEIGHT}" data-fps="{FPS}">
 <div class="glow"></div><div class="rail"></div>
 <div id="badge" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="1">{'<img src="assets/badge.png" alt="" />' if has_badge else ''}</div>
 <div id="heading" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="2">{html.escape(scene.heading)}</div>
-<div id="item0" class="item">{html.escape(scene.before)}</div><div id="arrow"><div class="shaft"></div><div class="head"></div></div>
-<div id="item1" class="item">{html.escape(scene.after)}</div>
+{item_html}{arrows_html}
 <div id="captions" class="clip" data-track-kind="captions" data-start="0" data-duration="{duration:.3f}" data-track-index="4"></div>
 </div><script>(function() {{
 window.__timelines=window.__timelines||{{}};
 var CAPTIONS={captions}; var tl=gsap.timeline({{paused:true}});
-tl.to("#item0",{{opacity:1,y:0,duration:.3,ease:"back.out(1.2)"}},{reveal[0]:.3f});
-tl.to("#item1",{{opacity:1,y:0,duration:.3,ease:"back.out(1.2)"}},{reveal[1]:.3f});
-tl.to("#arrow",{{opacity:1,duration:.2}},{reveal[1]:.3f});
+{reveals_js}
 var host=document.getElementById("captions");
 CAPTIONS.forEach(function(group,gi) {{
  var el=document.createElement("div"); el.className="cap-group";
@@ -438,8 +453,16 @@ CAPTIONS.forEach(function(group,gi) {{
  var end=Math.max(start+.08,Math.min(group.end,nextStart-.01));
  tl.set(el,{{opacity:1}},start); tl.to(el,{{opacity:0,duration:.12,ease:"power2.in"}},end-.12); tl.set(el,{{opacity:0,visibility:"hidden"}},end);
 }});
-window.__timelines["before_after"]=tl; tl.seek(0);
+window.__timelines["{kind}"]=tl; tl.seek(0);
 }})();</script></body></html>"""
+
+
+def before_after_composition_html(scene: BeforeAfter, words: list[tuple[float, float]], duration: float) -> str:
+    return _cards_composition_html(scene, words, duration, kind="before_after", items=(scene.before, scene.after))
+
+
+def flow_composition_html(scene: Flow, words: list[tuple[float, float]], duration: float) -> str:
+    return _cards_composition_html(scene, words, duration, kind="flow", items=scene.nodes)
 
 
 def build_before_after_project(scene: BeforeAfter, words: list[tuple[float, float]], duration: float, project_dir: Path) -> None:
@@ -452,6 +475,24 @@ def build_before_after_project(scene: BeforeAfter, words: list[tuple[float, floa
         sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
         sprite.save(assets / "badge.png")
     (project_dir / "index.html").write_text(before_after_composition_html(scene, words, duration), encoding="utf-8")
+    (project_dir / "hyperframes.json").write_text(json.dumps({
+        "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
+        "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
+        "media": {"autoProxy": False},
+    }, indent=2), encoding="utf-8")
+
+
+def build_flow_project(scene: Flow, words: list[tuple[float, float]], duration: float, project_dir: Path) -> None:
+    """Write a self-contained project for one flow scene."""
+    assets = project_dir / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    shutil.copy(ASSETS / "hyperframes" / "gsap.min.js", assets / "gsap.min.js")
+    shutil.copy(FONTS / "Anton-Regular.ttf", assets / "Anton-Regular.ttf")
+    shutil.copy(FONTS / "Inter-Variable.ttf", assets / "Inter-Variable.ttf")
+    if scene.icon or scene.logo:
+        sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
+        sprite.save(assets / "badge.png")
+    (project_dir / "index.html").write_text(flow_composition_html(scene, words, duration), encoding="utf-8")
     (project_dir / "hyperframes.json").write_text(json.dumps({
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
