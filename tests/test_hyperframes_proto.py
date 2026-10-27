@@ -24,12 +24,13 @@ from tubeforge.rendering.hyperframes_proto.compose import (
     _format_stat,
     _word_groups,
     build_before_after_project,
+    build_checklist_project,
     build_flow_project,
     build_big_stat_project,
     build_hook_project,
     build_loop_project,
 )
-from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Flow, Hook, Loop
+from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Checklist, Flow, Hook, Loop
 
 
 def _hook_scene(**overrides) -> Hook:
@@ -99,6 +100,22 @@ FLOW_WORDS = [(0.0, 0.44), (0.44, 0.957), (0.957, 1.081), (1.081, 1.671),
               (1.671, 1.976), (1.976, 2.23), (2.23, 2.669), (2.669, 3.023),
               (3.023, 3.328), (3.328, 3.807), (3.807, 4.247)]
 FLOW_DURATION = 4.427
+
+
+def _checklist_scene(**overrides) -> Checklist:
+    data = {"scene_id": "scene-3", "template": "checklist",
+            "vo": "Those secrets are passwords and API keys your apps use to reach databases.",
+            "caption": "Those secrets are passwords and API keys your apps use to reach databases.",
+            "reveal_words": [3, 5, 12], "heading": "Inside env variables",
+            "items": ["Passwords", "API keys", "Database access"], "icon": "lock", **overrides}
+    return Checklist.model_validate(data)
+
+
+# Job e53f4e8387424f65b6a6b50fbb166efa, scene-3, scene-relative measured word times.
+CHECKLIST_WORDS = [(0.0, 0.18), (0.18, 0.48), (0.48, 0.76), (0.76, 1.1),
+                   (1.1, 1.7), (1.7, 2.12), (2.12, 2.34), (2.34, 2.54),
+                   (2.54, 2.74), (2.74, 3.0), (3.0, 3.2), (3.2, 3.34), (3.34, 3.86)]
+CHECKLIST_DURATION = 4.39
 
 
 def test_word_groups_matches_the_pil_renderers_own_grouping_and_maps_real_timing():
@@ -216,6 +233,24 @@ def test_build_flow_project_omits_badge_without_icon_or_logo(tmp_path):
     assert '<img src="assets/badge.png"' not in (project / "index.html").read_text()
 
 
+def test_build_checklist_project_uses_real_reveals_without_flow_arrows(tmp_path):
+    project = tmp_path / "proj"
+    build_checklist_project(_checklist_scene(), CHECKLIST_WORDS, CHECKLIST_DURATION, project)
+    html = (project / "index.html").read_text()
+    assert 'data-composition-id="checklist"' in html and 'window.__timelines["checklist"]' in html
+    assert all(label in html for label in ("✓  Passwords", "✓  API keys", "✓  Database access"))
+    assert all(f'}},{at:.3f});' in html for at in (0.76, 1.7, 3.34))
+    assert 'class="arrow"' not in html
+    assert re.findall(r'<script src="([^"]+)"', html) == ["assets/gsap.min.js"]
+
+
+def test_build_checklist_project_omits_badge_without_icon_or_logo(tmp_path):
+    project = tmp_path / "proj"
+    build_checklist_project(_checklist_scene(icon=None), CHECKLIST_WORDS, CHECKLIST_DURATION, project)
+    assert not (project / "assets" / "badge.png").exists()
+    assert '<img src="assets/badge.png"' not in (project / "index.html").read_text()
+
+
 def test_vendored_assets_exist_on_disk():
     assert (ASSETS / "hyperframes" / "gsap.min.js").is_file()
     assert (ASSETS / "hyperframes" / "LICENSE-gsap.md").is_file()
@@ -304,3 +339,10 @@ def test_real_before_after_render_passes_check_and_decodes_to_the_right_spec():
 @needs_ffmpeg
 def test_real_flow_render_passes_check_and_decodes_to_the_right_spec():
     _real_check_render_decode(build_flow_project, _flow_scene(), FLOW_WORDS, FLOW_DURATION, "flow")
+
+
+@needs_hyperframes
+@needs_ffmpeg
+def test_real_checklist_render_passes_check_and_decodes_to_the_right_spec():
+    _real_check_render_decode(build_checklist_project, _checklist_scene(), CHECKLIST_WORDS,
+                              CHECKLIST_DURATION, "checklist")

@@ -17,7 +17,7 @@ from pathlib import Path
 from tubeforge.rendering.shorts.icons import badge
 from tubeforge.rendering.shorts.layout import AMBER, CYAN, MUTED, PANEL, WHITE, caption_groups
 from tubeforge.rendering.shorts.logos import logo_badge
-from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Flow, Hook
+from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Checklist, Flow, Hook
 
 # The count-up duration + easing the PIL renderer uses for a big_stat's newest figure
 # (``motion.py``'s ``COUNT_SECONDS`` and ``ease_out_cubic``, which is exactly GSAP's
@@ -386,7 +386,7 @@ def build_big_stat_project(scene: BigStat, words: list[tuple[float, float]], dur
     }, indent=2), encoding="utf-8")
 
 
-def _cards_composition_html(scene: BeforeAfter | Flow, words: list[tuple[float, float]],
+def _cards_composition_html(scene: BeforeAfter | Flow | Checklist, words: list[tuple[float, float]],
                             duration: float, *, kind: str, items: tuple[str, ...]) -> str:
     """PIL's fixed card slots for before/after and flow; reveal never shifts neighbours."""
     captions = json.dumps(_word_groups(scene.caption, words))
@@ -399,14 +399,14 @@ def _cards_composition_html(scene: BeforeAfter | Flow, words: list[tuple[float, 
     item_css = "\n".join(f"#item{i} {{ top:{top + i * (height + gap)}px; "
                          + (f"border-color:{CYAN}; " if i else "") + "}" for i in range(len(items)))
     arrows_css = "\n".join(f"#arrow{i} {{ top:{top + i * (height + gap) - gap + 10}px; }}"
-                           for i in range(1, len(items)))
-    item_html = "\n".join(f'<div id="item{i}" class="item">{html.escape(value)}</div>'
+                           for i in range(1, len(items)) if kind != "checklist")
+    item_html = "\n".join(f'<div id="item{i}" class="item">{html.escape("✓  " if kind == "checklist" else "")}{html.escape(value)}</div>'
                           for i, value in enumerate(items))
     arrows_html = "\n".join(f'<div id="arrow{i}" class="arrow"><div class="shaft"></div><div class="head"></div></div>'
-                            for i in range(1, len(items)))
+                            for i in range(1, len(items)) if kind != "checklist")
     reveals_js = "\n".join(
         f'tl.to("#item{i}",{{opacity:1,y:0,duration:.3,ease:"back.out(1.2)"}},{at:.3f});'
-        + (f'tl.to("#arrow{i}",{{opacity:1,duration:.2}},{at:.3f});' if i else "")
+        + (f'tl.to("#arrow{i}",{{opacity:1,duration:.2}},{at:.3f});' if i and kind != "checklist" else "")
         for i, at in enumerate(reveal))
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="UTF-8" />
@@ -465,6 +465,10 @@ def flow_composition_html(scene: Flow, words: list[tuple[float, float]], duratio
     return _cards_composition_html(scene, words, duration, kind="flow", items=scene.nodes)
 
 
+def checklist_composition_html(scene: Checklist, words: list[tuple[float, float]], duration: float) -> str:
+    return _cards_composition_html(scene, words, duration, kind="checklist", items=scene.items)
+
+
 def build_before_after_project(scene: BeforeAfter, words: list[tuple[float, float]], duration: float, project_dir: Path) -> None:
     assets = project_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
@@ -493,6 +497,24 @@ def build_flow_project(scene: Flow, words: list[tuple[float, float]], duration: 
         sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
         sprite.save(assets / "badge.png")
     (project_dir / "index.html").write_text(flow_composition_html(scene, words, duration), encoding="utf-8")
+    (project_dir / "hyperframes.json").write_text(json.dumps({
+        "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
+        "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
+        "media": {"autoProxy": False},
+    }, indent=2), encoding="utf-8")
+
+
+def build_checklist_project(scene: Checklist, words: list[tuple[float, float]], duration: float, project_dir: Path) -> None:
+    """Write a self-contained project for one checklist scene."""
+    assets = project_dir / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    shutil.copy(ASSETS / "hyperframes" / "gsap.min.js", assets / "gsap.min.js")
+    shutil.copy(FONTS / "Anton-Regular.ttf", assets / "Anton-Regular.ttf")
+    shutil.copy(FONTS / "Inter-Variable.ttf", assets / "Inter-Variable.ttf")
+    if scene.icon or scene.logo:
+        sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
+        sprite.save(assets / "badge.png")
+    (project_dir / "index.html").write_text(checklist_composition_html(scene, words, duration), encoding="utf-8")
     (project_dir / "hyperframes.json").write_text(json.dumps({
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
