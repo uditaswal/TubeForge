@@ -36,6 +36,8 @@ def encode(timeline: Timeline, silent: Path, audio: Path, destination: Path, *, 
               "alignment": [s.alignment for s in timeline.timings], "draft": draft,
               "narration_health": narration_health, "budget_realtime_factor": budget_rtf,
               "motion": True, "plates": {}, "renderer": "hyperframes",
+              "evidence_quote": (scene_report or {}).get("evidence_quote", []),
+              "source_fallbacks": (scene_report or {}).get("source_fallbacks", []),
               "scene_count": len(timeline.topic.scenes),
               "scene_checks": [{"ok": row.get("ok", False), "errors": sum((row.get(group) or {}).get("errorCount", 0)
                                for group in ("lint", "runtime", "layout", "craft"))}

@@ -17,10 +17,14 @@ def test_real_mastered_mix_mux_and_existing_qa(tmp_path):
     timeline = load_timeline(topic, reference)
     output = tmp_path / "preview.mp4"
     report = encode(timeline, JOB / "preview.mp4", reference / "mix" / "mix.wav", output,
-                    draft=True, budget_rtf=20)
+                    draft=True, budget_rtf=20,
+                    scene_report={"evidence_quote": [{"scene_index": 1, "source_label": "TechCrunch"}],
+                                  "source_fallbacks": [{"scene_index": 5, "reason": "capture unavailable"}]})
     assert report["passed"] is True
     assert report["scene_count"] == len(timeline.topic.scenes)
     assert report["frames"] == round(timeline.duration * 30)
     assert report["full_decode"] is True
     assert report["audio_health"] and report["temporal_qa"]
+    assert report["evidence_quote"][0]["scene_index"] == 1
+    assert report["source_fallbacks"][0]["scene_index"] == 5
     assert output.is_file() and output.with_suffix(".qa.json").is_file()

@@ -72,7 +72,7 @@ State of the renderer at this writing (read, do not assume): Codex wired an opt-
 
 Each step: one commit series, tests, one real render inspected, operator OK before the next. All NOT STARTED.
 
-**Step 1 — Sound budget (quick win, audio only). IMPLEMENTED; operator listen pending.** Files: `rendering/shorts/sfx.py`, `audio.py`, `config/production.yaml`.
+**Step 1 — Sound budget (quick win, audio only). VERIFIED; operator accepted and authorized Step 2.** Files: `rendering/shorts/sfx.py`, `audio.py`, `config/production.yaml`.
 - Cues only for: a number landing (`big_stat`), a typed key/command reveal (`terminal`), the final payoff
   (riser/impact), and at most one whoosh per ~10 s for a hard topic change. Scene cuts are silent by default.
 - Config: `sfx.max_per_minute` (default 4), `sfx.min_gap_s` (default 6), `sfx.peak` (default .18, was .30),
@@ -89,15 +89,29 @@ Each step: one commit series, tests, one real render inspected, operator OK befo
   passed with only a thumbnail warning for this listening copy. Full contact sheet inspected.
   Listen: `http://localhost:8082/review/railway-breach-modest-sfx.mp4`
   (`/home/uditaswal/docker/tubeforge/Youtube_Video_Producer/artifacts/review/railway-breach-modest-sfx.mp4`).
-  Step 1 becomes VERIFIED only after the operator hears it and calls the effects modest.
+  The operator confirmed acceptance in the conversation and instructed work to proceed to Step 2.
 
-**Step 2 — Evidence quote primitive (highlighted source screenshot).** Port `plates.py::source_card` behaviour
+**Step 2 — Evidence quote primitive (highlighted source screenshot). IMPLEMENTED; operator watch pending.** Port `plates.py::source_card` behaviour
 (captured paragraph + marker highlight sweeping left→right) into the HyperFrames path as `evidence_quote`.
 - Data: source screenshot path, highlight mask or text range, source label/URL footnote.
-- Rule for the writer/scene plan: a claim attributed to a source uses `evidence_quote` (exact quoted words,
-  captured screenshot); without a captured screenshot the scene falls back to a plain quote card, never a fake screenshot.
+- Current renderer rule: a scene with `SourceVisual` and a captured plate uses `evidence_quote`;
+  without a captured plate it falls back to that scene's normal template, never a fake screenshot.
 - Acceptance: render a scene from a real captured source; frames show the highlight reaching the quoted words as they are spoken; footnote readable above the Shorts UI band.
 - Out of scope: capturing new sources (the existing capture pipeline is reused).
+- Evidence (28 Oct): real job `e53f4e8387424f65b6a6b50fbb166efa`, source scene 1,
+  existing TechCrunch capture `reference/plates/source-1.png` plus `source-1-hl.png`
+  ([source page](https://techcrunch.com/2026/10/22/developer-platform-railway-urges-all-users-to-revoke-secret-keys-after-cyberattack/)).
+  HyperFrames check: zero errors in lint/runtime/layout/craft; two harmless nested-layer
+  warnings. Draft render with the real aligned words and the job's mastered audio decoded
+  cleanly. At scene-relative 0.9 s the marker is absent; it sweeps at the 1.081 s claim
+  anchor and is full by 1.9 s, then repeats for 2.230 and 3.328 s reveal anchors.
+  The 2 fps contact sheet was viewed. Source line uses the job's actual source name
+  at x=90–900, y=1480–1530, clear of the right rail and bottom title band.
+  Scene 5's capture had failed under the source page's CSP; a second draft render
+  visibly used the ordinary `before_after` template. Review:
+  `http://localhost:8082/review/evidence-quote-railway.mp4`;
+  fallback: `http://localhost:8082/review/evidence-quote-fallback-railway.mp4`.
+  Step 2 stays IMPLEMENTED until the operator watches the captured-source clip.
 
 **Step 3 — Design tokens.** Shared across all HyperFrames scenes (`hyperframes_proto/compose.py` base):
 entity → colour map (declared per video, e.g. `entities: {nginx: green, Pingora: orange}`), dim→light reveal helper,

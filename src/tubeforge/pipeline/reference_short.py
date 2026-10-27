@@ -29,7 +29,7 @@ from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
 RENDERER_VERSION = "reference-short-v1/render-3"  # sparse caused SFX budget
-HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-2"
+HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-3"
 
 
 def renderer_version(config: ReferenceShortConfig) -> str:
@@ -169,7 +169,8 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
                 silent = Path(scratch) / "silent.mp4"
                 scene_report = render_silent(timeline, silent, draft=draft, cancelled=cancelled,
                                              budget_rtf=config.budget_realtime_factor,
-                                             ffmpeg=config.ffmpeg_executable)
+                                             ffmpeg=config.ffmpeg_executable,
+                                             plates_directory=directory)
                 return hyperframes_encode(timeline, silent, mix, destination, draft=draft,
                                           cancelled=cancelled, budget_rtf=config.budget_realtime_factor,
                                           render_started=started, ffmpeg=config.ffmpeg_executable,

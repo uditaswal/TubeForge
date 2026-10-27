@@ -287,8 +287,8 @@ The spaced nonfinal cues respect the 6 s gap.
 The full-video contact sheet was inspected; the visual track is the unchanged reviewed
 PIL preview. Listening file: `/home/uditaswal/docker/tubeforge/Youtube_Video_Producer/artifacts/review/railway-breach-modest-sfx.mp4`,
 served at `http://localhost:8082/review/railway-breach-modest-sfx.mp4`.
-Status: **IMPLEMENTED**. Operator must listen and say whether the cues are modest before
-this Step 1 can be **VERIFIED**; do not start Step 2 yet.
+Status: **VERIFIED** for reference-quality Step 1. The operator accepted the modest-sound
+revision in the conversation and explicitly authorized Step 2.
 Focused regression: `tests/test_shorts_audio.py`, `test_hyperframes_routing.py`,
 `test_hyperframes_encode.py`, `test_config.py` — 35 passed; adjacent audio/plate/
 spoken tests — 21 passed. The broad reference-short render suite was interrupted
@@ -670,23 +670,55 @@ video frames. The ending loop returns to the opener composition but its animatio
 state does not prove a pixel-identical loop seam. The operator still needs to watch/listen
 to the whole preview and compare it with the PIL preview before choosing the renderer.
 
-**Important limitation of this opt-in prototype:** the PIL fixture uses five real-image,
-source and code plates. These standalone HyperFrames builders do not mount those plates;
-the PIL comparison sheet visibly contains evidence cards and stock footage missing from the
-HyperFrames film. This is a source-fidelity / visual-depth gap for a production swap, even
-though the narration and all ten scene templates are present. The existing display options
+**Important limitation of this opt-in prototype:** the original full-film trial predates
+the reference-quality Step 2 evidence quote treatment below. Captured source plates now
+mount for `SourceVisual` scenes, but stock and code plates remain absent; a new full film
+has not yet been rendered with the source treatment. The existing display options
 (source credits, watermark, mascot) also have no HyperFrames implementation. Do not enable
 the flag for a production channel until these choices are represented or explicitly gated.
 `terminal` remains **SYNTHETIC-only**: this real job contains no terminal scene.
+
+### Reference-quality Step 2 — captured source treatment (28 Oct)
+
+The default-off HyperFrames path now inspects the existing `reference/plates/manifest.json`
+for each `SourceVisual`. A captured plate replaces only that scene's body, keeping its
+heading and word-timed captions. The local base image and already captured marker image
+are layered in a rounded, shadowed card. GSAP reveals the marker left to right over 0.5 s,
+restarting at each of the scene's real `reveal_words` anchors, matching
+`Plates.card()`/`Timeline.state()`. The source footnote uses the real `Source.name`
+at x=90–900/y=1480–1530, above the bottom UI band and left of the right rail.
+Missing capture or plate file uses the normal template; missing highlight keeps the
+plain captured plate without a sweep. `hyperframes_encode.py` records used scenes and
+fallback reasons in the render QA provenance. The PIL route is unchanged.
+
+Real job `e53f4e8387424f65b6a6b50fbb166efa`, scene 1: existing TechCrunch capture
+`reference/plates/source-1.png` and `source-1-hl.png` from
+`https://techcrunch.com/2026/10/22/developer-platform-railway-urges-all-users-to-revoke-secret-keys-after-cyberattack/`.
+The quote matches the captured paragraph; no screenshot or text was fabricated.
+Real word anchors are 1.081, 2.230 and 3.328 s scene-relative. HyperFrames
+`check --json`: `ok=true`, **zero errors** in lint/runtime/layout/craft; two harmless
+nested-element lint notes (badge and source card). Draft render muxed with the job's
+unchanged mastered audio slice, `ffmpeg -xerror` decode passed. The inspected 2 fps
+sheet and sampled pixels show zero marker pixels at 0.9 s; a partial sweep at 1.2 s;
+full marker at 1.9 s; reset/sweep at 2.4 s; full at 2.8 s; and full after the third
+anchor at 3.9 s. Footnote is readable at full frame and clear of UI rails/title band.
+Review file `/home/uditaswal/docker/tubeforge/Youtube_Video_Producer/artifacts/review/evidence-quote-railway.mp4`
+(`http://localhost:8082/review/evidence-quote-railway.mp4`).
+Scene 5's existing capture failed due TechCrunch CSP; a second checked, draft-rendered,
+decoded scene visibly uses its normal `before_after` composition:
+`http://localhost:8082/review/evidence-quote-fallback-railway.mp4`.
+Both viewer URLs returned HTTP 200. Final focused suite: 11 passed, including real binary
+check/render/decode and marker-pixel assertions; the prior broader HyperFrames run passed
+34 tests (one deselected). Step 2 is **IMPLEMENTED**, awaiting the operator's watch.
 
 ### What a full production swap still needs
 
 1. **Operator review:** watch and listen to the complete HyperFrames preview at the path above,
    compare with `data/artifacts/e53f4e8387424f65b6a6b50fbb166efa/preview.mp4`, and
-   decide whether the source-card/stock gap is acceptable for a trial. Do not mark VERIFIED
+   decide whether the remaining stock/code plate gap is acceptable for a trial. Do not mark VERIFIED
    from automated checks alone.
-2. **Visual parity and display choices:** decide how the PIL plate manifest, source cards,
-   watermark and mascot are represented or gated in the HyperFrames path; inspect a real
+2. **Visual parity and display choices:** captured source cards are now represented; decide how
+   the remaining stock/code plates, watermark and mascot are represented or gated; inspect a real
    1080×1920 final after that work. A real-job terminal scene still needs its own acceptance
    because the only terminal evidence is the labelled SYNTHETIC fixture.
 3. **Worker image:** Node 22+ and a pinned HyperFrames CLI are missing from `Dockerfile`.
@@ -714,11 +746,11 @@ the flag for a production channel until these choices are represented or explici
 | Phase | State | Evidence | Next action |
 |---|---|---|---|
 | 0. Benchmark | **VERIFIED** — go decision made | this log, §Phase 0 | none (informed phase 4's go decision) |
-| 1. Sound (music variety + SFX) | **IMPLEMENTED** — reference-quality Step 1 revisited placement at 2 cues/.18; operator listen pending | this log, §Phase 1; `http://localhost:8082/review/railway-breach-modest-sfx.mp4`; −14.27 LUFS / −2.53 dBTP | operator calls the revised cues modest before Step 2 |
+| 1. Sound (music variety + SFX) | **VERIFIED** — reference-quality Step 1 accepted by operator | this log, §Phase 1; `http://localhost:8082/review/railway-breach-modest-sfx.mp4`; −14.27 LUFS / −2.53 dBTP | none for Step 1 |
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
-| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE / IMPLEMENTED** — seven builders and default-off production route; real 10-scene preview rendered, but `terminal` is **SYNTHETIC-only** and PIL plates/display options are absent | this log, §Phase 4; 40.410 s reviewed fixture, 1212 frames, QA pass, contact/boundary sheets, RTF 7.08 | operator full watch and PIL preference; then plate/display-option parity, real terminal acceptance, and operator-applied worker image change |
+| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE / IMPLEMENTED** — seven builders, default-off route and captured-source `evidence_quote`; stock/code plates and display options still absent, `terminal` **SYNTHETIC-only** | this log, §Phase 4; source scene 1 check/render/decode and 2 fps sheet; fallback scene 5; earlier 40.410 s full trial | operator watches Step 2 clip, then Step 3 design tokens; full-video preference, remaining plate/display parity, real terminal and worker image remain |
 | 5. Per-channel look | **NOT STARTED** | — | — |
 | — UTMOS naturalness scoring (VoiceStudio §5.2) | **NOT STARTED** — judged too heavy/risky to rush on this host | this log, §Phase 2b rationale | its own plan: source the checkpoint, install CPU-only `torch`, verify host memory headroom before running it anywhere near the live services |
 | — Inline pause/emphasis tags (VoiceStudio §5.3) | **NOT STARTED** — needs a schema change, not an audio change | this log, §Phase 2b rationale | its own plan: new `Scene` field or bracket-tag parsing, updated word-count validators, yt-script prompt changes, writers'-room review |

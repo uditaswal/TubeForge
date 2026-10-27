@@ -7,10 +7,13 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 from tubeforge.rendering.hyperframes_proto import cli, compose
 
 from .encode import RenderCancelled, checked, swap_used_kib
+from .plates import load_manifest
+from .schema import SourceVisual
 from .timeline import Timeline
 
 FPS = 30
@@ -24,6 +27,36 @@ BUILDERS = {
     "checklist": compose.build_checklist_project,
     "terminal": compose.build_terminal_project,
 }
+
+
+def source_treatment(scene, index: int, topic, directory: Path | None, manifest: dict) -> tuple[dict | None, str | None]:
+    """Resolve a captured plate or a precise reason to use the normal scene template."""
+    if not isinstance(getattr(scene, "visual", None), SourceVisual):
+        return None, None
+    if directory is None:
+        return None, "plates_directory_unavailable"
+    entry = manifest.get("scenes", {}).get(str(index), {})
+    if entry.get("kind") != "source" or not entry.get("file"):
+        return None, entry.get("reason") or "captured_plate_unavailable"
+
+    def local_file(value: str | None) -> Path | None:
+        if not value:
+            return None
+        path = (directory / value).resolve()
+        return path if path.is_relative_to(directory.resolve()) and path.is_file() else None
+
+    plate = local_file(entry["file"])
+    if plate is None:
+        return None, "captured_plate_file_missing"
+    highlight = local_file(entry.get("highlight"))
+    source = next((source for source in topic.sources if source.source_id in scene.source_ids), None)
+    domain = urlparse(entry.get("url", "")).hostname
+    label = source.name if source else domain
+    if not label:
+        return None, "source_label_missing"
+    return {"plate": plate, "highlight": highlight, "source_label": label,
+            "highlight_status": "available" if highlight else "missing",
+            "manifest_file": entry["file"]}, None
 
 
 def scene_plan(timeline: Timeline) -> list[tuple[int, int, list[tuple[float, float]]]]:
@@ -66,9 +99,11 @@ def _filter(parts: list[tuple[int, int, list[tuple[float, float]]]], *, draft: b
 
 def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
                   cancelled: Callable[[], bool] = lambda: False, budget_rtf: float = 20,
-                  ffmpeg: str = "ffmpeg", hyperframes_bin: str | None = None) -> dict:
+                  ffmpeg: str = "ffmpeg", hyperframes_bin: str | None = None,
+                  plates_directory: Path | None = None) -> dict:
     """Produce one silent MP4, or raise before promoting an incomplete film."""
     parts = scene_plan(timeline)
+    manifest = load_manifest(plates_directory) if plates_directory is not None else {"scenes": {}}
     binary = hyperframes_bin or os.environ.get("TUBEFORGE_HYPERFRAMES_BIN") or shutil.which("hyperframes")
     if not binary:
         raise ValueError("hyperframes binary is unavailable; set TUBEFORGE_HYPERFRAMES_BIN")
@@ -93,12 +128,26 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
         env = {"TMPDIR": str(root), "HYPERFRAMES_EXTRACT_CACHE_DIR": str(root / "cache")}
         clips = []
         checks = []
+        evidence_used, source_fallbacks = [], []
         for index, (scene, timing, (_, end, words)) in enumerate(zip(
                 timeline.topic.scenes, timeline.timings, parts, strict=True)):
             if guarded_cancelled():
                 raise RenderCancelled("render cancelled or worker ownership lost")
             project = root / f"scene-{index:02d}"
-            BUILDERS[scene.template](scene, words, timing.end - timing.start, project)
+            treatment, reason = source_treatment(scene, index, timeline.topic, plates_directory, manifest)
+            if treatment is not None:
+                compose.build_evidence_quote_project(
+                    scene, words, timing.end - timing.start, project, plate=treatment["plate"],
+                    highlight=treatment["highlight"], source_label=treatment["source_label"])
+                evidence_used.append({"scene_index": index, "scene_id": scene.scene_id,
+                                      "plate": treatment["manifest_file"],
+                                      "highlight_status": treatment["highlight_status"],
+                                      "source_label": treatment["source_label"]})
+            else:
+                if reason is not None:
+                    source_fallbacks.append({"scene_index": index, "scene_id": scene.scene_id,
+                                             "template": scene.template, "reason": reason})
+                BUILDERS[scene.template](scene, words, timing.end - timing.start, project)
             checks.append(cli.check(project, hyperframes_bin=binary, timeout=max(1, deadline-time.monotonic()),
                                     extra_env=env, cancelled=guarded_cancelled))
             clip = root / f"scene-{index:02d}.mp4"
@@ -122,4 +171,5 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
         temporary.replace(destination)
     return {"scene_count": len(parts), "frames": round(timeline.duration * FPS),
             "duration": timeline.duration, "checks": checks,
+            "evidence_quote": evidence_used, "source_fallbacks": source_fallbacks,
             "render_seconds": time.monotonic() - started}

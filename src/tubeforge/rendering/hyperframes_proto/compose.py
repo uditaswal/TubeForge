@@ -612,3 +612,104 @@ def build_terminal_project(scene: Terminal, words: list[tuple[float, float]], du
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
         "media": {"autoProxy": False},
     }, indent=2), encoding="utf-8")
+
+
+def evidence_quote_composition_html(scene, words: list[tuple[float, float]], duration: float, *,
+                                    source_label: str, plate_width: int, plate_height: int,
+                                    has_highlight: bool) -> str:
+    """A PIL-sized captured source card; only its body replaces the template graphics."""
+    captions = json.dumps(_word_groups(scene.caption, words))
+    # PIL's Timeline.state uses the newest reveal anchor. Each new anchor restarts the
+    # 0.5-second marker sweep; use those same aligned words, not a scene-relative timer.
+    reveals = [words[i][0] for i in scene.reveal_words]
+    scale = min(810 / plate_width, 670 / plate_height)
+    card_w, card_h = round(plate_width * scale), round(plate_height * scale)
+    card_left, card_top = round(495 - card_w / 2), round(835 - card_h / 2)
+    has_badge = bool(scene.icon or scene.logo)
+    heading = html.escape(getattr(scene, "heading", " ".join(getattr(scene, "headline", ()))))
+    sweep = "\n".join(
+        f'tl.set("#source-highlight",{{clipPath:"inset(0 100% 0 0)"}},{at:.3f});'
+        f'tl.to("#source-highlight",{{clipPath:"inset(0 0% 0 0)",duration:.5,ease:"none"}},{at:.3f});'
+        for at in reveals) if has_highlight else ""
+    highlight_html = ('<div id="source-highlight" class="source-layer"></div>'
+                      if has_highlight else "")
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="UTF-8" />
+<meta name="viewport" content="width={WIDTH}, height={HEIGHT}" />
+<script src="assets/gsap.min.js"></script>
+<style>
+@font-face {{ font-family: Anton; src: url("assets/Anton-Regular.ttf"); }}
+@font-face {{ font-family: Inter; src: url("assets/Inter-Variable.ttf"); font-weight: 100 900; }}
+* {{ box-sizing:border-box; margin:0; padding:0; }}
+html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:#080f1f; }}
+#root {{ position:relative; width:100%; height:100%; }}
+.glow {{ position:absolute; inset:-10%; background:radial-gradient(ellipse 60% 45% at 20% 70%,rgba(83,224,239,.10),transparent 60%),radial-gradient(ellipse 55% 40% at 85% 30%,rgba(121,52,239,.08),transparent 60%); }}
+.rail {{ position:absolute; top:212px; left:70px; right:160px; height:7px; background:{CYAN}; border-radius:3px; }}
+#badge {{ position:absolute; left:470px; top:230px; width:140px; height:140px; }}
+#badge img {{ width:100%; height:100%; }}
+#heading {{ position:absolute; left:60px; right:60px; top:390px; text-align:center; font:800 72px/1.2 Inter; color:{WHITE}; }}
+#source-card {{ position:absolute; left:{card_left}px; top:{card_top}px; width:{card_w}px; height:{card_h}px;
+ border-radius:28px; overflow:hidden; box-shadow:0 10px 28px rgba(0,0,0,.67); }}
+#source-card .source-layer {{ position:absolute; inset:0; width:100%; height:100%; background-size:100% 100%; }}
+#source-base {{ background-image:url("assets/source-base.png"); }}
+#source-highlight {{ clip-path:inset(0 100% 0 0); }}
+{('#source-highlight { background-image:url("assets/source-highlight.png"); }' if has_highlight else '')}
+#captions {{ position:absolute; left:40px; right:40px; top:1300px; text-align:center; }}
+.cap-group {{ position:absolute; left:0; right:0; font:96px/1 Anton; text-transform:uppercase; opacity:0; }}
+.cap-word {{ color:{WHITE}; -webkit-text-stroke:6px #0a0f1f; paint-order:stroke fill; }}
+#source-footnote {{ position:absolute; left:90px; width:810px; top:1480px; height:50px;
+ text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+ font:700 36px/1.2 Inter; color:{MUTED}; }}
+</style></head><body>
+<div id="root" class="clip" data-composition-id="evidence_quote" data-start="0" data-duration="{duration:.3f}" data-width="{WIDTH}" data-height="{HEIGHT}" data-fps="{FPS}">
+<div class="glow"></div><div class="rail"></div>
+<div id="badge" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="1">{'<img src="assets/badge.png" alt="" />' if has_badge else ''}</div>
+<div id="heading" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="2">{heading}</div>
+<div id="source-card" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="3"><div id="source-base" class="source-layer"></div>{highlight_html}</div>
+<div id="captions" class="clip" data-track-kind="captions" data-start="0" data-duration="{duration:.3f}" data-track-index="4"></div>
+<div id="source-footnote">Source: {html.escape(source_label)}</div>
+</div><script>(function() {{
+window.__timelines=window.__timelines||{{}};
+var CAPTIONS={captions}; var tl=gsap.timeline({{paused:true}});
+{sweep}
+var host=document.getElementById("captions");
+CAPTIONS.forEach(function(group,gi) {{
+ var el=document.createElement("div"); el.className="cap-group";
+ group.words.forEach(function(word,wi) {{ var span=document.createElement("span"); span.className="cap-word"; span.textContent=word+(wi<group.words.length-1?" ":""); el.appendChild(span); }});
+ host.appendChild(el);
+ var start=Math.max(0,group.start-.02);
+ var nextStart=gi+1<CAPTIONS.length?Math.max(0,CAPTIONS[gi+1].start-.02):Infinity;
+ var end=Math.max(start+.08,Math.min(group.end,nextStart-.01));
+ tl.set(el,{{opacity:1}},start); tl.to(el,{{opacity:0,duration:.12,ease:"power2.in"}},end-.12); tl.set(el,{{opacity:0,visibility:"hidden"}},end);
+}});
+window.__timelines["evidence_quote"]=tl; tl.seek(0);
+}})();</script></body></html>"""
+
+
+def build_evidence_quote_project(scene, words: list[tuple[float, float]], duration: float,
+                                 project_dir: Path, *, plate: Path, highlight: Path | None,
+                                 source_label: str) -> None:
+    """Build one self-contained source project using only already captured local images."""
+    from PIL import Image
+    assets = project_dir / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    shutil.copy(ASSETS / "hyperframes" / "gsap.min.js", assets / "gsap.min.js")
+    shutil.copy(FONTS / "Anton-Regular.ttf", assets / "Anton-Regular.ttf")
+    shutil.copy(FONTS / "Inter-Variable.ttf", assets / "Inter-Variable.ttf")
+    with Image.open(plate) as image:
+        width, height = image.size
+    shutil.copy(plate, assets / "source-base.png")
+    if highlight is not None:
+        shutil.copy(highlight, assets / "source-highlight.png")
+    if scene.icon or scene.logo:
+        sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
+        sprite.save(assets / "badge.png")
+    (project_dir / "index.html").write_text(
+        evidence_quote_composition_html(scene, words, duration, source_label=source_label,
+                                        plate_width=width, plate_height=height,
+                                        has_highlight=highlight is not None), encoding="utf-8")
+    (project_dir / "hyperframes.json").write_text(json.dumps({
+        "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
+        "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
+        "media": {"autoProxy": False},
+    }, indent=2), encoding="utf-8")
