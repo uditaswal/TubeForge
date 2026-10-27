@@ -386,10 +386,10 @@ exercising every WARN/PASS/fallback branch (this repository has no precedent for
 `.agents/skills/*.py` scripts — SKILL.md's own instruction is to run them for real, which this
 followed).
 
-## Phase 4 — the HyperFrames renderer: five templates proven end to end, not production-wired
+## Phase 4 — the HyperFrames renderer: six templates proven end to end, not production-wired
 
-**Outcome: the technical chain works, for real content, on this host — five of seven templates
-(`hook`, `loop`, `big_stat`, `before_after`, `flow`), deliberately scoped, not wired into any job's rendering.** This was always
+**Outcome: the technical chain works, for real content, on this host — six of seven templates
+(`hook`, `loop`, `big_stat`, `before_after`, `flow`, `checklist`), deliberately scoped, not wired into any job's rendering.** This was always
 going to be the
 largest item (the review's own estimate: "2–3 weeks"). Rather than rush partial, untested
 coverage of all seven scene templates into production code — which risks shipping something
@@ -544,9 +544,25 @@ slice 3.622–8.049 s, 4.427 s H.264/AAC; `ffmpeg -xerror` decoded cleanly. Insp
 sheet. `tests/test_hyperframes_proto.py`: 18 passed, including the real-binary path. Commit
 `0b0c8c3`. Local evidence: `Youtube_Video_Producer/.hyperframes-proto-test-tmp/flow-review/{proj/,silent.mp4,final.mp4,sheet.png}`.
 
+### Sixth template: `checklist` (27 Oct)
+
+`checklist_composition_html` / `build_checklist_project` use the same PIL fixed slots as
+`flow`, with checkmarked labels and no arrows. The real scene-3 of job
+`e53f4e8387424f65b6a6b50fbb166efa` ("Inside env variables", 4.390 s) reveals
+"Passwords", "API keys", and "Database access" at 0.760, 1.700, and 3.340 s from
+`reference/timeline.json`. `hyperframes check --json`: zero errors, zero layout warnings,
+known badge `<img>` lint note, and the standalone-film `line_unread` craft warning on the
+last two-word node (0.99 s before this middle scene ends, versus the 2 s *film-closing*
+threshold). Its measured cue is kept to match PIL; a future multi-scene check will see it in
+context. Draft render 1080×1920, mastered audio slice 8.049–12.439 s, 4.390 s H.264/AAC;
+`ffmpeg -xerror` decoded cleanly. Inspected the 2 fps sheet: the three checkmarked cards
+appear in place, no arrows or overlaps. `tests/test_hyperframes_proto.py`: 21 passed,
+including real-binary check/render/decode. Commit `4d55ab7`. Local evidence:
+`Youtube_Video_Producer/.hyperframes-proto-test-tmp/checklist-review/{proj/,silent.mp4,final.mp4,sheet.png}`.
+
 ### What a full production swap still needs (not started, in order)
 
-1. **The remaining two templates** — `checklist`, `terminal` —
+1. **The remaining template** — `terminal` —
    each the *same* pattern `hook`/`loop`/`big_stat` proved: a `<name>_composition_html` string
    builder in `compose.py`, real content in, real `hyperframes check` findings fixed, one real
    render inspected. All are layout variations on the same contract now that the one genuinely
@@ -598,7 +614,7 @@ sheet. `tests/test_hyperframes_proto.py`: 18 passed, including the real-binary p
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
-| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — 5 of 7 templates (`hook`, `loop`, `big_stat`, `before_after`, `flow`) proven end to end with real artifacts; **not wired into any job** | this log, §Phase 4; 18 tests, five real renders inspected | next: `checklist` in `src/tubeforge/rendering/hyperframes_proto/compose.py`, then `terminal`; multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
+| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — 6 of 7 templates (`hook`, `loop`, `big_stat`, `before_after`, `flow`, `checklist`) proven end to end with real artifacts; **not wired into any job** | this log, §Phase 4; 21 tests, six real renders inspected | next: `terminal` in `src/tubeforge/rendering/hyperframes_proto/compose.py` after locating a real terminal scene with timeline and mastered audio; multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
 | 5. Per-channel look | **NOT STARTED** | — | — |
 | — UTMOS naturalness scoring (VoiceStudio §5.2) | **NOT STARTED** — judged too heavy/risky to rush on this host | this log, §Phase 2b rationale | its own plan: source the checkpoint, install CPU-only `torch`, verify host memory headroom before running it anywhere near the live services |
 | — Inline pause/emphasis tags (VoiceStudio §5.3) | **NOT STARTED** — needs a schema change, not an audio change | this log, §Phase 2b rationale | its own plan: new `Scene` field or bracket-tag parsing, updated word-count validators, yt-script prompt changes, writers'-room review |
