@@ -386,10 +386,11 @@ exercising every WARN/PASS/fallback branch (this repository has no precedent for
 `.agents/skills/*.py` scripts — SKILL.md's own instruction is to run them for real, which this
 followed).
 
-## Phase 4 — the HyperFrames renderer: six templates proven end to end, not production-wired
+## Phase 4 — the HyperFrames renderer: six real-job templates plus one SYNTHETIC fixture, not production-wired
 
 **Outcome: the technical chain works, for real content, on this host — six of seven templates
-(`hook`, `loop`, `big_stat`, `before_after`, `flow`, `checklist`), deliberately scoped, not wired into any job's rendering.** This was always
+(`hook`, `loop`, `big_stat`, `before_after`, `flow`, `checklist`). The seventh (`terminal`) has
+only a SYNTHETIC Kokoro/Whisper fixture. None is wired into a job's rendering.** This was always
 going to be the
 largest item (the review's own estimate: "2–3 weeks"). Rather than rush partial, untested
 coverage of all seven scene templates into production code — which risks shipping something
@@ -560,15 +561,36 @@ appear in place, no arrows or overlaps. `tests/test_hyperframes_proto.py`: 21 pa
 including real-binary check/render/decode. Commit `4d55ab7`. Local evidence:
 `Youtube_Video_Producer/.hyperframes-proto-test-tmp/checklist-review/{proj/,silent.mp4,final.mp4,sheet.png}`.
 
+### Seventh template: `terminal` (27 Oct) — SYNTHETIC fixture only
+
+`terminal_composition_html` / `build_terminal_project` reproduce the PIL terminal panel,
+ILLUSTRATIVE OUTPUT label, white command text, green output text, and DejaVu Sans Mono font.
+The schema permits at most three lines, so the fixture has three. It is **SYNTHETIC**, not an
+approved script or a real job: “Run the status command, read its running result, then check
+whether the service responds cleanly.” Kokoro int8 (`af_bella`, 1.15×) synthesized a 5.355 s
+WAV; local Whisper base.en DTW aligned all 15 spoken words without an estimated fallback.
+The three line reveal cues are 0.000, 1.750, and 3.090 s; scene duration includes the normal
+0.18 s speech tail. No Codex/Claude script attempt or new job was used.
+
+`hyperframes check --json`: zero errors and zero layout/craft warnings; only the known badge
+`<img>` lint note. Draft 1080×1920 render, Kokoro audio gain/peak-limited and muxed into a
+5.567 s H.264/AAC clip; measured on the final AAC at −14.32 LUFS / −2.82 dBTP, and
+`ffmpeg -xerror` decoded cleanly.
+Inspected the 2 fps contact sheet: the panel and label are present at frame 0, then the three
+mono lines reveal in order with no overlaps. All 24 tests in `tests/test_hyperframes_proto.py`
+passed, including the synthetic terminal's real-binary check/render/decode path. Code commit
+`84f59d8` explicitly says SYNTHETIC. Local evidence (gitignored):
+`Youtube_Video_Producer/.hyperframes-proto-test-tmp/terminal-synthetic-review/` —
+`scene.json`, `narration.wav`, `timings.json`, `check.json`, `proj/`, `silent.mp4`,
+`mastered.wav`, `audio-measurement.json`, `final.mp4`, and `sheet.png`. **This does not prove
+terminal on a real job.**
+
 ### What a full production swap still needs (not started, in order)
 
-1. **The remaining template** — `terminal` —
-   each the *same* pattern `hook`/`loop`/`big_stat` proved: a `<name>_composition_html` string
-   builder in `compose.py`, real content in, real `hyperframes check` findings fixed, one real
-   render inspected. All are layout variations on the same contract now that the one genuinely
-   new motion idea (`big_stat`'s count-up) is done. Rough order of magnitude: comparable effort
-   per template to `hook` (the hardest, since the whole chain had to be built) or less (`loop`
-   took far less, being a pure reuse) — call it most of a day each.
+1. **Real-job acceptance for `terminal`.** The builder and SYNTHETIC fixture exist, but no
+   rendered terminal scene was found among 65 recorded jobs / 10 rendered reference topics.
+   When a real job contains one, use its topic, measured timeline and mastered mix to repeat
+   the check/render/decode/mux/contact-sheet path before claiming real-job evidence.
 2. **Multi-scene composition.** Everything proven above is one scene as a standalone clip. A
    real job is 6–20 scenes with transitions between them — the next real engineering question
    (not yet looked at): one HyperFrames project with sub-compositions per scene and a cue sheet
@@ -614,7 +636,7 @@ including real-binary check/render/decode. Commit `4d55ab7`. Local evidence:
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
-| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — 6 of 7 templates (`hook`, `loop`, `big_stat`, `before_after`, `flow`, `checklist`) proven end to end with real artifacts; **not wired into any job** | this log, §Phase 4; 21 tests, six real renders inspected | next: `terminal` in `src/tubeforge/rendering/hyperframes_proto/compose.py` after locating a real terminal scene with timeline and mastered audio; multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
+| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — all 7 builders exist; 6 proven on real job scenes, `terminal` tested with a **SYNTHETIC** Kokoro/Whisper fixture only; **not wired into any job** | this log, §Phase 4; 24 tests, six real-job renders and one synthetic render inspected | next: real-job terminal acceptance when such a scene exists; multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
 | 5. Per-channel look | **NOT STARTED** | — | — |
 | — UTMOS naturalness scoring (VoiceStudio §5.2) | **NOT STARTED** — judged too heavy/risky to rush on this host | this log, §Phase 2b rationale | its own plan: source the checkpoint, install CPU-only `torch`, verify host memory headroom before running it anywhere near the live services |
 | — Inline pause/emphasis tags (VoiceStudio §5.3) | **NOT STARTED** — needs a schema change, not an audio change | this log, §Phase 2b rationale | its own plan: new `Scene` field or bracket-tag parsing, updated word-count validators, yt-script prompt changes, writers'-room review |
