@@ -81,7 +81,21 @@ E2E phases (19 Oct): E2E-1 creative→render contract **IMPLEMENTED**; E2E-2 loc
 
 ## 11. Current release status and next action
 
-Updated 21 October 2026. Evidence detail: local `AUTONOMOUS_PROGRESS.md` (current + `_N` archives), `docs/HANDOFF.md`, and the archive of this plan.
+Updated 27 October 2026 for the A/V renderer trial. Evidence detail: local `AUTONOMOUS_PROGRESS.md` (current + `_N` archives), `docs/HANDOFF.md`, and the archive of this plan.
+
+### A/V renderer trial (27 October 2026)
+
+Phase 4 on `claude/av-quality-phase1` remains **PROTOTYPE** and is not wired into a video job.
+Six of seven HyperFrames scene templates (`hook`, `loop`, `big_stat`, `before_after`, `flow`,
+`checklist`) have passed real-binary check/render/decode tests and real artifact inspection;
+the three added on 27 October use measured words and mastered audio from job
+`e53f4e8387424f65b6a6b50fbb166efa`. Evidence, per-template findings and reproduction
+paths: [`docs/video-quality/av-quality-implementation-log.md`](../docs/video-quality/av-quality-implementation-log.md),
+Phase 4. `terminal` is **BLOCKED** on a real rendered reference scene: the specified job has
+none, and none was found among the 65 recorded jobs / 10 rendered reference topics. Next
+action: supply an existing terminal job ID or artifact path containing `reference/topic.json`,
+`reference/timeline.json`, and `reference/mix/mix.wav`; then implement and inspect that final
+template. Multi-scene composition and production wiring remain outside this pass.
 
 ### Reference-codebase quality review (23 October 2026)
 
