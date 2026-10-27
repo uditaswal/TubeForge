@@ -622,6 +622,7 @@ class ReferenceShortConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    renderer: Literal["pil", "hyperframes"] = "pil"
     alignment_model_path: Path | None = None
     voice: str = Field(default="af_bella", min_length=1, max_length=200)
     ffmpeg_executable: str = "ffmpeg"

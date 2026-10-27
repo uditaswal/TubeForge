@@ -903,7 +903,7 @@ class PipelineOrchestrator:
         return reference_short.render_identity(package.reference_short, str(inputs["narration"]), str(inputs["timing_map"]),
                                                draft=name == "preview", approval_identity=approval_identity,
                                                plates_sha=str(inputs.get("plates", "none")), options_sha=str(inputs.get("options", "none")),
-                                               music_sha=music_sha)
+                                               music_sha=music_sha, renderer=self.reference_config.renderer)
 
     def _reference_render_checkpoint(self, job: PipelineJob, stage: JobState, name: str, filename: str, cancellation_requested, *, approval_identity: str | None, approval_id: str | None) -> tuple[Artifact, str]:
         package = self._reference_package(job)
@@ -919,13 +919,14 @@ class PipelineOrchestrator:
         timeline = reference_short.load_timeline(package.reference_short, directory)
         output = self._artifact_path(job.id, filename)
         self._ensure_ownership(force=True)
-        self.events.append(job.id, "render_started", render=name, renderer=reference_short.RENDERER_VERSION)
+        selected_renderer = reference_short.renderer_version(self.reference_config)
+        self.events.append(job.id, "render_started", render=name, renderer=selected_renderer)
         report = reference_short.render(timeline, directory, output, self.reference_config, draft=name == "preview",
                                         cancelled=cancellation_requested or (lambda: False), bed=self._music_bed(music))
         self._ensure_ownership(force=True)
         checksum = self._checksum(output)
         identity = hashlib.sha256(json.dumps({"source_render_identity": source_identity, "artifact_checksum": checksum, "render_instance": uuid.uuid4().hex}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        provenance = {"render_identity": identity, "source_render_identity": source_identity, "renderer_template_version": reference_short.RENDERER_VERSION, "render_strategy": "reference-shorts-library", "input_identity": input_identity, "inputs": inputs, "qa": {key: report.get(key) for key in ("passed", "loudness", "realtime_factor", "peak_process_rss_kib", "alignment", "distinct_frame_events", "draft")}, "approval_identity": approval_identity, "approval_id": approval_id}
+        provenance = {"render_identity": identity, "source_render_identity": source_identity, "renderer_template_version": selected_renderer, "render_strategy": "reference-shorts-library" if self.reference_config.renderer == "pil" else "hyperframes-scenes", "input_identity": input_identity, "inputs": inputs, "qa": {key: report.get(key) for key in ("passed", "loudness", "realtime_factor", "peak_process_rss_kib", "alignment", "distinct_frame_events", "draft")}, "approval_identity": approval_identity, "approval_id": approval_id}
         artifact = self._save_artifact(Artifact(job.id, stage, name, str(output), checksum, provenance))
         self._replace_json(job.id, stage, f"{name}_manifest", {**provenance, "artifact_checksum": artifact.checksum_sha256})
         qa_path = output.with_suffix(".qa.json")

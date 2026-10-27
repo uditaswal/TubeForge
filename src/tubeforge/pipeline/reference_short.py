@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -27,6 +29,11 @@ from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
 RENDERER_VERSION = "reference-short-v1/render-2"  # bumped: mood-varied music + caused SFX (26 Oct)
+HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-1"
+
+
+def renderer_version(config: ReferenceShortConfig) -> str:
+    return HYPERFRAMES_RENDERER_VERSION if config.renderer == "hyperframes" else RENDERER_VERSION
 
 
 def is_reference(package: ContentPackage) -> bool:
@@ -148,6 +155,21 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
                      templates=templates, title=timeline.topic.title, bed=bed, sfx_enabled=sfx_enabled,
                      cancelled=cancelled, ffmpeg=config.ffmpeg_executable)
         narration_health = json.loads((directory / "mix" / "audio-provenance.json").read_text())["narration_health"]
+        if getattr(config, "renderer", "pil") == "hyperframes":
+            from tubeforge.rendering.shorts.hyperframes_compose import render_silent
+            from tubeforge.rendering.shorts.hyperframes_encode import encode as hyperframes_encode
+            started = time.monotonic()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix="hyperframes-stage-", dir=destination.parent) as scratch:
+                silent = Path(scratch) / "silent.mp4"
+                scene_report = render_silent(timeline, silent, draft=draft, cancelled=cancelled,
+                                             budget_rtf=config.budget_realtime_factor,
+                                             ffmpeg=config.ffmpeg_executable)
+                return hyperframes_encode(timeline, silent, mix, destination, draft=draft,
+                                          cancelled=cancelled, budget_rtf=config.budget_realtime_factor,
+                                          render_started=started, ffmpeg=config.ffmpeg_executable,
+                                          ffprobe=config.ffprobe_executable,
+                                          narration_health=narration_health, scene_report=scene_report)
         return encode(timeline, mix, destination, draft=draft, cancelled=cancelled,
                       budget_rtf=config.budget_realtime_factor, ffmpeg=config.ffmpeg_executable,
                       ffprobe=config.ffprobe_executable,
@@ -161,7 +183,7 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
 
 def render_identity(topic: ShortsTopic, narration_sha: str, timeline_sha: str, *, draft: bool,
                     approval_identity: str | None, plates_sha: str = "none", options_sha: str = "none",
-                    music_sha: str = "none") -> str:
+                    music_sha: str = "none", renderer: str = "pil") -> str:
     material = {"renderer": RENDERER_VERSION, "draft": draft, "topic": hashlib.sha256(
         topic.model_dump_json().encode()).hexdigest(), "narration": narration_sha,
         "timeline": timeline_sha, "approval": approval_identity}
@@ -171,4 +193,6 @@ def render_identity(topic: ShortsTopic, narration_sha: str, timeline_sha: str, *
         material["options"] = options_sha
     if music_sha != "none":
         material["music"] = music_sha
+    if renderer != "pil":
+        material["renderer_choice"] = renderer
     return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
