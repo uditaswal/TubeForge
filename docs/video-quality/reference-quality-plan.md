@@ -72,7 +72,7 @@ State of the renderer at this writing (read, do not assume): Codex wired an opt-
 
 Each step: one commit series, tests, one real render inspected, operator OK before the next. All NOT STARTED.
 
-**Step 1 — Sound budget (quick win, audio only).** Files: `rendering/shorts/sfx.py`, `audio.py`, `config/production.yaml`.
+**Step 1 — Sound budget (quick win, audio only). IMPLEMENTED; operator listen pending.** Files: `rendering/shorts/sfx.py`, `audio.py`, `config/production.yaml`.
 - Cues only for: a number landing (`big_stat`), a typed key/command reveal (`terminal`), the final payoff
   (riser/impact), and at most one whoosh per ~10 s for a hard topic change. Scene cuts are silent by default.
 - Config: `sfx.max_per_minute` (default 4), `sfx.min_gap_s` (default 6), `sfx.peak` (default .18, was .30),
@@ -80,6 +80,16 @@ Each step: one commit series, tests, one real render inspected, operator OK befo
 - Acceptance: re-master the reviewed fixture (job `e53f4e83…`); the cue log shows ≤ 4 cues/minute and ≥ 6 s apart;
   −14 LUFS / TP ≤ −1.5 still pass; **operator listens and says "modest"**. Tests for budget, spacing and no repeat.
 - Out of scope: new sounds, music changes.
+- Evidence (28 Oct): job `e53f4e8387424f65b6a6b50fbb166efa` re-mastered with its real narration,
+  scene templates and aligned reveal words. Nine old cut cues became two caused cues
+  (`pop` at 29.355 s, `riser` at 37.719 s); the 40.41 s budget permits two. Effects stem
+  peak .180; muxed file −14.27 LUFS / −2.53 dBTP, clean FFmpeg decode. A dense 60 s
+  SYNTHETIC 60 s worst-case narration tiling placed four cues, 12/24/36/57 s,
+  rotating `pop`/`ping`; effects peak .180, −14.10 LUFS / −2.34 dBTP. `qa_check.py`
+  passed with only a thumbnail warning for this listening copy. Full contact sheet inspected.
+  Listen: `http://localhost:8082/review/railway-breach-modest-sfx.mp4`
+  (`/home/uditaswal/docker/tubeforge/Youtube_Video_Producer/artifacts/review/railway-breach-modest-sfx.mp4`).
+  Step 1 becomes VERIFIED only after the operator hears it and calls the effects modest.
 
 **Step 2 — Evidence quote primitive (highlighted source screenshot).** Port `plates.py::source_card` behaviour
 (captured paragraph + marker highlight sweeping left→right) into the HyperFrames path as `evidence_quote`.

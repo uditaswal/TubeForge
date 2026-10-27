@@ -613,6 +613,16 @@ class VideoGenerationConfig(BaseModel):
             raise ValueError("video_generation.music_catalog track names must be unique")
         return self
 
+class ReferenceShortSfxConfig(BaseModel):
+    """Sparse licensed sound-effect budget for reference Shorts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_per_minute: int = Field(default=4, ge=0, le=60)
+    min_gap_s: float = Field(default=6.0, ge=0, le=90)
+    peak: float = Field(default=.18, gt=0, le=1)
+
+
 class ReferenceShortConfig(BaseModel):
     """Settings for the shared reference-short-v1 renderer (``rendering/shorts``).
 
@@ -623,6 +633,7 @@ class ReferenceShortConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     renderer: Literal["pil", "hyperframes"] = "pil"
+    sfx: ReferenceShortSfxConfig = Field(default_factory=ReferenceShortSfxConfig)
     alignment_model_path: Path | None = None
     voice: str = Field(default="af_bella", min_length=1, max_length=200)
     ffmpeg_executable: str = "ffmpeg"

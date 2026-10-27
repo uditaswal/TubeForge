@@ -11,9 +11,9 @@ from tubeforge.rendering.shorts import hyperframes_compose, hyperframes_encode
 
 
 def _timeline():
-    topic = SimpleNamespace(title="Fixture", scenes=[SimpleNamespace(template="hook")],
+    topic = SimpleNamespace(title="Fixture", scenes=[SimpleNamespace(template="hook", reveal_words=(0,))],
                             model_dump_json=lambda: '{"fixture":true}')
-    return SimpleNamespace(topic=topic, timings=[SimpleNamespace(start=0)], duration=30)
+    return SimpleNamespace(topic=topic, timings=[SimpleNamespace(start=0, words=(SimpleNamespace(start=.1),))], duration=30)
 
 
 def _master(monkeypatch):
@@ -69,7 +69,7 @@ def test_hyperframes_flag_routes_silent_film_and_same_mix(tmp_path, monkeypatch)
 def test_renderer_identity_changes_only_for_opt_in():
     topic = _timeline().topic
     base = reference_short.render_identity(topic, "n", "t", draft=True, approval_identity=None)
-    assert base == "d01e7967b41b089377630f57783931bdf94e5425a812cef6c212a7a008fd1f60"
+    assert base == "66958763f355450be4a5671a0294eed5c8b7461491373a2112f9e84fe7bda6ab"
     assert base == reference_short.render_identity(topic, "n", "t", draft=True,
                                                    approval_identity=None, renderer="pil")
     assert base != reference_short.render_identity(topic, "n", "t", draft=True,

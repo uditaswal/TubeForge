@@ -37,17 +37,53 @@ def test_synth_music_differs_by_mood_but_is_reproducible():
     assert np.max(np.abs(a1)) <= 0.12 + 1e-6
 
 
-def test_cue_for_template_has_a_cause_and_riser_is_reserved_for_the_payoff():
-    assert sfx.cue_for_template("big_stat") == "pop"
-    assert sfx.cue_for_template("checklist") == "click"
-    assert sfx.cue_for_template("terminal") == "key-press"
-    assert sfx.cue_for_template("cta") == sfx.RISER_CUE
-    assert sfx.cue_for_template("loop") == sfx.RISER_CUE
-    assert sfx.cue_for_template("some-future-template") == sfx.FALLBACK_CUE
-    # Every named cue must resolve to a real, vendored, licensed file.
-    for name in {*sfx.CUE_BY_TEMPLATE.values(), sfx.FALLBACK_CUE, sfx.RISER_CUE}:
+def test_every_budgeted_cue_has_a_licensed_manifest_entry():
+    for name in {name for takes in sfx.TAKES.values() for name in takes}:
         assert name in sfx._MANIFEST
         assert (sfx.SFX_ROOT / sfx._MANIFEST[name]["file"]).is_file()
+
+
+def test_scheduler_prioritizes_payoff_and_caps_thirty_seconds():
+    starts = (0, 3, 7, 11, 15, 19, 23, 27)
+    templates = ("hook", "flow", "big_stat", "terminal", "big_stat", "terminal", "flow", "loop")
+    placed, dropped = sfx.schedule(starts, templates, 30, hard_topic_changes=frozenset({1, 6}))
+    assert len(placed) == 2
+    assert [c["cause"] for c in placed] == ["number", "payoff"]
+    assert any(c["reason"] == "rate_cap" for c in dropped)
+    assert all(c["cause"] != "whoosh" or c["scene_index"] in {1, 6} for c in placed)
+
+
+def test_scheduler_spacing_reveal_alignment_and_final_exemption():
+    starts = (0, 7, 15, 23, 31, 39, 45, 51, 57)
+    templates = ("hook", "big_stat", "terminal", "big_stat", "flow", "terminal", "flow", "big_stat", "loop")
+    reveal = tuple(v + .5 for v in starts)
+    placed, _ = sfx.schedule(starts, templates, 60, reveal_times=reveal,
+                             max_per_minute=4, min_gap_s=8)
+    assert len(placed) <= 4
+    nonfinal = [c for c in placed if c["cause"] != "payoff"]
+    assert all(b["at_seconds"] - a["at_seconds"] >= 8 for a, b in zip(nonfinal, nonfinal[1:]))
+    assert any(c["at_seconds"] == 7.5 for c in placed)
+    close, _ = sfx.schedule((0, 25, 28), ("hook", "big_stat", "loop"), 30)
+    assert [c["cause"] for c in close] == ["number", "payoff"]
+
+
+def test_scheduler_no_repeat_deterministic_and_cuts_silent():
+    starts = (0, 8, 16, 24, 32, 40, 48, 56, 64)
+    templates = ("hook", "big_stat", "flow", "big_stat", "flow", "terminal", "checklist", "terminal", "loop")
+    first = sfx.schedule(starts, templates, 70, max_per_minute=8)
+    assert first == sfx.schedule(starts, templates, 70, max_per_minute=8)
+    names = [c["cue"] for c in first[0]]
+    assert all(a != b for a, b in zip(names, names[1:]))
+    assert not any(c["scene_index"] in {2, 4, 6} for c in first[0])
+
+
+def test_whoosh_requires_explicit_topic_change_and_ten_second_gap():
+    starts = (0, 5, 12, 19, 26, 33, 40, 47, 54)
+    templates = ("hook", "flow", "flow", "flow", "flow", "flow", "flow", "flow", "loop")
+    placed, dropped = sfx.schedule(starts, templates, 60, hard_topic_changes=frozenset({1, 2, 3}),
+                                    max_per_minute=10)
+    assert [c["scene_index"] for c in placed if c["cause"] == "whoosh"] == [1, 3]
+    assert any(c["scene_index"] == 2 and c["reason"] == "whoosh_gap" for c in dropped)
 
 
 def test_sfx_manifest_entries_all_carry_a_named_license():
@@ -105,10 +141,7 @@ def test_sfx_can_be_explicitly_turned_off(tmp_path):
     assert np.max(np.abs(effects_track)) == 0.0  # literally silent, not just quiet
 
 
-def test_master_places_one_real_cue_per_cut_and_riser_on_the_payoff_by_default(tmp_path):
-    """26-27 Oct: sound effects were heard, turned off, heard without them, and turned back on
-    by the operator so audio work could close out and effort move to the renderer (phase 4) —
-    ``sfx_enabled`` defaults to True, matching the first real render the operator approved of."""
+def test_master_places_budgeted_cues_and_riser_by_default(tmp_path):
     narration = _synthetic_narration(tmp_path, 30.0)
     scene_starts = (0.0, 4.0, 9.0, 14.0, 19.0, 24.0, 28.0)
     templates = ("hook", "big_stat", "before_after", "flow", "checklist", "terminal", "loop")
@@ -120,10 +153,27 @@ def test_master_places_one_real_cue_per_cut_and_riser_on_the_payoff_by_default(t
     assert provenance["sfx_enabled"] is True
     assert provenance["music"]["mood"] in {name for name, *_ in MOODS}
     cues = provenance["sound_effects"]
-    assert [c["template"] for c in cues] == list(templates[1:])
-    assert [c["cue"] for c in cues] == ["pop", "whoosh-short", "whoosh-short", "click", "key-press", sfx.RISER_CUE]
+    assert [c["template"] for c in cues] == ["big_stat", "loop"]
+    assert [c["cue"] for c in cues] == ["pop", sfx.RISER_CUE]
+    assert provenance["sound_effect_peak"] == .18
+    assert provenance["sound_effects_dropped"]
+    effects = sf.read(mix.parent / "effects.wav", dtype="float32")[0]
+    assert np.max(np.abs(effects)) <= .18 + 1e-5
     assert provenance["mastered_measurement"]["input_tp"] <= -1.5
     assert abs(provenance["mastered_measurement"]["input_i"] - (-14)) <= 1.0
+
+
+def test_master_is_byte_deterministic_for_same_title_and_scenes(tmp_path):
+    from tubeforge.rendering.shorts.encode import file_hash
+    narration = _synthetic_narration(tmp_path, 30.0)
+    options = {"templates": ("hook", "big_stat", "flow", "terminal", "loop"),
+               "title": "Same topic", "reveal_times": (0, 6, 12, 18, 27)}
+    starts = (0, 5, 11, 17, 27)
+    first = master(narration, starts, tmp_path / "first", **options)
+    second = master(narration, starts, tmp_path / "second", **options)
+    assert file_hash(first) == file_hash(second)
+    assert json.loads((first.parent / "audio-provenance.json").read_text())["sound_effects"] == \
+           json.loads((second.parent / "audio-provenance.json").read_text())["sound_effects"]
 
 
 def test_master_bed_none_mixes_real_silence_not_the_synthesized_default(tmp_path):
@@ -170,6 +220,7 @@ def test_master_rejects_a_template_count_mismatch(tmp_path):
 
 def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path):
     from tubeforge.pipeline import reference_short
+    from tubeforge.core.config import ReferenceShortConfig
     from tubeforge.rendering.shorts.schema import ShortsTopic
     from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
     from tests.test_reference_shorts import topic_data
@@ -188,11 +239,15 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
 
     captured = {}
 
-    def fake_master(narration, scene_starts, output, *, templates, title, bed="synthesized", sfx_enabled=True, cancelled=lambda: False, ffmpeg="ffmpeg"):
+    def fake_master(narration, scene_starts, output, *, templates, title, bed="synthesized", sfx_enabled=True,
+                    sfx_max_per_minute=4, sfx_min_gap_s=6.0, sfx_peak=.18, reveal_times=None,
+                    cancelled=lambda: False, ffmpeg="ffmpeg"):
         captured["templates"] = templates
         captured["title"] = title
         captured["bed"] = bed
         captured["sfx_enabled"] = sfx_enabled
+        captured["budget"] = (sfx_max_per_minute, sfx_min_gap_s, sfx_peak)
+        captured["reveal_times"] = reveal_times
         output.mkdir(parents=True, exist_ok=True)
         (output / "audio-provenance.json").write_text(json.dumps({"narration_health": {}}))
         return output / "mix.wav"
@@ -203,12 +258,18 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
     (tmp_path / "narration.wav").write_bytes(b"x")
 
     reference_short.render(timeline, tmp_path, tmp_path / "out.mp4",
-                           __import__("types").SimpleNamespace(ffmpeg_executable="ffmpeg",
-                                                                ffprobe_executable="ffprobe",
-                                                                budget_realtime_factor=10.0),
+                           ReferenceShortConfig(budget_realtime_factor=10.0),
                            draft=True, cancelled=lambda: False)
 
     assert captured["title"] == topic.title
     assert captured["templates"] == tuple(s.template for s in topic.scenes)
     assert captured["bed"] == "synthesized"  # default: unchanged behavior for a caller that picks no track
     assert captured["sfx_enabled"] is True  # default: on, per the operator's 27 Oct preference
+    assert captured["budget"] == (4, 6.0, .18)
+    assert captured["reveal_times"][1] == timings[1].words[topic.scenes[1].reveal_words[0]].start
+
+
+def test_reference_sfx_config_defaults():
+    from tubeforge.core.config import ReferenceShortConfig
+    config = ReferenceShortConfig()
+    assert (config.sfx.max_per_minute, config.sfx.min_gap_s, config.sfx.peak) == (4, 6.0, .18)

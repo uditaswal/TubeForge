@@ -259,6 +259,41 @@ SFX-with-a-cause, as originally built and as the operator approved on hearing it
 only listened to the audio in isolation via the served file; a full watch is optional before
 moving on, at the operator's discretion.
 
+### Reference-quality Step 1 revisit — restrained sound budget (28 Oct)
+
+The operator's later full listen found one cue per scene at .30 too much. The original
+Phase 1 placement above remains historical evidence; the current branch now schedules only
+number reveals (`big_stat`), typed reveals (`terminal`), and final `cta`/`loop` payoffs.
+Hard-topic whooshes require an explicit change marker; ordinary cuts stay silent. Budget:
+`max_per_minute=4` (floor-scaled to duration), `min_gap_s=6.0`, `peak=.18`.
+The final payoff may break the gap but counts against the cap. Priority is payoff, number,
+typed, whoosh. Vendored takes rotate so adjacent placed cues never share a name. Audio
+provenance now records cue/name/time/cause and dropped candidates with reasons.
+`sfx_enabled`, music selection and speech ducking remain available as before.
+
+Real job `e53f4e8387424f65b6a6b50fbb166efa` (40.4106 s): the old render had
+9 cues at .30; re-mastering its existing narration with real scene/word timings places
+2 cues at .18: `pop` on the `big_stat` reveal (29.355 s), `riser` on the loop payoff
+(37.719 s). No dropped candidates; all ordinary cuts are silent. Effects stem peak
+.180. Repeating the master produced the identical SHA-256
+`ce4d0567e115150977ba8060dc910445ac44aaf265efca87a90be98d00f16220`.
+The AAC mux measures −14.27 LUFS / −2.53 dBTP and decodes with `ffmpeg -xerror`.
+`qa_check.py` passed with only a thumbnail-file warning for the listening copy.
+A SYNTHETIC 60-second worst-case narration tiling (artifact
+`/tmp/tubeforge-modest-worst-case/mix`) placed four cues at 12, 24, 36 and 57 seconds
+(three number reveals and final payoff), dropped six over-budget candidates,
+and measured effects peak .180, −14.10 LUFS / −2.34 dBTP.
+The spaced nonfinal cues respect the 6 s gap.
+The full-video contact sheet was inspected; the visual track is the unchanged reviewed
+PIL preview. Listening file: `/home/uditaswal/docker/tubeforge/Youtube_Video_Producer/artifacts/review/railway-breach-modest-sfx.mp4`,
+served at `http://localhost:8082/review/railway-breach-modest-sfx.mp4`.
+Status: **IMPLEMENTED**. Operator must listen and say whether the cues are modest before
+this Step 1 can be **VERIFIED**; do not start Step 2 yet.
+Focused regression: `tests/test_shorts_audio.py`, `test_hyperframes_routing.py`,
+`test_hyperframes_encode.py`, `test_config.py` — 35 passed; adjacent audio/plate/
+spoken tests — 21 passed. The broad reference-short render suite was interrupted
+after several minutes without a result; no full-suite claim is made.
+
 ## Phase 2 — Kokoro voice model A/B (evidence gathered, not decided)
 
 **Outcome: both renders produced; the two are close enough by every available objective
@@ -679,7 +714,7 @@ the flag for a production channel until these choices are represented or explici
 | Phase | State | Evidence | Next action |
 |---|---|---|---|
 | 0. Benchmark | **VERIFIED** — go decision made | this log, §Phase 0 | none (informed phase 4's go decision) |
-| 1. Sound (music variety + SFX) | **CLOSED** — heard, SFX toggled off then back on by the operator (26→27 Oct); not pursuing further audio polish | this log, §Phase 1; 12 tests; real render file at `http://localhost:8082/review/railway-breach-new-audio.mp4` | none — effort moved to phase 4 |
+| 1. Sound (music variety + SFX) | **IMPLEMENTED** — reference-quality Step 1 revisited placement at 2 cues/.18; operator listen pending | this log, §Phase 1; `http://localhost:8082/review/railway-breach-modest-sfx.mp4`; −14.27 LUFS / −2.53 dBTP | operator calls the revised cues modest before Step 2 |
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |

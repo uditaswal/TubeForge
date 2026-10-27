@@ -97,7 +97,9 @@ def load_track_bed(path: Path, count: int, *, ffmpeg: str, deadline: float, canc
 
 def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
            templates: tuple[str, ...], title: str, bed: "Path | str | None" = "synthesized",
-           sfx_enabled: bool = True, cancelled=lambda: False, ffmpeg="ffmpeg"):
+           sfx_enabled: bool = True, sfx_max_per_minute: int = 4, sfx_min_gap_s: float = 6.0,
+           sfx_peak: float = .18, reveal_times: tuple[float, ...] | None = None,
+           cancelled=lambda: False, ffmpeg="ffmpeg"):
     """Mix locally, retain separate stems, then leave AAC true-peak headroom.
 
     ``templates`` names each scene's template (same order/length as ``scene_starts``);
@@ -111,13 +113,8 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     behavior for any caller that does not pass ``bed``, so nothing already in flight changes;
     only an explicit choice does.
 
-    ``sfx_enabled`` places one scene-cause sound effect per cut (§4.5's intent: a cause on
-    screen instead of the old filtered-noise accent) when ``True`` (the default). Briefly
-    defaulted to ``False`` on 26 Oct after the operator heard a first real render and asked
-    for it off; after hearing the no-SFX version too and finding it wasn't an improvement on
-    its own, the operator asked for SFX back on 27 Oct so audio work could be closed out and
-    effort moved to the renderer (phase 4). ``sfx.py`` and its vendored licensed library are
-    unchanged either way — this flag only decides whether ``master`` calls them.
+    ``sfx_enabled`` retains the explicit off switch. When enabled, the budget scheduler
+    chooses a few caused cues; ``reveal_times`` aligns number/typed cues to actual words.
     """
     if len(templates) != len(scene_starts):
         raise ValueError("templates must name every scene (one per scene_starts entry)")
@@ -144,20 +141,17 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     smooth = np.convolve(levels, np.ones(15) / 15, mode="same")
     duck = np.interp(np.arange(n) / 480, np.arange(len(smooth)), 1 - .75 * np.clip(smooth / .08, 0, 1))
     bed *= duck
-    cues_placed = []
+    cues_placed, cues_dropped = [], []
     if sfx_enabled:
-        for index, at in enumerate(scene_starts[1:], start=1):
-            template = templates[index]
-            cue_name = sfx.cue_for_template(template)
+        cues_placed, cues_dropped = sfx.schedule(scene_starts, templates, n / SR,
+                                                  reveal_times=reveal_times,
+                                                  max_per_minute=sfx_max_per_minute,
+                                                  min_gap_s=sfx_min_gap_s)
+        for event in cues_placed:
+            cue_name, at = event["cue"], event["at_seconds"]
             cue = sfx.load(cue_name, SR, ffmpeg=ffmpeg, deadline=deadline, cancelled=cancelled)
-            # A short cue starts just before the cut, matching the previous noise accent's
-            # timing (peak lands a touch after the visual, per the sound guide). The riser
-            # (cta/loop payoff) instead crests exactly on the cut, so it starts (its own
-            # length) earlier, clipped at 0 if there isn't that much lead time.
             start = round((at - (len(cue) / SR if cue_name == sfx.RISER_CUE else .035)) * SR)
-            sfx.place(effects, cue, start)
-            cues_placed.append({"scene_index": index, "template": template, "cue": cue_name,
-                                "at_seconds": at})
+            sfx.place(effects, cue, start, peak=sfx_peak)
     mix = voice + bed + effects
     for name, samples in (("music-ducked", bed), ("effects", effects), ("mix-raw", mix)):
         sf.write(output / f"{name}.wav", samples, SR, subtype="FLOAT")
@@ -196,7 +190,10 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     provenance = {"algorithm": f"{music_provenance['mode']} music bed" + (" plus licensed scene-cause sound effects" if sfx_enabled else ""),
                   "origin": f"{music_origin} {sfx_origin}",
                   "music": music_provenance, "music_peak_before_duck": .12, "speech_duck_maximum": .75,
-                  "sfx_enabled": sfx_enabled, "sound_effects": cues_placed, "sound_effect_peak": sfx.CUE_PEAK,
+                  "sfx_enabled": sfx_enabled, "sound_effects": cues_placed,
+                  "sound_effects_dropped": cues_dropped,
+                  "sound_effect_budget": {"max_per_minute": sfx_max_per_minute, "min_gap_s": sfx_min_gap_s},
+                  "sound_effect_peak": sfx_peak,
                   "master_target_lufs": -14, "master_target_dbtp": -2.5,
                   "input_measurement": measured, "mastered_measurement": result, "mastering": "gain-matched true-peak limiter, up to 3 measured passes", "narration_sha256": file_hash(narration),
                   "mix_sha256": file_hash(final),

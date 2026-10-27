@@ -28,8 +28,8 @@ from tubeforge.rendering.shorts.review import write_layout_review
 from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
-RENDERER_VERSION = "reference-short-v1/render-2"  # bumped: mood-varied music + caused SFX (26 Oct)
-HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-1"
+RENDERER_VERSION = "reference-short-v1/render-3"  # sparse caused SFX budget
+HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-2"
 
 
 def renderer_version(config: ReferenceShortConfig) -> str:
@@ -150,9 +150,14 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
     """
     starts = tuple(t.start for t in timeline.timings)
     templates = tuple(scene.template for scene in timeline.topic.scenes)
+    reveal_times = tuple(t.words[s.reveal_words[0]].start
+                         for s, t in zip(timeline.topic.scenes, timeline.timings, strict=True))
     try:
         mix = master(directory / "narration.wav", starts, directory / "mix",
                      templates=templates, title=timeline.topic.title, bed=bed, sfx_enabled=sfx_enabled,
+                     sfx_max_per_minute=config.sfx.max_per_minute,
+                     sfx_min_gap_s=config.sfx.min_gap_s, sfx_peak=config.sfx.peak,
+                     reveal_times=reveal_times,
                      cancelled=cancelled, ffmpeg=config.ffmpeg_executable)
         narration_health = json.loads((directory / "mix" / "audio-provenance.json").read_text())["narration_health"]
         if getattr(config, "renderer", "pil") == "hyperframes":
