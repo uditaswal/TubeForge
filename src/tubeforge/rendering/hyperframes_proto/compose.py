@@ -17,7 +17,7 @@ from pathlib import Path
 from tubeforge.rendering.shorts.icons import badge
 from tubeforge.rendering.shorts.layout import AMBER, CYAN, MUTED, PANEL, WHITE, caption_groups
 from tubeforge.rendering.shorts.logos import logo_badge
-from tubeforge.rendering.shorts.schema import BigStat, Hook
+from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Hook
 
 # The count-up duration + easing the PIL renderer uses for a big_stat's newest figure
 # (``motion.py``'s ``COUNT_SECONDS`` and ``ease_out_cubic``, which is exactly GSAP's
@@ -379,6 +379,79 @@ def build_big_stat_project(scene: BigStat, words: list[tuple[float, float]], dur
         sprite.save(assets / "badge.png")
     (project_dir / "index.html").write_text(
         big_stat_composition_html(scene, words, duration, composition_id=scene.template), encoding="utf-8")
+    (project_dir / "hyperframes.json").write_text(json.dumps({
+        "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
+        "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
+        "media": {"autoProxy": False},
+    }, indent=2), encoding="utf-8")
+
+
+def before_after_composition_html(scene: BeforeAfter, words: list[tuple[float, float]], duration: float) -> str:
+    """Two fixed PIL-layout slots, revealed at the corresponding narration words."""
+    captions = json.dumps(_word_groups(scene.caption, words))
+    reveal = [words[i][0] for i in scene.reveal_words]
+    has_badge = bool(scene.icon or scene.logo)
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="UTF-8" />
+<meta name="viewport" content="width={WIDTH}, height={HEIGHT}" />
+<script src="assets/gsap.min.js"></script>
+<style>
+@font-face {{ font-family: Anton; src: url("assets/Anton-Regular.ttf"); }}
+@font-face {{ font-family: Inter; src: url("assets/Inter-Variable.ttf"); font-weight: 100 900; }}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:#080f1f; }}
+#root {{ position:relative; width:100%; height:100%; }}
+.glow {{ position:absolute; inset:-10%; background: radial-gradient(ellipse 60% 45% at 20% 70%,rgba(83,224,239,.10),transparent 60%),radial-gradient(ellipse 55% 40% at 85% 30%,rgba(121,52,239,.08),transparent 60%); }}
+.rail {{ position:absolute; top:212px; left:70px; right:160px; height:7px; background:{CYAN}; border-radius:3px; }}
+#badge {{ position:absolute; left:470px; top:230px; width:140px; height:140px; }}
+#badge img {{ width:100%; height:100%; }}
+#heading {{ position:absolute; left:60px; right:60px; top:390px; text-align:center; font:800 72px/1.2 Inter; color:{WHITE}; }}
+.item {{ position:absolute; left:90px; width:810px; height:170px; border:2px solid #536b87; border-radius:18px; background:{PANEL}; opacity:0; transform:translateY(16px); display:flex; align-items:center; justify-content:center; padding:20px 25px; text-align:center; font:800 66px/1.15 Inter; color:{WHITE}; }}
+#item0 {{ top:612px; }} #item1 {{ top:858px; border-color:{CYAN}; }}
+#arrow {{ position:absolute; left:525px; top:792px; width:30px; height:56px; opacity:0; }}
+#arrow .shaft {{ position:absolute; left:12px; width:6px; height:38px; background:{CYAN}; }}
+#arrow .head {{ position:absolute; top:32px; border-left:15px solid transparent; border-right:15px solid transparent; border-top:18px solid {CYAN}; }}
+#captions {{ position:absolute; left:40px; right:40px; top:1300px; text-align:center; }}
+.cap-group {{ position:absolute; left:0; right:0; font:96px/1 Anton; text-transform:uppercase; opacity:0; }}
+.cap-word {{ color:{WHITE}; -webkit-text-stroke:6px #0a0f1f; paint-order:stroke fill; }}
+</style></head><body>
+<div id="root" class="clip" data-composition-id="before_after" data-start="0" data-duration="{duration:.3f}" data-width="{WIDTH}" data-height="{HEIGHT}" data-fps="{FPS}">
+<div class="glow"></div><div class="rail"></div>
+<div id="badge" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="1">{'<img src="assets/badge.png" alt="" />' if has_badge else ''}</div>
+<div id="heading" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="2">{html.escape(scene.heading)}</div>
+<div id="item0" class="item">{html.escape(scene.before)}</div><div id="arrow"><div class="shaft"></div><div class="head"></div></div>
+<div id="item1" class="item">{html.escape(scene.after)}</div>
+<div id="captions" class="clip" data-track-kind="captions" data-start="0" data-duration="{duration:.3f}" data-track-index="4"></div>
+</div><script>(function() {{
+window.__timelines=window.__timelines||{{}};
+var CAPTIONS={captions}; var tl=gsap.timeline({{paused:true}});
+tl.to("#item0",{{opacity:1,y:0,duration:.3,ease:"back.out(1.2)"}},{reveal[0]:.3f});
+tl.to("#item1",{{opacity:1,y:0,duration:.3,ease:"back.out(1.2)"}},{reveal[1]:.3f});
+tl.to("#arrow",{{opacity:1,duration:.2}},{reveal[1]:.3f});
+var host=document.getElementById("captions");
+CAPTIONS.forEach(function(group,gi) {{
+ var el=document.createElement("div"); el.className="cap-group";
+ group.words.forEach(function(word,wi) {{ var span=document.createElement("span"); span.className="cap-word"; span.textContent=word+(wi<group.words.length-1?" ":""); el.appendChild(span); }});
+ host.appendChild(el);
+ var start=Math.max(0,group.start-.02);
+ var nextStart=gi+1<CAPTIONS.length?Math.max(0,CAPTIONS[gi+1].start-.02):Infinity;
+ var end=Math.max(start+.08,Math.min(group.end,nextStart-.01));
+ tl.set(el,{{opacity:1}},start); tl.to(el,{{opacity:0,duration:.12,ease:"power2.in"}},end-.12); tl.set(el,{{opacity:0,visibility:"hidden"}},end);
+}});
+window.__timelines["before_after"]=tl; tl.seek(0);
+}})();</script></body></html>"""
+
+
+def build_before_after_project(scene: BeforeAfter, words: list[tuple[float, float]], duration: float, project_dir: Path) -> None:
+    assets = project_dir / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    shutil.copy(ASSETS / "hyperframes" / "gsap.min.js", assets / "gsap.min.js")
+    shutil.copy(FONTS / "Anton-Regular.ttf", assets / "Anton-Regular.ttf")
+    shutil.copy(FONTS / "Inter-Variable.ttf", assets / "Inter-Variable.ttf")
+    if scene.icon or scene.logo:
+        sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
+        sprite.save(assets / "badge.png")
+    (project_dir / "index.html").write_text(before_after_composition_html(scene, words, duration), encoding="utf-8")
     (project_dir / "hyperframes.json").write_text(json.dumps({
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},

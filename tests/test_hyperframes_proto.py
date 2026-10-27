@@ -23,11 +23,12 @@ from tubeforge.rendering.hyperframes_proto.compose import (
     FONTS,
     _format_stat,
     _word_groups,
+    build_before_after_project,
     build_big_stat_project,
     build_hook_project,
     build_loop_project,
 )
-from tubeforge.rendering.shorts.schema import BigStat, Hook, Loop
+from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Hook, Loop
 
 
 def _hook_scene(**overrides) -> Hook:
@@ -65,6 +66,22 @@ WORDS_9 = [(0.0, 0.3), (0.3, 0.6), (0.6, 0.9), (0.9, 1.2), (1.2, 1.5),
 WORDS_12 = [(0.16, 0.18), (0.18, 0.5), (0.5, 0.72), (0.93, 1.27), (1.27, 1.47), (1.47, 1.63),
            (1.63, 1.85), (1.85, 2.13), (2.13, 2.35), (2.35, 3.15), (3.15, 3.47), (3.47, 3.81)]
 BIG_STAT_DURATION = 4.403
+
+
+def _before_after_scene(**overrides) -> BeforeAfter:
+    data = {"scene_id": "scene-4", "template": "before_after",
+            "vo": "Railway says hackers even obtained decrypted contents for some of them.",
+            "caption": "Railway says hackers even obtained decrypted contents for some of them.",
+            "reveal_words": [2, 5], "heading": "Encrypted vs decrypted",
+            "before": "Encrypted: unreadable", "after": "Decrypted: readable", "icon": "lock", **overrides}
+    return BeforeAfter.model_validate(data)
+
+
+# Job e53f4e8387424f65b6a6b50fbb166efa, scene-4, scene-relative measured word times.
+BEFORE_AFTER_WORDS = [(0.35, 0.43), (0.43, 0.89), (0.89, 1.13), (1.13, 1.61),
+                      (1.61, 1.93), (1.93, 2.49), (2.49, 2.81), (2.81, 3.27),
+                      (3.27, 3.45), (3.45, 3.51), (3.51, 3.67)]
+BEFORE_AFTER_DURATION = 4.005
 
 
 def test_word_groups_matches_the_pil_renderers_own_grouping_and_maps_real_timing():
@@ -146,6 +163,24 @@ def test_build_big_stat_project_omits_the_badge_image_when_the_scene_has_no_icon
     assert not (project / "assets" / "badge.png").is_file()
 
 
+def test_build_before_after_project_uses_real_reveal_words_and_its_own_id(tmp_path):
+    project = tmp_path / "proj"
+    build_before_after_project(_before_after_scene(), BEFORE_AFTER_WORDS, BEFORE_AFTER_DURATION, project)
+    html = (project / "index.html").read_text()
+    assert 'data-composition-id="before_after"' in html
+    assert 'window.__timelines["before_after"]' in html
+    assert 'Encrypted: unreadable' in html and 'Decrypted: readable' in html
+    assert '},0.890);' in html and '},1.930);' in html
+    assert re.findall(r'<script src="([^"]+)"', html) == ["assets/gsap.min.js"]
+
+
+def test_build_before_after_project_omits_badge_without_icon_or_logo(tmp_path):
+    project = tmp_path / "proj"
+    build_before_after_project(_before_after_scene(icon=None), BEFORE_AFTER_WORDS, BEFORE_AFTER_DURATION, project)
+    assert not (project / "assets" / "badge.png").exists()
+    assert '<img src="assets/badge.png"' not in (project / "index.html").read_text()
+
+
 def test_vendored_assets_exist_on_disk():
     assert (ASSETS / "hyperframes" / "gsap.min.js").is_file()
     assert (ASSETS / "hyperframes" / "LICENSE-gsap.md").is_file()
@@ -221,3 +256,10 @@ def test_real_loop_render_passes_check_and_decodes_to_the_right_spec():
 @needs_ffmpeg
 def test_real_big_stat_render_passes_check_and_decodes_to_the_right_spec():
     _real_check_render_decode(build_big_stat_project, _big_stat_scene(), WORDS_12, BIG_STAT_DURATION, "big_stat")
+
+
+@needs_hyperframes
+@needs_ffmpeg
+def test_real_before_after_render_passes_check_and_decodes_to_the_right_spec():
+    _real_check_render_decode(build_before_after_project, _before_after_scene(), BEFORE_AFTER_WORDS,
+                              BEFORE_AFTER_DURATION, "before_after")
