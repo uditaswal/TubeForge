@@ -576,6 +576,17 @@ mastering (−14 LUFS, ≤−2.5 dBTP) and QA. The preview is a 720×1280 draft;
 1080×1920. The worker needs ≥2 GB RAM (`compose.yaml`) and the image extras
 `alignment` and `reference-renderer` (rebuild after pulling: `docker compose build`).
 
+`pipeline.reference_short.renderer` accepts `pil` (default) or `hyperframes`.
+The HyperFrames route is an opt-in **PROTOTYPE** that renders one clip per scene,
+joins them at 30 fps, and muxes the same mastered audio through the existing QA
+gate. It needs a HyperFrames CLI on `PATH` or `TUBEFORGE_HYPERFRAMES_BIN`, plus
+Node and Chromium in the worker image; the current `Dockerfile` has Chromium but
+not Node/HyperFrames. The reviewed 720×1280 preview and exact worker-image
+proposal are in `docs/video-quality/av-quality-implementation-log.md` §Phase 4.
+The HyperFrames builders currently omit PIL's stock/source/code plates and
+display options, and `terminal` has only a SYNTHETIC fixture. Keep `pil` for
+production until the operator reviews the full preview and these gaps are resolved.
+
 For a local speech-quality trial, `pipeline.reference_short` accepts
 `spoken_profile: spoken-v1`, a `pronunciation_lexicon` mapping one displayed
 token to one or more spoken words, `speech_group_size: 2`, and

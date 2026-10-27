@@ -304,7 +304,8 @@ def test_shorts_renderer_is_portrait_30fps_and_caps_visual_holds(tmp_path: Path)
     assert len(paced) == 3 and max(item.duration_seconds for item in paced) <= 3
     assert "concat=n=3" in graph
     assert "*on/" in graph and "*(1-on/" in graph
-    assert "MarginV=470" in graph and "MarginL=96" in graph
+    # ASS captions carry their own styles; the renderer must preserve them.
+    assert "force_style=''" in graph
     assert command[command.index("-r") + 1] == "30"
     assert command[command.index("-filter_complex_threads") + 1] == str(profile.threads)
     assert command[command.index("-threads", command.index("-c:v")) + 1] == str(profile.threads)

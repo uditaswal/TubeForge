@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tubeforge.rendering.hyperframes_proto import cli, compose
 
-from .encode import RenderCancelled, checked
+from .encode import RenderCancelled, checked, swap_used_kib
 from .timeline import Timeline
 
 FPS = 30
@@ -72,7 +72,18 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
     binary = hyperframes_bin or os.environ.get("TUBEFORGE_HYPERFRAMES_BIN") or shutil.which("hyperframes")
     if not binary:
         raise ValueError("hyperframes binary is unavailable; set TUBEFORGE_HYPERFRAMES_BIN")
-    if cancelled():
+    initial_swap = swap_used_kib()
+
+    def guarded_cancelled() -> bool:
+        if swap_used_kib() - initial_swap > 524288:
+            raise MemoryError("host swap grew more than 512 MiB during HyperFrames render")
+        available = next((int(line.split()[1]) for line in Path("/proc/meminfo").read_text().splitlines()
+                          if line.startswith("MemAvailable:")), 0)
+        if available < 524288:
+            raise MemoryError("host has less than 512 MiB available during HyperFrames render")
+        return cancelled()
+
+    if guarded_cancelled():
         raise RenderCancelled("render cancelled or worker ownership lost")
     destination.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
@@ -84,16 +95,16 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
         checks = []
         for index, (scene, timing, (_, end, words)) in enumerate(zip(
                 timeline.topic.scenes, timeline.timings, parts, strict=True)):
-            if cancelled():
+            if guarded_cancelled():
                 raise RenderCancelled("render cancelled or worker ownership lost")
             project = root / f"scene-{index:02d}"
             BUILDERS[scene.template](scene, words, timing.end - timing.start, project)
             checks.append(cli.check(project, hyperframes_bin=binary, timeout=max(1, deadline-time.monotonic()),
-                                    extra_env=env, cancelled=cancelled))
+                                    extra_env=env, cancelled=guarded_cancelled))
             clip = root / f"scene-{index:02d}.mp4"
             cli.render(project, clip, quality="draft" if draft else "high", hyperframes_bin=binary,
                        timeout=max(1, deadline-time.monotonic()), workers=1, extra_env=env,
-                       cancelled=cancelled)
+                       cancelled=guarded_cancelled)
             clips.append(clip)
         temporary = root / "joined.mp4"
         command = [ffmpeg, "-y", "-v", "error"]
@@ -103,10 +114,10 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
                         "-an", "-c:v", "libx264", "-threads", "2", "-preset", "veryfast",
                         "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS),
                         "-movflags", "+faststart", str(temporary)])
-        checked(command, deadline=deadline, cancelled=cancelled)
+        checked(command, deadline=deadline, cancelled=guarded_cancelled)
         checked([ffmpeg, "-v", "error", "-xerror", "-i", str(temporary), "-f", "null", "-"],
-                deadline=deadline, cancelled=cancelled)
-        if cancelled():
+                deadline=deadline, cancelled=guarded_cancelled)
+        if guarded_cancelled():
             raise RenderCancelled("ownership lost before HyperFrames promotion")
         temporary.replace(destination)
     return {"scene_count": len(parts), "frames": round(timeline.duration * FPS),

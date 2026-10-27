@@ -1,7 +1,8 @@
 """The seven standalone HyperFrames scene templates (video-quality phase 4).
 
 Six use real-job scene evidence; ``terminal`` uses a labelled SYNTHETIC fixture with
-Kokoro audio and Whisper word timings. None is wired into production rendering.
+Kokoro audio and Whisper word timings. The builders are routed only by the
+default-off HyperFrames renderer choice.
 
 The real-binary integration test (project build -> ``hyperframes check`` -> ``hyperframes
 render`` -> real decode) only runs when a working ``hyperframes`` CLI is on PATH, matching
@@ -170,6 +171,8 @@ def test_build_hook_project_writes_a_self_contained_tree(tmp_path):
     assert 'data-composition-id="hook"' in html and 'window.__timelines["hook"]' in html
     assert "YOU HOST ON" not in html  # content is injected by JS from the data, not baked as text
     assert "Rotate" in html and "Railway?" in html  # the JSON payload is present verbatim
+    assert "top: 620px; text-align: center" in html
+    assert "top: 910px; display: flex" in html  # PIL: 620 + 2 * 135 + 20
     # No remote fetches: the only <script src> is the vendored local copy.
     srcs = re.findall(r'<script src="([^"]+)"', html)
     assert srcs == ["assets/gsap.min.js"]
@@ -179,6 +182,7 @@ def test_build_hook_project_omits_the_badge_image_when_the_scene_has_no_icon_or_
     project = tmp_path / "proj"
     build_hook_project(_hook_scene(icon=None), WORDS_10, 3.63, project)
     assert not (project / "assets" / "badge.png").is_file()
+    assert "top: 840px; display: flex" in (project / "index.html").read_text()
 
 
 def test_build_loop_project_reuses_the_hook_composition_with_its_own_id(tmp_path):

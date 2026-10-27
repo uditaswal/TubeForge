@@ -1,7 +1,8 @@
 """Standalone HyperFrames scene prototypes for all seven Shorts templates.
 
 Each builder keeps the PIL renderer's palette, geometry, font and word-anchored reveal
-contract. These projects render one scene at a time and are not wired into production.
+contract. The opt-in Shorts adapter renders these projects one scene at a time and
+joins the clips on the accepted timeline; the default renderer remains PIL.
 ``terminal`` has only a labelled synthetic Kokoro/Whisper fixture so far.
 """
 from __future__ import annotations
@@ -54,6 +55,9 @@ def hook_composition_html(scene: Hook, words: list[tuple[float, float]], duratio
     chips_js = json.dumps([html.escape(chip) for chip in scene.chips])
     captions_js = json.dumps(captions)
     has_badge = bool(scene.icon or scene.logo)
+    # layout.py places hook/loop chips immediately below the headline stack.
+    headline_top, headline_step = (620, 135) if has_badge else (520, 150)
+    chips_top = headline_top + headline_step * len(scene.headline) + 20
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -77,11 +81,11 @@ def hook_composition_html(scene: Hook, words: list[tuple[float, float]], duratio
   #badge {{ position: absolute; left: 50%; top: 270px; width: 220px; height: 220px; transform: translateX(-50%);
     opacity: 0; }}
   #badge img {{ width: 100%; height: 100%; }}
-  #headlines {{ position: absolute; left: 60px; right: 60px; top: 500px; text-align: center; }}
+  #headlines {{ position: absolute; left: 60px; right: 60px; top: {headline_top}px; text-align: center; }}
   .headline {{ font-family: "Anton"; text-transform: uppercase; font-size: 124px; line-height: 1.12;
     letter-spacing: -.01em; color: {WHITE}; opacity: 0; filter: blur(8px); }}
   .headline.accent {{ color: {CYAN}; }}
-  #chips {{ position: absolute; left: 90px; right: 90px; display: flex; gap: 20px; justify-content: center; }}
+  #chips {{ position: absolute; left: 90px; right: 90px; top: {chips_top}px; display: flex; gap: 20px; justify-content: center; }}
   .chip {{ flex: 1; max-width: 300px; height: 100px; border-radius: 14px; background: {PANEL};
     border: 1px solid rgba(83,224,239,.35); color: {MUTED}; font-family: "Inter"; font-weight: 800;
     font-size: 40px; display: flex; align-items: center; justify-content: center; text-align: center;

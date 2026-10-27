@@ -585,47 +585,94 @@ passed, including the synthetic terminal's real-binary check/render/decode path.
 `mastered.wav`, `audio-measurement.json`, `final.mp4`, and `sheet.png`. **This does not prove
 terminal on a real job.**
 
-### What a full production swap still needs (not started, in order)
+### Multi-scene production wiring trial (27 Oct) — IMPLEMENTED, still PROTOTYPE
 
-1. **Real-job acceptance for `terminal`.** The builder and SYNTHETIC fixture exist, but no
-   rendered terminal scene was found among 65 recorded jobs / 10 rendered reference topics.
-   When a real job contains one, use its topic, measured timeline and mastered mix to repeat
-   the check/render/decode/mux/contact-sheet path before claiming real-job evidence.
-2. **Multi-scene composition.** Everything proven above is one scene as a standalone clip. A
-   real job is 6–20 scenes with transitions between them — the next real engineering question
-   (not yet looked at): one HyperFrames project with sub-compositions per scene and a cue sheet
-   stitching them (`data-composition-src`, matching the contract's own sub-composition model),
-   or N separate single-scene renders concatenated by FFmpeg (simpler, loses GSAP's own
-   stagger/overlap *across* a scene boundary, likely the pragmatic first choice).
-3. **A `rendering/shorts/hyperframes_encode.py`-shaped module** that mixes a HyperFrames
-   silent render with the (unchanged) phase-1 mastered audio and runs the *existing* QA
-   pipeline (`analyze`, `scan_samples`, `inspect_encoded_video` from `rendering/shorts/encode.py`
-   — all reusable as-is, since they operate on a finished MP4 regardless of how it was made).
-   Not written this session: the muxing above was a one-off FFmpeg command, not this module.
-4. **A `pipeline.reference_short.renderer: "pil" | "hyperframes"` config flag**, default
-   `"pil"`, threaded through `reference_short.render()` exactly the way `bed` was threaded
-   through `master()` in phase 1 — so nothing already in production changes until this is
-   explicitly turned on for a channel. Not started.
-5. **Node 22+ and `chrome-headless-shell` (or system Chromium, which already works — see
-   phase 0) in the worker Docker image.** The current `Dockerfile` already installs `chromium`
-   (phase 0 used it directly, via `HYPERFRAMES_BROWSER_PATH` falling back to the system
-   binary). Node is the only gap. **Proposed, untested — no Docker daemon in this sandbox to
-   build or run it against:**
+Three green checkpoints on `claude/av-quality-phase1`: `2612243` renders one checked
+HyperFrames clip per scene and joins all clips on *global* 30 fps frame edges; `e3f9626`
+muxes the unchanged mastered WAV and applies the existing loudness, sample-health,
+full-decode and temporal QA gates; `901d77c` routes through
+`pipeline.reference_short.renderer: "pil" | "hyperframes"`, default `"pil"`. The PIL
+render call and its identity hash remain unchanged; a HyperFrames choice gets a distinct
+identity, so a cached PIL artifact cannot be reused. Unsupported scene templates fail with
+their scene ID. The 0.3 s PIL transition cue is approximated by a 0.15 s outgoing fade to
+navy followed by a 0.15 s incoming rise; separate clips cannot share PIL's moving
+background across the boundary. Cancellation and a 512 MiB swap-growth / 512 MiB available
+memory guard stop subprocesses before local promotion.
+
+The reviewed real job `e53f4e8387424f65b6a6b50fbb166efa` rendered all **10 scenes**
+at 720×1280/30 fps with the original `reference/mix/mix.wav` (SHA-256
+`2d4a5b0a2b17513c22d5208e3ddb767f7b4893655c47e0a23a042892bcfa8059`).
+All ten `hyperframes check --json` results had zero errors. Final MP4:
+`../Youtube_Video_Producer/.hyperframes-proto-test-tmp/full-review/preview.mp4`
+(SHA-256 `3848a37d12f2ebd9ff3f431406f527da83455120f0449cc4d7d7c862b3a74e83`).
+It is 40.410 s / 1212 frames, H.264/AAC, 48 kHz; `ffmpeg -xerror` decoded cleanly.
+QA passed: −14.29 LUFS, −2.48 dBTP, no black or freeze intervals. `qa_check.py` on the
+review folder: 11 PASS, one WARN (the pre-SFX fixture's audio provenance has no SFX list),
+zero FAIL. At the final render, BusyBox `time -v` recorded 4m 48.48s wall and 1,185,832 KiB
+maximum RSS; GNU `/usr/bin/time` is absent on this host. The renderer QA measured 286.02 s,
+RTF 7.08 against the 20 budget. The stored PIL preview QA for the *same job* reports
+493.08 s, RTF 12.20, and 788,240 KiB peak RSS (historical run, not a simultaneous A/B).
+The review folder links the job's accepted package/request/timeline/publishing metadata and
+uses this preview's measured loudness in `quality_report.json`; the original job was not edited.
+Test gate: the broad `pytest tests -q` run ended at **640 passed, 19 skipped, 3 failed**.
+The failures were a pre-existing host Piper executable prerequisite in the voice-preview
+cache test, the worktree's missing `models/` link for the production config test, and a
+stale ASS caption-style assertion in a legacy Shorts test. The permitted gitignored model
+link was added; the ASS test now checks the renderer's existing `force_style=''` behavior.
+Those two tests and all new multi-scene/mux/routing tests then passed together (9 passed).
+The voice-preview test remained stalled with a temporary executable placeholder and after
+a test-local preflight bypass; both attempts were stopped, the bypass was reverted, and
+the test remains an environment/host blocker. No production voice code was changed.
+
+The first full contact sheet exposed hook/loop chips at the top edge. The CSS now puts them
+below the headline at the PIL coordinates; the full preview was rerendered and the sheet,
+opening/middle/closing frames and nine 3-frame boundary samples were viewed. Distinct
+compositions appear in order; captions are legible, the navy transition dips are visible,
+and there is no multi-second empty stretch. Evidence:
+`../Youtube_Video_Producer/.hyperframes-proto-test-tmp/full-review/{sheet-01.png,sheet-02.png,transitions.png,frame-0.8.png,frame-22.png,frame-39.5.png,preview.qa.json,time-final.txt}`.
+The 6×2 contact-sheet filter left unused black *tile slots* in its second PNG; these are not
+video frames. The ending loop returns to the opener composition but its animation/caption
+state does not prove a pixel-identical loop seam. The operator still needs to watch/listen
+to the whole preview and compare it with the PIL preview before choosing the renderer.
+
+**Important limitation of this opt-in prototype:** the PIL fixture uses five real-image,
+source and code plates. These standalone HyperFrames builders do not mount those plates;
+the PIL comparison sheet visibly contains evidence cards and stock footage missing from the
+HyperFrames film. This is a source-fidelity / visual-depth gap for a production swap, even
+though the narration and all ten scene templates are present. The existing display options
+(source credits, watermark, mascot) also have no HyperFrames implementation. Do not enable
+the flag for a production channel until these choices are represented or explicitly gated.
+`terminal` remains **SYNTHETIC-only**: this real job contains no terminal scene.
+
+### What a full production swap still needs
+
+1. **Operator review:** watch and listen to the complete HyperFrames preview at the path above,
+   compare with `data/artifacts/e53f4e8387424f65b6a6b50fbb166efa/preview.mp4`, and
+   decide whether the source-card/stock gap is acceptable for a trial. Do not mark VERIFIED
+   from automated checks alone.
+2. **Visual parity and display choices:** decide how the PIL plate manifest, source cards,
+   watermark and mascot are represented or gated in the HyperFrames path; inspect a real
+   1080×1920 final after that work. A real-job terminal scene still needs its own acceptance
+   because the only terminal evidence is the labelled SYNTHETIC fixture.
+3. **Worker image:** Node 22+ and a pinned HyperFrames CLI are missing from `Dockerfile`.
+   Chromium and FFmpeg are already installed. **Operator proposal only; no npm install,
+   Docker build or Dockerfile change was run in this pass:**
 
    ```dockerfile
-   # after the existing `RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg …` block
+   # Add curl and ca-certificates to the existing apt install list, then before USER tubeforge:
    RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
        && apt-get install -y --no-install-recommends nodejs \
+       && npm install -g hyperframes@0.8.192 \
        && rm -rf /var/lib/apt/lists/*
-   # hyperframes is an npm package pinned per-project (npx hyperframes@0.8.192), not a
-   # system install — no further Dockerfile line needed for it specifically.
+   ENV HYPERFRAMES_BROWSER_PATH=/usr/bin/chromium
    ```
 
-   Someone with Docker access needs to apply this, build the image, and confirm
-   `npx hyperframes@0.8.192 doctor --json` reports Node/Chrome/FFmpeg all OK inside the
-   container before relying on it.
-6. **UTMOS and inline pause/emphasis tags** (VoiceStudio, deferred in phase 2b for the reasons
-   given there) remain separate, unrelated follow-ups.
+   Operator verification command after applying that proposal:
+   `docker compose build worker && docker compose run --rm --entrypoint sh worker -lc 'node --version && hyperframes doctor --json && chromium --version && ffmpeg -version | head -1'`.
+   Confirm Node ≥22 and the doctor browser/FFmpeg checks pass. The configured worker user
+   also needs a writable non-tmpfs `TMPDIR` and `HYPERFRAMES_EXTRACT_CACHE_DIR`.
+4. **UTMOS and inline pause/emphasis tags** remain separate VoiceStudio follow-ups from
+   phase 2b, not part of this renderer trial.
 
 ## Summary: state per phase
 
@@ -636,7 +683,7 @@ terminal on a real job.**
 | 2. Voice (Kokoro fp32 A/B) | **DECIDED (26 Oct): keep int8**, no config change | this log, §Phase 2 | closed |
 | 2b. Voice blending | **IMPLEMENTED**, not operator-watched, no channel has opted in | this log, §Phase 2b; 11 new tests; real audible sample on disk | decide whether/which channel wants a blend; if so, add it to `config/production.yaml` and set `reference_short.voice` |
 | 3. Craft gate (HyperFrames thresholds in our QA) | **DONE** | this log, §Phase 3; commit `c07d2a4` | — |
-| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE** — all 7 builders exist; 6 proven on real job scenes, `terminal` tested with a **SYNTHETIC** Kokoro/Whisper fixture only; **not wired into any job** | this log, §Phase 4; 24 tests, six real-job renders and one synthetic render inspected | next: real-job terminal acceptance when such a scene exists; multi-scene composition, the encode/mux module, the config flag, Node in the worker image — all listed in §Phase 4, in order |
+| 4. Renderer trial (HyperFrames for Shorts) | **PROTOTYPE / IMPLEMENTED** — seven builders and default-off production route; real 10-scene preview rendered, but `terminal` is **SYNTHETIC-only** and PIL plates/display options are absent | this log, §Phase 4; 40.410 s reviewed fixture, 1212 frames, QA pass, contact/boundary sheets, RTF 7.08 | operator full watch and PIL preference; then plate/display-option parity, real terminal acceptance, and operator-applied worker image change |
 | 5. Per-channel look | **NOT STARTED** | — | — |
 | — UTMOS naturalness scoring (VoiceStudio §5.2) | **NOT STARTED** — judged too heavy/risky to rush on this host | this log, §Phase 2b rationale | its own plan: source the checkpoint, install CPU-only `torch`, verify host memory headroom before running it anywhere near the live services |
 | — Inline pause/emphasis tags (VoiceStudio §5.3) | **NOT STARTED** — needs a schema change, not an audio change | this log, §Phase 2b rationale | its own plan: new `Scene` field or bracket-tag parsing, updated word-count validators, yt-script prompt changes, writers'-room review |
