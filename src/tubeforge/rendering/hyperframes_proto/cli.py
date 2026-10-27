@@ -11,6 +11,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -24,20 +27,38 @@ def _env(extra_env: dict[str, str] | None) -> dict[str, str]:
     return env
 
 
-def _run(args: list[str], *, cwd: Path, timeout: float, extra_env: dict[str, str] | None) -> subprocess.CompletedProcess:
-    try:
-        return subprocess.run(args, cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                              env=_env(extra_env), check=False)
-    except FileNotFoundError as error:
-        raise HyperFramesError(f"hyperframes binary not found: {args[0]}") from error
-    except subprocess.TimeoutExpired as error:
-        raise HyperFramesError(f"hyperframes {args[1] if len(args) > 1 else ''} timed out after {timeout:.0f}s") from error
+def _run(args: list[str], *, cwd: Path, timeout: float, extra_env: dict[str, str] | None,
+         cancelled: Callable[[], bool] = lambda: False) -> subprocess.CompletedProcess:
+    with tempfile.TemporaryFile(mode="w+t") as stdout, tempfile.TemporaryFile(mode="w+t") as stderr:
+        try:
+            process = subprocess.Popen(args, cwd=str(cwd), stdout=stdout, stderr=stderr,
+                                       text=True, env=_env(extra_env), start_new_session=True)
+        except FileNotFoundError as error:
+            raise HyperFramesError(f"hyperframes binary not found: {args[0]}") from error
+        deadline = time.monotonic() + timeout
+        try:
+            while process.poll() is None:
+                if cancelled():
+                    from tubeforge.rendering.shorts.encode import RenderCancelled
+                    raise RenderCancelled("HyperFrames render cancelled or worker ownership lost")
+                if time.monotonic() > deadline:
+                    raise HyperFramesError(f"hyperframes {args[1] if len(args) > 1 else ''} timed out after {timeout:.0f}s")
+                time.sleep(.1)
+            stdout.seek(0)
+            stderr.seek(0)
+            return subprocess.CompletedProcess(args, process.returncode, stdout.read(), stderr.read())
+        finally:
+            if process.poll() is None:
+                import signal
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
 
 
 def check(project_dir: Path, *, hyperframes_bin: str = "hyperframes", timeout: float = 120,
-         extra_env: dict[str, str] | None = None) -> dict:
+         extra_env: dict[str, str] | None = None, cancelled: Callable[[], bool] = lambda: False) -> dict:
     """Run ``hyperframes check --json``; raise with its own findings on any error."""
-    result = _run([hyperframes_bin, "check", "--json"], cwd=project_dir, timeout=timeout, extra_env=extra_env)
+    result = _run([hyperframes_bin, "check", "--json"], cwd=project_dir, timeout=timeout,
+                  extra_env=extra_env, cancelled=cancelled)
     try:
         report = json.loads(result.stdout)
     except ValueError as error:
@@ -51,10 +72,11 @@ def check(project_dir: Path, *, hyperframes_bin: str = "hyperframes", timeout: f
 
 
 def render(project_dir: Path, output: Path, *, quality: str = "draft", hyperframes_bin: str = "hyperframes",
-          timeout: float = 600, workers: int = 1, extra_env: dict[str, str] | None = None) -> None:
+          timeout: float = 600, workers: int = 1, extra_env: dict[str, str] | None = None,
+          cancelled: Callable[[], bool] = lambda: False) -> None:
     """Render the project's ``index.html`` to a silent MP4 at ``output``."""
     args = [hyperframes_bin, "render", "--quality", quality, "--workers", str(workers),
             "--output", str(output.resolve())]
-    result = _run(args, cwd=project_dir, timeout=timeout, extra_env=extra_env)
+    result = _run(args, cwd=project_dir, timeout=timeout, extra_env=extra_env, cancelled=cancelled)
     if result.returncode != 0 or not output.is_file():
         raise HyperFramesError(f"hyperframes render failed (exit {result.returncode}): {result.stderr[-4000:] or result.stdout[-4000:]}")
