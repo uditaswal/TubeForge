@@ -15,9 +15,9 @@ import shutil
 from pathlib import Path
 
 from tubeforge.rendering.shorts.icons import badge
-from tubeforge.rendering.shorts.layout import AMBER, CYAN, MUTED, PANEL, WHITE, caption_groups
+from tubeforge.rendering.shorts.layout import AMBER, CYAN, GREEN, MUTED, PANEL, WHITE, caption_groups, font
 from tubeforge.rendering.shorts.logos import logo_badge
-from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Checklist, Flow, Hook
+from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Checklist, Flow, Hook, Terminal
 
 # The count-up duration + easing the PIL renderer uses for a big_stat's newest figure
 # (``motion.py``'s ``COUNT_SECONDS`` and ``ease_out_cubic``, which is exactly GSAP's
@@ -515,6 +515,97 @@ def build_checklist_project(scene: Checklist, words: list[tuple[float, float]], 
         sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
         sprite.save(assets / "badge.png")
     (project_dir / "index.html").write_text(checklist_composition_html(scene, words, duration), encoding="utf-8")
+    (project_dir / "hyperframes.json").write_text(json.dumps({
+        "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
+        "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
+        "media": {"autoProxy": False},
+    }, indent=2), encoding="utf-8")
+
+
+MONO_FONT = Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf")
+
+
+def terminal_composition_html(scene: Terminal, words: list[tuple[float, float]], duration: float) -> str:
+    """PIL terminal panel and line reveals, timed to the narration's measured words."""
+    captions = json.dumps(_word_groups(scene.caption, words))
+    reveal = [words[i][0] for i in scene.reveal_words]
+    if len(reveal) != len(scene.lines):
+        raise ValueError("terminal needs one reveal word per line")
+    has_badge = bool(scene.icon or scene.logo)
+    dy = 65 if has_badge else 0
+    line_html = []
+    line_css = []
+    reveals_js = []
+    for i, (line, at) in enumerate(zip(scene.lines, reveal, strict=True)):
+        value = ("$ " if line.kind == "command" else "") + line.text
+        size = next((px for px in range(48, 39, -1) if font(px, mono=True).getlength(value) <= 770), None)
+        if size is None:
+            raise ValueError(f"terminal line {i} cannot fit at the PIL renderer's minimum 40px")
+        line_html.append(f'<div id="line{i}" class="line">{html.escape(value)}</div>')
+        line_css.append(f'#line{i} {{ top:{670 + dy + i * 160}px; font-size:{size}px; '
+                        f'color:{GREEN if line.kind == "output" else WHITE}; }}')
+        reveals_js.append(f'tl.to("#line{i}",{{opacity:1,y:0,duration:.3,ease:"back.out(1.2)"}},{at:.3f});')
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="UTF-8" />
+<meta name="viewport" content="width={WIDTH}, height={HEIGHT}" />
+<script src="assets/gsap.min.js"></script>
+<style>
+@font-face {{ font-family: Anton; src: url("assets/Anton-Regular.ttf"); }}
+@font-face {{ font-family: Inter; src: url("assets/Inter-Variable.ttf"); font-weight: 100 900; }}
+@font-face {{ font-family: DejaVuMono; src: url("assets/DejaVuSansMono-Bold.ttf"); }}
+* {{ box-sizing:border-box; margin:0; padding:0; }}
+html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:#080f1f; }}
+#root {{ position:relative; width:100%; height:100%; }}
+.glow {{ position:absolute; inset:-10%; background:radial-gradient(ellipse 60% 45% at 20% 70%,rgba(83,224,239,.10),transparent 60%),radial-gradient(ellipse 55% 40% at 85% 30%,rgba(121,52,239,.08),transparent 60%); }}
+.rail {{ position:absolute; top:212px; left:70px; right:160px; height:7px; background:{CYAN}; border-radius:3px; }}
+#badge {{ position:absolute; left:470px; top:230px; width:140px; height:140px; }}
+#badge img {{ width:100%; height:100%; }}
+#heading {{ position:absolute; left:60px; right:60px; top:{325 + dy}px; text-align:center; font:800 72px/1.2 Inter; color:{WHITE}; }}
+#terminal-panel {{ position:absolute; left:80px; top:{510 + dy}px; width:830px; height:650px; border:3px solid #536b87; border-radius:24px; background:#0a121e; }}
+#evidence {{ position:absolute; left:110px; top:{550 + dy}px; width:770px; text-align:center; font:800 28px/1.2 Inter; color:{MUTED}; }}
+.line {{ position:absolute; left:110px; width:770px; height:65px; text-align:center; font-family:DejaVuMono; line-height:1.2; white-space:nowrap; opacity:0; transform:translateY(16px); }}
+{' '.join(line_css)}
+#captions {{ position:absolute; left:40px; right:40px; top:1300px; text-align:center; }}
+.cap-group {{ position:absolute; left:0; right:0; font:96px/1 Anton; text-transform:uppercase; opacity:0; }}
+.cap-word {{ color:{WHITE}; -webkit-text-stroke:6px #0a0f1f; paint-order:stroke fill; }}
+</style></head><body>
+<div id="root" class="clip" data-composition-id="terminal" data-start="0" data-duration="{duration:.3f}" data-width="{WIDTH}" data-height="{HEIGHT}" data-fps="{FPS}">
+<div class="glow"></div><div class="rail"></div>
+<div id="badge" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="1">{'<img src="assets/badge.png" alt="" />' if has_badge else ''}</div>
+<div id="heading" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="2">{html.escape(scene.heading)}</div>
+<div id="terminal-panel"></div><div id="evidence">{html.escape(scene.evidence_label)}</div>
+{' '.join(line_html)}
+<div id="captions" class="clip" data-track-kind="captions" data-start="0" data-duration="{duration:.3f}" data-track-index="4"></div>
+</div><script>(function() {{
+window.__timelines=window.__timelines||{{}};
+var CAPTIONS={captions}; var tl=gsap.timeline({{paused:true}});
+{' '.join(reveals_js)}
+var host=document.getElementById("captions");
+CAPTIONS.forEach(function(group,gi) {{
+ var el=document.createElement("div"); el.className="cap-group";
+ group.words.forEach(function(word,wi) {{ var span=document.createElement("span"); span.className="cap-word"; span.textContent=word+(wi<group.words.length-1?" ":""); el.appendChild(span); }});
+ host.appendChild(el);
+ var start=Math.max(0,group.start-.02);
+ var nextStart=gi+1<CAPTIONS.length?Math.max(0,CAPTIONS[gi+1].start-.02):Infinity;
+ var end=Math.max(start+.08,Math.min(group.end,nextStart-.01));
+ tl.set(el,{{opacity:1}},start); tl.to(el,{{opacity:0,duration:.12,ease:"power2.in"}},end-.12); tl.set(el,{{opacity:0,visibility:"hidden"}},end);
+}});
+window.__timelines["terminal"]=tl; tl.seek(0);
+}})();</script></body></html>"""
+
+
+def build_terminal_project(scene: Terminal, words: list[tuple[float, float]], duration: float, project_dir: Path) -> None:
+    """Write a self-contained project for one terminal scene (including the PIL mono font)."""
+    assets = project_dir / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    shutil.copy(ASSETS / "hyperframes" / "gsap.min.js", assets / "gsap.min.js")
+    shutil.copy(FONTS / "Anton-Regular.ttf", assets / "Anton-Regular.ttf")
+    shutil.copy(FONTS / "Inter-Variable.ttf", assets / "Inter-Variable.ttf")
+    shutil.copy(MONO_FONT, assets / "DejaVuSansMono-Bold.ttf")
+    if scene.icon or scene.logo:
+        sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
+        sprite.save(assets / "badge.png")
+    (project_dir / "index.html").write_text(terminal_composition_html(scene, words, duration), encoding="utf-8")
     (project_dir / "hyperframes.json").write_text(json.dumps({
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},

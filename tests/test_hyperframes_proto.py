@@ -26,11 +26,12 @@ from tubeforge.rendering.hyperframes_proto.compose import (
     build_before_after_project,
     build_checklist_project,
     build_flow_project,
+    build_terminal_project,
     build_big_stat_project,
     build_hook_project,
     build_loop_project,
 )
-from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Checklist, Flow, Hook, Loop
+from tubeforge.rendering.shorts.schema import BeforeAfter, BigStat, Checklist, Flow, Hook, Loop, Terminal
 
 
 def _hook_scene(**overrides) -> Hook:
@@ -116,6 +117,29 @@ CHECKLIST_WORDS = [(0.0, 0.18), (0.18, 0.48), (0.48, 0.76), (0.76, 1.1),
                    (1.1, 1.7), (1.7, 2.12), (2.12, 2.34), (2.34, 2.54),
                    (2.54, 2.74), (2.74, 3.0), (3.0, 3.2), (3.2, 3.34), (3.34, 3.86)]
 CHECKLIST_DURATION = 4.39
+
+
+def _synthetic_terminal_scene(**overrides) -> Terminal:
+    """SYNTHETIC fixture, never an approved script or real TubeForge job."""
+    data = {"scene_id": "synthetic-terminal-01", "template": "terminal",
+            "vo": "Run the status command, read its running result, then check whether the service responds cleanly.",
+            "caption": "Run the status command, read its running result, then check whether the service responds cleanly.",
+            "reveal_words": [0, 6, 9], "heading": "Service health",
+            "evidence_label": "ILLUSTRATIVE OUTPUT",
+            "lines": [{"kind": "command", "text": "service status"},
+                      {"kind": "output", "text": "running"},
+                      {"kind": "command", "text": "service check"}],
+            "icon": "code", **overrides}
+    return Terminal.model_validate(data)
+
+
+# SYNTHETIC fixture: Kokoro af_bella 1.15x, then local Whisper base.en DTW (no estimate).
+# Local audio/timing evidence: .hyperframes-proto-test-tmp/terminal-synthetic-review/.
+SYNTHETIC_TERMINAL_WORDS = [(0.0, 0.12), (0.12, 0.26), (0.26, 0.5), (0.5, 0.88),
+                            (1.37, 1.63), (1.63, 1.75), (1.75, 1.97), (1.97, 2.37),
+                            (2.79, 3.09), (3.09, 3.29), (3.29, 3.51), (3.51, 3.69),
+                            (3.69, 4.01), (4.01, 4.47), (4.47, 5.17)]
+SYNTHETIC_TERMINAL_DURATION = 5.535  # Kokoro audio 5.355 s + the standard 0.18 s scene tail.
 
 
 def test_word_groups_matches_the_pil_renderers_own_grouping_and_maps_real_timing():
@@ -251,6 +275,27 @@ def test_build_checklist_project_omits_badge_without_icon_or_logo(tmp_path):
     assert '<img src="assets/badge.png"' not in (project / "index.html").read_text()
 
 
+def test_build_synthetic_terminal_project_uses_whisper_reveals_and_mono_font(tmp_path):
+    project = tmp_path / "proj"
+    build_terminal_project(_synthetic_terminal_scene(), SYNTHETIC_TERMINAL_WORDS,
+                           SYNTHETIC_TERMINAL_DURATION, project)
+    html = (project / "index.html").read_text()
+    assert 'data-composition-id="terminal"' in html and 'window.__timelines["terminal"]' in html
+    assert all(label in html for label in ("$ service status", "running", "$ service check"))
+    assert all(f'}},{at:.3f});' in html for at in (0.0, 1.75, 3.09))
+    assert 'ILLUSTRATIVE OUTPUT' in html
+    assert (project / "assets" / "DejaVuSansMono-Bold.ttf").is_file()
+    assert re.findall(r'<script src="([^"]+)"', html) == ["assets/gsap.min.js"]
+
+
+def test_build_synthetic_terminal_project_omits_badge_without_icon_or_logo(tmp_path):
+    project = tmp_path / "proj"
+    build_terminal_project(_synthetic_terminal_scene(icon=None), SYNTHETIC_TERMINAL_WORDS,
+                           SYNTHETIC_TERMINAL_DURATION, project)
+    assert not (project / "assets" / "badge.png").exists()
+    assert '<img src="assets/badge.png"' not in (project / "index.html").read_text()
+
+
 def test_vendored_assets_exist_on_disk():
     assert (ASSETS / "hyperframes" / "gsap.min.js").is_file()
     assert (ASSETS / "hyperframes" / "LICENSE-gsap.md").is_file()
@@ -346,3 +391,10 @@ def test_real_flow_render_passes_check_and_decodes_to_the_right_spec():
 def test_real_checklist_render_passes_check_and_decodes_to_the_right_spec():
     _real_check_render_decode(build_checklist_project, _checklist_scene(), CHECKLIST_WORDS,
                               CHECKLIST_DURATION, "checklist")
+
+
+@needs_hyperframes
+@needs_ffmpeg
+def test_synthetic_terminal_real_binary_check_render_and_decode():
+    _real_check_render_decode(build_terminal_project, _synthetic_terminal_scene(), SYNTHETIC_TERMINAL_WORDS,
+                              SYNTHETIC_TERMINAL_DURATION, "terminal")
