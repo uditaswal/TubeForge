@@ -85,6 +85,10 @@ class ContentRequest(DomainModel):
     # "debate" closes on a pointed comment question. Changes the script, so it is part of the
     # generation identity, but the default is omitted to keep existing jobs and cache keys unchanged.
     ending: str = Field(default="loop", pattern=r"^(loop|debate)$")
+    # Which video renderer draws a reference Short: "classic" (cards, the default) or "story"
+    # (a purpose-built picture per scene). Render-only, so it never changes script identity and the
+    # default is omitted from the serialized form.
+    video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
 
     @model_serializer(mode="wrap")
     def omit_default_script_fields(self, handler):
@@ -97,6 +101,8 @@ class ContentRequest(DomainModel):
             value.pop("channel_watermark", None)
         if self.ending == "loop":
             value.pop("ending", None)
+        if self.video_style == "classic":
+            value.pop("video_style", None)
         if self.script_owner == "codex":
             value.pop("script_owner", None)
         if self.script_model is None:

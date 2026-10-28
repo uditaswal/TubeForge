@@ -808,7 +808,7 @@ class PipelineOrchestrator:
     def _reference_assets(self, job: PipelineJob, package: ContentPackage, cancellation_requested=None) -> None:
         """Prepare optional real-imagery plates (never failing the job), then keep the contact sheet for review."""
         topic = package.reference_short
-        reference_short.write_options(self._reference_dir(job), show_sources=job.request.show_source_credit, watermark=job.request.channel_watermark, mascot=job.request.show_mascot)
+        reference_short.write_options(self._reference_dir(job), show_sources=job.request.show_source_credit, watermark=job.request.channel_watermark, mascot=job.request.show_mascot, style=job.request.video_style)
         plates = self._reference_plates(job, topic, cancellation_requested)
         directory = self._reference_dir(job) / "layout"
         for index, page in enumerate(reference_short.layout_review(topic, directory), 1):

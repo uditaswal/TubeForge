@@ -47,14 +47,16 @@ def resolve(path: Path) -> Path:
 OPTIONS_FILE = "render_options.json"
 
 
-def write_options(directory: Path, *, show_sources: bool, watermark: str | None, mascot: bool = False) -> None:
+def write_options(directory: Path, *, show_sources: bool, watermark: str | None, mascot: bool = False,
+                  style: str = "classic") -> None:
     """Persist the operator's display choices beside the timeline; defaults leave no file (older jobs unchanged)."""
     path = directory / OPTIONS_FILE
-    if not show_sources and not watermark and not mascot:
+    if not show_sources and not watermark and not mascot and style == "classic":
         path.unlink(missing_ok=True)
         return
     directory.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"show_sources": bool(show_sources), "watermark": watermark or None, **({"mascot": True} if mascot else {})}, sort_keys=True))
+    path.write_text(json.dumps({"show_sources": bool(show_sources), "watermark": watermark or None, **({"mascot": True} if mascot else {}),
+                                **({"style": style} if style != "classic" else {})}, sort_keys=True))
 
 
 def load_options(directory: Path) -> RenderOptions:
@@ -63,6 +65,15 @@ def load_options(directory: Path) -> RenderOptions:
     except (OSError, ValueError):
         return RenderOptions()
     return RenderOptions(show_sources=bool(data.get("show_sources")), watermark=data.get("watermark") or None, mascot=bool(data.get("mascot")))
+
+
+def load_style(directory: Path) -> str:
+    """The job's video style ("classic" unless the operator chose another); old jobs have no file."""
+    try:
+        style = json.loads((directory / OPTIONS_FILE).read_text()).get("style", "classic")
+    except (OSError, ValueError):
+        return "classic"
+    return style if style in ("classic", "story") else "classic"
 
 
 def options_identity(directory: Path) -> str:
@@ -160,8 +171,12 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
                      reveal_times=reveal_times,
                      cancelled=cancelled, ffmpeg=config.ffmpeg_executable)
         narration_health = json.loads((directory / "mix" / "audio-provenance.json").read_text())["narration_health"]
-        if getattr(config, "renderer", "pil") == "hyperframes":
-            from tubeforge.rendering.shorts.hyperframes_compose import render_silent
+        story = load_style(directory) == "story"
+        if story or getattr(config, "renderer", "pil") == "hyperframes":
+            if story:
+                from tubeforge.rendering.shorts.story import render_silent
+            else:
+                from tubeforge.rendering.shorts.hyperframes_compose import render_silent
             from tubeforge.rendering.shorts.hyperframes_encode import encode as hyperframes_encode
             started = time.monotonic()
             destination.parent.mkdir(parents=True, exist_ok=True)
