@@ -45,10 +45,11 @@ def source_treatment(scene, index: int, topic, directory: Path | None, manifest:
         path = (directory / value).resolve()
         return path if path.is_relative_to(directory.resolve()) and path.is_file() else None
 
-    plate = local_file(entry["file"])
+    plate = local_file(entry.get("file_2x")) or local_file(entry["file"])
     if plate is None:
         return None, "captured_plate_file_missing"
-    highlight = local_file(entry.get("highlight"))
+    highlight = (local_file(entry.get("highlight_2x")) if plate.name.endswith("-2x.png") else None) \
+        or local_file(entry.get("highlight"))
     source = next((source for source in topic.sources if source.source_id in scene.source_ids), None)
     domain = urlparse(entry.get("url", "")).hostname
     label = (domain or "").removeprefix("www.") or (source.name if source else None)

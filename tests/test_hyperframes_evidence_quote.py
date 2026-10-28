@@ -144,3 +144,24 @@ def test_real_binary_evidence_quote_check_render_decode():
                         (pixels[:, :, 2] < 150)).sum())
         assert yellow_at(.9) == 0
         assert yellow_at(1.5) > 10000
+
+
+def test_source_treatment_prefers_native_resolution_plates(tmp_path):
+    plates = tmp_path / "plates"
+    plates.mkdir()
+    for name in ("s.png", "s-hl.png", "s-2x.png", "s-hl-2x.png"):
+        Image.new("RGB", (8, 4), "white").save(plates / name)
+    entry = {"kind": "source", "file": "plates/s.png", "highlight": "plates/s-hl.png",
+             "file_2x": "plates/s-2x.png", "highlight_2x": "plates/s-hl-2x.png",
+             "url": "https://example.com/a"}
+    timeline = _fixture() if (REFERENCE / "topic.json").is_file() else None
+    if timeline is None:
+        pytest.skip("real fixture absent")
+    treatment, reason = film.source_treatment(timeline.topic.scenes[1], 1, timeline.topic, tmp_path,
+                                              {"scenes": {"1": entry}})
+    assert reason is None
+    assert treatment["plate"].name == "s-2x.png" and treatment["highlight"].name == "s-hl-2x.png"
+    entry.pop("highlight_2x")
+    treatment, _ = film.source_treatment(timeline.topic.scenes[1], 1, timeline.topic, tmp_path,
+                                         {"scenes": {"1": entry}})
+    assert treatment["highlight"].name == "s-hl.png"

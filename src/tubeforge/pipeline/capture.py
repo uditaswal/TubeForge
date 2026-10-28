@@ -141,7 +141,9 @@ def make_capture(config: SourceCaptureConfig):
                     title = (page.title() or "").casefold()
                     if any(marker in title for marker in BLOCKED_TITLES):
                         return {"reason": f"page blocked automated access ({title[:40]!r})"}
-                    page.add_style_tag(content=HIDE_OVERLAYS)
+                    # Not add_style_tag: newer Playwright injects via a data: fetch that strict connect-src CSPs reject.
+                    page.evaluate("css => { const s = document.createElement('style'); s.textContent = css;"
+                                  " (document.head || document.documentElement).appendChild(s); }", HIDE_OVERLAYS)
                     page.evaluate(f"document.documentElement.style.zoom = '{config.page_zoom}'")  # bigger text on the 810 px card
                     page.wait_for_timeout(400)
                     found = page.evaluate(FIND, quote)
@@ -155,11 +157,15 @@ def make_capture(config: SourceCaptureConfig):
         except (PlaywrightError, TimeoutError, OSError) as error:
             return {"reason": f"capture failed: {type(error).__name__}: {str(error)[:120]}"}
         import io
-        image = Image.open(io.BytesIO(shot)).convert("RGB")
-        image = image.resize((CARD_WIDTH, max(1, round(image.height * CARD_WIDTH / image.width))), Image.Resampling.LANCZOS)
+        full = Image.open(io.BytesIO(shot)).convert("RGB")
+        image = full.resize((CARD_WIDTH, max(1, round(full.height * CARD_WIDTH / full.width))), Image.Resampling.LANCZOS)
         plain, marked = base.with_suffix(".png"), base.with_name(base.name + "-hl.png")
         image.save(plain)
         draw_highlight(image, found["rects"], clip).save(marked)
+        # Native-resolution copies for renderers that draw the card larger than 810 px (HyperFrames).
+        plain2, marked2 = base.with_name(base.name + "-2x.png"), base.with_name(base.name + "-hl-2x.png")
+        full.save(plain2)
+        draw_highlight(full, found["rects"], clip).save(marked2)
         return {"file": f"plates/{plain.name}", "highlight": f"plates/{marked.name}", "matched": bool(found["complete"]),
-                "matched_words": found["words"]}
+                "matched_words": found["words"], "file_2x": f"plates/{plain2.name}", "highlight_2x": f"plates/{marked2.name}"}
     return capture
