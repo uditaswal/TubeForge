@@ -16,6 +16,13 @@ COPY tests ./tests
 COPY alembic.ini ./
 RUN python -m pip install --no-cache-dir ".[dev,local-media,kokoro,alignment,reference-renderer]"
 
+# Node + HyperFrames for the "Story" video style (Chromium is installed above).
+COPY --from=node:24-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:24-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && npm install -g hyperframes@0.8.192
+ENV TUBEFORGE_HYPERFRAMES_BIN=/usr/local/bin/hyperframes
+
 USER tubeforge
 EXPOSE 8080
 CMD ["uvicorn", "tubeforge.main:app", "--host", "0.0.0.0", "--port", "8080"]
