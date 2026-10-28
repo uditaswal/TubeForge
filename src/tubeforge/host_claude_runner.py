@@ -328,7 +328,7 @@ def _concise(error: Exception) -> str:
 
 def run_research(request: GenerateShortsScriptRequest, *, model: str | None = None, root: Path = RUNNER_ROOT) -> HostRunnerSuccess:
     """One cached research call per exact brief, with Claude's WebSearch tool."""
-    from tubeforge.providers.content.research import ResearchResult, research_prompt
+    from tubeforge.providers.content.research import ResearchResult, clip_assessment, research_prompt
     material = json.dumps(generation_request_key_payload(request.request), sort_keys=True).encode()
     cache_path = root / "research-cache" / (hashlib.sha256(material).hexdigest() + ".json")
     if cache_path.is_file():
@@ -340,7 +340,7 @@ def run_research(request: GenerateShortsScriptRequest, *, model: str | None = No
     consume_invocation(request, root)
     started = time.monotonic()
     structured, usage = call_claude(prompt, codex_output_schema_for_research(ResearchResult), model=model, effort=effort, web_search=True)
-    result = ResearchResult.model_validate(structured)
+    result = ResearchResult.model_validate(clip_assessment(structured))
     if not usage.get("web_search_requests"):
         raise ValueError("research did not record any web search; refusing unverified citations")
     response = HostRunnerSuccess(package=result.model_dump(mode="json"), usage=usage, provenance={
