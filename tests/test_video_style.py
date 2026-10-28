@@ -9,7 +9,9 @@ import pytest
 from pydantic import ValidationError
 
 from test_ending_and_length import request
+from tubeforge.domain.contracts import generation_request_content, generation_request_key_payload
 from tubeforge.pipeline import reference_short
+from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest
 
 JOB = Path(__file__).resolve().parents[2] / "Youtube_Video_Producer" / "data" / "artifacts" / "e53f4e8387424f65b6a6b50fbb166efa" / "reference"
 
@@ -19,6 +21,20 @@ def test_style_defaults_to_classic_and_is_omitted_from_the_request():
     assert request(video_style="story").model_dump(mode="json")["video_style"] == "story"
     with pytest.raises(ValidationError):
         request(video_style="neon")
+
+
+def test_story_style_is_not_sent_to_the_host_writer_or_script_cache():
+    classic = request()
+    story = request(video_style="story", show_source_credit=True, show_mascot=True,
+                    channel_watermark="TubeForge")
+    assert generation_request_key_payload(story) == generation_request_key_payload(classic)
+    assert story.video_style == "story"  # the job still keeps its render choice
+    writer = generation_request_content(story)
+    assert writer.video_style == "classic"
+    for operation in ("PreflightContentV1", "GenerateShortsScriptV1", "ResearchSourcesV1"):
+        payload = json.loads(GenerateShortsScriptRequest(operation=operation, request=writer).model_dump_json())
+        assert all(field not in payload["request"] for field in
+                   ("video_style", "show_source_credit", "show_mascot", "channel_watermark"))
 
 
 def test_options_file_records_only_a_non_default_style(tmp_path):

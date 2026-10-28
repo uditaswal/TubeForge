@@ -129,11 +129,13 @@ class ContentRequest(DomainModel):
 
 
 def generation_request_content(request: ContentRequest) -> ContentRequest:
-    """Strip v7 capture-only fields before sending semantic input to a writer."""
-    if request.prompt_version not in {"m6-content-v7", "m6-content-v8"}:
-        return request
-    sources = tuple(source.model_copy(update={"retrieved_at": None, "content_sha256": None}) for source in request.sources)
-    return request.model_copy(update={"sources": sources})
+    """Send only script inputs to a writer, excluding local render options."""
+    updates = {"show_source_credit": False, "show_mascot": False,
+               "channel_watermark": None, "video_style": "classic"}
+    if request.prompt_version in {"m6-content-v7", "m6-content-v8"}:
+        updates["sources"] = tuple(source.model_copy(update={"retrieved_at": None, "content_sha256": None})
+                                   for source in request.sources)
+    return request.model_copy(update=updates)
 
 
 def generation_request_key_payload(request: ContentRequest) -> dict[str, object]:
@@ -145,9 +147,7 @@ def generation_request_key_payload(request: ContentRequest) -> dict[str, object]
     miss for the same reviewed request.
     """
     value = generation_request_content(request).model_dump(mode="json")
-    value.pop("show_source_credit", None)  # render-only: changing them must not trigger a new script
-    value.pop("channel_watermark", None)
-    value.pop("show_mascot", None)
+    # generation_request_content already removes render-only options.
     if request.prompt_version in {"m6-content-v1", "m6-content-v2", "m6-content-v3", "m6-content-v4"} and request.channel_identity == "default" and request.channel_voice_profile == ContentRequest.model_fields["channel_voice_profile"].default:
         value.pop("channel_identity")
         value.pop("channel_voice_profile")
