@@ -94,3 +94,14 @@ def test_story_layout_covers_every_template_and_uses_only_topic_text(tmp_path):
     bare = story.build_story(timeline, tmp_path / "bare", plates_directory=None, manifest={"scenes": {}})
     assert bare["evidence_quote"] == []
     assert "assets/hero-" not in (tmp_path / "bare" / "index.html").read_text()
+
+
+def test_claude_runner_accepts_the_long_excerpt_prompt_that_the_old_60k_limit_rejected():
+    from test_ending_and_length import request as make_request
+    from tubeforge import host_claude_runner
+    from tubeforge.domain.contracts import SourceReference
+    from tubeforge.providers.content.prompts import build_content_prompt
+    long = make_request(90).model_copy(update={"sources": (
+        SourceReference(source_id="s", title="T", url="https://example.com/a", excerpt="word " * 3100),)})
+    prompt = build_content_prompt(long, template_version="m6-content-v8", max_chars=host_claude_runner.MAX_PROMPT_CHARS)
+    assert 60_000 < len(prompt) <= host_claude_runner.MAX_PROMPT_CHARS

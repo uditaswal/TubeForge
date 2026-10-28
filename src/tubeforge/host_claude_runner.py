@@ -43,6 +43,9 @@ from tubeforge.providers.content.prompts import (
 MAX_MESSAGE_BYTES = 65_536
 TIMEOUT_SECONDS = 540
 MAX_OUTPUT_BYTES = 2_000_000
+# Script-prompt ceiling. Keep it equal to pipeline.claude.max_prompt_chars in config/production.yaml: a 90 s
+# Short with a ~15k-character source excerpt assembles ~65k characters (fixed instructions are ~47k).
+MAX_PROMPT_CHARS = int(os.environ.get("TUBEFORGE_CLAUDE_MAX_PROMPT_CHARS", "90000"))
 # Per-job model choices (ContentRequest.script_model) -> (CLI model, reasoning effort).
 MODELS = {"sonnet-medium": ("claude-sonnet-5-5", "medium"), "opus": ("claude-opus-5-5", "high")}
 DEFAULT_CHOICE = "sonnet-medium"
@@ -256,7 +259,7 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
     room = None
     if version == "m6-content-v8" and writers_room_enabled():
         room, room_notes["angle"] = angle_pass(request, root, model=model, effort=effort, usage_total=usage_total)
-    prompt = build_content_prompt(request.request, template_version=version, max_chars=60_000, writers_room=room)
+    prompt = build_content_prompt(request.request, template_version=version, max_chars=MAX_PROMPT_CHARS, writers_room=room)
     from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, preflight
     skill_hashes = preflight(template_version=version) if version in SKILL_TEMPLATES else None
     if version in CONTENT_ENVELOPE_TEMPLATES:
@@ -373,7 +376,7 @@ def codex_output_schema_for_research(model_class) -> dict:
 def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunnerSuccess:
     if request.operation == "PreflightContentV1":
         from tubeforge.providers.content.youtube_skills import preflight
-        prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
+        prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=MAX_PROMPT_CHARS)
         claude_binary()
         return HostRunnerSuccess(package={}, provenance={"resource_hashes": preflight(template_version=request.request.prompt_version), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
                                                          "preflight": True, "operations": ["ResearchSourcesV1"], "runner": "claude"})
