@@ -22,6 +22,7 @@ from tubeforge.domain.contracts import ContentPackage
 from tubeforge.rendering.shorts.audio import master
 from tubeforge.rendering.shorts.encode import RenderCancelled, encode, file_hash
 from tubeforge.rendering.shorts import plates as plates_module
+from tubeforge.rendering.hyperframes_proto.cli import HyperFramesError
 from tubeforge.rendering.shorts.layout import LayoutError, RenderOptions
 from tubeforge.rendering.shorts.prepare import prepare
 from tubeforge.rendering.shorts.review import write_layout_review
@@ -198,7 +199,8 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
                       narration_health=narration_health)
     except RenderCancelled:
         raise
-    except (ValueError, MemoryError, TimeoutError, LayoutError) as error:
+    except (ValueError, MemoryError, TimeoutError, LayoutError, HyperFramesError) as error:
+        # HyperFramesError is a RuntimeError; left uncaught it crash-looped the worker instead of failing the job.
         raise ProviderValidationError(f"reference render failed its gate: {error}") from error
 
 

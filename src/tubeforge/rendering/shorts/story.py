@@ -252,11 +252,12 @@ def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callab
     destination.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     deadline = started + max(60, timeline.duration * budget_rtf)
-    with tempfile.TemporaryDirectory(prefix="story-render-", dir=destination.parent) as scratch:
+    with tempfile.TemporaryDirectory(prefix="story-render-", dir=destination.parent) as scratch, \
+            cli.short_scratch(Path(scratch)) as short:
         root = Path(scratch)
         # The worker runs as an arbitrary uid with HOME=/, which Chromium cannot write a profile into
         # ("Target closed"); give it the private scratch directory instead.
-        env = {"TMPDIR": str(root), "HOME": str(root), "XDG_CONFIG_HOME": str(root), "XDG_CACHE_HOME": str(root),
+        env = {"TMPDIR": str(short), "HOME": str(short), "XDG_CONFIG_HOME": str(short), "XDG_CACHE_HOME": str(short),
                "HYPERFRAMES_EXTRACT_CACHE_DIR": str(root / "cache")}
         project = root / "story"
         report = build_story(timeline, project, plates_directory=plates_directory, manifest=manifest)

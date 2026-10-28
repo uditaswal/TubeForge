@@ -124,3 +124,28 @@ def test_hyperframes_gets_a_writable_home_so_chromium_starts_under_the_worker_ui
     assert len(seen) == 2
     for env in seen:
         assert env["HOME"] == env["TMPDIR"] == env["XDG_CONFIG_HOME"] == env["XDG_CACHE_HOME"]
+
+
+def test_short_scratch_keeps_chromium_profile_socket_paths_under_the_unix_limit(tmp_path):
+    from tubeforge.rendering.hyperframes_proto.cli import short_scratch
+    root = tmp_path / ("artifacts-" + "a" * 32) / "hyperframes-stage-6q82sxgp" / "story-render-wlink6pt"
+    root.mkdir(parents=True)
+    with short_scratch(root) as short:
+        socket_path = short / "puppeteer_dev_chrome_profile-abcdef" / "SingletonSocket"
+        assert len(str(socket_path)) < 107 and short.resolve() == root.resolve()
+    assert not short.exists()
+
+
+def test_a_hyperframes_failure_fails_the_render_instead_of_crashing_the_worker(tmp_path, monkeypatch):
+    from test_hyperframes_evidence_quote import _fixture
+    from tubeforge.core.config import ReferenceShortConfig
+    from tubeforge.core.errors import ProviderValidationError
+    from tubeforge.pipeline import reference_short
+    from tubeforge.rendering.hyperframes_proto.cli import HyperFramesError
+    timeline = _fixture()
+    def boom(*args, **kwargs):
+        raise HyperFramesError("hyperframes check failed: Target closed")
+    monkeypatch.setattr(reference_short, "master", boom)
+    with pytest.raises(ProviderValidationError, match="Target closed"):
+        reference_short.render(timeline, tmp_path, tmp_path / "out.mp4", ReferenceShortConfig(renderer="hyperframes"),
+                               draft=True, cancelled=lambda: False)
