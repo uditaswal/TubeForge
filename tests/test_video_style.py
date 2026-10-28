@@ -105,3 +105,22 @@ def test_claude_runner_accepts_the_long_excerpt_prompt_that_the_old_60k_limit_re
         SourceReference(source_id="s", title="T", url="https://example.com/a", excerpt="word " * 3100),)})
     prompt = build_content_prompt(long, template_version="m6-content-v8", max_chars=host_claude_runner.MAX_PROMPT_CHARS)
     assert 60_000 < len(prompt) <= host_claude_runner.MAX_PROMPT_CHARS
+
+
+def test_hyperframes_gets_a_writable_home_so_chromium_starts_under_the_worker_uid(tmp_path, monkeypatch):
+    """The worker's HOME is '/', unwritable for Chromium's profile; both HyperFrames paths must override it."""
+    from test_hyperframes_evidence_quote import _fixture
+    from tubeforge.rendering.shorts import hyperframes_compose, story
+    seen = []
+    def fake_check(project, **kwargs):
+        seen.append(kwargs["extra_env"])
+        raise RuntimeError("stop after the first check")
+    for module in (story, hyperframes_compose):
+        monkeypatch.setattr(module.cli, "check", fake_check)
+    timeline = _fixture()
+    for module in (story, hyperframes_compose):
+        with pytest.raises(RuntimeError, match="stop after"):
+            module.render_silent(timeline, tmp_path / "out.mp4", draft=True, plates_directory=None, hyperframes_bin="/bin/true")
+    assert len(seen) == 2
+    for env in seen:
+        assert env["HOME"] == env["TMPDIR"] == env["XDG_CONFIG_HOME"] == env["XDG_CACHE_HOME"]

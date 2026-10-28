@@ -126,7 +126,10 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
     deadline = started + max(60, timeline.duration * budget_rtf)
     with tempfile.TemporaryDirectory(prefix="hyperframes-render-", dir=destination.parent) as scratch:
         root = Path(scratch)
-        env = {"TMPDIR": str(root), "HYPERFRAMES_EXTRACT_CACHE_DIR": str(root / "cache")}
+        # The worker runs as an arbitrary uid with HOME=/, which Chromium cannot write a profile into
+        # ("Target closed"); give it the private scratch directory instead.
+        env = {"TMPDIR": str(root), "HOME": str(root), "XDG_CONFIG_HOME": str(root), "XDG_CACHE_HOME": str(root),
+               "HYPERFRAMES_EXTRACT_CACHE_DIR": str(root / "cache")}
         clips = []
         checks = []
         evidence_used, source_fallbacks = [], []
