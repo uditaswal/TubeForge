@@ -36,6 +36,9 @@ pipeline:
     invocation_limit: 2
     reservation_seconds: 1800
     prompt_template_version: "m6-content-v7"
+    # A 90 s Short with a ~15k-character source excerpt assembles ~65k characters (the fixed
+    # instructions are ~47k), over the 60k default. ~20k tokens is cheap for Claude and still bounded.
+    max_prompt_chars: 90000
   video_generation:
     default_preset: "reference-short"
     # The m6-content-v1..v7 formats (16:9 boxes with big burned-in captions) are retired: no preset may use them
