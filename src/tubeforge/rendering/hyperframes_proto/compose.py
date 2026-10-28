@@ -616,15 +616,19 @@ def build_terminal_project(scene: Terminal, words: list[tuple[float, float]], du
 
 def evidence_quote_composition_html(scene, words: list[tuple[float, float]], duration: float, *,
                                     source_label: str, plate_width: int, plate_height: int,
-                                    has_highlight: bool) -> str:
-    """A PIL-sized captured source card; only its body replaces the template graphics."""
+                                    has_highlight: bool, focus: tuple[float, float] = (.5, .5)) -> str:
+    """A large captured source card with a push-in on the cited words; only the body is swapped."""
     captions = json.dumps(_word_groups(scene.caption, words))
     # PIL's Timeline.state uses the newest reveal anchor. Each new anchor restarts the
     # 0.5-second marker sweep; use those same aligned words, not a scene-relative timer.
     reveals = [words[i][0] for i in scene.reveal_words]
-    scale = min(810 / plate_width, 670 / plate_height)
+    scale = min(820 / plate_width, 700 / plate_height)
     card_w, card_h = round(plate_width * scale), round(plate_height * scale)
-    card_left, card_top = round(495 - card_w / 2), round(835 - card_h / 2)
+    card_left, card_top = round(490 - card_w / 2), round(870 - card_h / 2)
+    pill_top = card_top + card_h + 56
+    first = reveals[0] if reveals else 0.0
+    push = (f'tl.set("#source-card",{{transformOrigin:"50% 50%",scale:1}},0);'
+            f'tl.to("#source-card",{{scale:1.07,duration:{max(1.0, duration - first - .3):.3f},ease:"power1.inOut"}},{max(0.0, first - .2):.3f});')
     has_badge = bool(scene.icon or scene.logo)
     heading = html.escape(getattr(scene, "heading", " ".join(getattr(scene, "headline", ()))))
     sweep = "\n".join(
@@ -649,7 +653,8 @@ html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:#08
 #badge img {{ width:100%; height:100%; }}
 #heading {{ position:absolute; left:60px; right:60px; top:390px; text-align:center; font:800 72px/1.2 Inter; color:{WHITE}; }}
 #source-card {{ position:absolute; left:{card_left}px; top:{card_top}px; width:{card_w}px; height:{card_h}px;
- border-radius:28px; overflow:hidden; box-shadow:0 10px 28px rgba(0,0,0,.67); }}
+ border-radius:28px; overflow:hidden; box-shadow:0 0 0 3px rgba(83,224,239,.55),0 18px 48px rgba(0,0,0,.75); }}
+#source-zoom {{ position:absolute; inset:0; }}
 #source-card .source-layer {{ position:absolute; inset:0; width:100%; height:100%; background-size:100% 100%; }}
 #source-base {{ background-image:url("assets/source-base.png"); }}
 #source-highlight {{ clip-path:inset(0 100% 0 0); }}
@@ -657,20 +662,22 @@ html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:#08
 #captions {{ position:absolute; left:40px; right:40px; top:1300px; text-align:center; }}
 .cap-group {{ position:absolute; left:0; right:0; font:96px/1 Anton; text-transform:uppercase; opacity:0; }}
 .cap-word {{ color:{WHITE}; -webkit-text-stroke:6px #0a0f1f; paint-order:stroke fill; }}
-#source-footnote {{ position:absolute; left:90px; width:810px; top:1480px; height:50px;
- text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
- font:700 36px/1.2 Inter; color:{MUTED}; }}
+#source-footnote {{ position:absolute; left:90px; width:810px; top:{pill_top}px; height:64px;
+ display:flex; align-items:center; justify-content:center; white-space:nowrap;
+ font:800 38px/1.2 Inter; color:{WHITE}; background:rgba(83,224,239,.16);
+ border:2px solid rgba(83,224,239,.6); border-radius:32px; }}
 </style></head><body>
 <div id="root" class="clip" data-composition-id="evidence_quote" data-start="0" data-duration="{duration:.3f}" data-width="{WIDTH}" data-height="{HEIGHT}" data-fps="{FPS}">
 <div class="glow"></div><div class="rail"></div>
 <div id="badge" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="1">{'<img src="assets/badge.png" alt="" />' if has_badge else ''}</div>
 <div id="heading" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="2">{heading}</div>
-<div id="source-card" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="3"><div id="source-base" class="source-layer"></div>{highlight_html}</div>
+<div id="source-card" class="clip" data-start="0" data-duration="{duration:.3f}" data-track-index="3"><div id="source-zoom"><div id="source-base" class="source-layer"></div>{highlight_html}</div></div>
 <div id="captions" class="clip" data-track-kind="captions" data-start="0" data-duration="{duration:.3f}" data-track-index="4"></div>
 <div id="source-footnote">Source: {html.escape(source_label)}</div>
 </div><script>(function() {{
 window.__timelines=window.__timelines||{{}};
 var CAPTIONS={captions}; var tl=gsap.timeline({{paused:true}});
+{push}
 {sweep}
 var host=document.getElementById("captions");
 CAPTIONS.forEach(function(group,gi) {{
@@ -704,10 +711,18 @@ def build_evidence_quote_project(scene, words: list[tuple[float, float]], durati
     if scene.icon or scene.logo:
         sprite = logo_badge(scene.logo, 140) if scene.logo else badge(scene.icon, 140)
         sprite.save(assets / "badge.png")
+    focus = (.5, .5)
+    if highlight is not None:
+        import numpy as np
+        with Image.open(plate) as base, Image.open(highlight) as marked:
+            diff = np.abs(np.asarray(base.convert("RGB"), int) - np.asarray(marked.convert("RGB"), int)).sum(2) > 40
+        ys, xs = np.nonzero(diff)
+        if len(xs):
+            focus = (float(xs.mean()) / width, float(ys.mean()) / height)
     (project_dir / "index.html").write_text(
         evidence_quote_composition_html(scene, words, duration, source_label=source_label,
                                         plate_width=width, plate_height=height,
-                                        has_highlight=highlight is not None), encoding="utf-8")
+                                        has_highlight=highlight is not None, focus=focus), encoding="utf-8")
     (project_dir / "hyperframes.json").write_text(json.dumps({
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},

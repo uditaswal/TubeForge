@@ -50,9 +50,9 @@ def test_source_composition_uses_real_reveal_words_and_safe_footnote(tmp_path):
     assert 'background-image:url("assets/source-highlight.png")' in page
     assert '1.081' in page and '2.230' in page and '3.328' in page
     assert 'duration:.5,ease:"none"' in page
-    assert "What happened" in page and "Source: Railway urges" in page
-    assert "left:90px; width:810px; top:1480px; height:50px" in page
-    assert "font:700 36px/1.2 Inter" in page
+    assert "What happened" in page and "Source: techcrunch.com" in page
+    assert "left:90px; width:810px; top:" in page and "height:64px" in page
+    assert "font:800 38px/1.2 Inter" in page and 'id="source-zoom"' in page and "scale:1.07" in page
     assert (project / "assets" / "source-base.png").read_bytes() == treatment["plate"].read_bytes()
     assert (project / "assets" / "source-highlight.png").read_bytes() == treatment["highlight"].read_bytes()
 
@@ -139,7 +139,7 @@ def test_real_binary_evidence_quote_check_render_decode():
             frame = root / f"frame-{seconds}.png"
             subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(seconds), "-i", str(output),
                             "-frames:v", "1", str(frame)], check=True)
-            pixels = np.asarray(Image.open(frame).convert("RGB"))[580:1090, 90:900]
+            pixels = np.asarray(Image.open(frame).convert("RGB"))[470:1160, 40:940]
             return int(((pixels[:, :, 0] > 180) & (pixels[:, :, 1] > 150) &
                         (pixels[:, :, 2] < 150)).sum())
         assert yellow_at(.9) == 0
