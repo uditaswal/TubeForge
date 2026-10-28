@@ -622,13 +622,13 @@ def evidence_quote_composition_html(scene, words: list[tuple[float, float]], dur
     # PIL's Timeline.state uses the newest reveal anchor. Each new anchor restarts the
     # 0.5-second marker sweep; use those same aligned words, not a scene-relative timer.
     reveals = [words[i][0] for i in scene.reveal_words]
-    scale = min(820 / plate_width, 700 / plate_height)
+    scale = min(900 / plate_width, 760 / plate_height)
     card_w, card_h = round(plate_width * scale), round(plate_height * scale)
-    card_left, card_top = round(490 - card_w / 2), round(870 - card_h / 2)
+    card_left, card_top = round(490 - card_w / 2), round(850 - card_h / 2)
     pill_top = card_top + card_h + 56
     first = reveals[0] if reveals else 0.0
     push = (f'tl.set("#source-card",{{transformOrigin:"50% 50%",scale:1}},0);'
-            f'tl.to("#source-card",{{scale:1.07,duration:{max(1.0, duration - first - .3):.3f},ease:"power1.inOut"}},{max(0.0, first - .2):.3f});')
+            f'tl.to("#source-card",{{scale:1.04,duration:{max(1.0, duration - first - .3):.3f},ease:"power1.inOut"}},{max(0.0, first - .2):.3f});')
     has_badge = bool(scene.icon or scene.logo)
     heading = html.escape(getattr(scene, "heading", " ".join(getattr(scene, "headline", ()))))
     sweep = "\n".join(

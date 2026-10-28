@@ -52,7 +52,7 @@ def test_source_composition_uses_real_reveal_words_and_safe_footnote(tmp_path):
     assert 'duration:.5,ease:"none"' in page
     assert "What happened" in page and "Source: techcrunch.com" in page
     assert "left:90px; width:810px; top:" in page and "height:64px" in page
-    assert "font:800 38px/1.2 Inter" in page and 'id="source-zoom"' in page and "scale:1.07" in page
+    assert "font:800 38px/1.2 Inter" in page and 'id="source-zoom"' in page and "scale:1.04" in page
     assert (project / "assets" / "source-base.png").read_bytes() == treatment["plate"].read_bytes()
     assert (project / "assets" / "source-highlight.png").read_bytes() == treatment["highlight"].read_bytes()
 
