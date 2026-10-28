@@ -1,6 +1,7 @@
 services:
   migrate:
     build: .
+    image: tubeforge-app:local
     # Match the local operator so the dashboard can later remove its own
     # generated artifacts from the bind-mounted data directory.
     user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
@@ -20,6 +21,7 @@ services:
 
   web:
     build: .
+    image: tubeforge-app:local
     user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     # OAuth callback query strings contain short-lived authorization codes.
     command: ["uvicorn", "tubeforge.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]
@@ -51,6 +53,7 @@ services:
 
   worker:
     build: .
+    image: tubeforge-app:local
     user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     command: ["python", "-m", "tubeforge.workers.main"]
     depends_on:
@@ -78,6 +81,7 @@ services:
 
   piper-tts:
     build: .
+    image: tubeforge-app:local
     user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     command: ["python", "-m", "tubeforge.tts_server"]
     expose: ["5000"]
@@ -101,6 +105,7 @@ services:
   publisher-worker:
     profiles: ["publishing"]
     build: .
+    image: tubeforge-app:local
     user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     command: ["python", "-m", "tubeforge.publishing_worker.main"]
     depends_on:
@@ -120,6 +125,7 @@ services:
 
   scheduler:
     build: .
+    image: tubeforge-app:local
     user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"
     command: ["python", "-m", "tubeforge.scheduling.main"]
     depends_on:
