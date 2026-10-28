@@ -1280,7 +1280,9 @@ class PipelineOrchestrator:
             return ContentRequest.model_validate(existing)
         if packet is None:
             from tubeforge.providers.content.research import needs_research, ResearchResult, fetch_research_packet
-            if self.research_enabled and job.request.prompt_version == CONTENT_TEMPLATE_VERSION and needs_research(job.request):
+            # Reference Shorts (m6-content-v8) research the same way: a notes-only brief has no evidence, and the
+            # writer correctly refuses "insufficient_sources" rather than inventing facts for it.
+            if self.research_enabled and job.request.prompt_version in (CONTENT_TEMPLATE_VERSION, "m6-content-v8") and needs_research(job.request):
                 research = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "source_research")
                 if research is None:
                     if self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "source_research") is not None:
@@ -1288,7 +1290,7 @@ class PipelineOrchestrator:
                     researcher = getattr(self.content, "research_sources", None)
                     if researcher is None:
                         raise ProviderValidationError("Automatic topic research requires the host Codex provider")
-                    self.events.append(job.id, "source_research_started", provider="host-codex-research")
+                    self.events.append(job.id, "source_research_started", provider=f"host-{job.request.script_owner}-research")
                     research = researcher(job.request)
                     self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "source_research", research)
                 packet = fetch_research_packet(ResearchResult.model_validate(research["package"]))

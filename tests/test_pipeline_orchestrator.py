@@ -1221,6 +1221,31 @@ def test_topic_research_checkpoint_survives_restart_without_regeneration(pipelin
     assert all(original in actual for original, actual in zip(request.notes, effective.notes))
 
 
+def test_notes_only_reference_short_researches_sources_before_writing(pipeline, monkeypatch):
+    """A notes-only m6-content-v8 Short must get researched sources, not the operator's notes as its only evidence."""
+    from tubeforge.providers.content import research
+    runner, content, *_ = pipeline
+    runner.research_enabled = True
+    request = ContentRequest(topic="Why windows cannot beat mac", angle="Fewer configurations are easier to test",
+        target_duration_seconds=60, language="en", audience="general", aspect_ratio="9:16", prompt_version="m6-content-v8",
+        script_owner="claude", sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes",
+                                                         title="Brief", excerpt="Hypothesis"),))
+    job = runner.jobs.create("research-reference-short", request)
+    calls = []
+    def research_sources(value):
+        calls.append(value)
+        return {"package": {"status": "ready", "assessment": "Qualify the premise", "sources": [
+            {"source_id": "one", "url": "https://example.com/one", "title": "One"},
+            {"source_id": "two", "url": "https://example.com/two", "title": "Two"}]}, "provenance": {}, "usage": {}}
+    monkeypatch.setattr(content, "research_sources", research_sources, raising=False)
+    monkeypatch.setattr(research, "fetch_research_packet", lambda result: {
+        "schema_version": "1.0", "retrieval_mode": "codex_researched", "research_assessment": result.assessment,
+        "sources": [{**s.model_dump(), "excerpt": "Fetched evidence " + s.source_id} for s in result.sources]})
+    effective = runner._effective_content_request(job)
+    assert len(calls) == 1 and [s.source_id for s in effective.sources] == ["one", "two"]
+    assert "operator-notes" not in [s.source_id for s in effective.sources]
+
+
 def test_retired_format_stops_before_any_script_call(pipeline) -> None:
     runner, content, *_ = pipeline
     runner.retired_prompt_versions = frozenset({"test-v1"})
