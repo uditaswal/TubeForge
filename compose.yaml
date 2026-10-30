@@ -1,3 +1,5 @@
+name: youtube_video_producer
+
 services:
   migrate:
     build: .

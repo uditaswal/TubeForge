@@ -632,6 +632,10 @@ within the configured safe-area line width. The first corrected Docker example
 and its unresolved final-render gate were recorded in the former
 `docs/TASK4_VIDEO_REVIEW.md` (git history).
 
+## Where the services run from
+
+The Compose stack and the Claude runner run from the **`dev` worktree** (`~/docker/tubeforge/tubeforge-dev`), never from the `main` checkout: every change lands on `dev`, runs there, and is merged to `main` only after the operator validates it. `data/`, `models/`, `artifacts/` and `.env` in the dev worktree are symlinks to the main checkout's copies (one database, one set of models); the Compose project name is pinned to `youtube_video_producer` so the containers and volumes are the same ones. Run `docker compose ...` from the dev worktree; the user systemd unit `tubeforge-claude-runner` points there too (`docs/deploy/tubeforge-claude-runner.service`).
+
 ## Application logs
 
 All services write rotating, redacted JSON-lines logs to `data/logs/<service>.log` (rolled to `<service>.1.log`, `.2.log`… at 10 MB, deleted after 5 days; git-ignored). Details, fields and OpsDetective hook-up: [docs/operations/logging.md](docs/operations/logging.md).
