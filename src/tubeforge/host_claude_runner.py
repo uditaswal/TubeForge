@@ -421,6 +421,9 @@ def serve(path: Path, model: str | None) -> None:
 
 
 def main() -> None:
+    from tubeforge.core.app_logging import configure_logging
+
+    configure_logging("claude-runner")
     default = Path(__file__).resolve().parents[2] / "data" / "run" / "claude" / "claude.sock"
     serve(Path(os.environ.get("TUBEFORGE_CLAUDE_SOCKET", default)), os.environ.get("TUBEFORGE_CLAUDE_MODEL"))
 

@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import json
 import logging
+import time
 from typing import Callable
 
 from tubeforge.core.config import WorkerConfig
+from tubeforge.core.app_logging import job_context, process_stats
 from tubeforge.db.repositories import HeavyWorkLeaseRepository, JobRepository, PipelineJob
 from tubeforge.domain.states import JobState
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
@@ -43,14 +45,17 @@ class WorkerService:
             _event("job_claim_released", job_id=job.id, worker_id=self.worker_id, reason="heavy_work_unavailable")
             self._record(job.id, "job_claim_released", reason="heavy_work_unavailable")
             return None
+        started = time.perf_counter()
         try:
-            result = self.orchestrator.run(
-                job.id,
-                authentication_restored=job.authentication_restored_at is not None,
-                interrupt_after=interrupt_after,
-                cancellation_requested=lambda: self.jobs.get(job.id).cancellation_requested_at is not None,
-                ownership_check=guard.check,
-            )
+            with job_context(job.id):
+                result = self.orchestrator.run(
+                    job.id,
+                    authentication_restored=job.authentication_restored_at is not None,
+                    interrupt_after=interrupt_after,
+                    cancellation_requested=lambda: self.jobs.get(job.id).cancellation_requested_at is not None,
+                    ownership_check=guard.check,
+                )
+            _event("job_run_finished", job_id=job.id, state=result.state.value, duration_ms=round((time.perf_counter() - started) * 1000, 1), **process_stats())
             if result.state is JobState.FAILED_RETRYABLE:
                 return self._schedule_retry(result)
             if result.state is JobState.PUBLICATION_VERIFICATION_PENDING:
@@ -67,6 +72,9 @@ class WorkerService:
             return result
         except PipelineInterrupted:
             # Simulates process death: leave the lease so another worker can recover it.
+            raise
+        except Exception as error:
+            logger.exception("job_exception", extra={"event": "job_exception", "job_id": job.id, "duration_ms": round((time.perf_counter() - started) * 1000, 1), "error_type": type(error).__name__})
             raise
         finally:
             guard.release()

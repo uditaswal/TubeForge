@@ -632,6 +632,10 @@ within the configured safe-area line width. The first corrected Docker example
 and its unresolved final-render gate were recorded in the former
 `docs/TASK4_VIDEO_REVIEW.md` (git history).
 
+## Application logs
+
+All services write rotating, redacted JSON-lines logs to `data/logs/<service>.log` (rolled to `<service>.1.log`, `.2.log`… at 10 MB, deleted after 5 days; git-ignored). Details, fields and OpsDetective hook-up: [docs/operations/logging.md](docs/operations/logging.md).
+
 ## Creator Studio UI contract
 
 For newly rendered reference Shorts, Generations → Generation record shows
