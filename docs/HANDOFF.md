@@ -14,7 +14,7 @@ strict JSON script + scene plan; all pixels, audio and encoding are local and co
 
 ## Working rules for the relay
 1. Start: `git status`, `git log -5 --oneline`, read this file. One agent on the branch at a time.
-   **Never commit on `main`:** work on `dev` (worktree `../tubeforge-dev`) or a new feature branch/worktree, then post a review (changes + validation evidence). The operator merges to `main`; agents do not merge or push `main`. Remove temporary branches/worktrees once merged.
+   **Never commit on `main`:** work on `dev` (worktree `../tubeforge-dev`) or a new feature branch/worktree, then post a review (changes + validation evidence). Agents may merge to `main` only after asking and getting the operator's explicit approval for that specific merge; ask every time, and never push or force-push a remote without being asked. Remove temporary branches/worktrees once merged.
 2. Commit at every green checkpoint; before stopping (or near your token limit) commit and edit
    **Next step** below with a concrete file/command. Commit messages carry no AI attribution trailers.
 3. Judge video work by looking at frames: `ffmpeg -i x.mp4 -vf "fps=1/3,scale=270:480,tile=6x2" -frames:v 1 sheet.png`, then view the PNG.
