@@ -1,6 +1,6 @@
 """Story video style: one HyperFrames composition per Short with a purpose-built picture per scene.
 
-Design target is docs/video-quality/reference/cloudflare-pingora: a big stacked headline with one
+Design target is doc-internal/video-quality/reference/cloudflare-pingora: a big stacked headline with one
 accent word, one diagram per scene built up as the narration reaches each idea, captions
 underneath, nothing inside the Shorts UI rails. Scenes are laid out from their *template* and
 *visual* (never from a scene number), and only text already in the approved topic is drawn:

@@ -1,8 +1,8 @@
 # TubeForge short-form video rulebook
 
-Use this for future scripts, scene plans, renderer changes and review of vertical Shorts. The [reference audit](DOCKER_SHORT_BENCHMARK_REVIEW.md) holds attachment details and measured comparisons; this file contains reusable production rules. The canonical narration contract remains [yt-script automation](../.agents/skills/yt-script/automation.md).
+Use this for future scripts, scene plans, renderer changes and review of vertical Shorts. The reference audit (kept internally) holds attachment details and measured comparisons; this file contains reusable production rules. The canonical narration contract remains [yt-script automation](../.agents/skills/yt-script/automation.md).
 
-The newer `reference-short-v1` profile follows the [Claude pipeline review](CLAUDE_PIPELINE_REVIEW.md):
+The newer `reference-short-v1` profile follows the Claude pipeline review (kept internally):
 25–45 seconds, 6–8 scenes, 8–15 spoken words per scene, 0.12–0.4-second speech
 tails (default 0.18 s since 22 Oct 2026; internal pauses capped at 0.15 s, voice 1.15×), fixed semantic templates
 and a final spoken comment challenge followed by the visible follow CTA. Its

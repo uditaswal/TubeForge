@@ -15,7 +15,7 @@ repository (Apache-2.0, `Graphify`-reviewed local checkout), path
 That repository's own `CREDITS.md` for this directory names Pixabay as the
 source and the Pixabay Content License as the terms; this file restates the
 same chain of custody for this repository, per
-`docs/reviews/2026-10-26-av-quality-hyperframes-voicestudio.md` §4.5.
+`doc-internal/reviews/2026-10-26-av-quality-hyperframes-voicestudio.md` §4.5.
 
 HyperFrames' own license (Apache-2.0) covers its code, not these audio files;
 the audio files carry the Pixabay Content License named above and in each

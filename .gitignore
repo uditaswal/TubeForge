@@ -111,3 +111,6 @@ Thumbs.db
 logs/
 *.log
 *.[0-9]*.log
+
+# --- Internal-only documentation (plans, handoff, reviews, evidence); never published ---
+doc-internal/

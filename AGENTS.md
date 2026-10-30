@@ -1,14 +1,14 @@
 # TubeForge autonomous development rules
 
-You are developing TubeForge, an automated YouTube-video generation system. This file is the durable rules/safety contract (no milestone history). Current phase and next step: `docs/HANDOFF.md`.
+You are developing TubeForge, an automated YouTube-video generation system. This file is the durable rules/safety contract (no milestone history). Current phase and next step: `doc-internal/HANDOFF.md`.
 
 ## Project records (keep consistent; never copy status between them)
 
-- `design_doc/tubeforge-publishing-design.md` — single current plan/status: contracts, phases, release state, blockers, next five actions. Removed historical docs live only in git history. Update affected stages, status, evidence and next action after each coherent stage.
+- `doc-internal/design_doc/tubeforge-publishing-design.md` — single current plan/status: contracts, phases, release state, blockers, next five actions. Removed historical docs live only in git history. Update affected stages, status, evidence and next action after each coherent stage.
 - `AUTONOMOUS_PROGRESS.md` — local-only (gitignored) append-only evidence log: scope, validation commands/results, artifacts inspected, blocker, next action, **≤ ~15 lines per entry**. Append with `cat >> AUTONOMOUS_PROGRESS.md <<'EOF'`; never Read/grep/cat it whole. **Rotate** when it exceeds 40 KB (`wc -c`) or a new calendar month starts: rename to the next free `AUTONOMOUS_PROGRESS.md_N`, create a fresh file with a short summary of the archive plus the last entry. Never read `AUTONOMOUS_PROGRESS.md_*` unless the operator asks. Do not claim a milestone complete there unless its plan stage is **VERIFIED** with linked evidence.
 - `readme.md` — operator setup/workflow guide; update when supported setup, configuration or workflow changes.
 - `docs/SHORT_FORM_VIDEO_RULEBOOK.md` — video quality and creative review.
-- `docs/CONTENT_SKILLS_CONTRACT.md` — binding rules for `.agents/skills`, `yt-script`, research, scene plans and the reference-short profile. **Read it before any script, skill, research or scene-plan work.**
+- `doc-internal/CONTENT_SKILLS_CONTRACT.md` — binding rules for `.agents/skills`, `yt-script`, research, scene plans and the reference-short profile. **Read it before any script, skill, research or scene-plan work.**
 
 - Delivery QA: before any video job is called done, run `.agents/skills/om-video-quality/qa_check.py` on its artifact folder and apply that skill's checklist; publishing-package rules are in `om-social-delivery`.
 
@@ -71,4 +71,4 @@ When validation fails, continue debugging.
 
 ## Content skills and research
 
-Project skills live in `.agents/skills/`; `yt-script` is the sole production narration skill (never update or load competing copies); `viral-short-form` is optional reference only. Read the selected `SKILL.md` and required resources before use, and review supporting scripts before running them. Skills supply content instructions; rendering, narration, scheduling, analytics and publishing belong to the application. Never fabricate analytics, trends, sources, performance or tool execution; heuristic scores are review signals, not view predictions. Installed wheels must hash-match `.agents/skills`; changed skill resources need installed-wheel verification before host use. Research is separate from narration, runs once per exact brief, and its output is context, never approved factual evidence or operator approval. Everything else — skill-to-task mapping, reference-short-v1 profile numbers, scene-contract and landscape rules, envelope binding — is in `docs/CONTENT_SKILLS_CONTRACT.md`.
+Project skills live in `.agents/skills/`; `yt-script` is the sole production narration skill (never update or load competing copies); `viral-short-form` is optional reference only. Read the selected `SKILL.md` and required resources before use, and review supporting scripts before running them. Skills supply content instructions; rendering, narration, scheduling, analytics and publishing belong to the application. Never fabricate analytics, trends, sources, performance or tool execution; heuristic scores are review signals, not view predictions. Installed wheels must hash-match `.agents/skills`; changed skill resources need installed-wheel verification before host use. Research is separate from narration, runs once per exact brief, and its output is context, never approved factual evidence or operator approval. Everything else — skill-to-task mapping, reference-short-v1 profile numbers, scene-contract and landscape rules, envelope binding — is in `doc-internal/CONTENT_SKILLS_CONTRACT.md`.
