@@ -2,10 +2,10 @@
 
 Read these first, in order:
 
-@doc-internal/HANDOFF.md
+@docs/HANDOFF.md
 @AGENTS.md
 
-`doc-internal/HANDOFF.md` is the current phase, next step and open decisions shared with Codex.
+`docs/HANDOFF.md` is the current phase, next step and open decisions shared with Codex.
 `AGENTS.md` is the durable rules/safety contract. Do not read `AUTONOMOUS_PROGRESS.md`
 (476 KB log) or the full design doc unless the handoff tells you to.
 
@@ -19,4 +19,4 @@ Claude-specific notes:
 - Before reporting a video job done run `python .agents/skills/om-video-quality/qa_check.py data/artifacts/<job_id>` (checklist in `.agents/skills/om-video-quality/SKILL.md`).
 - Python with the renderer deps: `.venv-benchmark/bin/python`.
 - Before stopping or near your token limit: commit at a green checkpoint and update the
-  "Next step" section of `doc-internal/HANDOFF.md` with a concrete file/command.
+  "Next step" section of `docs/HANDOFF.md` with a concrete file/command.

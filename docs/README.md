@@ -2,6 +2,7 @@
 
 Public documentation. Start with the [project README](../readme.md).
 
+- [HANDOFF.md](HANDOFF.md) — current phase, next step and gotchas shared by the agents working on the repo
 - [operations/logging.md](operations/logging.md) — rotating JSON application logs: files, fields, retention, redaction
 - [operations/api-workflow.md](operations/api-workflow.md) — reviewing and approving a job through the API
 - [operations/platform-integrations.md](operations/platform-integrations.md) — YouTube, Meta and other platform setup

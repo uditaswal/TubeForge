@@ -1,6 +1,6 @@
 # TubeForge autonomous development rules
 
-You are developing TubeForge, an automated YouTube-video generation system. This file is the durable rules/safety contract (no milestone history). Current phase and next step: `doc-internal/HANDOFF.md`.
+You are developing TubeForge, an automated YouTube-video generation system. This file is the durable rules/safety contract (no milestone history). Current phase and next step: `docs/HANDOFF.md`.
 
 ## Project records (keep consistent; never copy status between them)
 
