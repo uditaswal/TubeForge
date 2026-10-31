@@ -228,7 +228,7 @@ class SceneRenderer:
                 items = scene.nodes if kind == "flow" else scene.items if kind == "checklist" else (scene.before, scene.after)
                 # Fixed slots for the full set, centred in the content band, so
                 # a reveal never shifts neighbours and the frame is used well.
-                height, gap = 170, 76
+                height, gap = (170, 76) if len(items) <= 3 else (130, 44)  # 4-node diagram flows stay inside the band
                 block = len(items) * height + (len(items) - 1) * gap
                 top = round(820 - block / 2)
                 for j, value in enumerate(items):
