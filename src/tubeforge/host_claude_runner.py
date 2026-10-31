@@ -388,16 +388,9 @@ def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunne
     return run_request(request, model=model)
 
 
-def serve(path: Path, model: str | None) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        path.unlink()
-    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    listener.bind(str(path))
-    path.chmod(0o660)
-    listener.listen(4)
-    while True:
-        connection, _ = listener.accept()
+def serve_connection(connection: socket.socket, model: str | None) -> None:
+    """Answer one client. A client that hangs up (a probe, a restarted worker) must never stop the runner."""
+    try:
         with connection:
             started_operation = False
             try:
@@ -421,6 +414,22 @@ def serve(path: Path, model: str | None) -> None:
                 connection.sendall(encode_failure("allowance_exhausted", str(error)))
             except Exception as error:  # worker receives a bounded, redacted failure
                 connection.sendall(encode_failure("invalid_output", f"{type(error).__name__}: {error}", invocation_started=started_operation))
+
+    except OSError as error:  # BrokenPipeError, ConnectionResetError: the peer is gone, so there is nobody to answer
+        print(f"client disconnected before the reply was sent: {type(error).__name__}", file=sys.stderr, flush=True)
+
+
+def serve(path: Path, model: str | None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(path))
+    path.chmod(0o660)
+    listener.listen(4)
+    while True:
+        connection, _ = listener.accept()
+        serve_connection(connection, model)
 
 
 def main() -> None:
