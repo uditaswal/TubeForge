@@ -5,6 +5,7 @@ import re
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_serializer, model_validator
 
+from .cues import Cue, validate_cues
 from .icons import ICON_NAMES
 from .logos import LOGO_NAMES
 
@@ -68,10 +69,15 @@ class Scene(StrictModel):
     logo: LogoName | None = None
     # Optional real imagery for the scene; None keeps the code-drawn template only.
     visual: Visual | None = None
+    # Optional narrator delivery (pauses, breaths, stress, whispers) anchored to indices in ``vo``;
+    # bound by Python from tags in the canonical narration, never written by the model directly.
+    cues: tuple[Cue, ...] = ()
 
     @model_serializer(mode="wrap")
     def omit_empty_visual(self, handler):
         value = handler(self)
+        if not self.cues:
+            value.pop("cues", None)
         if self.visual is None:
             value.pop("visual", None)
         if self.logo is None:
@@ -87,6 +93,8 @@ class Scene(StrictModel):
             raise ValueError("reveal_words must be ordered, distinct narration word indices")
         if "\n" in self.caption:
             raise ValueError("caption input is continuous display text, not a multiline layout")
+        if self.cues:
+            validate_cues(self.cues, len(words))
         return self
 
 

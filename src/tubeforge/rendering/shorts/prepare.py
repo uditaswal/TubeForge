@@ -60,30 +60,55 @@ def synthesize(topic, settings, output, voice):
     primary = KokoroVoiceProvider(settings.pipeline.kokoro.model_copy(update={"speed": pacing.voice_speed}))
     fallback = PiperVoiceProvider(settings.pipeline.piper)
     identity = profile_hash(profile=pacing.spoken_profile, lexicon=pacing.pronunciation_lexicon,
-                            group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing)
+                            group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing,
+                            delivery=pacing.delivery_cues)
     groups = []
     for first in range(0, len(topic.scenes), pacing.speech_group_size):
         scenes = topic.scenes[first:first + pacing.speech_group_size]
         forms = [prepare_spoken(scene.vo, profile=pacing.spoken_profile,
                                 lexicon=pacing.pronunciation_lexicon) for scene in scenes]
         spoken_text = " ".join(form.text for form in forms)
-        request = VoiceRequest(text=spoken_text, language="en", voice_id=voice, section_id=scenes[0].scene_id,
-                               settings=(("spoken_profile_sha256", identity),))
-        warning = None
-        try:
-            result = primary.synthesize(request)
-        except (ProviderValidationError, RetryableProviderError) as error:
-            warning = f"Kokoro unavailable; local Piper fallback: {type(error).__name__}"
-            LOG.warning(warning)
-            result = fallback.synthesize(request.model_copy(update={"voice_id": settings.pipeline.piper.voice_id}))
-        audio, sr = sf.read(result.artifact_path, dtype="float32")
-        if audio.ndim != 1 or not np.isfinite(audio).all():
-            raise ValueError("voice output must be finite mono samples")
-        active = np.where(np.abs(audio) > .004)[0]
-        if not len(active):
-            raise ValueError("voice output is silent")
-        audio = audio[max(0, active[0] - round(.04 * sr)):min(len(audio), active[-1] + round(.1 * sr))]
-        audio = compress_pauses(audio, sr, pacing.max_pause_seconds)
+        cued = pacing.delivery_cues != "off" and any(scene.cues for scene in scenes)
+
+        def speak(text, scale=1.0, *, _scene=scenes[0].scene_id):
+            extra = (("speed_scale", f"{scale:.2f}"),) if scale != 1.0 else ()
+            request = VoiceRequest(text=text, language="en", voice_id=voice, section_id=_scene,
+                                   settings=(("spoken_profile_sha256", identity), *extra))
+            note = None
+            try:
+                outcome = primary.synthesize(request)
+            except (ProviderValidationError, RetryableProviderError) as error:
+                note = f"Kokoro unavailable; local Piper fallback: {type(error).__name__}"
+                LOG.warning(note)
+                outcome = fallback.synthesize(request.model_copy(update={
+                    "voice_id": settings.pipeline.piper.voice_id, "settings": request.settings[:1]}))
+            samples, rate = sf.read(outcome.artifact_path, dtype="float32")
+            if samples.ndim != 1 or not np.isfinite(samples).all():
+                raise ValueError("voice output must be finite mono samples")
+            live = np.where(np.abs(samples) > .004)[0]
+            if not len(live):
+                raise ValueError("voice output is silent")
+            samples = samples[max(0, live[0] - round(.04 * rate)):min(len(samples), live[-1] + round(.1 * rate))]
+            return samples, rate, outcome, note
+
+        if cued:
+            from . import delivery
+            state = {}
+
+            def synth(text, scale):
+                samples, rate, outcome, note = speak(text, scale)
+                state.update(rate=rate, result=outcome)
+                state["warning"] = state.get("warning") or note
+                return compress_pauses(samples, rate, pacing.max_pause_seconds)
+
+            parts = []
+            for scene, form in zip(scenes, forms, strict=True):
+                segments = delivery.plan(form.tokens, scene.cues) if scene.cues else [delivery.Segment(form.text)]
+                parts.append(delivery.render(segments, synth, lambda: state["rate"]))
+            audio, sr, result, warning = np.concatenate(parts), state["rate"], state["result"], state["warning"]
+        else:
+            audio, sr, result, warning = speak(spoken_text)
+            audio = compress_pauses(audio, sr, pacing.max_pause_seconds)
         raw = output / f"voice-group-{first:02d}-raw.wav"
         sf.write(raw, audio, sr, subtype="PCM_16")
         path = raw
@@ -146,7 +171,8 @@ def align(topic, output, model_path, tail=.18, *, pacing=None):
         raise ValueError("voice manifest no longer matches reviewed topic")
     if pacing is not None and manifest.get("profile_sha256") != profile_hash(
             profile=pacing.spoken_profile, lexicon=pacing.pronunciation_lexicon,
-            group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing):
+            group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing,
+            delivery=pacing.delivery_cues):
         raise ValueError("speech settings changed between synthesis and alignment")
     warning = None
     try:

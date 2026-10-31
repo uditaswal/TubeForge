@@ -140,6 +140,7 @@ def codex_output_schema(*, envelope: bool = False, reference: bool = False, keep
             item = schema["$defs"][kind]
             item["properties"].pop("vo")
             item["required"].remove("vo")
+            item["properties"].pop("cues", None)
     if envelope:
         # The application binds immutable inputs; do not make the model copy
         # long fetched excerpts or runtime settings into generated output.
