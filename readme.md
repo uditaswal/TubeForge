@@ -944,3 +944,16 @@ the host runner wheel before using them in an isolated deployed runner.
 Animated landscape scenes receive local word timing and native 16:9 layouts. The default waveform timing remains an estimate requiring listening review; it is not independently measured word alignment.
 
 Ready, unapproved previews can use the same media-stage refresh after a renderer repair; approved previews require the revision workflow. Animated landscape captions use short word-timed ASS chunks below the diagrams. Production preview and final profiles both normalize audio and measure the encoded result.
+
+### Batch plan import
+
+In signed-in Studio, open **Batch plans**. Choose a markdown file (or paste it),
+select **Validate and preview**, review the table and any line-numbered errors,
+then **Commit import**. Each `## Heading` requires exactly one fenced `yaml`
+block with `id`, `title`, `concept`, and `beats: [{t: 0, point: Hook}]`.
+Optional fields include `length_s` (30–90; default 60), `ending` (`loop` or
+`debate`), `channel`, `publish_at`, `hook`, `cta`, `claims_to_verify`, `sources`,
+`thumbnail: {text: ..., visual: ...}`, `tags`, and opaque `narration` text.
+Publish dates are metadata; importing never schedules or uploads anything.
+Re-importing skips identical IDs, updates unused shorts, and reports conflicts
+for changed shorts already reserved or produced. A validation error saves nothing.
