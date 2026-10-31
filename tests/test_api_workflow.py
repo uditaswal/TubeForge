@@ -67,6 +67,7 @@ def test_private_job_api_creates_and_records_an_approval(tmp_path: Path) -> None
         assert diagnostics.status_code == 200
         assert diagnostics.json()["stage_metrics"] == {}
         assert diagnostics.json()["performance_enforcement"] == "disabled"
+        assert diagnostics.json()["ai_usage"] is None
         download = client.get(f"/api/jobs/{job_id}/diagnostics.jsonl")
         assert download.status_code == 200
         assert "attachment" in download.headers["content-disposition"]

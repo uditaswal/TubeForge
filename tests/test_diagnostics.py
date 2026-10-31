@@ -27,3 +27,21 @@ def test_stage_summary_keeps_attempts_and_failure_without_inventing_a_job_peak()
     assert summary["worker_retry_count"] == 1
     assert summary["failure_reason"] == "source unavailable"
     assert "lifetime" in summary["memory_note"]
+
+
+def test_ai_usage_maps_claude_and_codex_token_shapes_without_inventing_fields() -> None:
+    from tubeforge.pipeline.usage_report import normalize_usage, summarize_ai_usage
+
+    claude = normalize_usage({"input_tokens": 6, "output_tokens": 100, "cache_creation_input_tokens": 50, "cache_read_input_tokens": 10, "total_cost_usd": 0.12345})
+    assert claude["total_tokens"] == 166 and claude["cost_usd"] == 0.1235
+    codex = normalize_usage({"input_tokens": 1000, "cached_input_tokens": 900, "output_tokens": 40})
+    assert codex["input_tokens"] == 100 and codex["cache_read_tokens"] == 900 and codex["total_tokens"] == 1040
+    assert "cost_usd" not in codex
+    assert summarize_ai_usage(None, None) is None
+    report = summarize_ai_usage(
+        {"provenance": {"provider": "host-claude-runner", "model": "m", "elapsed_seconds": 9.5},
+         "usage": {"attempts": 2, "calls": [{"stage": "script", "output_tokens": 10}, {"stage": "editor", "output_tokens": 5}]}},
+        {"usage": {"output_tokens": 7, "web_search_requests": 2}, "provenance": {"web_searches": 2, "elapsed_seconds": 3}})
+    assert [step["stage"] for step in report["steps"]] == ["research", "script", "editor"]
+    assert report["total"]["output_tokens"] == 22 and report["total"]["calls"] == 3 and report["total"]["web_searches"] == 2
+    assert report["per_call_detail"] is True
