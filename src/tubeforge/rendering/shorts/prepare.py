@@ -89,10 +89,15 @@ def synthesize(topic, settings, output, voice):
         path = raw
         if pacing.voice_processing == "gentle-v1":
             path = output / f"voice-group-{first:02d}.wav"
-            checked([pacing.ffmpeg_executable, "-y", "-v", "error", "-i", str(raw), "-af",
-                     "highpass=f=70,acompressor=threshold=0.1:ratio=1.6:attack=15:release=120:makeup=1",
-                     "-ar", str(sr), "-ac", "1", "-c:a", "pcm_s16le", str(path)],
-                    deadline=time.monotonic() + 90, cancelled=lambda: False)
+            command = [pacing.ffmpeg_executable, "-y", "-v", "error", "-i", str(raw), "-af",
+                       "highpass=f=70,acompressor=threshold=0.1:ratio=1.6:attack=15:release=120:makeup=1",
+                       "-ar", str(sr), "-ac", "1", "-c:a", "pcm_s16le", str(path)]
+            try:
+                checked(command, deadline=time.monotonic() + 180, cancelled=lambda: False)
+            except TimeoutError:
+                # A few seconds of audio never needs minutes: this is host starvation (swap, a busy neighbour), so try once more.
+                print("voice processing timed out; retrying once", file=sys.stderr, flush=True)
+                checked(command, deadline=time.monotonic() + 180, cancelled=lambda: False)
         group_audio, group_sr = sf.read(path, dtype="float32")
         if group_sr != sr or group_audio.ndim != 1 or not np.isfinite(group_audio).all():
             raise ValueError("processed voice is not finite mono speech")
