@@ -957,3 +957,13 @@ Optional fields include `length_s` (30–90; default 60), `ending` (`loop` or
 Publish dates are metadata; importing never schedules or uploads anything.
 Re-importing skips identical IDs, updates unused shorts, and reports conflicts
 for changed shorts already reserved or produced. A validation error saves nothing.
+
+Filter Batch plans by day, select shorts, then choose **Produce selected shorts**.
+A configured vertical preset must support every selected duration. Each short
+becomes one normal generation; repeat clicks reuse its existing job. Script and
+preview approvals remain in Generations. The queue waits for these approvals,
+uses the existing heavy-work lease, and records checker results in Activity.
+A failed or cancelled short does not block later work; exhausted script allowances
+require an operator decision. Finished batch jobs stop before publication.
+Progress uses measured completed work; ETA stays unavailable before timing evidence
+or while approvals are pending. No script attempt allowance is reset.

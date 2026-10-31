@@ -12,7 +12,12 @@ class BatchImportRequest(BaseModel):
     commit: bool = False
 
 
-def register_batch_routes(app, runtime):
+class BatchProduceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[str] = Field(min_length=1, max_length=200)
+
+
+def register_batch_routes(app, runtime, build_request):
     repository = BatchPlanRepository(runtime.database.session_factory)
 
     @app.post('/api/batch-plans/import', tags=['batch'])
@@ -24,9 +29,46 @@ def register_batch_routes(app, runtime):
 
     @app.get('/api/batch-plans', tags=['batch'])
     def list_plans():
-        return repository.list()
+        items = repository.list()
+        for item in items:
+            item['qa'] = None
+            if item['job_id']:
+                job = runtime.jobs.get(item['job_id'])
+                item['status'] = job.state.value
+                item['failure_message'] = job.failure_message
+                if job.failure_message and 'exhaust' in job.failure_message.lower():
+                    item['status'] = 'needs operator decision'
+                item['qa'] = (repository.for_job(job.id) or {}).get('batch_qa')
+                item['activity_url'] = f'/api/jobs/{job.id}/events'
+        finished = [item for item in items if item['status'] == 'final_ready']
+        durations = []
+        for item in finished:
+            events = runtime.events.list_for_job(item['job_id'], limit=1000)
+            seconds = sum(float(e.details.get('elapsed_seconds', 0)) for e in events if e.event_type == 'batch_run_finished')
+            if seconds:
+                durations.append(seconds)
+        remaining = sum(item['status'] not in {'final_ready', 'failed_validation', 'failed_exhausted', 'cancelled', 'needs operator decision'} for item in items)
+        waiting = any(item['status'] in {'script_approval_required', 'preview_ready'} for item in items)
+        eta = round(sum(durations) / len(durations) * remaining) if durations and not waiting else None
+        # ETA is unknown until completed jobs supply measured timings.
+        for item in items:
+            item['progress'] = {'finished': len(finished), 'total': len(items), 'eta_seconds': eta}
+        return items
 
     @app.get('/batch', response_class=HTMLResponse, include_in_schema=False)
     def batch_page():
         from tubeforge.api.batch_ui import BATCH_HTML
         return BATCH_HTML
+
+    @app.post('/api/batch-plans/produce', tags=['batch'])
+    def produce(value: BatchProduceRequest):
+        if len(set(value.ids)) != len(value.ids):
+            raise HTTPException(422, detail='duplicate short ids')
+        try:
+            items = repository.produce(value.ids, build_request)
+        except ValueError as error:
+            raise HTTPException(422, detail=str(error)) from error
+        for item in items:
+            if item['action'] == 'created':
+                runtime.events.append(item['job_id'], 'batch_job_created', short_id=item['id'])
+        return {'items': items}

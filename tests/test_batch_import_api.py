@@ -42,3 +42,31 @@ def test_signed_in_import_preview_commit_idempotency_and_conflict(tmp_path: Path
         assert client.get('/api/batch-plans').json()[0]['short']['title'] == 'Changed'
         assert client.post('/api/batch-plans/import', json={'markdown': PLAN.replace('id: one\n', ''), 'commit': True}).status_code == 422
     database.dispose()
+
+
+def test_produce_endpoint_preserves_brief_and_reports_exhaustion(tmp_path: Path):
+    from tubeforge.domain.states import JobState
+    settings = Settings(app=AppConfig(name='test', environment='test'), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'produce.db'}"), auth=AuthConfig(enabled=True), pipeline={'video_generation': {'default_preset': 'shorts', 'presets': {'shorts': {'aspect_ratio': '9:16', 'duration_seconds': 60}}}})
+    database = create_database(settings.database)
+    Base.metadata.create_all(database.engine)
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin('operator', 'correct-horse-battery-staple')
+        client.post('/login', json={'username': 'operator', 'password': 'correct-horse-battery-staple'})
+        assert client.post('/api/batch-plans/produce', json={'ids': ['one']}).status_code == 403
+        client.headers['x-csrf-token'] = client.cookies['tubeforge_csrf']
+        plan = PLAN.replace('concept: Explain one', 'concept: Explain one\nhook: Hook text\ncta: Question\nnarration: Exact supplied script.')
+        client.post('/api/batch-plans/import', json={'markdown': plan, 'commit': True})
+        response = client.post('/api/batch-plans/produce', json={'ids': ['one']})
+        assert response.status_code == 200, response.text
+        job_id = response.json()['items'][0]['job_id']
+        request = runtime.jobs.get(job_id).request
+        assert request.review_mode == 'manual'
+        assert 'Exact supplied script.' in request.notes[0]
+        assert 'Hook text' in request.notes[0] and 'Question' in request.notes[0]
+        assert client.post('/api/batch-plans/produce', json={'ids': ['one']}).json()['items'][0]['action'] == 'skipped'
+        runtime.jobs.update_state(job_id, JobState.FAILED_VALIDATION, failure_message='two-attempt limit exhausted; operator review required')
+        assert client.get('/api/batch-plans').json()[0]['status'] == 'needs operator decision'
+        assert client.post('/api/batch-plans/produce', json={'ids': ['missing']}).status_code == 422
+        assert client.post('/api/batch-plans/produce', json={'ids': ['one', 'one']}).status_code == 422
+    database.dispose()

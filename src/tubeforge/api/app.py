@@ -1000,7 +1000,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return runtime.scheduler.run(schedule, run_key=f"manual-{uuid4().hex}")
 
     from tubeforge.api.batch import register_batch_routes
-    register_batch_routes(app, runtime)
+    def batch_request(short):
+        import json
+        presets = application_settings.pipeline.video_generation.presets
+        preset = next((name for name, value in presets.items() if value.aspect_ratio == "9:16" and value.minimum_duration_seconds <= short.length_s <= value.maximum_duration_seconds), None)
+        if preset is None:
+            raise ValueError("no configured vertical preset supports this short's length")
+        request = _video_request(VideoBriefRequest(title=short.title,
+            notes=("Unverified operator batch brief: " + json.dumps(short.model_dump(mode="json"), ensure_ascii=False),),
+            angle=short.concept, duration_seconds=short.length_s, preset=preset,
+            review_mode="manual", ending=short.ending, channel_identity=short.channel), application_settings)
+        _reject_retired_format(request, application_settings)
+        return request
+    register_batch_routes(app, runtime, batch_request)
 
     @app.post("/api/jobs", status_code=status.HTTP_201_CREATED, tags=["jobs"])
     def create_job(request: ContentRequest) -> dict[str, object]:

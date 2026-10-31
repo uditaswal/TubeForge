@@ -47,6 +47,11 @@ class WorkerService:
             return None
         started = time.perf_counter()
         try:
+            from tubeforge.db.batch_plans import BatchPlanRepository
+            batch = BatchPlanRepository(self.jobs._session_factory).for_job(job.id)
+            if batch is not None and job.state is JobState.FINAL_READY:
+                self._batch_qa(job, guard)
+                return job
             with job_context(job.id):
                 result = self.orchestrator.run(
                     job.id,
@@ -55,6 +60,10 @@ class WorkerService:
                     cancellation_requested=lambda: self.jobs.get(job.id).cancellation_requested_at is not None,
                     ownership_check=guard.check,
                 )
+            from tubeforge.db.batch_plans import BatchPlanRepository
+            if BatchPlanRepository(self.jobs._session_factory).for_job(job.id) is not None:
+                self._record(job.id, "batch_run_finished", elapsed_seconds=round(time.perf_counter() - started, 3), state=result.state.value)
+            self._batch_qa(result, guard)
             _event("job_run_finished", job_id=job.id, state=result.state.value, duration_ms=round((time.perf_counter() - started) * 1000, 1), **process_stats())
             if result.state is JobState.FAILED_RETRYABLE:
                 return self._schedule_retry(result)
@@ -81,6 +90,43 @@ class WorkerService:
             latest = self.jobs.get(job.id)
             if latest.claim_owner == self.worker_id and latest.state is not JobState.FAILED_RETRYABLE:
                 self.jobs.release_claim(job.id, self.worker_id)
+
+    def _batch_qa(self, job, guard):
+        from tubeforge.db.batch_plans import BatchPlanRepository
+        repository = BatchPlanRepository(self.jobs._session_factory)
+        if repository.for_job(job.id) is None:
+            return
+        if job.state not in {JobState.FINAL_READY, JobState.FAILED_VALIDATION,
+                             JobState.FAILED_EXHAUSTED, JobState.CANCELLED}:
+            return
+        import subprocess
+        import sys
+        from pathlib import Path
+        from tubeforge.core.config import REPOSITORY_ROOT
+        if not guard.check(force=True):
+            return
+        root = getattr(self.orchestrator, "artifact_root", None)
+        try:
+            if root is None:
+                raise ValueError("artifact root unavailable")
+            with subprocess.Popen([sys.executable, str(REPOSITORY_ROOT / ".agents/skills/om-video-quality/qa_check.py"), str(Path(root) / job.id), "--json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+                deadline = time.monotonic() + 120
+                while True:
+                    try:
+                        output, error_output = process.communicate(timeout=5)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline or not guard.check(force=True):
+                            process.kill()
+                            process.communicate()
+                            raise ValueError("QA timed out or worker ownership lost")
+                qa = {"exit_code": process.returncode, "output": output[-64000:], "error": error_output[-2000:]}
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            qa = {"exit_code": None, "error": str(error), "output": ""}
+        if not guard.check(force=True):
+            return
+        repository.save_qa(job.id, qa, owner=self.worker_id)
+        self._record(job.id, "batch_qa_recorded", **qa)
 
     def _schedule_retry(self, job: PipelineJob) -> PipelineJob:
         attempt = job.attempt_count + 1
