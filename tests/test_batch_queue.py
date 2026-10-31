@@ -130,3 +130,33 @@ def test_restart_after_final_checkpoint_runs_qa_without_publication(queue, tmp_p
     assert stub.calls == []
     assert repo.for_job(first)['batch_qa']['exit_code'] == 2
     assert worker.run_once() is None
+
+
+def test_unexpected_middle_renderer_exception_does_not_stall_batch(queue, tmp_path, monkeypatch):
+    db, repo, jobs = queue
+    items = repo.produce(['0', '1', '2'], request)
+    stub = Stub(jobs, tmp_path)
+    normal = stub.run
+    def run(job_id, **kwargs):
+        if job_id == items[1]['job_id']:
+            raise RuntimeError('stub renderer crashed')
+        return normal(job_id, **kwargs)
+    stub.run = run
+    worker = WorkerService('worker', jobs, stub)
+    monkeypatch.setattr(worker, '_batch_qa', lambda job, guard: repo.save_qa(job.id, {'exit_code': 0, 'output': 'stub'}, owner=worker.worker_id))
+    assert worker.run_once().state == JobState.FINAL_READY
+    assert worker.run_once().state == JobState.FAILED_VALIDATION
+    assert worker.run_once().id == items[2]['job_id']
+
+
+@pytest.mark.parametrize('state', [JobState.FAILED_EXHAUSTED, JobState.FAILED_VALIDATION, JobState.CANCELLED])
+def test_terminal_checkpoint_recovers_missing_qa_without_rerunning_job(queue, tmp_path, state):
+    db, repo, jobs = queue
+    job_id = repo.produce(['0'], request)[0]['job_id']
+    jobs.update_state(job_id, state)
+    stub = Stub(jobs, tmp_path)
+    worker = WorkerService('restarted', jobs, stub)
+    assert worker.run_once().state == state
+    assert stub.calls == []
+    assert repo.for_job(job_id)['batch_qa']['exit_code'] == 2
+    assert worker.run_once() is None

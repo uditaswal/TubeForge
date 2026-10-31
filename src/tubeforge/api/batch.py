@@ -1,7 +1,9 @@
 """Authenticated batch endpoints inherit the application's auth/CSRF middleware."""
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
+from datetime import date
+from typing import Literal
 from tubeforge.batch_plans import parse_batch
 from tubeforge.db.batch_plans import BatchPlanRepository
 
@@ -17,6 +19,12 @@ class BatchProduceRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=200)
 
 
+class BatchReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal['approve', 'reject', 'ready', 'regenerate']
+    reviewed_identity: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+
 def register_batch_routes(app, runtime, build_request):
     repository = BatchPlanRepository(runtime.database.session_factory)
 
@@ -28,8 +36,10 @@ def register_batch_routes(app, runtime, build_request):
         return {'committed': value.commit, 'items': repository.import_shorts(plan.shorts, commit=value.commit)}
 
     @app.get('/api/batch-plans', tags=['batch'])
-    def list_plans():
+    def list_plans(day: date | None = None):
         items = repository.list()
+        if day:
+            items = [item for item in items if (item['short'].get('publish_at') or '')[:10] == day.isoformat()]
         for item in items:
             item['qa'] = None
             if item['job_id']:
@@ -47,12 +57,12 @@ def register_batch_routes(app, runtime, build_request):
             seconds = sum(float(e.details.get('elapsed_seconds', 0)) for e in events if e.event_type == 'batch_run_finished')
             if seconds:
                 durations.append(seconds)
-        remaining = sum(item['status'] not in {'final_ready', 'failed_validation', 'failed_exhausted', 'cancelled', 'needs operator decision'} for item in items)
+        remaining = sum(bool(item['job_id']) and item['status'] not in {'final_ready', 'failed_validation', 'failed_exhausted', 'cancelled', 'needs operator decision'} for item in items)
         waiting = any(item['status'] in {'script_approval_required', 'preview_ready'} for item in items)
         eta = round(sum(durations) / len(durations) * remaining) if durations and not waiting else None
         # ETA is unknown until completed jobs supply measured timings.
         for item in items:
-            item['progress'] = {'finished': len(finished), 'total': len(items), 'eta_seconds': eta}
+            item['progress'] = {'finished': len(finished), 'total': sum(bool(value['job_id']) for value in items), 'eta_seconds': eta}
         return items
 
     @app.get('/batch', response_class=HTMLResponse, include_in_schema=False)
@@ -72,3 +82,26 @@ def register_batch_routes(app, runtime, build_request):
             if item['action'] == 'created':
                 runtime.events.append(item['job_id'], 'batch_job_created', short_id=item['id'])
         return {'items': items}
+
+    from tubeforge.db.batch_review import BatchReviewRepository
+    reviews = BatchReviewRepository(runtime.database.session_factory)
+
+    @app.get('/api/batch-plans/review', tags=['batch'])
+    def day_review(day: date | None = None):
+        return reviews.list_day(day.isoformat() if day else None)
+
+    @app.post('/api/batch-plans/{short_id}/review', tags=['batch'])
+    def review_decision(short_id: str, value: BatchReviewRequest, request: Request):
+        session = runtime.auth.session(request.cookies.get('tubeforge_session'))
+        actor = str(session.user_id) if session else 'local-operator'
+        try:
+            return reviews.decide(short_id, value.action, value.reviewed_identity, actor)
+        except KeyError as error:
+            raise HTTPException(404, detail=str(error)) from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, detail=str(error)) from error
+
+    @app.get('/batch/review', response_class=HTMLResponse, include_in_schema=False)
+    def day_review_page():
+        from tubeforge.api.batch_review_ui import REVIEW_HTML
+        return REVIEW_HTML

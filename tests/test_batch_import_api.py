@@ -70,3 +70,15 @@ def test_produce_endpoint_preserves_brief_and_reports_exhaustion(tmp_path: Path)
         assert client.post('/api/batch-plans/produce', json={'ids': ['missing']}).status_code == 422
         assert client.post('/api/batch-plans/produce', json={'ids': ['one', 'one']}).status_code == 422
     database.dispose()
+
+
+def test_imported_but_unqueued_shorts_do_not_inflate_progress(tmp_path):
+    settings = Settings(app=AppConfig(name='test', environment='test'), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'progress.db'}"))
+    db = create_database(settings.database)
+    Base.metadata.create_all(db.engine)
+    with TestClient(create_app(settings)) as client:
+        plan = PLAN.replace('concept: Explain one', 'concept: Explain one\npublish_at: 2026-11-01T10:00:00+05:30')
+        client.post('/api/batch-plans/import', json={'markdown': plan, 'commit': True})
+        assert client.get('/api/batch-plans?day=2026-11-01').json()[0]['progress']['total'] == 0
+        assert client.get('/api/batch-plans?day=2026-11-02').json() == []
+    db.dispose()

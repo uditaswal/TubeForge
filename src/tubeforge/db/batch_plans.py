@@ -47,7 +47,7 @@ class BatchPlanRepository:
     def list(self):
         with self.sessions() as session:
             rows = session.scalars(select(TopicRecord).where(TopicRecord.id.like("batch-%")).order_by(TopicRecord.created_at, TopicRecord.id))
-            return [{"id": row.id, "short": json.loads(row.options_json)["batch_plan"], "status": row.status, "job_id": row.generation_job_id} for row in rows if "batch_plan" in json.loads(row.options_json)]
+            return [{"id": row.id, "short": json.loads(row.options_json)["batch_plan"], "status": row.status, "job_id": row.generation_job_id} for row in rows if "batch_plan" in json.loads(row.options_json) and not json.loads(row.options_json).get("batch_history")]
 
     def for_job(self, job_id):
         with self.sessions() as session:

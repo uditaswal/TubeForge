@@ -49,7 +49,7 @@ class WorkerService:
         try:
             from tubeforge.db.batch_plans import BatchPlanRepository
             batch = BatchPlanRepository(self.jobs._session_factory).for_job(job.id)
-            if batch is not None and job.state is JobState.FINAL_READY:
+            if batch is not None and job.state in {JobState.FINAL_READY, JobState.FAILED_VALIDATION, JobState.FAILED_EXHAUSTED, JobState.CANCELLED}:
                 self._batch_qa(job, guard)
                 return job
             with job_context(job.id):
@@ -84,6 +84,14 @@ class WorkerService:
             raise
         except Exception as error:
             logger.exception("job_exception", extra={"event": "job_exception", "job_id": job.id, "duration_ms": round((time.perf_counter() - started) * 1000, 1), "error_type": type(error).__name__})
+            from tubeforge.db.batch_plans import BatchPlanRepository
+            if BatchPlanRepository(self.jobs._session_factory).for_job(job.id) is not None and guard.check(force=True):
+                latest = self.jobs.get(job.id)
+                failed = self.jobs.update_state_if_claimed(job.id, self.worker_id, now=self._now(), state=JobState.FAILED_VALIDATION, resume_state=latest.state, failure_message=str(error))
+                if failed is not None:
+                    self._record(job.id, "job_error", state=failed.state.value, error=str(error))
+                    self._batch_qa(failed, guard)
+                    return failed
             raise
         finally:
             guard.release()
@@ -97,7 +105,7 @@ class WorkerService:
         if repository.for_job(job.id) is None:
             return
         if job.state not in {JobState.FINAL_READY, JobState.FAILED_VALIDATION,
-                             JobState.FAILED_EXHAUSTED, JobState.CANCELLED}:
+                             JobState.FAILED_EXHAUSTED, JobState.FAILED_RETRYABLE, JobState.CANCELLED}:
             return
         import subprocess
         import sys
@@ -109,6 +117,9 @@ class WorkerService:
         try:
             if root is None:
                 raise ValueError("artifact root unavailable")
+            from tubeforge.db.batch_review import file_checksum
+            final_path = Path(root) / job.id / 'final.mp4'
+            before = file_checksum(str(final_path)) if final_path.is_file() else None
             with subprocess.Popen([sys.executable, str(REPOSITORY_ROOT / ".agents/skills/om-video-quality/qa_check.py"), str(Path(root) / job.id), "--json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
                 deadline = time.monotonic() + 120
                 while True:
@@ -121,6 +132,10 @@ class WorkerService:
                             process.communicate()
                             raise ValueError("QA timed out or worker ownership lost")
                 qa = {"exit_code": process.returncode, "output": output[-64000:], "error": error_output[-2000:]}
+                after = file_checksum(str(final_path)) if final_path.is_file() else None
+                if before != after:
+                    qa = {"exit_code": None, "output": "", "error": "final artifact changed during QA"}
+                qa['artifact_checksum'] = after if before == after else None
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             qa = {"exit_code": None, "error": str(error), "output": ""}
         if not guard.check(force=True):

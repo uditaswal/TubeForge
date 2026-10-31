@@ -156,7 +156,7 @@ class JobRepository:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
 
-    def create(self, job_id: str, request: ContentRequest, *, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None) -> PipelineJob:
+    def create(self, job_id: str, request: ContentRequest, *, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None, transaction: Session | None = None) -> PipelineJob:
         now = datetime.now(UTC)
         record = PipelineJobRecord(
             id=job_id, request_json=request.model_dump_json(), video_description=video_description.strip() if video_description is not None else None, state=JobState.TOPIC_CREATED.value,
@@ -165,6 +165,11 @@ class JobRepository:
             attempt_count=0, next_retry_at=None, cancellation_requested_at=None,
             authentication_restored_at=None,
         )
+        if transaction is not None:
+            transaction.add(record)
+            _snapshot_video_destinations(transaction, job_id, destination_account_ids, video_description, now)
+            transaction.flush()
+            return _job_from_record(record)
         try:
             with self._session_factory.begin() as session:
                 session.add(record)
@@ -331,6 +336,16 @@ class JobRepository:
             from sqlalchemy.orm import aliased
             batch_topic, earlier_topic = aliased(TopicRecord), aliased(TopicRecord)
             earlier_job = aliased(PipelineJobRecord)
+            # A crash between a terminal checkpoint and QA must resume only QA.
+            pending_qa_topic = aliased(TopicRecord)
+            eligible = or_(eligible, and_(
+                PipelineJobRecord.state.in_([JobState.FAILED_VALIDATION.value, JobState.FAILED_EXHAUSTED.value, JobState.CANCELLED.value]),
+                exists(select(pending_qa_topic.id).where(
+                    pending_qa_topic.generation_job_id == PipelineJobRecord.id,
+                    func.json_extract(pending_qa_topic.options_json, "$.batch_plan.id").is_not(None),
+                    func.json_extract(pending_qa_topic.options_json, "$.batch_qa").is_(None),
+                ).correlate(PipelineJobRecord)),
+            ))
             finished = [JobState.FINAL_READY.value, JobState.FAILED_VALIDATION.value,
                         JobState.FAILED_EXHAUSTED.value, JobState.CANCELLED.value,
                         JobState.FAILED_RETRYABLE.value, JobState.AUTH_REQUIRED.value]

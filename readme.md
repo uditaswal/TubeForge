@@ -967,3 +967,13 @@ A failed or cancelled short does not block later work; exhausted script allowanc
 require an operator decision. Finished batch jobs stop before publication.
 Progress uses measured completed work; ETA stays unavailable before timing evidence
 or while approvals are pending. No script attempt allowance is reset.
+
+Open **Batch plans → Day review queue** to inspect a day's final videos, available
+thumbnails, QA output, and script/beats. **Approve** binds the exact video and
+review identity; **Stage as ready** requires that approval and matching successful
+QA. Ready is local staging only. **Reject** returns the item to needs review.
+**Regenerate** creates a new ordinary generation with fresh script/preview/final
+review requirements; it preserves the exact brief and its script allowance.
+An unchanged script may replay its accepted cache. Existing decisions are invalid
+if reviewed artifacts change. Missing thumbnails and unfinished videos are shown
+truthfully; the player stays open during background refresh.

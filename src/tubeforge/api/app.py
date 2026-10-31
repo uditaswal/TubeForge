@@ -1010,6 +1010,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             notes=("Unverified operator batch brief: " + json.dumps(short.model_dump(mode="json"), ensure_ascii=False),),
             angle=short.concept, duration_seconds=short.length_s, preset=preset,
             review_mode="manual", ending=short.ending, channel_identity=short.channel), application_settings)
+        request = request.model_copy(update={"sources": tuple(source.model_copy(update={"title": "Unverified operator batch brief"}) for source in request.sources)})
         _reject_retired_format(request, application_settings)
         return request
     register_batch_routes(app, runtime, batch_request)
