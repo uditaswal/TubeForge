@@ -29,7 +29,7 @@ from tubeforge.domain.video_duration import SHORTS_MAX_DURATION_SECONDS, SHORTS_
 from tubeforge.pipeline.alignment import LocalWhisperDTWAligner, LocalWordAligner, WordTiming, verify_word_alignment
 from tubeforge.pipeline.captions import render_highlighted_ass, render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
-from tubeforge.pipeline.music import MusicCatalog, MusicSelection, resolve_bed
+from tubeforge.pipeline.music import MusicCatalog, MusicSelection, catalog_track, resolve_bed
 from tubeforge.pipeline.publication import identity as publication_identity, metadata_from_package, render_thumbnail, validate_thumbnail
 from tubeforge.pipeline.quality import validate_final_artifact
 from tubeforge.pipeline.storyboard import render_contact_sheets, storyboard_manifest
@@ -987,11 +987,8 @@ class PipelineOrchestrator:
         reference = self._reference_package(job)
         timing = self._reference_timing(job, reference) if reference is not None else self._required_json(job.id, JobState.VOICE_GENERATION, "timing_map")
         metadata_inputs = {"content_identity": content.checksum_sha256, "final_render_identity": final_manifest.get("render_identity"), "generator": {"provider": "deterministic-local", "model": None}, "template_version": self.publication_config.metadata_template_version, "config": self.publication_config.model_dump(mode="json", include={"title_max_length", "description_max_length", "tag_max_count", "tag_max_length", "tag_payload_max_length", "metadata_template_version"}), "timing_identity": self._required_artifact(job.id, JobState.VOICE_GENERATION, "timing_map").checksum_sha256}
-        music = None
-        if job.request.music_track:
-            if self.music_catalog is None:
-                raise ProviderValidationError("music was selected but no approved catalog is configured")
-            music = self.music_catalog.resolve(job.request.music_track)
+        music = catalog_track(self.music_catalog, job.request.music_track)
+        if music is not None:
             metadata_inputs["music"] = music.model_dump(mode="json")
         metadata_identity = publication_identity(metadata_inputs)
         current = self._load_json_artifact(job.id, JobState.PUBLICATION_PREPARING, "metadata")
@@ -1147,10 +1144,8 @@ class PipelineOrchestrator:
         inputs = {"content": content.checksum_sha256, "timing_map": timing_artifact.checksum_sha256, "narration": narration.checksum_sha256, "captions": captions.checksum_sha256, "assets": [{"scene_id": segment.scene_id, "checksum_sha256": segment.asset_checksum} for segment in segments]}
         if contract_artifact is not None:
             inputs["scene_contract"] = contract_artifact.checksum_sha256
-        if job.request.music_track:
-            if self.music_catalog is None:
-                raise ProviderValidationError("music was selected but no approved catalog is configured")
-            track = self.music_catalog.resolve(job.request.music_track)
+        track = catalog_track(self.music_catalog, job.request.music_track)
+        if track is not None:
             inputs["music"] = track.model_dump(mode="json")
             if renderer.config.audio_normalization_enabled:
                 inputs["audio_mix_version"] = MUSIC_LOUDNESS_VERSION

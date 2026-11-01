@@ -226,5 +226,18 @@ def resolve_bed(catalog: "MusicCatalog | None", music_track: str | None) -> Musi
     return MusicSelection("track", catalog.resolve(name))
 
 
-__all__ = ["MusicCatalog", "MusicTrackRecord", "MusicSelection", "resolve_bed",
+def catalog_track(catalog: "MusicCatalog | None", music_track: str | None) -> "MusicTrackRecord | None":
+    """The approved catalog record for a requested track, or None for no request and for the built-in beds.
+
+    The synthesized bed and silence are not catalog tracks (no file, no licence record), so asking the catalog for
+    them fails with "approved music track is unavailable"; publication prep and render identities use this instead.
+    """
+    if not music_track or music_track in RESERVED_MUSIC_NAMES:
+        return None
+    if catalog is None:
+        raise ProviderValidationError("music was selected but no approved catalog is configured")
+    return catalog.resolve(music_track)
+
+
+__all__ = ["MusicCatalog", "catalog_track", "MusicTrackRecord", "MusicSelection", "resolve_bed",
           "SYNTHESIZED_MUSIC_NAME", "NO_MUSIC_NAME", "RESERVED_MUSIC_NAMES"]
