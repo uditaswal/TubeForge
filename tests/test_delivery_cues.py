@@ -177,3 +177,14 @@ def test_cues_are_ignored_when_delivery_is_off_or_scene_has_none(tmp_path, monke
     prepare.synthesize(_topic(tmp_path, cues), _settings("off"), tmp_path, "af_bella")
     prepare.synthesize(_topic(tmp_path, ()), _settings("cues-v1"), tmp_path, "af_bella")
     assert [text for text, _ in _FakeKokoro.calls] == ["It was quiet and nobody noticed the failure until Friday."] * 2
+
+
+def test_a_video_keeps_at_most_two_whispers():
+    narration = "[whisper]nobody was watching the logs[/whisper] and then it broke."
+    scenes = [{"scene_id": f"s{i}", "template": "hook"} for i in range(4)]
+    sections = [{"scene_id": f"s{i}", "narration": narration} for i in range(4)]
+    bound = bind_reference_output({"reference_short": {"scenes": scenes}, "script_sections": sections},
+                                  SimpleNamespace(sources=[], topic="t"))
+    kinds = [[c["kind"] for c in s.get("cues", [])] for s in bound["reference_short"]["scenes"]]
+    assert kinds == [["whisper"], ["whisper"], [], []]
+    assert all(s["vo"] == "nobody was watching the logs and then it broke." for s in bound["reference_short"]["scenes"])

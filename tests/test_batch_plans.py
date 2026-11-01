@@ -35,3 +35,11 @@ def test_beat_time_ranges_are_accepted_and_keep_their_end():
     assert [(b.t, b.end) for b in plan.shorts[0].beats] == [(0.0, 10.0), (10.0, None), (40.0, 60.0)]
     bad = parse_batch('## One\n```yaml\nid: one\ntitle: One\nconcept: C\nbeats:\n  - {t: "10-5", point: Hook}\n```\n')
     assert bad.errors
+
+
+def test_shipped_example_plan_parses_cleanly():
+    from pathlib import Path
+    from tubeforge.batch_plans import parse_batch
+    plan = parse_batch((Path(__file__).resolve().parents[1] / "examples" / "batch-plan-example.md").read_text())
+    assert not plan.errors and [s.id for s in plan.shorts] == [
+        "sd-001-sql-vs-nosql", "sd-002-in-memory-cache", "sd-003-load-balancing"]
