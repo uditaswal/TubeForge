@@ -1,5 +1,4 @@
 """Authenticated batch endpoints inherit the application's auth/CSRF middleware."""
-from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -101,8 +100,7 @@ def register_batch_routes(app, runtime, build_request):
         return {'items': items}
 
     from tubeforge.db.batch_review import BatchReviewRepository
-    export_root = Path(runtime.orchestrator.artifact_root).parent / 'batch-exports'
-    reviews = BatchReviewRepository(runtime.database.session_factory, export_root=export_root)
+    reviews = BatchReviewRepository(runtime.database.session_factory)
 
     @app.get('/api/batch-plans/review', tags=['batch'])
     def day_review(day: date | None = None):
@@ -118,18 +116,6 @@ def register_batch_routes(app, runtime, build_request):
             raise HTTPException(404, detail=str(error)) from error
         except (ValueError, OSError) as error:
             raise HTTPException(409, detail=str(error)) from error
-
-    @app.get('/api/batch-plans/{short_id}/export', tags=['batch'])
-    def batch_export(short_id: str):
-        """The staged package for a ready short, re-verified against the reviewed artifact on every read."""
-        from tubeforge.batch_export import verify
-        item = next((x for x in reviews.list_day(None) if x['id'] == short_id), None)
-        if item is None:
-            raise HTTPException(404, detail='short not found')
-        if not item['export']:
-            raise HTTPException(404, detail='no export staged for this short')
-        result = verify(Path(item['export']['path']), identity=item['reviewed_identity'] or 'unavailable')
-        return {'status': result['status'], 'reason': result.get('reason'), 'path': item['export']['path'], 'package': result.get('package')}
 
     @app.get('/batch/review', response_class=HTMLResponse, include_in_schema=False)
     def day_review_page():

@@ -1004,11 +1004,3 @@ regeneration, and new batch worker admission across every plan. Running work
 stops at its next ownership/checkpoint check; the current operation may finish.
 Turn hold off to resume. Hold does not affect unrelated non-batch jobs or approve,
 stage, upload, or publish anything.
-
-**Staged export.** **Stage as ready** also writes `data/batch-exports/<id>-<day>/` containing the
-reviewed `final.mp4`, `thumbnail.jpg` and a `package.json` (title, description, tags, thumbnail
-text, source URLs, QA result, reviewed checksums; `published: false`, `publish_at` as metadata
-only). The folder is built beside its target and swapped in atomically; a failed export leaves
-the short at *approved*. Day review shows the export's status (`current`, `stale` after the
-reviewed artifact changes, `invalid` if a file no longer matches its manifest, or `missing`) with
-an **Open export manifest** link, which re-verifies on every read. Nothing is uploaded or scheduled.
