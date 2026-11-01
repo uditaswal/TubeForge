@@ -62,7 +62,7 @@ class BatchReviewRepository:
                 'production_state': job.state if job else 'not_started', 'state': state,
                 'decision': review.get('decision') if current else None, 'reviewed_identity': identity,
                 'checksum': checksums.get('final'), 'available': available, 'error': error,
-                'qa': qa, 'qa_ok': qa_ok, 'script': package,
+                'qa': qa, 'qa_ok': qa_ok, 'script': package, 'thumbnail_result': options.get('batch_thumbnail'),
                 'preview_url': f'/api/jobs/{job.id}/artifacts/final' if available else None,
                 'thumbnail_url': f'/api/jobs/{job.id}/artifacts/thumbnail' if thumbnail and 'thumbnail' in checksums else None}
 

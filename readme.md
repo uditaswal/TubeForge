@@ -977,3 +977,9 @@ review requirements; it preserves the exact brief and its script allowance.
 An unchanged script may replay its accepted cache. Existing decisions are invalid
 if reviewed artifacts change. Missing thumbnails and unfinished videos are shown
 truthfully; the player stays open during background refresh.
+
+Batch finals also receive a local 1080×1920 portrait thumbnail using the existing
+thumbnail composer. Plan `thumbnail.text` takes precedence over the generated
+package's first nonblank thumbnail option. The visual hint is advisory; no image
+is fetched. A thumbnail failure leaves the video intact and appears as a truthful
+unavailable reason in Day review. Worker restart resumes missing thumbnail work.
