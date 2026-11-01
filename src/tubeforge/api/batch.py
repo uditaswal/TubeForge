@@ -100,7 +100,7 @@ def register_batch_routes(app, runtime, build_request):
         return {'items': items}
 
     from tubeforge.db.batch_review import BatchReviewRepository
-    reviews = BatchReviewRepository(runtime.database.session_factory)
+    reviews = BatchReviewRepository(runtime.database.session_factory, runtime.orchestrator.artifact_root)
 
     @app.get('/api/batch-plans/review', tags=['batch'])
     def day_review(day: date | None = None):
@@ -149,3 +149,28 @@ def register_batch_routes(app, runtime, build_request):
     @app.put('/api/batch-plans/hold', tags=['batch'])
     def set_batch_hold(value: BatchHoldRequest):
         return {'hold': automation.hold(value.hold)}
+
+    @app.get('/api/batch-plans/{short_id}/export', response_class=HTMLResponse, tags=['batch'])
+    def open_export(short_id: str):
+        import html
+        from urllib.parse import quote
+        try:
+            reviews.export_file(short_id, 'package.json')
+        except KeyError as error:
+            raise HTTPException(404, detail=str(error)) from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, detail=str(error)) from error
+        from tubeforge.api.studio_shell import STUDIO_CSS
+        base = '/api/batch-plans/' + quote(short_id, safe='') + '/export/'
+        return '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local staged export</title><style>' + STUDIO_CSS + 'body{max-width:800px;margin:40px auto;padding:0 20px}a{color:var(--cyan)}li{margin:16px 0}</style><h1>Local staged export: ' + html.escape(short_id) + '</h1><p>Reviewed local files. No publication has occurred.</p><ul>' + ''.join('<li><a href="' + base + name + '">' + name + '</a></li>' for name in ['final.mp4', 'thumbnail.jpg', 'package.json']) + '</ul><a href="/batch/review">Return to review</a></html>'
+
+    @app.get('/api/batch-plans/{short_id}/export/{name}', tags=['batch'])
+    def download_export(short_id: str, name: str):
+        from fastapi.responses import FileResponse
+        try:
+            path = reviews.export_file(short_id, name)
+        except KeyError as error:
+            raise HTTPException(404, detail=str(error)) from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, detail=str(error)) from error
+        return FileResponse(path, filename=name)
