@@ -1,14 +1,60 @@
 """Batch intake surface; shares Studio tokens and operator authentication."""
 from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
-_MAIN_HTML = '''<main><h1>Batch plans</h1><a href="/batch/review">Day review queue</a><p>Import shorts for review. Publish dates are metadata only.</p>
+_MAIN_HTML = '''<main>
+<div class="studio-page-head"><div><h1>Batch plans</h1><p class="sub">Import shorts for review. Publish dates are metadata only.</p></div><a href="/batch/review" class="button-link">Day review queue</a></div>
+<section class="panel">
+<h2>Import a plan</h2>
+<p class="sub">One markdown file, one short per heading. Re-importing skips identical IDs and reports conflicts.</p>
 <label for="batchPlan">Plan ID</label><input id="batchPlan" value="default" pattern="[a-z0-9-]{1,80}" required>
-<fieldset><legend>Overnight production</legend><label><input id="autoEnabled" type="checkbox"> Produce automatically</label><label for="autoTime">Local start</label><input id="autoTime" type="time" value="22:00"><label for="autoZone">Time zone</label><input id="autoZone" value="Asia/Kolkata"><label for="autoOffset">Target day offset</label><input id="autoOffset" type="number" min="0" max="7" value="1"><button id="saveAutomation" type="button">Save automatic production</button><p id="automationState" role="status" aria-live="polite">Loading production settings…</p><label><input id="batchHold" type="checkbox"> Hold all batch production</label><button id="saveHold" type="button">Save hold</button><p id="holdState" role="status" aria-live="polite"></p></fieldset>
-<form id="batchForm"><label for="batchFile">Markdown file</label><input id="batchFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="batchText">Markdown plan</label><textarea id="batchText" required></textarea><button id="validate" type="submit">Validate and preview</button><button id="commit" type="button" disabled>Commit import</button></form>
-<label for="day">Day (publish metadata)</label><input id="day" type="date"><button id="produce" type="button">Produce selected shorts</button><p id="progress" role="status"></p><p id="result" role="status" aria-live="polite"></p><div class="table-frame"><table><thead><tr><th>Select / short</th><th>Publish metadata</th><th>Channel</th><th>Length</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div></main>'''
+<form id="batchForm">
+<label for="batchFile">Markdown file</label><input id="batchFile" type="file" accept=".md,.markdown,text/markdown,text/plain">
+<label for="batchText">Markdown plan</label><textarea id="batchText" required></textarea>
+<div class="actions"><button id="validate" type="submit">Validate and preview</button><button id="commit" type="button" class="secondary" disabled>Commit import</button></div>
+</form>
+</section>
+<section class="panel">
+<h2>Overnight production</h2>
+<fieldset>
+<label class="checkbox"><input id="autoEnabled" type="checkbox"> Produce automatically</label>
+<div class="field-grid">
+<div><label for="autoTime">Local start</label><input id="autoTime" type="time" value="22:00"></div>
+<div><label for="autoZone">Time zone</label><input id="autoZone" value="Asia/Kolkata"></div>
+<div><label for="autoOffset">Target day offset</label><input id="autoOffset" type="number" min="0" max="7" value="1"></div>
+</div>
+<div class="actions"><button id="saveAutomation" type="button">Save automatic production</button></div>
+<p id="automationState" class="sub" role="status" aria-live="polite">Loading production settings…</p>
+<label class="checkbox"><input id="batchHold" type="checkbox"> Hold all batch production</label>
+<div class="actions"><button id="saveHold" type="button" class="secondary">Save hold</button></div>
+<p id="holdState" class="sub" role="status" aria-live="polite"></p>
+</fieldset>
+</section>
+<section class="panel">
+<h2>Shorts</h2>
+<div class="day-row"><div><label for="day">Day (publish metadata)</label><input id="day" type="date"></div><button id="produce" type="button">Produce selected shorts</button></div>
+<p id="progress" class="sub" role="status"></p><p id="result" class="sub" role="status" aria-live="polite"></p>
+<div class="table-frame"><table><thead><tr><th>Select / short</th><th>Publish metadata</th><th>Channel</th><th>Length</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
+</section>
+</main>'''
 
 _PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batch plans — TubeForge</title><style>''' + STUDIO_CSS + '''
-main{max-width:1080px;margin:32px auto;padding:0 20px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}th{font-weight:500;color:var(--muted)}.table-frame{overflow:auto}textarea{display:block;width:100%;min-height:200px}button{margin:12px 8px 12px 0} label{display:block;margin:16px 0 6px}#day{display:inline-block;width:auto;margin-right:8px}@media(max-width:640px){table,thead,tbody,tr,td{display:block}thead{display:none}tr{border:1px solid var(--line);border-radius:12px;margin:10px 0;padding:6px}td{border:0;padding:6px 8px;font-size:14px}td:nth-child(2)::before{content:'Publish: ';color:var(--muted)}td:nth-child(3)::before{content:'Channel: ';color:var(--muted)}td:nth-child(4)::before{content:'Length: ';color:var(--muted)}}</style>
+main{max-width:980px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
+.panel h2{margin:0 0 4px}
+.panel>p.sub{margin:0 0 18px}
+.field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:4px 16px;margin-bottom:4px}
+.field-grid label{margin:14px 0 6px}
+.checkbox{display:flex;align-items:center;gap:8px;margin:14px 0;color:#d5e0ee;font-size:12px;font-weight:540}
+.checkbox input{margin:0}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;align-items:center}
+a.button-link{display:inline-flex;align-items:center;flex:none;background:#223346;color:#eaf4ff;border:1px solid #3c5067;border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+a.button-link:hover{background:#2d4258;border-color:#60758c}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}th{font-weight:500;color:var(--muted)}.table-frame{overflow:auto;margin-top:14px}
+textarea{display:block;width:100%;min-height:200px}
+label{display:block;margin:14px 0 6px}
+#day{display:inline-block;width:auto;margin-right:8px}
+.day-row{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:14px}
+.day-row label{margin:0}
+@media(max-width:640px){table,thead,tbody,tr,td{display:block}thead{display:none}tr{border:1px solid var(--line);border-radius:12px;margin:10px 0;padding:6px}td{border:0;padding:6px 8px;font-size:14px}td:nth-child(2)::before{content:'Publish: ';color:var(--muted)}td:nth-child(3)::before{content:'Channel: ';color:var(--muted)}td:nth-child(4)::before{content:'Length: ';color:var(--muted)}}</style>
 '''
 
 

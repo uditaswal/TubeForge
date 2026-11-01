@@ -1,10 +1,29 @@
 """Local review surface. Preserve the open player during silent refresh."""
 from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
-_MAIN_HTML = r'''<main><h1>Day review</h1><p>Review the exact local video. Ready means staged for later publishing.</p><label for="day">Day (publish metadata; leave blank for all)</label><input id="day" type="date"><button id="refresh" type="button">Refresh</button><p id="notice" role="status" aria-live="polite">Loading review queue…</p><div class="review-layout"><ul id="reviewList" aria-label="Day videos"></ul><section id="detail" aria-label="Selected video"><p>Select a short to review its video, QA, and script.</p></section></div></main>'''
+_MAIN_HTML = r'''<main>
+<div class="studio-page-head"><div><h1>Day review</h1><p class="sub">Review the exact local video. Ready means staged for later publishing.</p></div></div>
+<section class="panel">
+<div class="day-row"><div><label for="day">Day (publish metadata; leave blank for all)</label><input id="day" type="date"></div><button id="refresh" type="button" class="secondary">Refresh</button></div>
+<p id="notice" class="sub" role="status" aria-live="polite">Loading review queue…</p>
+</section>
+<div class="review-layout">
+<section class="panel" aria-label="Day videos"><ul id="reviewList"></ul></section>
+<section class="panel" id="detail" aria-label="Selected video"><p>Select a short to review its video, QA, and script.</p></section>
+</div>
+</main>'''
 
 _PAGE_HEAD = r'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Day review — TubeForge</title><style>''' + STUDIO_CSS + r'''
-main{max-width:1160px;margin:32px auto;padding:0 20px}.review-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(0,2fr);gap:24px}#reviewList{list-style:none;padding:0;margin:0}#reviewList button{display:block;text-align:left;width:100%;background:var(--panel);color:inherit;margin:0 0 8px}video{display:block;width:100%;max-height:65vh;background:#000}img{max-width:240px;width:100%;height:auto}pre{white-space:pre-wrap;overflow-wrap:anywhere}#actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}#actions button{min-height:44px}label{display:block}#day{margin:8px 12px 20px 0} @media(max-width:760px){.review-layout{grid-template-columns:1fr}main{margin:16px auto;padding:0 14px}}</style>
+main{max-width:1160px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
+.panel h2,.panel h3:first-child{margin-top:0}
+.day-row{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px}
+.day-row label{margin:0 0 6px}
+.review-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(0,2fr);gap:20px;align-items:start}
+#reviewList{list-style:none;padding:0;margin:0}#reviewList button{display:block;text-align:left;width:100%;background:var(--studio-panel-alt);border:1px solid var(--line);border-radius:9px;color:inherit;margin:0 0 8px;padding:10px 12px}#reviewList li:last-child button{margin-bottom:0}
+video{display:block;width:100%;max-height:65vh;background:#000;border-radius:10px}img{max-width:240px;width:100%;height:auto;border-radius:8px;margin-top:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--studio-input);border:1px solid var(--line);border-radius:9px;padding:12px;font-size:12px}
+#actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}#actions button{min-height:44px}
+label{display:block;margin:14px 0 6px}
+@media(max-width:760px){.review-layout{grid-template-columns:1fr}main{margin:16px auto;padding:0 14px}}</style>
 '''
 
 
