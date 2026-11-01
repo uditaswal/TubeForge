@@ -103,10 +103,21 @@ class _TextExtractor(HTMLParser):
 
 
 class _RejectRedirects(HTTPRedirectHandler):
-    """Prevent an allowlisted source URL from pivoting to another host."""
+    """Prevent an allowlisted source URL from pivoting to another host.
 
-    def redirect_request(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-        raise ProviderValidationError("source redirects are not permitted")
+    Canonicalising redirects (a trailing slash, a moved docs path) stay on the same host and are
+    followed, at most three hops, only over HTTPS without credentials or a custom port. Any
+    redirect to a different host, scheme or port is refused.
+    """
+
+    max_redirections = 3
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        before, after = urlparse(req.full_url), urlparse(newurl)
+        if (after.scheme != "https" or after.username or after.password or after.port not in {None, 443}
+                or (after.hostname or "").casefold() != (before.hostname or "").casefold()):
+            raise ProviderValidationError("source redirects are not permitted")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class SourceIngestor:
@@ -126,7 +137,8 @@ class SourceIngestor:
             raise ProviderValidationError("source host is not allowed")
         try:
             with self._opener.open(Request(str(source.url), headers={"User-Agent": "TubeForge/0.1"}), timeout=self.timeout_seconds) as response:
-                if response.geturl() != str(source.url):
+                final = urlparse(response.geturl())
+                if final.scheme != "https" or (final.hostname or "").casefold() != host or final.port not in {None, 443}:
                     raise ProviderValidationError("source redirects are not permitted")
                 content_type = response.headers.get_content_type()
                 if content_type not in {"text/html", "text/plain"}:
