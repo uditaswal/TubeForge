@@ -15,6 +15,7 @@ import json
 import math
 import os
 import shutil
+import subprocess
 import tempfile
 import time
 from collections.abc import Callable
@@ -206,6 +207,36 @@ def _terminal(sid: str, scene, reveal: list[float], a: float, b: float, accent: 
     return body, anim
 
 
+def _backdrop(index: int, scene, topic, plates_directory: Path | None, manifest: dict, assets: Path, ffmpeg: str = "ffmpeg") -> dict | None:
+    """A blurred, darkened still from the scene's acquired stock plate (hook, and the loop scene reuses the hook's).
+
+    The still is prepared once with FFmpeg (blur and dim baked in, so Chromium does no filtering) and pushed in slowly.
+    Returns None when there is no usable plate, and the scene keeps its plain background. The plate's licence evidence
+    is returned so it can be recorded in the render report.
+    """
+    if plates_directory is None:
+        return None
+    source_index = 0 if scene.template == "loop" else index
+    entry = manifest.get("scenes", {}).get(str(source_index), {})
+    if entry.get("kind") != "stock" or not entry.get("file"):
+        return None
+    path = (plates_directory / entry["file"]).resolve()
+    if not path.is_relative_to(plates_directory.resolve()) or not path.is_file():
+        return None
+    target = assets / f"backdrop-{source_index}.jpg"
+    if not target.exists():
+        filters = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=12,eq=brightness=-0.10:saturation=0.9"
+        command = [ffmpeg, "-y", "-v", "error", *(["-ss", "1.0"] if entry.get("media") == "video" else []), "-i", str(path),
+                   "-frames:v", "1", "-vf", filters, "-q:v", "4", str(target)]
+        try:
+            subprocess.run(command, check=True, timeout=60, capture_output=True)
+        except (OSError, subprocess.SubprocessError):
+            return None
+    evidence = entry.get("evidence", {})
+    return {"file": target.name, "scene_index": index, "plate": entry["file"], "provider": evidence.get("provider"),
+            "asset_id": evidence.get("asset_id"), "license": evidence.get("license_name"), "query": entry.get("query")}
+
+
 def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest: dict) -> dict:
     """Write one self-contained HyperFrames project for the whole Short and report what it used."""
     assets = out / "assets"
@@ -220,6 +251,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
           "function show(id,a,b){tl.set('#'+id,{opacity:1},a);tl.set('#'+id,{opacity:0},b);}", POP]
     captions: list[dict] = []
     heroes: list[dict] = []
+    backdrops: list[dict] = []
 
     for i, scene in enumerate(topic.scenes):
         timing = timeline.timings[i]
@@ -273,8 +305,18 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                     + f'pop("#{sid}pill",{a + .8:.3f});')
         elif template in ("hook", "loop"):
             body = _heading(scene.headline, RED, top=280, size=176)
+            backdrop = _backdrop(i, scene, topic, plates_directory, manifest, assets)
+            if backdrop is not None:
+                backdrops.append(backdrop)
+                body = (f'<div id="{sid}bg" style="position:absolute;left:-60px;top:-60px;width:1200px;height:2040px;'
+                        f'background:url(assets/{backdrop["file"]}) center/cover"></div>'
+                        f'<div style="position:absolute;left:0;top:0;width:1080px;height:1920px;'
+                        f'background:linear-gradient(180deg,rgba(10,11,16,.40) 0%,rgba(10,11,16,.10) 45%,rgba(10,11,16,.55) 100%)"></div>' + body)
+                backdrop_anim = f'tl.fromTo("#{sid}bg",{{scale:1}},{{scale:1.12,duration:{b - a:.2f},ease:"none"}},{a:.3f});'
+            else:
+                backdrop_anim = ""
             chips = list(scene.chips)
-            anim = f'tl.fromTo("#{sid} .h1",{{opacity:0,y:60}},{{opacity:1,y:0,duration:.5,ease:"power3.out"}},{a:.3f});'
+            anim = backdrop_anim + f'tl.fromTo("#{sid} .h1",{{opacity:0,y:60}},{{opacity:1,y:0,duration:.5,ease:"power3.out"}},{a:.3f});'
             for k, chip in enumerate(chips):
                 body += (f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{880 + k * 100}px;background:{RED if k == 0 else "#1b2036"};'
                          f'border:2px solid {RED if k == 0 else "#333a58"};color:#fff;font:400 60px/1 Anton;height:84px;border-radius:14px;text-transform:uppercase">{html.escape(chip)}</div>')
@@ -377,7 +419,7 @@ window.__timelines=window.__timelines||{{}}; window.__timelines["story"]=tl; tl.
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
         "media": {"autoProxy": False}}, indent=2), encoding="utf-8")
-    return {"evidence_quote": heroes}
+    return {"evidence_quote": heroes, "stock_backdrops": backdrops}
 
 
 def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callable[[], bool] = lambda: False,
@@ -416,5 +458,5 @@ def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callab
                 deadline=deadline, cancelled=cancelled)
         scaled.replace(destination)
     return {"scene_count": len(timeline.topic.scenes), "frames": round(timeline.duration * FPS),
-            "duration": timeline.duration, "checks": [check], "evidence_quote": report["evidence_quote"],
+            "duration": timeline.duration, "checks": [check], "evidence_quote": report["evidence_quote"], "stock_backdrops": report.get("stock_backdrops", []),
             "source_fallbacks": [], "style": "story", "render_seconds": time.monotonic() - started}
