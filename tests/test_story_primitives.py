@@ -105,3 +105,22 @@ def test_key_words_get_an_animated_marker_and_other_words_do_not(tmp_path):
     flat_keys = [flag for group in groups for flag in group["keys"]]
     assert [i for i, flag in enumerate(flat_keys) if flag] == [0, 3, 6, 8]
     assert all(len(group["times"]) == len(group["words"]) for group in groups)
+
+
+def test_a_diagram_flow_and_a_terminal_beat_a_captured_source_plate(tmp_path):
+    from pathlib import Path
+    from tubeforge.rendering.shorts.schema import SourceVisual
+    from tubeforge.rendering.shorts.hyperframes_compose import source_treatment  # noqa: F401
+    visual = SourceVisual(kind="source", quote="A quoted passage from the cited source page that is long enough to be valid.")
+    scene = flow(diagram="zigzag", danger=[0], visual=visual, source_ids=["s"])
+    plate = tmp_path / "plate.png"
+    from PIL import Image
+    Image.new("RGB", (400, 600), "white").save(plate)
+    manifest = {"scenes": {"0": {"kind": "source", "file": "plate.png", "url": "https://example.com/x"}}}
+    timeline = story_timeline([scene])
+    timeline.topic.sources = (SimpleNamespace(source_id="s", url="https://example.com/x", name="Example"),)
+    story.build_story(timeline, tmp_path / "p", plates_directory=tmp_path, manifest=manifest)
+    page = (tmp_path / "p" / "index.html").read_text()
+    assert 'id="s0n3"' in page and 'id="s0l1"' in page         # the diagram is drawn
+    assert "hero-0" not in page                                 # not replaced by the screenshot card
+    assert "A quoted passage" in page                           # the source still shows, as a quote

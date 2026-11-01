@@ -30,7 +30,7 @@ from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
 RENDERER_VERSION = "reference-short-v1/render-3"  # sparse caused SFX budget
-HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-3"
+HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-4"
 
 
 def renderer_version(config: ReferenceShortConfig) -> str:

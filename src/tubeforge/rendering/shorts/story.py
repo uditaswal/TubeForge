@@ -116,9 +116,11 @@ def _diagram(sid: str, scene, reveal: list[float], a: float, b: float, accent: s
         for k in range(children):
             boxes.append((60 + k * (width + 30), 900, width, 170))
     else:  # zigzag ladder
-        step = min(200, (1230 - 590 - 128) // max(1, count - 1))
+        quote = isinstance(getattr(scene, "visual", None), SourceVisual)  # a source quote sits under the diagram
+        height, bottom = (112, 1070) if quote else (128, 1230)
+        step = min(200, (bottom - 590 - height) // max(1, count - 1))
         for k in range(count):
-            boxes.append((60 if k % 2 == 0 else 540, 590 + k * step, 410, 128))
+            boxes.append((60 if k % 2 == 0 else 540, 590 + k * step, 410, height))
     body = _heading(scene.heading, accent)
     anim = ""
     setters = ""
@@ -230,6 +232,8 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
         template = scene.template
         label = next((_domain(source_urls.get(s)) for s in scene.source_ids if source_urls.get(s)), None)
         treatment, _ = source_treatment(scene, i, topic, plates_directory, manifest)
+        if template == "terminal" or (template == "flow" and scene.diagram != "stack"):
+            treatment = None  # the diagram or terminal is the picture; the source rides underneath as a quote
         body = anim = ""
 
         def rows(items, top, step, build):
@@ -334,7 +338,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                 body += f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{600 + k * 100}px;background:#1b2036;border:2px solid #333a58;color:{INK}">{html.escape(chip)}</div>'
                 anim += f'pop("#{sid}c{k}",{reveal[min(k, len(reveal) - 1)]:.3f});'
         # A source quote with no captured plate is shown as a labelled quote, never as a screenshot.
-        if treatment is None and isinstance(visual, SourceVisual) and template in ("flow", "checklist", "big_stat", "hook", "loop"):
+        if treatment is None and isinstance(visual, SourceVisual) and template in ("flow", "checklist", "big_stat", "hook", "loop", "terminal"):
             body += f'<div class="note" id="{sid}q" style="top:1130px;font-size:30px;font-style:italic">“{html.escape(visual.quote)}”<br><span style="font-style:normal;font-size:26px">— {html.escape(label or "source")}</span></div>'
             anim += f'pop("#{sid}q",{reveal[-1] + .3:.3f},{{y:20}});'
         divs.append(f'<div id="{sid}" class="scene">{body}</div>')
