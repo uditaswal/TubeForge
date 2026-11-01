@@ -30,7 +30,8 @@ def package(scenes=None, hooks=(), late_stat=False, visuals=(0, 2, 3, 5), legacy
     return SimpleNamespace(reference_short=ShortsTopic.model_validate(data), hook_options=hooks)
 
 
-GOOD = {}
+YOU = "This synthetic example shows you what readable graphics and captions need."
+GOOD = {i: {"vo": YOU, "caption": YOU} for i in (1, 2, 3)}   # a clean script also speaks to the viewer (fact-dump gate)
 
 
 def test_clean_script_passes():
