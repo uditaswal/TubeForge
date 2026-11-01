@@ -37,21 +37,29 @@ strict JSON script + scene plan; all pixels, audio and encoding are local and co
 - Publishing page: title/description suggestion (`pipeline/publication_suggest.py`), thumbnails (`pipeline/thumbnail.py`). Instagram publisher NOT STARTED.
 
 ## Status in one line each (details: local `doc-internal/handoff-notes.md`)
-IMPLEMENTED, not operator-watched: Claude script owner + model picker, hook/craft gates, writers' room (editor applied-path not yet seen live), real-imagery plates (Pixabay + local stock library + source screenshots + code cards), brand logos, motion/icons, preview→final→publication prep (job `8c23e099…`), upload-ready title/description/thumbnail, Shorts thumbnails, display options, mascot, loop/debate ending. Nothing approved or published.
-
+Merged to `main`, IMPLEMENTED and not operator-VERIFIED: Claude script owner + model picker, hook/craft gates, writers' room, real-imagery plates,
+HyperFrames **Story** style (diagram/terminal/word-timed key-word highlight; a diagram or terminal scene beats a captured source plate), voice delivery cues
+(`[pause]`, `[breath]`, `*stress*`, `[whisper]`; scripts barely use them yet), spoken-form rules (acronyms by letter name, versions, years),
+batch plans (import → queue → day review → checksum-bound staged export, thumbnails, opt-in overnight production + hold; `docs/batch-plans.md`),
+Claude spend cap (rolling 24 h: 40 calls, $8, $1.50/call; env `TUBEFORGE_CLAUDE_*`, ledger `data/run/claude/usage-ledger.jsonl`).
+Pilot: one 60 s Log4Shell Short rendered end to end on 1 Nov (loudness/loop checks pass). Nothing is approved or published.
 
 ## Next step
-1. **Merge/validate on `dev`:** restart `web`, `worker`, `scheduler` from the dev worktree after `docker compose build` (shared image `tubeforge-app:local`), then confirm `data/logs/*.log` is being written (`docs/operations/logging.md`).
-2. **Story video style:** watch the HyperFrames-rendered Story output end to end; accept or request repair before more renderer work. The renderer is a default-off prototype until the operator prefers it.
-3. **Reference-quality work:** continue the design-token step only after the operator accepts the evidence-quote scene.
-4. **Script generation:** create a new job from the sanitized brief when retrying; never reset a failed request's attempt allowance.
-5. Scheduler → private YouTube, then Instagram (not started).
-
+1. **Track B, channel safety and originality** (local plan `doc-internal/design_doc/tubeforge-publishing-design.md`, "PRIORITY TRACK B"): Claude takes M-S1–M-S4
+   (layout families chosen by content, originality gates, audio rotation + licence trail, truthful encode metadata + cue adoption); Codex takes M-S5–M-S8
+   (disclosure/compliance record in the export, batch repetition report, cadence guard, checklist doc) on `feature/channel-safety`. Do NOT add detection-evasion
+   (random EXIF/encoder spoofing, fingerprint jitter); metadata stays truthful.
+2. **Batch gaps:** plans ignore their `sources:` list (every batch job runs web research, which fails on JS-rendered docs); run the 3-video batch pilot and a 7-day run.
+3. **Operator watches pending:** voice cue A/B, the Story output, evidence-quote step (then design tokens in `doc-internal/video-quality/reference-quality-plan.md`).
+4. `qa_check.py` still uses an old 25–45 s duration window (Shorts profile is 30–90 s); fixing it means a skill change and a host wheel redeploy.
+5. Publishing (scheduler → private YouTube, then Instagram) stays deferred until video generation is accepted.
 
 ## Gotchas learned
-- Kill/restart the Claude runner after *any* change to prompts/layout (it imports code at start): `scripts/run_claude_runner.sh`.
+- Restart everything with `scripts/restart_stack.sh` (rebuild image, migrate, web/worker/scheduler, Claude runner; no sudo needed). The runner imports code at start, so restart it after any prompt/layout change.
   Restart `web` and `worker` too after schema changes (they import `src` once).
-- Failed generations burn the two-attempt allowance per exact request; change the brief to start a new request, never reset counts.
+- Failed generations burn the two-attempt allowance per exact request *source packet*; change the brief or sources for a new request, never reset counts. Re-submitting an identical accepted request reuses the cached script (no Claude call).
+- Source fetching follows same-host HTTPS redirects only; a cross-host redirect skips that researched source (at least two usable sources are still required).
+- Dashboard and review viewer (`:62065`, `:8082`) are loopback-only; the operator reaches them over an SSH port-forward.
 - Voice+alignment run fine at 2 GB; under heavy host swap Whisper can fail (now retried once, then logged estimate fallback).
 - Worker image needs extras `alignment,reference-renderer` (`docker compose build worker web migrate scheduler` after pulling).
 - Dashboard test login: create a temporary admin (`tubeforge create-admin`), delete it and its sessions afterwards.
