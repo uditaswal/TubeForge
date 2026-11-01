@@ -9,6 +9,12 @@ Description=TubeForge Claude script runner (user-level)
 WorkingDirectory=%h/docker/tubeforge/tubeforge-dev
 Environment=TUBEFORGE_PYTHON=%h/docker/tubeforge/Youtube_Video_Producer/.venv-benchmark/bin/python
 ExecStart=%h/docker/tubeforge/tubeforge-dev/scripts/run_claude_runner.sh
+# Spending limits (rolling 24 h; each defaults to the value shown, and an invalid or zero value falls
+# back to the default, so the runner can never be unlimited by accident). A refused call burns no
+# script attempt and the job retries later. Ledger: data/run/claude/usage-ledger.jsonl.
+#Environment=TUBEFORGE_CLAUDE_MAX_CALLS_PER_DAY=40
+#Environment=TUBEFORGE_CLAUDE_MAX_USD_PER_DAY=8.00
+#Environment=TUBEFORGE_CLAUDE_MAX_USD_PER_CALL=1.50
 Restart=on-failure
 
 [Install]

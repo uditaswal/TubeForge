@@ -90,6 +90,11 @@ def resolve_model(request) -> tuple[str, str]:
     return MODELS[request.request.script_model or DEFAULT_CHOICE]
 
 
+from tubeforge.claude_budget import BudgetExceededError, ClaudeBudget  # noqa: E402
+
+BUDGET = ClaudeBudget.from_env()
+
+
 def build_command(schema: dict, *, model: str, effort: str | None = None, web_search: bool = False) -> list[str]:
     command = [claude_binary(), "-p", "--model", model, "--output-format", "json",
                "--json-schema", json.dumps(schema, separators=(",", ":")),
@@ -99,11 +104,14 @@ def build_command(schema: dict, *, model: str, effort: str | None = None, web_se
         command += ["--effort", effort]
     if web_search:
         command += ["--allowedTools", "WebSearch"]
+    command += ["--max-budget-usd", f"{BUDGET.max_usd_per_call:.2f}"]  # the CLI stops a single call at this spend
     return command
 
 
 def call_claude(prompt: str, schema: dict, *, model: str, effort: str | None = None, web_search: bool = False) -> tuple[dict, dict]:
     """Run one print-mode call; return (structured output, usage evidence)."""
+    BUDGET.check()
+    BUDGET.record(usd=None, label="launch")  # counted before launch so failed or timed-out calls still count
     with tempfile.TemporaryDirectory(prefix="tubeforge-claude-") as cwd:
         try:
             completed = subprocess.run(build_command(schema, model=model, effort=effort, web_search=web_search), input=prompt.encode(),
@@ -133,6 +141,7 @@ def call_claude(prompt: str, schema: dict, *, model: str, effort: str | None = N
         if isinstance(model_usage, dict):
             searches += int(model_usage.get("webSearchRequests") or 0)
     usage["web_search_requests"] = searches
+    BUDGET.record(usd=usage.get("total_cost_usd"), label="cost", calls=0)
     return structured, usage
 
 
@@ -258,6 +267,7 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
     """
     from pydantic import ValidationError
     model, effort = (model, None) if model else resolve_model(request)
+    BUDGET.check(headroom_calls=5)  # a job (angle, script, repair, editor) must fit before any attempt is consumed
     version = request.request.prompt_version
     schema = codex_output_schema(envelope=version in CONTENT_ENVELOPE_TEMPLATES, reference=version == "m6-content-v8", keep_lengths=True)
     usage_total: dict[str, object] = {"attempts": 0, "total_cost_usd": 0.0}
@@ -340,6 +350,7 @@ def run_research(request: GenerateShortsScriptRequest, *, model: str | None = No
     prompt = research_prompt(request.request)
     if len(prompt) > 60_000:
         raise ValueError("research brief exceeds prompt limit")
+    BUDGET.check()
     consume_invocation(request, root)
     started = time.monotonic()
     structured, usage = call_claude(prompt, codex_output_schema_for_research(ResearchResult), model=model, effort=effort, web_search=True)
