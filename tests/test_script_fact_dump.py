@@ -97,3 +97,18 @@ def test_prompt_states_the_two_limits_the_writer_kept_breaking():
     source = open(prompts.__file__).read()
     assert "terminal lines at most 26 characters in total" in source and "log4j2.formatMsgNoLookups=true" in source
     assert "DIFFERENT words than the voice-over" in source and "PATCH ONE FAILED" in source
+
+
+def test_a_score_without_its_scale_is_flagged_and_an_explained_one_is_not():
+    from tubeforge.providers.content.craft import unexplained_score_problems
+    bad = package(["Log4Shell scored a perfect ten, and all it took was logging text.", *GOOD[1:]])
+    flagged = unexplained_score_problems(bad)
+    assert len(flagged) == 1 and "scene 1" in flagged[0] and "what it measures" in flagged[0]
+    assert unexplained_score_problems(package(["Apache gave it the top danger rating, ten out of ten.", *GOOD[1:]])) == []
+    assert unexplained_score_problems(package(["It was rated critical by the vendor.", *GOOD[1:]])) == []          # no figure, nothing to explain
+    assert unexplained_score_problems(package(["Apache scored it a perfect ten.", *GOOD[1:]]))                     # the second pilot-script line
+
+
+def test_filler_phrases_are_banned():
+    from tubeforge.providers.content.craft import BANNED_PHRASES
+    assert "think about that" in BANNED_PHRASES

@@ -175,7 +175,7 @@ EDITOR_INSTRUCTIONS = (
     "('120 thousand dollars', '3.4 times', 'megabytes'; no $ symbol, no x multipliers, no MB or ms abbreviations, no thousands commas). "
     "(7) listener test: read the narration aloud as one continuous voice-over. If a scene sounds like a list of facts, versions or figures, or repeats its neighbours' sentence frame, "
     "rewrite it as one plain explanation of what happened and why it matters to the viewer; keep at most one number per scene and four in the whole narration (drop extra figures "
-    "from the voice-over; the claim, its claim_id and its source stay, and the figures belong in the scene's on-screen text); introduce at most two technical terms per scene; "
+    "from the voice-over; the claim, its claim_id and its source stay, and the figures belong in the scene's on-screen text); every score, rating or ranking must say what it measures and its scale ('the top danger rating, ten out of ten', never 'a perfect ten'); introduce at most two technical terms per scene; "
     "make at least a third of the middle scenes speak to the viewer ('you', 'your') or say what it means for them; no three scenes start with the same word. "
     "Do not add or change any fact, number, claim_id, source_id, visual quote or reveal_words index meaning; keep every field valid; keep the narration within 78-92 words total. "
     "If the draft is already strong, change little."

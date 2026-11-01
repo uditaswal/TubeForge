@@ -15,6 +15,7 @@ BANNED_PHRASES = (
     "buckle up", "stay tuned", "mind-blowing", "mind blowing", "unlock", "unleash", "revolutionize",
     "revolutionise", "delve", "landscape", "let that sink in", "you won't believe", "it's no secret",
     "at the end of the day", "the secret sauce", "not just", "elevate", "supercharge", "harness the power",
+    "think about that", "read that again", "let that settle",
     # Insider jargon a general viewer does not know (explain it in plain words instead).
     "cutover", "paradigm", "synergy", "leverage", "bandwidth", "idempotent", "orchestrate",
 )
@@ -171,6 +172,7 @@ def craft_problems(package) -> list[str]:
     problems += visual_problems(package)
     problems += thumbnail_problems(package)
     problems += fact_dump_problems(package)
+    problems += unexplained_score_problems(package)
     # One copy of the words: a heading that just repeats the narration adds nothing to the frame.
     for index, scene in enumerate(scenes[1:-1], 2):
         heading = _content(getattr(scene, "heading", ""))
@@ -210,6 +212,23 @@ def _jargon(text: str) -> set[str]:
             if JARGON.fullmatch(token) and not (position == 0 and token.istitle()) and token not in {"I", "OK"}:
                 found.add(token.casefold())
     return found
+
+
+SCORE_WORDS = re.compile(r"\b(scor(?:e|es|ed|ing)|rated|rating|ranked|ranking|graded|grade)\b|\bperfect (?:ten|10|score)\b", re.I)
+SCALE_WORDS = re.compile(r"\b(out of|scale|percent|per cent|points?|percentile)\b|\d\s?/\s?\d+", re.I)
+FIGURE = re.compile(r"\b(\d[\d.,]*|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|hundred|thousand|million|billion)\b", re.I)
+
+
+def unexplained_score_problems(package) -> list[str]:
+    """A score, rating or rank is meaningless unless the sentence says what it measures and the scale ("ten out of ten on the danger scale")."""
+    problems: list[str] = []
+    for index, scene in enumerate(package.reference_short.scenes, 1):
+        for sentence in re.split(r"(?<=[.!?])\s+", scene.vo):
+            if SCORE_WORDS.search(sentence) and FIGURE.search(sentence) and not SCALE_WORDS.search(sentence):
+                problems.append(f"scene {index} gives a score without saying what it measures or its scale ({sentence.strip()!r}); a viewer hears it once, so say "
+                                "what is being scored and out of what ('the top danger rating, ten out of ten')")
+                break
+    return problems
 
 
 def fact_dump_problems(package) -> list[str]:

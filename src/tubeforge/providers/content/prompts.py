@@ -181,7 +181,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             "hook with a stake; why this affects the viewer (say 'you' or 'your' in at least a third of the middle scenes); how it works, told through ONE concrete example or analogy "
             "in plain words (what the attacker or engineer actually does, step by step); the twist or the limit; what to do. One idea per scene. "
             "NUMBERS: at most one number per scene and at most four in the whole narration. Keep only the figures that carry the story, round them, and say what they mean "
-            "('about nine in ten', 'three fixes in three weeks'). Never read out a run of version numbers, dates or figures; put lists, version tables and extra figures in the scene's "
+            "('about nine in ten', 'three fixes in three weeks'). Never give a score, rating or ranking without saying what it measures and its scale: not 'it scored a perfect ten' but 'it got the top danger rating, ten out of ten'; a viewer hears every figure once and cannot look it up. Never read out a run of version numbers, dates or figures; put lists, version tables and extra figures in the scene's "
             "visuals (flow nodes, checklist items, source quote) instead of the voice-over. "
             "JARGON: at most two technical terms or acronyms per scene, each explained in a few plain words the first time it appears. "
             "SOURCES: do not walk through the source in order; pick the two or three facts that carry the story and summarise the rest. "
