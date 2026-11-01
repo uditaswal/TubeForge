@@ -52,7 +52,8 @@ Pilot: one 60 s Log4Shell Short rendered end to end on 1 Nov (loudness/loop chec
 2. **Batch gaps:** plans ignore their `sources:` list (every batch job runs web research, which fails on JS-rendered docs); run the 3-video batch pilot and a 7-day run.
 3. **Operator watches pending:** voice cue A/B, the Story output, evidence-quote step (then design tokens in `doc-internal/video-quality/reference-quality-plan.md`).
 4. `qa_check.py` still uses an old 25–45 s duration window (Shorts profile is 30–90 s); fixing it means a skill change and a host wheel redeploy.
-5. Publishing (scheduler → private YouTube, then Instagram) stays deferred until video generation is accepted.
+5. **Batch UI overhaul** (Track C, M-U1–M-U4, Claude): Batch plans and Day review look poor to the operator; redesign after Codex's M-S5–M-S8 land.
+6. Publishing (scheduler → private YouTube, then Instagram) stays deferred until video generation is accepted.
 
 ## Gotchas learned
 - Restart everything with `scripts/restart_stack.sh` (rebuild image, migrate, web/worker/scheduler, Claude runner; no sudo needed). The runner imports code at start, so restart it after any prompt/layout change.
