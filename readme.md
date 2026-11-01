@@ -983,3 +983,11 @@ thumbnail composer. Plan `thumbnail.text` takes precedence over the generated
 package's first nonblank thumbnail option. The visual hint is advisory; no image
 is fetched. A thumbnail failure leaves the video intact and appears as a truthful
 unavailable reason in Day review. Worker restart resumes missing thumbnail work.
+
+**Staged export.** **Stage as ready** also writes `data/batch-exports/<id>-<day>/` containing the
+reviewed `final.mp4`, `thumbnail.jpg` and a `package.json` (title, description, tags, thumbnail
+text, source URLs, QA result, reviewed checksums; `published: false`, `publish_at` as metadata
+only). The folder is built beside its target and swapped in atomically; a failed export leaves
+the short at *approved*. Day review shows the export's status (`current`, `stale` after the
+reviewed artifact changes, `invalid` if a file no longer matches its manifest, or `missing`) with
+an **Open export manifest** link, which re-verifies on every read. Nothing is uploaded or scheduled.
