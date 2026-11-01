@@ -31,10 +31,10 @@ button.small{padding:8px 11px;font-size:12px}
 .studio-workspace{margin:0 2px 23px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:#dbe8f6;font-size:11px;font-weight:650;letter-spacing:.02em}
 .studio-nav-label{padding:0 12px;margin:0 0 8px;color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .studio-nav{display:grid;gap:4px}
-.studio-nav button{position:relative;width:100%;min-height:42px;margin:0;padding:10px 12px;text-align:left;background:transparent;color:var(--muted);border:1px solid transparent;border-radius:8px;font-size:12px;font-weight:560;box-shadow:none}
-.studio-nav button:hover:not(:disabled){background:var(--panel);color:#edf3fb;transform:none}
-.studio-nav button[aria-current=page]{background:#20332e;border-color:#344b40;color:var(--cyan)}
-.studio-nav button[aria-current=page]::after{content:"";position:absolute;right:12px;top:50%;width:5px;height:5px;border-radius:50%;background:var(--cyan);transform:translateY(-50%)}
+.studio-nav button,.studio-nav a{position:relative;display:block;width:100%;min-height:42px;margin:0;padding:10px 12px;text-align:left;background:transparent;color:var(--muted);border:1px solid transparent;border-radius:8px;font-size:12px;font-weight:560;box-shadow:none;text-decoration:none;box-sizing:border-box;line-height:22px}
+.studio-nav button:hover:not(:disabled),.studio-nav a:hover{background:var(--panel);color:#edf3fb;transform:none;text-decoration:none}
+.studio-nav button[aria-current=page],.studio-nav a[aria-current=page]{background:#20332e;border-color:#344b40;color:var(--cyan)}
+.studio-nav button[aria-current=page]::after,.studio-nav a[aria-current=page]::after{content:"";position:absolute;right:12px;top:50%;width:5px;height:5px;border-radius:50%;background:var(--cyan);transform:translateY(-50%)}
 .studio-sidebar-foot{margin-top:auto;padding:17px 10px 3px;color:var(--muted);font-size:11px;line-height:1.5;border-top:1px solid var(--line)}
 .studio-main{margin-left:228px;min-width:0;min-height:100vh}
 .studio-topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:16px;height:70px;padding:0 30px;border-bottom:1px solid var(--line);background:var(--bg);margin:0}

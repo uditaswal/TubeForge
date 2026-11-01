@@ -538,6 +538,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response = await call_next(request)
             status_code = response.status_code
             response.headers["x-request-id"] = request_id
+            if response.headers.get("content-type", "").startswith("text/html"):
+                # Dashboard pages are per-session and change on every deploy; never let a
+                # browser serve a stale cached copy after a restart (this caused an
+                # operator-visible "my change didn't land" false alarm once).
+                response.headers["Cache-Control"] = "no-store"
             return response
         except Exception:
             http_logger.exception("http_request_failed", extra={"event": "http_request", "method": request.method, "path": request.url.path})
@@ -1364,7 +1369,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const toggle=document.createElement('button');toggle.type='button';toggle.className='small secondary';toggle.id='toggleMarkdownMode';toggle.textContent='Paste a markdown plan instead';toggle.style.margin='4px 0 14px';
           form.before(toggle);
           const mdPanel=document.createElement('div');mdPanel.id='markdownModePanel';mdPanel.hidden=true;
-          mdPanel.innerHTML='<label for="studioMarkdownFile">Markdown file</label><input id="studioMarkdownFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="studioMarkdownText">Markdown plan (same format as Batch plans)</label><textarea id="studioMarkdownText" required></textarea><button id="studioMarkdownSubmit" type="button">Validate and create video</button><button id="studioMarkdownBack" type="button" class="secondary">Use the structured form instead</button><p id="studioMarkdownStatus" class="notice" role="status" aria-live="polite"></p>';
+          const mdExample='## Short title\n\n```yaml\nid: my-short-id\ntitle: "Why Amazon Uses DynamoDB for Some Workloads"\nconcept: "SQL vs NoSQL: scalability and schema flexibility"\nlength_s: 60\nending: loop\nhook: "Billions of products load instantly. Is it really one relational database?"\nbeats:\n  - {t: "0-10", point: "Hook: how a product page loads fast at huge scale"}\n  - {t: "10-40", point: "Strict relational schemas get costly at huge read volume; key-value stores trade guarantees for scale"}\n  - {t: "40-60", point: "Use a key-value store for high-scale reads; keep SQL where you need joins and strong consistency"}\ncta: "Full deep-dive coming in the long-form video"\nclaims_to_verify:\n  - "Amazon uses DynamoDB for parts of its catalog and still uses relational databases elsewhere"\nsources: []\nthumbnail: {text: "SQL Dies at Scale?", visual: "SQL logo vs NoSQL logo with a VS badge"}\ntags: [system design, sql, nosql]\n```';
+          mdPanel.innerHTML='<p class="sub">One <code>## Heading</code> plus exactly one fenced <code>```yaml</code> block, same format as Batch plans (<a href="/batch" target="_blank" rel="noopener">docs/batch-plans.md</a>). Required: <code>id, title, concept, beats: [{t, point}]</code>. Optional: <code>length_s</code> (30&ndash;90, default 60), <code>ending</code> (loop/debate), <code>channel</code>, <code>publish_at</code>, <code>hook</code>, <code>cta</code>, <code>claims_to_verify</code>, <code>sources</code>, <code>thumbnail: {text, visual}</code>, <code>tags</code>, <code>narration</code>.</p><label for="studioMarkdownFile">Markdown file</label><input id="studioMarkdownFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="studioMarkdownText">Markdown plan (same format as Batch plans)</label><textarea id="studioMarkdownText" required placeholder="'+mdExample.replace(/"/g,'&quot;')+'"></textarea><button id="studioMarkdownSubmit" type="button">Validate and create video</button><button id="studioMarkdownBack" type="button" class="secondary">Use the structured form instead</button><p id="studioMarkdownStatus" class="notice" role="status" aria-live="polite"></p>';
           form.after(mdPanel);
           function setMode(markdown){form.hidden=markdown;mdPanel.hidden=!markdown;toggle.hidden=markdown;}
           toggle.onclick=()=>setMode(true);
