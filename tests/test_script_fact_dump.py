@@ -90,3 +90,10 @@ def test_scorecard_separates_the_pilot_from_a_plain_script():
     assert bad["version_numbers"] == 3 and good["version_numbers"] == 0
     assert bad["fact_dump_problems"] > 0 == good["fact_dump_problems"]
     assert good["viewer_address_share"] > bad["viewer_address_share"]
+
+
+def test_prompt_states_the_two_limits_the_writer_kept_breaking():
+    from tubeforge.providers.content import prompts
+    source = open(prompts.__file__).read()
+    assert "terminal lines at most 26 characters in total" in source and "log4j2.formatMsgNoLookups=true" in source
+    assert "DIFFERENT words than the voice-over" in source and "PATCH ONE FAILED" in source
