@@ -64,3 +64,7 @@ def test_built_in_music_beds_are_not_catalog_tracks():
     with pytest.raises(ProviderValidationError, match="unavailable"):
         catalog_track(catalog, "Missing Track")
     assert catalog_track(SimpleNamespace(resolve=lambda name: f"record:{name}"), "Real Track") == "record:Real Track"
+
+
+def test_batch_requests_render_in_the_story_style(settings):
+    assert build_batch_request(short(sources=[]), settings).video_style == "story"

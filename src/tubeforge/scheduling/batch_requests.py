@@ -11,7 +11,8 @@ def build_batch_request(short, settings):
     brief = dict(title=short.title,
         notes=('Unverified operator batch brief: ' + json.dumps(short.model_dump(mode='json'), ensure_ascii=False),),
         angle=short.concept, duration_seconds=short.length_s, preset=preset,
-        review_mode='manual', ending=short.ending, channel_identity=short.channel)
+        review_mode='manual', ending=short.ending, channel_identity=short.channel,
+        video_style='story')  # the approved look; Classic is the legacy renderer
     request = None
     if short.sources:
         # The plan's own sources become the evidence (page text is read at request time), so no web research runs.
