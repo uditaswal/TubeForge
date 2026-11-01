@@ -23,8 +23,33 @@ def file_checksum(path: str) -> str:
 
 
 class BatchReviewRepository:
-    def __init__(self, sessions):
+    def __init__(self, sessions, export_root=None):
         self.sessions = sessions
+        self.export_root = Path(export_root) if export_root is not None else None
+
+    def _export_status(self, options, identity):
+        record = options.get('batch_export')
+        if not record:
+            return None
+        from tubeforge.batch_export import verify
+        if identity is None:
+            return {'status': 'stale', 'reason': 'reviewed artifact is unavailable or changed', 'path': record['path']}
+        result = verify(Path(record['path']), identity=identity)
+        return {'status': result['status'], 'reason': result.get('reason'), 'path': record['path']}
+
+    def _write_export(self, session, row, options, current, actor):
+        """Stage the exact approved artifacts; raises so a failed export never records 'ready'."""
+        if self.export_root is None:
+            return None
+        from tubeforge.batch_export import build_package, folder_name, write_export
+        artifacts = {a.name: a for a in session.scalars(select(ArtifactRecord).where(ArtifactRecord.job_id == row.generation_job_id))}
+        thumb = artifacts.get('thumbnail')
+        checksums = {name: current['checksums'][name] for name in ('final', 'script', 'thumbnail') if name in current['checksums']}
+        thumb_text = (options.get('batch_thumbnail') or {}).get('text')
+        package = build_package(short=current['short'], job_id=row.generation_job_id, package=current['script'], qa=current['qa'] or {},
+                                checksums=checksums, identity=current['reviewed_identity'], actor=actor, thumbnail_text=thumb_text)
+        return write_export(self.export_root, name=folder_name(current['short']), final=Path(artifacts['final'].path),
+                            thumbnail=Path(thumb.path) if thumb is not None and 'thumbnail' in checksums else None, package=package)
 
     def _snapshot(self, session, topic):
         options = json.loads(topic.options_json)
@@ -63,6 +88,7 @@ class BatchReviewRepository:
                 'decision': review.get('decision') if current else None, 'reviewed_identity': identity,
                 'checksum': checksums.get('final'), 'available': available, 'error': error,
                 'qa': qa, 'qa_ok': qa_ok, 'script': package, 'thumbnail_result': options.get('batch_thumbnail'),
+                'checksums': checksums, 'export': self._export_status(options, identity),
                 'preview_url': f'/api/jobs/{job.id}/artifacts/final' if available else None,
                 'thumbnail_url': f'/api/jobs/{job.id}/artifacts/thumbnail' if thumbnail and 'thumbnail' in checksums else None}
 
@@ -122,6 +148,10 @@ class BatchReviewRepository:
                 state, decision = 'needs_review', 'regenerated'
             else:
                 raise ValueError('unknown review action')
+            if action == 'ready':
+                exported = self._write_export(session, row, options, current, actor)
+                if exported is not None:
+                    options['batch_export'] = {**exported, 'at': datetime.now(UTC).isoformat()}
             options['batch_review'] = {'state': state, 'decision': decision, 'identity': identity if action != 'regenerate' else None,
                                        'checksum': current['checksum'], 'actor': actor, 'at': datetime.now(UTC).isoformat()}
             row.options_json = json.dumps(options, sort_keys=True)
