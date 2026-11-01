@@ -353,7 +353,9 @@ class JobRepository:
                 batch_topic.generation_job_id == PipelineJobRecord.id,
                 func.json_extract(batch_topic.options_json, "$.batch_plan.id").is_not(None),
                 or_(and_(PipelineJobRecord.state == JobState.FINAL_READY.value,
-                         func.json_extract(batch_topic.options_json, "$.batch_qa").is_not(None)),
+                         func.json_extract(batch_topic.options_json, "$.batch_qa").is_not(None),
+                         or_(func.json_extract(batch_topic.options_json, "$.batch_thumbnail").is_not(None),
+                             func.json_extract(batch_topic.options_json, "$.batch_history") == 1)),
                     exists(select(earlier_topic.id).join(earlier_job, earlier_job.id == earlier_topic.generation_job_id).where(
                         func.json_extract(earlier_topic.options_json, "$.batch_plan.id").is_not(None),
                         or_(earlier_job.created_at < PipelineJobRecord.created_at,

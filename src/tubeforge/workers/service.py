@@ -50,6 +50,7 @@ class WorkerService:
             from tubeforge.db.batch_plans import BatchPlanRepository
             batch = BatchPlanRepository(self.jobs._session_factory).for_job(job.id)
             if batch is not None and job.state in {JobState.FINAL_READY, JobState.FAILED_VALIDATION, JobState.FAILED_EXHAUSTED, JobState.CANCELLED}:
+                self._batch_thumbnail(job, guard)
                 self._batch_qa(job, guard)
                 return job
             with job_context(job.id):
@@ -63,6 +64,7 @@ class WorkerService:
             from tubeforge.db.batch_plans import BatchPlanRepository
             if BatchPlanRepository(self.jobs._session_factory).for_job(job.id) is not None:
                 self._record(job.id, "batch_run_finished", elapsed_seconds=round(time.perf_counter() - started, 3), state=result.state.value)
+            self._batch_thumbnail(result, guard)
             self._batch_qa(result, guard)
             _event("job_run_finished", job_id=job.id, state=result.state.value, duration_ms=round((time.perf_counter() - started) * 1000, 1), **process_stats())
             if result.state is JobState.FAILED_RETRYABLE:
@@ -98,6 +100,11 @@ class WorkerService:
             latest = self.jobs.get(job.id)
             if latest.claim_owner == self.worker_id and latest.state is not JobState.FAILED_RETRYABLE:
                 self.jobs.release_claim(job.id, self.worker_id)
+
+    def _batch_thumbnail(self, job, guard):
+        if job.state is JobState.FINAL_READY:
+            from tubeforge.workers.batch_thumbnail import ensure_thumbnail
+            ensure_thumbnail(self.jobs._session_factory, job.id, getattr(self.orchestrator, 'artifact_root', None), self.worker_id, guard)
 
     def _batch_qa(self, job, guard):
         from tubeforge.db.batch_plans import BatchPlanRepository
