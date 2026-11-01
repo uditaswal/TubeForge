@@ -2,7 +2,7 @@
 # Layers run from least to most frequently changed, so editing source never reinstalls the heavy
 # dependencies (onnxruntime, ctranslate2, kokoro, piper, playwright...):
 #   1 system packages -> 2 Node + HyperFrames -> 3 Python dependencies -> 4 project source.
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/src PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
