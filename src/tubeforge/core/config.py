@@ -655,6 +655,8 @@ class ReferenceShortConfig(BaseModel):
     pronunciation_check: Literal["off", "advisory"] = "advisory"
     # A short silence before and after spelled-out acronyms so the letters stay intelligible.
     acronym_gaps: Literal["off", "gaps-v1"] = "gaps-v1"
+    # Only these terms get the gap (it costs ~0.3 s per split); grow it when the pronunciation report flags a word.
+    acronym_gap_terms: list[str] = Field(default_factory=lambda: ["ldap", "log4j"])
 
 
 class PixabayConfig(BaseModel):

@@ -33,23 +33,30 @@ class Segment:
     breath_before: bool = False
 
 
-ACRONYM_GAP_BEFORE, ACRONYM_GAP_AFTER = 0.15, 0.20
+ACRONYM_GAP_BEFORE, ACRONYM_GAP_AFTER = 0.08, 0.10
+_PUNCTUATED = (",", ".", ";", ":", "!", "?", "\u2014", ")", "\u2026")
 
 
-def spelling_gaps(applied: Sequence[dict], word_count: int) -> tuple[Cue, ...]:
-    """Short silences around spelled-out or multi-word replacements ("you ar el", "jay en dee eye").
+def spelling_gaps(applied: Sequence[dict], display_words: Sequence[str], terms: Sequence[str] = ()) -> tuple[Cue, ...]:
+    """Short silences around the *listed* hard-to-hear replacements only (``terms``, case-insensitive).
 
-    Letters spoken as words run into the sentence and become unintelligible; a beat before and after lets the
-    listener hear them as one unit. Anchors are display-word indices, like script cues.
+    Splitting speech into pieces costs roughly 0.3 s per boundary whatever the gap, and most acronyms are heard
+    fine without one, so gaps are opt-in per term. The list is data-driven: LDAP ("el dap") and Log4j were the words
+    Whisper lost without a gap ("over LDAP" came back as "app"). A side that already has punctuation (``JNDI,``) keeps
+    its natural pause and gets no extra gap. Anchors are display-word indices, like script cues.
     """
+    wanted = {term.casefold() for term in terms}
     gaps: dict[int, float] = {}
+    count = len(display_words)
     for row in applied:
         if row.get("rule") not in {"acronym", "lexicon"} or len(str(row.get("spoken", "")).split()) < 2:
             continue
         index = int(row["display_index"])
-        if index > 0:
+        if display_words[index].strip(".,;:!?\"'()").casefold() not in wanted:
+            continue
+        if ACRONYM_GAP_BEFORE and index > 0 and not display_words[index - 1].endswith(_PUNCTUATED):
             gaps[index] = max(gaps.get(index, 0.0), ACRONYM_GAP_BEFORE)
-        if index + 1 < word_count:
+        if ACRONYM_GAP_AFTER and index + 1 < count and not display_words[index].endswith(_PUNCTUATED):
             gaps[index + 1] = max(gaps.get(index + 1, 0.0), ACRONYM_GAP_AFTER)
     return tuple(Cue(kind="pause", at=at, seconds=seconds) for at, seconds in sorted(gaps.items()))
 

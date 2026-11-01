@@ -190,26 +190,25 @@ def test_a_video_keeps_at_most_two_whispers():
     assert all(s["vo"] == "nobody was watching the logs and then it broke." for s in bound["reference_short"]["scenes"])
 
 
-def test_spelling_gaps_surround_spelled_out_words_only():
+def test_spelling_gaps_apply_only_to_listed_terms_and_respect_punctuation():
     from tubeforge.rendering.shorts.spoken import prepare_spoken, VERSION
-    text = "It can point at a URL over LDAP, then stop."
+    text = "It can point at a URL over LDAP then stop, and Log4j, really."
     form = prepare_spoken(text, profile=VERSION, lexicon={})
-    gaps = delivery.spelling_gaps(form.applied, len(form.tokens))
-    pairs = [(c.at, c.seconds) for c in gaps]
     words = text.split()
-    assert pairs == [(words.index("URL"), delivery.ACRONYM_GAP_BEFORE), (words.index("over"), delivery.ACRONYM_GAP_AFTER),
-                     (words.index("LDAP,"), delivery.ACRONYM_GAP_BEFORE), (words.index("then"), delivery.ACRONYM_GAP_AFTER)]
-    plain = prepare_spoken("Nothing spelled out here at all.", profile=VERSION, lexicon={})
-    assert delivery.spelling_gaps(plain.applied, len(plain.tokens)) == ()
-    only = prepare_spoken("API", profile=VERSION, lexicon={})
-    assert delivery.spelling_gaps(only.applied, 1) == ()          # nothing before or after to separate
+    gaps = delivery.spelling_gaps(form.applied, words, ["ldap", "LOG4J"])
+    pairs = [(c.at, c.seconds) for c in gaps]
+    # URL is not listed; LDAP gets a gap on both sides; "Log4j," already has a comma after it and "and" is plain, so only a lead-in gap
+    assert pairs == [(words.index("LDAP"), delivery.ACRONYM_GAP_BEFORE), (words.index("then"), delivery.ACRONYM_GAP_AFTER),
+                     (words.index("Log4j,"), delivery.ACRONYM_GAP_BEFORE)]
+    assert delivery.spelling_gaps(form.applied, words, []) == ()
 
 
-def test_adjacent_acronyms_get_one_gap_not_two():
-    from tubeforge.rendering.shorts.spoken import prepare_spoken, VERSION
-    form = prepare_spoken("Use the CPU GPU pair now", profile=VERSION, lexicon={})
-    at = [c.at for c in delivery.spelling_gaps(form.applied, len(form.tokens))]
-    assert len(at) == len(set(at))
+def test_script_pauses_keep_their_minimum_while_automatic_gaps_may_be_shorter():
+    import pytest
+    from tubeforge.rendering.shorts.cues import Cue, validate_cues
+    assert Cue(kind="pause", at=2, seconds=0.08).seconds == 0.08            # automatic gap
+    with pytest.raises(ValueError):
+        validate_cues((Cue(kind="pause", at=2, seconds=0.08),), 6)           # a script pause that short is rejected
 
 
 def test_synthesis_inserts_the_gaps_and_keeps_alignment_text(tmp_path, monkeypatch):
@@ -220,12 +219,13 @@ def test_synthesis_inserts_the_gaps_and_keeps_alignment_text(tmp_path, monkeypat
     _FakeKokoro.calls = []
     settings = _settings("cues-v1")
     settings.pipeline.reference_short.acronym_gaps = "gaps-v1"
+    settings.pipeline.reference_short.acronym_gap_terms = ["url"]
     prepare.synthesize(topic, settings, tmp_path, "af_bella")
     assert [text for text, _ in _FakeKokoro.calls] == ["We call the", "you ar el", "every single day."]
     manifest = json.loads((tmp_path / "voice-manifest.json").read_text())
     assert manifest["groups"][0]["spoken_text"] == "We call the you ar el every single day."
     audio, _ = sf.read(tmp_path / manifest["groups"][0]["file"])
-    assert len(audio) / RATE > (3 + 3 + 3) * 0.1 + delivery.ACRONYM_GAP_BEFORE + delivery.ACRONYM_GAP_AFTER - 0.05
+    assert len(audio) / RATE > (3 + 3 + 3) * 0.1 + delivery.ACRONYM_GAP_BEFORE + delivery.ACRONYM_GAP_AFTER - 0.1
     off = _settings("cues-v1")
     off.pipeline.reference_short.acronym_gaps = "off"
     _FakeKokoro.calls = []

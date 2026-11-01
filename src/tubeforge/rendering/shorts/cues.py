@@ -47,7 +47,7 @@ class Cue(BaseModel):
     kind: Literal["pause", "breath", "emphasis", "whisper"]
     at: int = Field(ge=0, le=60)                 # pause/breath: before this word; span cues: first word
     end: int | None = Field(default=None, ge=1, le=61)  # span cues: one past the last word
-    seconds: float | None = Field(default=None, ge=MIN_PAUSE_SECONDS, le=MAX_PAUSE_SECONDS)
+    seconds: float | None = Field(default=None, ge=0.03, le=MAX_PAUSE_SECONDS)  # script pauses are held to MIN_PAUSE_SECONDS in validate_cues; automatic gaps may be shorter
 
     @model_validator(mode="after")
     def shape(self):
@@ -154,6 +154,9 @@ def parse(text: str) -> tuple[str, tuple[Cue, ...]]:
 
 def validate_cues(cues: tuple[Cue, ...], word_count: int) -> tuple[Cue, ...]:
     """Drop edge pauses/breaths that cannot be heard, then enforce the per-scene delivery budget."""
+    for cue in cues:
+        if cue.kind == "pause" and not MIN_PAUSE_SECONDS <= cue.seconds <= MAX_PAUSE_SECONDS:
+            raise ValueError(f"a pause lasts {MIN_PAUSE_SECONDS}-{MAX_PAUSE_SECONDS} seconds")
     kept = tuple(sorted((c for c in cues if c.kind not in {"pause", "breath"} or 0 < c.at < word_count),
                         key=lambda c: (c.at, c.kind)))
     if len(kept) > MAX_CUES_PER_SCENE:

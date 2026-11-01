@@ -59,7 +59,7 @@ def _delivery_identity(pacing) -> str:
     """Hash input for everything that changes how speech is assembled; "off" keeps pre-existing profile hashes."""
     parts = [pacing.delivery_cues] if pacing.delivery_cues != "off" else []
     if getattr(pacing, "acronym_gaps", "off") != "off":
-        parts.append(pacing.acronym_gaps)
+        parts.append(pacing.acronym_gaps + ":" + ",".join(sorted(getattr(pacing, "acronym_gap_terms", ()))))
     return "+".join(parts) or "off"
 
 
@@ -67,7 +67,7 @@ def scene_cues(scene, form, pacing):
     """Script cues (when enabled) plus automatic gaps around spelled-out words, for one scene."""
     from . import delivery
     script = tuple(scene.cues) if pacing.delivery_cues != "off" else ()
-    gaps = delivery.spelling_gaps(form.applied, len(form.tokens)) if getattr(pacing, "acronym_gaps", "off") != "off" else ()
+    gaps = delivery.spelling_gaps(form.applied, scene.vo.split(), getattr(pacing, "acronym_gap_terms", ())) if getattr(pacing, "acronym_gaps", "off") != "off" else ()
     return script + gaps
 
 
@@ -87,7 +87,7 @@ def synthesize(topic, settings, output, voice):
         cue_sets = [scene_cues(scene, form, pacing) for scene, form in zip(scenes, forms, strict=True)]
         cued = any(cue_sets)
 
-        def speak(text, scale=1.0, *, _scene=scenes[0].scene_id):
+        def speak(text, scale=1.0, *, _scene=scenes[0].scene_id, tight=False):
             extra = (("speed_scale", f"{scale:.2f}"),) if scale != 1.0 else ()
             request = VoiceRequest(text=text, language="en", voice_id=voice, section_id=_scene,
                                    settings=(("spoken_profile_sha256", identity), *extra))
@@ -105,7 +105,8 @@ def synthesize(topic, settings, output, voice):
             live = np.where(np.abs(samples) > .004)[0]
             if not len(live):
                 raise ValueError("voice output is silent")
-            samples = samples[max(0, live[0] - round(.04 * rate)):min(len(samples), live[-1] + round(.1 * rate))]
+            lead, tail = (.015, .03) if tight else (.04, .1)   # pieces of one sentence are joined tightly
+            samples = samples[max(0, live[0] - round(lead * rate)):min(len(samples), live[-1] + round(tail * rate))]
             return samples, rate, outcome, note
 
         if cued:
@@ -113,7 +114,7 @@ def synthesize(topic, settings, output, voice):
             state = {}
 
             def synth(text, scale):
-                samples, rate, outcome, note = speak(text, scale)
+                samples, rate, outcome, note = speak(text, scale, tight=True)
                 state.update(rate=rate, result=outcome)
                 state["warning"] = state.get("warning") or note
                 return compress_pauses(samples, rate, pacing.max_pause_seconds)
