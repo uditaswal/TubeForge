@@ -153,7 +153,7 @@ class CodexProviderConfig(BaseModel):
     voice_profiles: dict[str, str] = Field(default_factory=dict)
     default_channel_identity: str = Field(default="default", pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     prompt_template_version: str = Field(default="m6-content-v7", min_length=1, max_length=100)
-    max_prompt_chars: int = Field(default=60_000, ge=1_000, le=200_000)
+    max_prompt_chars: int = Field(default=75_000, ge=1_000, le=200_000)
     socket_path: Path = Path("/run/tubeforge-codex/codex.sock")
     socket_timeout_seconds: int = Field(default=490, ge=1, le=600)
     invocation_limit: int = Field(default=2, ge=1, le=2)
@@ -206,7 +206,7 @@ class OllamaProviderConfig(BaseModel):
     validation_retries: int = Field(default=0, ge=0, le=3)
     reservation_seconds: int = Field(default=600, ge=10, le=14_400)
     prompt_template_version: str = Field(default="m6-content-v2", min_length=1, max_length=100)
-    max_prompt_chars: int = Field(default=60_000, ge=1_000, le=200_000)
+    max_prompt_chars: int = Field(default=75_000, ge=1_000, le=200_000)
 
     @field_validator("base_url")
     @classmethod

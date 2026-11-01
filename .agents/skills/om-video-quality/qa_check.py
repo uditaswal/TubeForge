@@ -15,7 +15,7 @@ from pathlib import Path
 
 CARD_HEADING_LIMIT = 30          # rendering/animated_card.py
 TARGET_TOLERANCE = 0.40          # core/config.py target_duration_tolerance_ratio
-SHORTS_SECONDS = (25.0, 45.0)    # reference-short-v1 profile
+SHORTS_SECONDS = (30.0, 90.0)    # reference-short-v1 profile (30-90 s, default 60)
 WORDS_PER_SECOND = (1.9, 3.2)    # Kokoro ~2.3, Piper ~2.7
 LOUDNESS = {"reference": (-15.0, -13.0, -1.5), "legacy": (-16.5, -12.5, -1.0)}  # min LUFS, max LUFS, max true peak
 # HyperFrames craft thresholds, ported from its own check (video-quality review §4.1/§4.6):

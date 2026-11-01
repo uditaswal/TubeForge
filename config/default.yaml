@@ -43,7 +43,7 @@ pipeline:
     reservation_seconds: 1200
     repair_attempt_limit: 0
     prompt_template_version: "m6-content-v7"
-    max_prompt_chars: 60000
+    max_prompt_chars: 75000
   piper:
     executable: "piper"
     model_path: null
