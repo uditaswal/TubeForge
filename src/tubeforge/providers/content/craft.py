@@ -297,3 +297,60 @@ def script_scorecard(package) -> dict:
         "avg_words_per_sentence": round(words / max(1, len(sentences)), 1),
         "fact_dump_problems": len(fact_dump_problems(package)),
     }
+
+
+# --- Repair-loop helpers: dict-level checks that work on a draft that does not validate yet -----------------------
+_TAGS = re.compile(r"\[(?:pause(?:\s+[0-9.]+)?|breath|whisper|/whisper)\]", re.I)
+
+
+def _scene_vo(draft: dict, index: int) -> str:
+    scene = draft["reference_short"]["scenes"][index]
+    text = scene.get("vo") or draft["script_sections"][index]["narration"]
+    return _TAGS.sub(" ", text).replace("*", "")
+
+
+def heading_repeats(heading: str, narration: str) -> bool:
+    words = _content(heading)
+    return len(words) >= 3 and sum(word in set(_content(narration)) for word in words) / len(words) >= .8
+
+
+def display_preflight(draft: dict, ending: str = "loop") -> list[str]:
+    """The display-text rules that kept rejecting drafts one group at a time, checked together on the raw draft."""
+    problems: list[str] = []
+    try:
+        scenes = draft["reference_short"]["scenes"]
+        for index, scene in enumerate(scenes):
+            heading = scene.get("heading")
+            if isinstance(heading, str) and 0 < index < len(scenes) - 1 and heading_repeats(heading, _scene_vo(draft, index)):
+                problems.append(f"scene {index + 1} heading {heading!r} repeats the narration; use a two-to-four-word label in different words")
+            if scene.get("template") == "terminal":
+                for line in scene.get("lines", ()):
+                    total = len(line.get("text", "")) + (2 if line.get("kind") == "command" else 0)
+                    if total > 30:
+                        problems.append(f"scene {index + 1} terminal line {line.get('text', '')!r} is {total} characters with its prompt; at most 26, use a short illustrative command")
+        for number, text in enumerate((draft.get("thumbnail_brief") or {}).get("text_options", ()), 1):
+            if len(str(text).split()) > 3:
+                problems.append(f"thumbnail text_option {number} {text!r} has more than three words; use two or three")
+        expected = "cta" if ending == "debate" else "loop"
+        if scenes and scenes[-1].get("template") != expected:
+            problems.append(f"the final scene must use template {expected} for this request's {ending} ending")
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return problems
+    return problems
+
+
+def normalize_headings(draft: dict) -> list[dict]:
+    """Last-resort repair: shorten a heading that repeats its narration to its last two content words. Returns notes."""
+    notes: list[dict] = []
+    try:
+        scenes = draft["reference_short"]["scenes"]
+        for index, scene in enumerate(scenes):
+            heading = scene.get("heading")
+            if isinstance(heading, str) and 0 < index < len(scenes) - 1 and heading_repeats(heading, _scene_vo(draft, index)):
+                kept = [word for word in heading.split() if word.casefold().strip(".,;:!?") not in STOPWORDS][-2:]
+                if len(kept) == 2:
+                    notes.append({"rule": "heading_shortened", "scene_id": scene.get("scene_id"), "from": heading, "to": " ".join(kept)})
+                    scene["heading"] = " ".join(kept)
+    except (KeyError, IndexError, TypeError, AttributeError):
+        pass
+    return notes
