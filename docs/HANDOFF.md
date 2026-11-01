@@ -45,6 +45,7 @@ Claude spend cap (rolling 24 h: 40 calls, $8, $1.50/call; env `TUBEFORGE_CLAUDE_
 Pilot: one 60 s Log4Shell Short rendered end to end on 1 Nov (loudness/loop checks pass). Nothing is approved or published.
 
 ## Next step
+0. **Priority order (operator, 1 Nov): D audio → F stock backdrops → B channel safety → E provider fallback → C batch UI.** Claude takes that order; Codex runs B's M-S5–M-S8 then E in parallel in its own lane. Overlaps are done once (M-AU4 covers M-S3, M-AU2 covers M-S4's cues).
 1. **Track B, channel safety and originality** (local plan `doc-internal/design_doc/tubeforge-publishing-design.md`, "PRIORITY TRACK B"): Claude takes M-S1–M-S4
    (layout families chosen by content, originality gates, audio rotation + licence trail, truthful encode metadata + cue adoption); Codex takes M-S5–M-S8
    (disclosure/compliance record in the export, batch repetition report, cadence guard, checklist doc) on `feature/channel-safety`. Do NOT add detection-evasion
