@@ -1,13 +1,22 @@
 """Batch intake surface; shares Studio tokens and operator authentication."""
-from tubeforge.api.studio_shell import STUDIO_CSS
+from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
-BATCH_HTML = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batch plans — TubeForge</title><style>''' + STUDIO_CSS + '''
-main{max-width:1080px;margin:32px auto;padding:0 20px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}th{font-weight:500;color:var(--muted)}.table-frame{overflow:auto}textarea{display:block;width:100%;min-height:200px}button{margin:12px 8px 12px 0} label{display:block;margin:16px 0 6px}#day{display:inline-block;width:auto;margin-right:8px}@media(max-width:640px){table,thead,tbody,tr,td{display:block}thead{display:none}tr{border:1px solid var(--line);border-radius:12px;margin:10px 0;padding:6px}td{border:0;padding:6px 8px;font-size:14px}td:nth-child(2)::before{content:'Publish: ';color:var(--muted)}td:nth-child(3)::before{content:'Channel: ';color:var(--muted)}td:nth-child(4)::before{content:'Length: ';color:var(--muted)}}</style>
-<main><a href="/">TubeForge Studio</a><h1>Batch plans</h1><a href="/batch/review">Day review queue</a><p>Import shorts for review. Publish dates are metadata only.</p>
+_MAIN_HTML = '''<main><h1>Batch plans</h1><a href="/batch/review">Day review queue</a><p>Import shorts for review. Publish dates are metadata only.</p>
 <label for="batchPlan">Plan ID</label><input id="batchPlan" value="default" pattern="[a-z0-9-]{1,80}" required>
 <fieldset><legend>Overnight production</legend><label><input id="autoEnabled" type="checkbox"> Produce automatically</label><label for="autoTime">Local start</label><input id="autoTime" type="time" value="22:00"><label for="autoZone">Time zone</label><input id="autoZone" value="Asia/Kolkata"><label for="autoOffset">Target day offset</label><input id="autoOffset" type="number" min="0" max="7" value="1"><button id="saveAutomation" type="button">Save automatic production</button><p id="automationState" role="status" aria-live="polite">Loading production settings…</p><label><input id="batchHold" type="checkbox"> Hold all batch production</label><button id="saveHold" type="button">Save hold</button><p id="holdState" role="status" aria-live="polite"></p></fieldset>
 <form id="batchForm"><label for="batchFile">Markdown file</label><input id="batchFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="batchText">Markdown plan</label><textarea id="batchText" required></textarea><button id="validate" type="submit">Validate and preview</button><button id="commit" type="button" disabled>Commit import</button></form>
-<label for="day">Day (publish metadata)</label><input id="day" type="date"><button id="produce" type="button">Produce selected shorts</button><p id="progress" role="status"></p><p id="result" role="status" aria-live="polite"></p><div class="table-frame"><table><thead><tr><th>Select / short</th><th>Publish metadata</th><th>Channel</th><th>Length</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div></main>
+<label for="day">Day (publish metadata)</label><input id="day" type="date"><button id="produce" type="button">Produce selected shorts</button><p id="progress" role="status"></p><p id="result" role="status" aria-live="polite"></p><div class="table-frame"><table><thead><tr><th>Select / short</th><th>Publish metadata</th><th>Channel</th><th>Length</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div></main>'''
+
+_PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batch plans — TubeForge</title><style>''' + STUDIO_CSS + '''
+main{max-width:1080px;margin:32px auto;padding:0 20px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}th{font-weight:500;color:var(--muted)}.table-frame{overflow:auto}textarea{display:block;width:100%;min-height:200px}button{margin:12px 8px 12px 0} label{display:block;margin:16px 0 6px}#day{display:inline-block;width:auto;margin-right:8px}@media(max-width:640px){table,thead,tbody,tr,td{display:block}thead{display:none}tr{border:1px solid var(--line);border-radius:12px;margin:10px 0;padding:6px}td{border:0;padding:6px 8px;font-size:14px}td:nth-child(2)::before{content:'Publish: ';color:var(--muted)}td:nth-child(3)::before{content:'Channel: ';color:var(--muted)}td:nth-child(4)::before{content:'Length: ';color:var(--muted)}}</style>
+'''
+
+
+def render_batch_html(username: str | None = None) -> str:
+    return (
+        _PAGE_HEAD
+        + wrap_studio_page('batch', username, 'Workspace / Batch plans', _MAIN_HTML)
+        + '''
 <script>
 const form=document.querySelector('#batchForm'),input=document.querySelector('#batchText'),file=document.querySelector('#batchFile'),commit=document.querySelector('#commit'),result=document.querySelector('#result'),rows=document.querySelector('#rows');
 let validated=null,busy=false;
@@ -28,4 +37,9 @@ setting('saveAutomation').onclick=()=>saveSetting('/api/batch-plans/automation/'
 setting('saveHold').onclick=()=>saveSetting('/api/batch-plans/hold',{hold:setting('batchHold').checked},setting('saveHold'));
 setting('batchPlan').onchange=()=>{validated=null;commit.disabled=true;automationDirty=false;loadAutomation(true);setting('day').onchange()};loadAutomation(true);setInterval(()=>loadAutomation(false),10000);
 form.onsubmit=e=>{e.preventDefault();submit(false)};commit.onclick=()=>submit(true);fetch(planURL()).then(async r=>{if(!r.ok)throw Error('Could not load imported shorts');display(await r.json())}).catch(e=>result.textContent=e.message);
+''' + STUDIO_STATIC_MENU_SCRIPT + '''
 </script></html>'''
+    )
+
+
+BATCH_HTML = render_batch_html(None)

@@ -82,9 +82,10 @@ def register_batch_routes(app, runtime, build_request):
         return items
 
     @app.get('/batch', response_class=HTMLResponse, include_in_schema=False)
-    def batch_page():
-        from tubeforge.api.batch_ui import BATCH_HTML
-        return BATCH_HTML
+    def batch_page(request: Request):
+        from tubeforge.api.batch_ui import render_batch_html
+        session = runtime.auth.session(request.cookies.get('tubeforge_session'))
+        return render_batch_html(runtime.auth.username_for(session.user_id) if session else None)
 
     @app.post('/api/batch-plans/produce', tags=['batch'])
     def produce(value: BatchProduceRequest):
@@ -118,9 +119,10 @@ def register_batch_routes(app, runtime, build_request):
             raise HTTPException(409, detail=str(error)) from error
 
     @app.get('/batch/review', response_class=HTMLResponse, include_in_schema=False)
-    def day_review_page():
-        from tubeforge.api.batch_review_ui import REVIEW_HTML
-        return REVIEW_HTML
+    def day_review_page(request: Request):
+        from tubeforge.api.batch_review_ui import render_review_html
+        session = runtime.auth.session(request.cookies.get('tubeforge_session'))
+        return render_review_html(runtime.auth.username_for(session.user_id) if session else None)
 
     from tubeforge.db.batch_automation import BatchAutomationRepository
     automation = BatchAutomationRepository(runtime.database.session_factory)

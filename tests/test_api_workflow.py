@@ -681,3 +681,20 @@ def test_retired_formats_cannot_start_from_studio_api_or_retry(tmp_path: Path) -
         runtime.jobs.update_state("legacy-failed", JobState.FAILED_VALIDATION, JobState.PREVIEW_RENDERING, "x")
         assert client.post("/api/jobs/legacy-failed/retry", json={}).status_code == 422
         assert runtime.jobs.get("legacy-failed").state is JobState.FAILED_VALIDATION
+
+
+def test_dashboard_shows_signed_in_user_copy_script_and_markdown_mode_controls(tmp_path: Path) -> None:
+    database_path = tmp_path / "chrome.db"
+    _migrate(database_path)
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"), auth=AuthConfig(enabled=True))
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("chrome-operator", "correct-horse-battery-staple")
+        assert client.post("/login", json={"username": "chrome-operator", "password": "correct-horse-battery-staple"}).status_code == 200
+        dashboard = client.get("/").text
+        assert 'id="authInfo" data-username="chrome-operator"' in dashboard
+        assert 'id="signOutButton"' not in dashboard  # built client-side by STUDIO_SCRIPT from #authInfo, not server-rendered
+        assert 'id="copyFullScript"' in dashboard and 'id="copyScriptStatus"' in dashboard
+        assert "toggleMarkdownMode" in dashboard and 'id="studioMarkdownSubmit"' in dashboard
+        assert client.post("/logout").status_code == 200
+        assert client.get("/", follow_redirects=False).status_code == 303

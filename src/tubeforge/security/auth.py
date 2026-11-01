@@ -52,6 +52,10 @@ class AuthService:
             record = session.scalar(select(AuthSessionRecord).where(AuthSessionRecord.token_hash == _hash(token), AuthSessionRecord.expires_at > now))
             return record
 
+    def username_for(self, user_id: str) -> str | None:
+        with self._session_factory() as session:
+            return session.scalar(select(AdminUserRecord.username).where(AdminUserRecord.id == user_id))
+
     def logout(self, token: str | None) -> None:
         if not token: return
         with self._session_factory.begin() as session: session.execute(delete(AuthSessionRecord).where(AuthSessionRecord.token_hash == _hash(token)))
