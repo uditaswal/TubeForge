@@ -124,3 +124,39 @@ def test_a_diagram_flow_and_a_terminal_beat_a_captured_source_plate(tmp_path):
     assert 'id="s0n3"' in page and 'id="s0l1"' in page         # the diagram is drawn
     assert "hero-0" not in page                                 # not replaced by the screenshot card
     assert "A quoted passage" in page                           # the source still shows, as a quote
+
+
+def _hook(template="hook"):
+    from tubeforge.rendering.shorts.schema import Hook, Loop
+    data = dict(template=template, scene_id="h", vo=VO, caption=VO, source_ids=["fixture"], reveal_words=[0], headline=["ONE LINE", "RAN CODE"], chips=["CVSS"])
+    return (Hook if template == "hook" else Loop).model_validate(data)
+
+
+def _plates(tmp_path):
+    from PIL import Image
+    (tmp_path / "plates").mkdir()
+    Image.new("RGB", (1280, 720), (30, 90, 160)).save(tmp_path / "plates" / "stock-0.png")
+    manifest = {"scenes": {"0": {"kind": "stock", "media": "photo", "file": "plates/stock-0.png", "query": "server room",
+                                 "evidence": {"provider": "pixabay", "asset_id": "14900", "license_name": "Pixabay Content License"}}}}
+    return tmp_path, manifest
+
+
+def test_hook_and_loop_scenes_get_a_blurred_stock_backdrop_with_licence_evidence(tmp_path):
+    plates, manifest = _plates(tmp_path)
+    timeline = story_timeline([_hook("hook"), _hook("loop")])
+    timeline.topic.sources = ()
+    report = story.build_story(timeline, tmp_path / "p", plates_directory=plates, manifest=manifest)
+    page = (tmp_path / "p" / "index.html").read_text()
+    assert page.count("backdrop-0.jpg") == 2 and (tmp_path / "p" / "assets" / "backdrop-0.jpg").is_file()   # the loop reuses the hook's backdrop
+    assert 's0bg' in page and 's1bg' in page and "scale:1.12" in page
+    assert [b["license"] for b in report["stock_backdrops"]] == ["Pixabay Content License"] * 2
+    assert report["stock_backdrops"][0]["provider"] == "pixabay" and report["stock_backdrops"][0]["query"] == "server room"
+
+
+def test_without_a_stock_plate_the_hook_keeps_its_plain_background(tmp_path):
+    timeline = story_timeline([_hook("hook")])
+    timeline.topic.sources = ()
+    report = story.build_story(timeline, tmp_path / "p", plates_directory=tmp_path, manifest={"scenes": {}})
+    assert report["stock_backdrops"] == [] and "backdrop-" not in (tmp_path / "p" / "index.html").read_text()
+    missing = {"scenes": {"0": {"kind": "stock", "media": "photo", "file": "plates/gone.png"}}}
+    assert story.build_story(timeline, tmp_path / "q", plates_directory=tmp_path, manifest=missing)["stock_backdrops"] == []
