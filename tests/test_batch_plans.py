@@ -26,3 +26,12 @@ def test_errors_are_line_numbered(text, message):
     errors = parse_batch(text).errors
     assert errors and any(message in error.message for error in errors)
     assert all(error.line >= 1 for error in errors)
+
+
+def test_beat_time_ranges_are_accepted_and_keep_their_end():
+    from tubeforge.batch_plans import parse_batch
+    plan = parse_batch('## One\n```yaml\nid: one\ntitle: One\nconcept: C\nbeats:\n  - {t: "0-10", point: Hook}\n  - {t: 10, point: Core}\n  - {t: "40\u201360s", point: End}\n```\n')
+    assert not plan.errors
+    assert [(b.t, b.end) for b in plan.shorts[0].beats] == [(0.0, 10.0), (10.0, None), (40.0, 60.0)]
+    bad = parse_batch('## One\n```yaml\nid: one\ntitle: One\nconcept: C\nbeats:\n  - {t: "10-5", point: Hook}\n```\n')
+    assert bad.errors

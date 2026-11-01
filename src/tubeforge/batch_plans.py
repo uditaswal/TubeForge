@@ -6,13 +6,27 @@ from datetime import datetime
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, model_validator
+
+
+_RANGE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:-|\u2013|to)\s*(\d+(?:\.\d+)?)\s*s?\s*$")
 
 
 class Beat(BaseModel):
+    """One outline beat. ``t`` is the start second; a range such as ``"0-10"`` is accepted and keeps its end."""
     model_config = ConfigDict(extra="forbid")
     t: float = Field(ge=0, le=90)
+    end: float | None = Field(default=None, ge=0, le=90)
     point: str = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_ranges(cls, data):
+        if isinstance(data, dict) and isinstance(data.get("t"), str):
+            found = _RANGE.match(data["t"])
+            if found and float(found.group(2)) > float(found.group(1)):
+                return {**data, "t": float(found.group(1)), "end": float(found.group(2))}
+        return data
 
 
 class Thumbnail(BaseModel):
