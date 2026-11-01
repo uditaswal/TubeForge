@@ -47,8 +47,8 @@ html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:{BG
 .note {{ position:absolute; left:60px; right:130px; font:700 32px/1.3 Inter; color:{MUTED}; }}
 #captions {{ position:absolute; left:40px; right:40px; top:1330px; }}
 .cap-group {{ position:absolute; left:0; right:0; text-align:center; font:104px/1 Anton; text-transform:uppercase; opacity:0; }}
-.cap-word {{ color:{INK}; -webkit-text-stroke:7px {BG}; paint-order:stroke fill; position:relative; display:inline-block; isolation:isolate; }}
-.cap-word .mark {{ position:absolute; left:-12px; right:-12px; top:12%; bottom:0; background:var(--mark,#ffb020); border-radius:14px; z-index:-1; transform:scaleX(0); transform-origin:0 50%; }}
+.cap-word {{ color:{INK}; -webkit-text-stroke:7px {BG}; paint-order:stroke fill; position:relative; display:inline-block; }}
+.cap-word .mark {{ position:absolute; left:2px; right:2px; bottom:-10px; height:8px; background:#ffb020; border-radius:4px; transform:scaleX(0); transform-origin:0 50%; }}
 """
 
 POP = ("function pop(sel,t,o){o=o||{};tl.fromTo(sel,{opacity:0,x:o.x||0,y:o.y===undefined?40:o.y,scale:o.s||.92},"
@@ -351,7 +351,8 @@ CAPTIONS.forEach(function(g,gi) {{
  g.words.forEach(function(w,wi) {{
   var s=document.createElement("span"); s.className="cap-word"; s.appendChild(document.createTextNode(w));
   if (g.keys && g.keys[wi]) {{ var m=document.createElement("i"); m.className="mark"; s.appendChild(m);
-   tl.fromTo(m,{{scaleX:0}},{{scaleX:1,duration:Math.max(.14,g.times[wi][1]-g.times[wi][0]),ease:"none"}},g.times[wi][0]); }}
+   tl.fromTo(m,{{scaleX:0}},{{scaleX:1,duration:Math.max(.16,g.times[wi][1]-g.times[wi][0]),ease:"power1.out"}},g.times[wi][0]);
+   tl.to(s,{{color:"#ffb020",duration:.1}},g.times[wi][0]); }}
   el.appendChild(s); if (wi<g.words.length-1) el.appendChild(document.createTextNode(" "));
  }});
  host.appendChild(el);

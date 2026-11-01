@@ -9,7 +9,17 @@ from dataclasses import dataclass
 _WORD = re.compile(r"[^\W_]+(?:[’'-][^\W_]+)*", re.UNICODE)
 _DECIMAL = re.compile(r"(?<=\d)[.,](?=\d)")
 _CORE = re.compile(r"^([^\w$]*)(.*?)([^\w%]*?)$", re.UNICODE)
-_ACRONYMS = {"AI", "API", "CPU", "GPU", "PHP"}
+# Letter names the voice reads reliably (bare capitals such as "A P I" are often swallowed or mis-said).
+_LETTER_NAMES = {"A": "ay", "B": "bee", "C": "see", "D": "dee", "E": "ee", "F": "eff", "G": "jee", "H": "aitch",
+                 "I": "eye", "J": "jay", "K": "kay", "L": "el", "M": "em", "N": "en", "O": "oh", "P": "pee",
+                 "Q": "cue", "R": "ar", "S": "ess", "T": "tee", "U": "you", "V": "vee", "W": "double-you",
+                 "X": "ex", "Y": "why", "Z": "zee"}
+# All-caps words people say as words, not letter by letter.
+_SPOKEN_AS_WORDS = {"NASA", "NATO", "LASER", "SCUBA", "RAM", "ROM", "PIN", "OPEC", "UNESCO", "FIFA", "ASCII", "NOT", "AND",
+                    "THE", "FOR", "ALL", "NEW", "NOW", "YES", "BUT", "ARE", "WAS", "ONE", "TWO", "OK"}
+# Technical words the voice gets wrong; lower-case keys, applied beneath any configured lexicon.
+DEFAULT_LEXICON = {"jndi": "jay en dee eye", "ldap": "el dap", "log4j": "log four jay", "nginx": "engine ex",
+                   "kubectl": "cube control", "sudo": "pseudo", "sql": "sequel", "iot": "eye oh tee", "oauth": "oh auth"}
 VERSION = "spoken-v1"
 
 
@@ -34,11 +44,36 @@ def _integer(number: int) -> str:
     return small[number // 100] + " hundred" + (" " + _integer(number % 100) if number % 100 else "")
 
 
+def _year(number: int) -> str:
+    if number % 100 == 0 and number % 1000:
+        return _integer(number // 100) + " hundred"
+    if 2000 <= number <= 2009:
+        return "two thousand" + (" " + _integer(number % 10) if number % 10 else "")
+    return _integer(number // 100) + " " + (_integer(number % 100) if number % 100 >= 10 else
+                                           ("oh " + _integer(number % 100) if number % 100 else "hundred"))
+
+
+def _spell(core: str) -> str:
+    plural = len(core) > 2 and core.endswith("s") and core[:-1].isupper()
+    letters = core[:-1] if plural else core
+    names = [_LETTER_NAMES[c] for c in letters]
+    return " ".join(names) + ("s" if plural else "")
+
+
 def _replacement(core: str, lexicon: dict[str, str]) -> tuple[str, str | None]:
     if core.casefold() in lexicon:
         return lexicon[core.casefold()], "lexicon"
-    if core in _ACRONYMS:
-        return " ".join(core), "acronym"
+    if core.casefold() in DEFAULT_LEXICON:
+        return DEFAULT_LEXICON[core.casefold()], "lexicon"
+    if re.fullmatch(r"[A-Z]{2,6}s?", core) and core.rstrip("s") not in _SPOKEN_AS_WORDS and core not in _SPOKEN_AS_WORDS:
+        return _spell(core), "acronym"
+    if re.fullmatch(r"v?\d{1,3}(?:\.\d{1,3}){1,3}", core):
+        parts = core.lstrip("v").split(".")
+        return ("version " if core.startswith("v") else "") + " point ".join(
+            _integer(int(part)) if (part == "0" or not part.startswith("0")) else " ".join(_integer(int(c)) for c in part)
+            for part in parts), "version"
+    if re.fullmatch(r"(?:19|20)\d\d", core):
+        return _year(int(core)), "year"
     if re.fullmatch(r"(?:100|[1-9]?\d)%", core):
         return _integer(int(core[:-1])) + " percent", "percent"
     if re.fullmatch(r"\$(?:[1-9]\d{0,2}|0)", core):
