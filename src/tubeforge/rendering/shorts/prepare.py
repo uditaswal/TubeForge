@@ -273,6 +273,7 @@ def align(topic, output, model_path, tail=.18, *, pacing=None):
     if scene_index != len(topic.scenes):
         raise ValueError("voice groups omitted reviewed scenes")
     timeline = Timeline(topic, tuple(timings))
+    pronunciation = pronunciation_report(topic, output, manifest, aligner, pacing)
     voice = np.zeros(round(timeline.duration * 48000), np.float32)
     for start, audio in pieces:
         voice[start:start + len(audio)] = audio
@@ -280,10 +281,44 @@ def align(topic, output, model_path, tail=.18, *, pacing=None):
     (output / "timeline.json").write_text(json.dumps({
         "duration": timeline.duration, "scenes": [asdict(t) for t in timings], "warnings": warnings,
         "alignment_model_sha256": aligner.model_sha256 if aligner else None,
+        "pronunciation": {"suspect_count": pronunciation["suspect_count"], "report": "pronunciation-report.json"} if pronunciation else None,
         "topic_sha256": file_hash(output / "topic.json"),
         "speech_profile_sha256": manifest["profile_sha256"],
         "narration_sha256": file_hash(output / "narration.wav"),
     }, indent=2) + "\n")
+
+
+def pronunciation_report(topic, output, manifest, aligner, pacing) -> dict | None:
+    """Advisory check: what a speech model hears versus what each voice group was told to say. Never raises."""
+    if aligner is None or pacing is None or getattr(pacing, "pronunciation_check", "off") == "off":
+        return None
+    from tubeforge.pipeline import pronunciation
+    groups, suspects_total, scene_index = [], 0, 0
+    try:
+        for record in manifest["groups"]:
+            scenes = topic.scenes[scene_index:scene_index + len(record["scene_ids"])]
+            scene_index += len(scenes)
+            display_words, spans, offset = [], [], 0
+            for local, scene in enumerate(scenes):
+                display_words.extend(scene.vo.split())
+                spans.extend((first + offset, end + offset) for first, end in record["display_spans"][local])
+                offset += record["display_spans"][local][-1][1]
+            result = pronunciation.check_group(
+                spoken_text=record["spoken_text"], display_words=display_words, display_spans=spans,
+                transcribe=lambda path=output / record["file"]: pronunciation.transcribe_with(aligner.model, path, ffmpeg=pacing.ffmpeg_executable))
+            for suspect in result["suspects"]:
+                suspect["scene_id"] = scenes[0].scene_id
+            suspects_total += len(result["suspects"])
+            groups.append({"scene_ids": record["scene_ids"], **result})
+    except Exception as error:  # advisory only: a failed check must never fail the job
+        LOG.warning("pronunciation check skipped: %s: %s", type(error).__name__, error)
+        return None
+    report = {"version": pronunciation.VERSION, "model": "whisper-base-en", "suspect_count": suspects_total, "groups": groups}
+    (output / "pronunciation-report.json").write_text(json.dumps(report, indent=2) + "\n")
+    for group in groups:
+        for suspect in group["suspects"]:
+            LOG.warning("pronunciation suspect in %s: %s expected %r heard %r", suspect["scene_id"], suspect["display"], suspect["expected"], suspect["heard"])
+    return report
 
 
 def prepare(topic: ShortsTopic, output: Path, *, config: Path, alignment_model: Path,

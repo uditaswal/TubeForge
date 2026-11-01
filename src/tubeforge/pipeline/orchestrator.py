@@ -858,6 +858,15 @@ class PipelineOrchestrator:
         self._save_file(job.id, JobState.VOICE_GENERATION, "voice_manifest", directory / "voice-manifest.json", {"generator": "rendering.shorts.prepare"})
         self._save_file(job.id, JobState.VOICE_GENERATION, "timing_map", directory / "timeline.json", {"alignment": [t.alignment for t in timeline.timings], "duration": timeline.duration})
         self.events.append(job.id, "reference_speech_ready", duration=round(timeline.duration, 2), alignment=sorted({t.alignment for t in timeline.timings}))
+        report_path = directory / "pronunciation-report.json"
+        if report_path.is_file():
+            try:
+                report = json.loads(report_path.read_text())
+                suspects = [{"words": s["display"], "expected": s["expected"], "heard": s["heard"]}
+                            for group in report["groups"] for s in group["suspects"]][:12]
+                self.events.append(job.id, "pronunciation_checked", suspect_count=report["suspect_count"], suspects=suspects)
+            except (OSError, ValueError, KeyError):
+                pass
         self._transition(job, JobState.CAPTION_GENERATION)
 
     def _reference_captions(self, job: PipelineJob, package: ContentPackage) -> None:

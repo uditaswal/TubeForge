@@ -10,7 +10,9 @@ _WORD = re.compile(r"[^\W_]+(?:[’'-][^\W_]+)*", re.UNICODE)
 _DECIMAL = re.compile(r"(?<=\d)[.,](?=\d)")
 _CORE = re.compile(r"^([^\w$]*)(.*?)([^\w%]*?)$", re.UNICODE)
 # Letter names the voice reads reliably (bare capitals such as "A P I" are often swallowed or mis-said).
-_LETTER_NAMES = {"A": "ay", "B": "bee", "C": "see", "D": "dee", "E": "ee", "F": "eff", "G": "jee", "H": "aitch",
+# Measured with Kokoro + Whisper (1 Nov 2026): "ay" is spoken as "eye" ("ay pee eye" -> "IPI") and bare "A P I" is swallowed
+# ("PI"); "eh" is recognised as the letter A in API, AI, AWS, IAM, NAT. Every other letter name below was recognised as spelled.
+_LETTER_NAMES = {"A": "eh", "B": "bee", "C": "see", "D": "dee", "E": "ee", "F": "eff", "G": "jee", "H": "aitch",
                  "I": "eye", "J": "jay", "K": "kay", "L": "el", "M": "em", "N": "en", "O": "oh", "P": "pee",
                  "Q": "cue", "R": "ar", "S": "ess", "T": "tee", "U": "you", "V": "vee", "W": "double-you",
                  "X": "ex", "Y": "why", "Z": "zee"}

@@ -651,6 +651,8 @@ class ReferenceShortConfig(BaseModel):
     voice_processing: Literal["off", "gentle-v1"] = "off"
     # Honour pause/breath/stress/whisper cues bound from the narration; scenes without cues are unaffected.
     delivery_cues: Literal["off", "cues-v1"] = "cues-v1"
+    # Advisory transcription check of the synthesised voice (reuses the alignment model); never fails a job.
+    pronunciation_check: Literal["off", "advisory"] = "advisory"
 
 
 class PixabayConfig(BaseModel):

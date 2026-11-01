@@ -13,7 +13,7 @@ from tubeforge.rendering.shorts.spoken import (
 def test_spoken_forms_keep_display_words_and_cover_every_spoken_word():
     display = "PHP fixed 50% of cases for $12 in API v2.0, not RTX-4090."
     prepared = prepare_spoken(display, profile=VERSION, lexicon={"PHP": "P H P"})
-    assert prepared.text == "P H P fixed fifty percent of cases for twelve dollars in ay pee eye version two point zero, not RTX-4090."
+    assert prepared.text == "P H P fixed fifty percent of cases for twelve dollars in eh pee eye version two point zero, not RTX-4090."
     assert len(prepared.display_spans) == len(display.split())
     assert prepared.display_spans[0] == (0, 3)
     assert prepared.display_spans[2] == (4, 6)
@@ -89,7 +89,7 @@ def test_overlap_alignment_repair_makes_word_times_monotonic_and_inside_the_phra
 def test_acronyms_versions_years_and_technical_words_are_spoken_as_words():
     text = "Log4j took a URL and the API in 2013 via 2.15.0, then JNDI and LDAP; CVSS 10, not NASA."
     prepared = prepare_spoken(text, profile=VERSION, lexicon={})
-    assert prepared.text == ("log four jay took a you ar el and the ay pee eye in twenty thirteen via two point fifteen point zero, "
+    assert prepared.text == ("log four jay took a you ar el and the eh pee eye in twenty thirteen via two point fifteen point zero, "
                              "then jay en dee eye and el dap; see vee ess ess ten, not NASA.")
     assert len(prepared.display_spans) == len(text.split())
     assert [row["rule"] for row in prepared.applied] == ["lexicon", "acronym", "acronym", "year", "version", "lexicon", "lexicon", "acronym", "integer"]
