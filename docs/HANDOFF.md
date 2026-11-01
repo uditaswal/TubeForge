@@ -50,7 +50,7 @@ Pilot: one 60 s Log4Shell Short rendered end to end on 1 Nov (loudness/loop chec
    (disclosure/compliance record in the export, batch repetition report, cadence guard, checklist doc) on `feature/channel-safety`. Do NOT add detection-evasion
    (random EXIF/encoder spoofing, fingerprint jitter); metadata stays truthful.
 2. **Batch gaps:** plans ignore their `sources:` list (every batch job runs web research, which fails on JS-rendered docs); run the 3-video batch pilot and a 7-day run.
-3. **Operator watches pending:** voice cue A/B, the Story output, evidence-quote step (then design tokens in `doc-internal/video-quality/reference-quality-plan.md`).
+3. **Accepted by the operator (1 Nov):** Codex M3 stock-footage video and the evidence-quote step. Unblocked: M4 and the design-tokens step (`doc-internal/video-quality/`). Still to listen to: voice cue A/B. **Track F:** stock-footage backdrops behind the hook/loop (and where it fits) in the Story renderer (Claude).
 4. `qa_check.py` still uses an old 25–45 s duration window (Shorts profile is 30–90 s); fixing it means a skill change and a host wheel redeploy.
 5. **Batch UI overhaul** (Track C, M-U1–M-U4, Claude): Batch plans and Day review look poor to the operator; redesign after Codex's M-S5–M-S8 land.
 6. **Audio track D** (pronunciation check, cue adoption, mix checks; Claude) and **provider fallback track E** (dashboard mode: Claude only / Codex only / automatic fallback, so one membership can be cancelled; Codex builds the dashboard/router, Claude the runner error codes).
