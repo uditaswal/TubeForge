@@ -30,6 +30,7 @@ def automation(tmp_path):
 def test_not_due_due_local_offset_double_fire_and_no_approval(automation):
     db, plans, control, scheduler, now = automation
     assert control.get('unknown')['enabled'] is False
+    assert control.get('week')['next_run_at'] == '2026-11-01T22:00:00+05:30'
     assert scheduler.tick(now=now) == []
     result = scheduler.tick(now=now + timedelta(minutes=30))[0]
     assert result['state'] == 'done' and len(result['items']) == 3
