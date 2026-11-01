@@ -653,6 +653,8 @@ class ReferenceShortConfig(BaseModel):
     delivery_cues: Literal["off", "cues-v1"] = "cues-v1"
     # Advisory transcription check of the synthesised voice (reuses the alignment model); never fails a job.
     pronunciation_check: Literal["off", "advisory"] = "advisory"
+    # A short silence before and after spelled-out acronyms so the letters stay intelligible.
+    acronym_gaps: Literal["off", "gaps-v1"] = "gaps-v1"
 
 
 class PixabayConfig(BaseModel):

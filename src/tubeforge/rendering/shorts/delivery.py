@@ -33,6 +33,27 @@ class Segment:
     breath_before: bool = False
 
 
+ACRONYM_GAP_BEFORE, ACRONYM_GAP_AFTER = 0.15, 0.20
+
+
+def spelling_gaps(applied: Sequence[dict], word_count: int) -> tuple[Cue, ...]:
+    """Short silences around spelled-out or multi-word replacements ("you ar el", "jay en dee eye").
+
+    Letters spoken as words run into the sentence and become unintelligible; a beat before and after lets the
+    listener hear them as one unit. Anchors are display-word indices, like script cues.
+    """
+    gaps: dict[int, float] = {}
+    for row in applied:
+        if row.get("rule") not in {"acronym", "lexicon"} or len(str(row.get("spoken", "")).split()) < 2:
+            continue
+        index = int(row["display_index"])
+        if index > 0:
+            gaps[index] = max(gaps.get(index, 0.0), ACRONYM_GAP_BEFORE)
+        if index + 1 < word_count:
+            gaps[index + 1] = max(gaps.get(index + 1, 0.0), ACRONYM_GAP_AFTER)
+    return tuple(Cue(kind="pause", at=at, seconds=seconds) for at, seconds in sorted(gaps.items()))
+
+
 def plan(tokens: Sequence[str], cues: Sequence[Cue]) -> list[Segment]:
     """Group spoken tokens into segments at every style change, pause and breath."""
     if not tokens:

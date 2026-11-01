@@ -188,3 +188,46 @@ def test_a_video_keeps_at_most_two_whispers():
     kinds = [[c["kind"] for c in s.get("cues", [])] for s in bound["reference_short"]["scenes"]]
     assert kinds == [["whisper"], ["whisper"], [], []]
     assert all(s["vo"] == "nobody was watching the logs and then it broke." for s in bound["reference_short"]["scenes"])
+
+
+def test_spelling_gaps_surround_spelled_out_words_only():
+    from tubeforge.rendering.shorts.spoken import prepare_spoken, VERSION
+    text = "It can point at a URL over LDAP, then stop."
+    form = prepare_spoken(text, profile=VERSION, lexicon={})
+    gaps = delivery.spelling_gaps(form.applied, len(form.tokens))
+    pairs = [(c.at, c.seconds) for c in gaps]
+    words = text.split()
+    assert pairs == [(words.index("URL"), delivery.ACRONYM_GAP_BEFORE), (words.index("over"), delivery.ACRONYM_GAP_AFTER),
+                     (words.index("LDAP,"), delivery.ACRONYM_GAP_BEFORE), (words.index("then"), delivery.ACRONYM_GAP_AFTER)]
+    plain = prepare_spoken("Nothing spelled out here at all.", profile=VERSION, lexicon={})
+    assert delivery.spelling_gaps(plain.applied, len(plain.tokens)) == ()
+    only = prepare_spoken("API", profile=VERSION, lexicon={})
+    assert delivery.spelling_gaps(only.applied, 1) == ()          # nothing before or after to separate
+
+
+def test_adjacent_acronyms_get_one_gap_not_two():
+    from tubeforge.rendering.shorts.spoken import prepare_spoken, VERSION
+    form = prepare_spoken("Use the CPU GPU pair now", profile=VERSION, lexicon={})
+    at = [c.at for c in delivery.spelling_gaps(form.applied, len(form.tokens))]
+    assert len(at) == len(set(at))
+
+
+def test_synthesis_inserts_the_gaps_and_keeps_alignment_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(prepare, "KokoroVoiceProvider", _FakeKokoro)
+    monkeypatch.setattr(prepare, "PiperVoiceProvider", lambda settings: None)
+    monkeypatch.setattr(prepare, "file_hash", lambda path: "h")
+    topic = SimpleNamespace(scenes=[SimpleNamespace(scene_id="s1", vo="We call the URL every single day.", cues=())])
+    _FakeKokoro.calls = []
+    settings = _settings("cues-v1")
+    settings.pipeline.reference_short.acronym_gaps = "gaps-v1"
+    prepare.synthesize(topic, settings, tmp_path, "af_bella")
+    assert [text for text, _ in _FakeKokoro.calls] == ["We call the", "you ar el", "every single day."]
+    manifest = json.loads((tmp_path / "voice-manifest.json").read_text())
+    assert manifest["groups"][0]["spoken_text"] == "We call the you ar el every single day."
+    audio, _ = sf.read(tmp_path / manifest["groups"][0]["file"])
+    assert len(audio) / RATE > (3 + 3 + 3) * 0.1 + delivery.ACRONYM_GAP_BEFORE + delivery.ACRONYM_GAP_AFTER - 0.05
+    off = _settings("cues-v1")
+    off.pipeline.reference_short.acronym_gaps = "off"
+    _FakeKokoro.calls = []
+    prepare.synthesize(topic, off, tmp_path, "af_bella")
+    assert len(_FakeKokoro.calls) == 1                                  # no gaps, one synthesis call, as before

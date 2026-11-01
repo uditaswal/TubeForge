@@ -55,20 +55,37 @@ def compress_pauses(audio, sr, max_pause, threshold=.004, frame_seconds=.01):
     return np.concatenate([audio[start:stop] for start, stop in keep])
 
 
+def _delivery_identity(pacing) -> str:
+    """Hash input for everything that changes how speech is assembled; "off" keeps pre-existing profile hashes."""
+    parts = [pacing.delivery_cues] if pacing.delivery_cues != "off" else []
+    if getattr(pacing, "acronym_gaps", "off") != "off":
+        parts.append(pacing.acronym_gaps)
+    return "+".join(parts) or "off"
+
+
+def scene_cues(scene, form, pacing):
+    """Script cues (when enabled) plus automatic gaps around spelled-out words, for one scene."""
+    from . import delivery
+    script = tuple(scene.cues) if pacing.delivery_cues != "off" else ()
+    gaps = delivery.spelling_gaps(form.applied, len(form.tokens)) if getattr(pacing, "acronym_gaps", "off") != "off" else ()
+    return script + gaps
+
+
 def synthesize(topic, settings, output, voice):
     pacing = settings.pipeline.reference_short
     primary = KokoroVoiceProvider(settings.pipeline.kokoro.model_copy(update={"speed": pacing.voice_speed}))
     fallback = PiperVoiceProvider(settings.pipeline.piper)
     identity = profile_hash(profile=pacing.spoken_profile, lexicon=pacing.pronunciation_lexicon,
                             group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing,
-                            delivery=pacing.delivery_cues)
+                            delivery=_delivery_identity(pacing))
     groups = []
     for first in range(0, len(topic.scenes), pacing.speech_group_size):
         scenes = topic.scenes[first:first + pacing.speech_group_size]
         forms = [prepare_spoken(scene.vo, profile=pacing.spoken_profile,
                                 lexicon=pacing.pronunciation_lexicon) for scene in scenes]
         spoken_text = " ".join(form.text for form in forms)
-        cued = pacing.delivery_cues != "off" and any(scene.cues for scene in scenes)
+        cue_sets = [scene_cues(scene, form, pacing) for scene, form in zip(scenes, forms, strict=True)]
+        cued = any(cue_sets)
 
         def speak(text, scale=1.0, *, _scene=scenes[0].scene_id):
             extra = (("speed_scale", f"{scale:.2f}"),) if scale != 1.0 else ()
@@ -102,8 +119,8 @@ def synthesize(topic, settings, output, voice):
                 return compress_pauses(samples, rate, pacing.max_pause_seconds)
 
             parts = []
-            for scene, form in zip(scenes, forms, strict=True):
-                segments = delivery.plan(form.tokens, scene.cues) if scene.cues else [delivery.Segment(form.text)]
+            for form, cues in zip(forms, cue_sets, strict=True):
+                segments = delivery.plan(form.tokens, cues) if cues else [delivery.Segment(form.text)]
                 parts.append(delivery.render(segments, synth, lambda: state["rate"]))
             audio, sr, result, warning = np.concatenate(parts), state["rate"], state["result"], state["warning"]
         else:
@@ -177,7 +194,7 @@ def align(topic, output, model_path, tail=.18, *, pacing=None):
     if pacing is not None and manifest.get("profile_sha256") != profile_hash(
             profile=pacing.spoken_profile, lexicon=pacing.pronunciation_lexicon,
             group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing,
-            delivery=pacing.delivery_cues):
+            delivery=_delivery_identity(pacing)):
         raise ValueError("speech settings changed between synthesis and alignment")
     warning = None
     try:
