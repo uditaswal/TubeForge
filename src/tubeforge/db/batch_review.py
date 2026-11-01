@@ -23,8 +23,10 @@ def file_checksum(path: str) -> str:
 
 
 class BatchReviewRepository:
-    def __init__(self, sessions):
+    def __init__(self, sessions, artifact_root=None):
         self.sessions = sessions
+        from tubeforge.pipeline.publication_batch_export import BatchExportStore
+        self.exports = BatchExportStore(artifact_root or Path('data/artifacts'))
 
     def _snapshot(self, session, topic):
         options = json.loads(topic.options_json)
@@ -51,6 +53,13 @@ class BatchReviewRepository:
         state = review.get('state', 'needs_review') if current else 'needs_review'
         qa = options.get('batch_qa')
         qa_ok = bool(qa and qa.get('exit_code') == 0 and qa.get('artifact_checksum') == checksums.get('final') and 'final' in checksums)
+        export = options.get('batch_export')
+        export_ok = bool(current and state == 'ready' and qa_ok and self.exports.valid(export, identity))
+        if export and not export_ok:
+            self.exports.invalidate(export)
+        if state == 'ready' and not export_ok:
+            state = 'needs_review'
+            current = False
         package = None
         if script and 'script' in checksums:
             try:
@@ -61,13 +70,14 @@ class BatchReviewRepository:
         return {'id': options['batch_plan']['id'], 'short': options['batch_plan'], 'job_id': topic.generation_job_id,
                 'production_state': job.state if job else 'not_started', 'state': state,
                 'decision': review.get('decision') if current else None, 'reviewed_identity': identity,
-                'checksum': checksums.get('final'), 'available': available, 'error': error,
+                'checksum': checksums.get('final'), 'reviewed_checksums': checksums, 'export_url': f'/api/batch-plans/{options["batch_plan"]["id"]}/export' if export_ok else None, 'available': available, 'error': error,
                 'qa': qa, 'qa_ok': qa_ok, 'script': package, 'thumbnail_result': options.get('batch_thumbnail'),
                 'preview_url': f'/api/jobs/{job.id}/artifacts/final' if available else None,
                 'thumbnail_url': f'/api/jobs/{job.id}/artifacts/thumbnail' if thumbnail and 'thumbnail' in checksums else None}
 
     def list_day(self, day=None):
         with self.sessions() as session:
+            session.execute(text('BEGIN IMMEDIATE'))
             rows = session.scalars(select(TopicRecord).where(TopicRecord.id.like('batch-%')).order_by(TopicRecord.created_at, TopicRecord.id))
             items = []
             for row in rows:
@@ -96,11 +106,24 @@ class BatchReviewRepository:
             job = session.get(PipelineJobRecord, row.generation_job_id)
             if action in {'approve', 'ready'} and not current['qa_ok']:
                 raise ValueError('QA must pass for the exact reviewed final artifact')
-            if action == 'ready' and current['state'] != 'approved':
+            if action == 'ready' and current['state'] not in {'approved', 'ready'}:
                 raise ValueError('approve this exact artifact before staging')
+            previous_export = options.get('batch_export')
+            if action != 'ready':
+                options.pop('batch_export', None)
             if action == 'approve':
                 state, decision = 'approved', 'approved'
             elif action == 'ready':
+                if not current['thumbnail_url']:
+                    raise ValueError('thumbnail unavailable; export cannot be staged')
+                artifacts = list(session.scalars(select(ArtifactRecord).where(ArtifactRecord.job_id == job.id)))
+                final = next(a for a in artifacts if a.name == 'final')
+                thumbnail = next(a for a in artifacts if a.name == 'thumbnail')
+                plan = options['batch_plan']
+                copy = (options.get('batch_thumbnail') or {}).get('text') or (plan.get('thumbnail') or {}).get('text') or next(iter((current.get('script') or {}).get('thumbnail_brief', {}).get('text_options', [])), '')
+                options['batch_export'] = self.exports.prepare(plan_id=options.get('batch_plan_id', 'default'), short=plan,
+                    package=current['script'], qa=current['qa'], reviewed_identity=identity, reviewed_checksums=current['reviewed_checksums'],
+                    final=final.path, thumbnail=thumbnail.path, thumbnail_text=copy, script=next(a.path for a in artifacts if a.name == 'content_package'))
                 state, decision = 'ready', 'approved'
             elif action == 'reject':
                 state, decision = 'needs_review', 'rejected'
@@ -118,6 +141,7 @@ class BatchReviewRepository:
                 child = JobRepository(self.sessions).create(uuid4().hex, request, transaction=session)
                 row.generation_job_id = child.id
                 options.pop('batch_qa', None)
+                options.pop('batch_thumbnail', None)
                 options['batch_regeneration'] = {'identity': identity, 'source_job_id': job.id}
                 state, decision = 'needs_review', 'regenerated'
             else:
@@ -129,4 +153,20 @@ class BatchReviewRepository:
             session.add(JobEventRecord(job_id=job.id, event_type='batch_review_' + action,
                 details_json=json.dumps({'short_id': short_id, 'actor': actor, 'reviewed_identity': identity, 'checksum': current['checksum'], 'state': state, 'new_job_id': row.generation_job_id if action == 'regenerate' else None}), created_at=datetime.now(UTC)))
             session.commit()
+            if action != 'ready':
+                self.exports.invalidate(previous_export)
             return {'id': short_id, 'state': state, 'decision': decision, 'job_id': row.generation_job_id}
+
+    def export_file(self, short_id, name):
+        if name not in {'final.mp4', 'thumbnail.jpg', 'package.json'}:
+            raise KeyError('export file not found')
+        with self.sessions() as session:
+            session.execute(text('BEGIN IMMEDIATE'))
+            row = session.get(TopicRecord, 'batch-' + short_id)
+            if row is None:
+                raise KeyError('short not found')
+            current = self._snapshot(session, row)
+            if current['state'] != 'ready' or not current['export_url']:
+                raise ValueError('export is unavailable or invalidated; review and stage again')
+            info = json.loads(row.options_json)['batch_export']
+            return Path(info['version']) / name

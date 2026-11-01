@@ -36,12 +36,15 @@ class BatchAutomationRepository:
             default = {'enabled': False, 'start_time': '22:00', 'timezone': 'Asia/Kolkata', 'day_offset': 1, 'next_run_at': None, 'last_run': None}
             if row:
                 options = json.loads(row.options_json)
+                def local(value):
+                    stamp = value.replace(tzinfo=UTC) if value.tzinfo is None else value
+                    return stamp.astimezone(ZoneInfo(row.timezone)).isoformat()
                 default.update({key: options[key] for key in ['start_time', 'day_offset']})
-                default.update(enabled=row.enabled, timezone=row.timezone, next_run_at=row.next_run_at.isoformat() if row.enabled and row.next_run_at else None)
+                default.update(enabled=row.enabled, timezone=row.timezone, next_run_at=local(row.next_run_at) if row.enabled and row.next_run_at else None)
                 run = session.scalar(select(ScheduleRunRecord).where(ScheduleRunRecord.schedule_id == row.id).order_by(ScheduleRunRecord.started_at.desc(), ScheduleRunRecord.id.desc()).limit(1))
                 if run:
                     details = json.loads(run.details_json)
-                    default['last_run'] = {'state': run.state, 'started_at': run.started_at.isoformat(), 'finished_at': run.finished_at.isoformat() if run.finished_at else None, 'result': details.get('result')}
+                    default['last_run'] = {'state': run.state, 'started_at': local(run.started_at), 'finished_at': local(run.finished_at) if run.finished_at else None, 'result': details.get('result')}
             return {'plan_id': plan_id, 'hold': is_held(session), **default}
 
     def configure(self, plan_id, *, enabled, start_time, timezone, day_offset, now=None):

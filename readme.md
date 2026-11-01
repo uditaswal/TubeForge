@@ -1004,3 +1004,25 @@ regeneration, and new batch worker admission across every plan. Running work
 stops at its next ownership/checkpoint check; the current operation may finish.
 Turn hold off to resume. Hold does not affect unrelated non-batch jobs or approve,
 stage, upload, or publish anything.
+
+### Local staged exports
+
+**Stage as ready** now writes the final video, registered portrait thumbnail,
+and `package.json` under the existing publishing staging area:
+`data/publishing/staging/batch/<plan-id>/<date>/<short-id>/` (relative to the
+configured artifact root's parent). The date is the short's publish metadata date,
+or the review date in Asia/Kolkata when no publish date is supplied.
+A missing thumbnail prevents export and leaves the approval available for review.
+
+Each folder is an atomic pointer to a completed immutable version. Re-approval
+and staging replace that pointer only after all copied files match reviewed
+checksums. The manifest preserves title, generated description (or concept when
+unavailable), tags, thumbnail text, source URLs, QA, reviewed hashes and `publish_at`
+as metadata only. Old versions stay retained under `.versions` for traceability.
+
+Use **Open export** on a ready review row to open the authenticated local file
+list and download the video, thumbnail or manifest. Every open/download checks
+current review, QA and file hashes. Changed artifacts or staged bytes invalidate
+the export, remove its active pointer, and require review/staging again. Rejecting,
+regenerating or re-approving also removes the prior active export. No upload or
+platform operation is performed.

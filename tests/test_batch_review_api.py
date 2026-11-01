@@ -18,7 +18,7 @@ from tubeforge.domain.states import JobState
 
 @pytest.fixture
 def review(tmp_path):
-    settings = Settings(app=AppConfig(name='test', environment='test'), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'review.db'}"), auth=AuthConfig(enabled=True))
+    settings = Settings(app=AppConfig(name='test', environment='test'), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'review.db'}"), auth=AuthConfig(enabled=True), pipeline={'voice': {'artifact_root': tmp_path / 'artifacts'}})
     db = create_database(settings.database)
     Base.metadata.create_all(db.engine)
     with TestClient(create_app(settings)) as client:
@@ -31,8 +31,10 @@ def review(tmp_path):
         request = ContentRequest(topic='One', angle='Concept', target_duration_seconds=60, language='en', audience='general', prompt_version='test-v1', sources=(SourceReference(source_id='operator', url='https://local.invalid/notes', title='Unverified notes'),))
         job_id = repo.produce(['one'], lambda short: request)[0]['job_id']
         runtime.jobs.update_state(job_id, JobState.FINAL_READY)
+        media = tmp_path / 'artifacts'
+        media.mkdir()
         for name, stage, content in [('final', JobState.FINAL_RENDERING, b'stub final bytes'), ('content_package', JobState.CONTENT_GENERATING, b'{"script_sections": []}'), ('thumbnail', JobState.PUBLICATION_PREPARING, b'stub thumbnail')]:
-            path = tmp_path / name
+            path = media / name
             path.write_bytes(content)
             checksum = hashlib.sha256(content).hexdigest()
             runtime.artifacts.save(Artifact(job_id, stage, name, str(path), checksum, {}))
@@ -41,7 +43,7 @@ def review(tmp_path):
             options = json.loads(row.options_json)
             options['batch_qa'] = {'exit_code': 0, 'output': 'stub checker PASS', 'artifact_checksum': hashlib.sha256(b'stub final bytes').hexdigest()}
             row.options_json = json.dumps(options)
-        yield client, runtime, repo, job_id, tmp_path
+        yield client, runtime, repo, job_id, media
     db.dispose()
 
 
