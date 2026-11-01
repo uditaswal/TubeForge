@@ -151,6 +151,12 @@ Validation rules your output must satisfy (violations are rejected and cost an a
 - Every claim with time_sensitive=true, confidence "low" or "medium" must also set human_review_required=true and review_status="needs_review".
 - Respect every length and count bound in the schema. Shorten text instead of truncating mid-word.
 - Narration and on-screen text are separate fields; keep spoken word counts within the stated per-scene range.
+
+FINAL CHECK before you return (the most common rejections):
+- Every heading is a two-to-four-word label in different words than its narration (at most two shared words).
+- The final scene's template matches the ending: loop for a loop ending, cta for a debate ending.
+- Every thumbnail text_option is two or three words, even if it mentions a score.
+- Every terminal line is at most 26 characters including the '$ ' prompt; flow nodes, checklist items and before/after texts at most 26.
 """
 
 
@@ -173,6 +179,10 @@ EDITOR_INSTRUCTIONS = (
     "(4) the biggest number or twist lands in the second half and the line before the loop echoes the hook; (5) the final scene is template loop: no follow or subscribe request, one open-ended sentence with no final full stop that hands back into scene 1's first words, and it copies scene 1's headline, chips, icon and logo. "
     "(6) plain speech: replace insider jargon with everyday words, and write every money amount, size and multiplier in the narration and its caption as spoken words "
     "('120 thousand dollars', '3.4 times', 'megabytes'; no $ symbol, no x multipliers, no MB or ms abbreviations, no thousands commas). "
+    "(7) listener test: read the narration aloud as one continuous voice-over. If a scene sounds like a list of facts, versions or figures, or repeats its neighbours' sentence frame, "
+    "rewrite it as one plain explanation of what happened and why it matters to the viewer; keep at most one number per scene and four in the whole narration (drop extra figures "
+    "from the voice-over; the claim, its claim_id and its source stay, and the figures belong in the scene's on-screen text); every score, rating or ranking must say what it measures and its scale ('the top danger rating, ten out of ten', never 'a perfect ten'); introduce at most two technical terms per scene; "
+    "make at least a third of the middle scenes speak to the viewer ('you', 'your') or say what it means for them; no three scenes start with the same word. "
     "Do not add or change any fact, number, claim_id, source_id, visual quote or reveal_words index meaning; keep every field valid; keep the narration within 78-92 words total. "
     "If the draft is already strong, change little."
 )
@@ -243,19 +253,37 @@ def editor_pass(request, root, raw, *, model, effort, schema, version, usage_tot
     return None, None, note
 
 
-def _validate_once(raw, request, version):
+def _with_preflight(error: Exception, draft: dict, ending: str) -> Exception:
+    """Add every display-text problem found in the same pass, so one repair attempt can fix them all."""
+    from tubeforge.providers.content.craft import display_preflight
+    said = _concise(error)
+    extra = [problem for problem in display_preflight(draft, ending) if problem[:48] not in said]
+    if not extra:
+        return error
+    return ProviderValidationError(said + "\nALSO FIX (found in the same pass, so one repair can handle everything):\n- " + "\n- ".join(extra))
+
+
+def _validate_once(raw, request, version, *, final: bool = False):
     if version in CONTENT_ENVELOPE_TEMPLATES:
         from tubeforge.providers.content.output import unwrap_generation
         raw = unwrap_generation(raw, request=request.request)
     normalized, normalizations = normalize_fallback_visuals(raw)
-    package = ContentPackage.model_validate(normalized)
-    if normalize_content_request(package.request) != normalize_content_request(request.request):
-        raise ValueError("Claude output source packet differs from the immutable request")
-    from tubeforge.providers.content.prompts import validate_video_package
-    validate_video_package(package, request.request, provider_name="Claude")
-    from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, evaluate
-    if version in SKILL_TEMPLATES:
-        evaluate(package)  # titles, thumbnail words, hook options: repairable like any other rule
+    if final:  # the last attempt: shorten a heading that repeats its narration rather than fail the whole job over a label
+        from tubeforge.providers.content.craft import normalize_headings
+        normalizations = [*normalizations, *normalize_headings(normalized)]
+    try:
+        package = ContentPackage.model_validate(normalized)
+        if normalize_content_request(package.request) != normalize_content_request(request.request):
+            raise ValueError("Claude output source packet differs from the immutable request")
+        from tubeforge.providers.content.prompts import validate_video_package
+        validate_video_package(package, request.request, provider_name="Claude")
+        from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, evaluate
+        if version in SKILL_TEMPLATES:
+            evaluate(package)  # titles, thumbnail words, hook options: repairable like any other rule
+    except (ValidationError, ProviderValidationError) as error:
+        if isinstance(error, InsufficientSourcesError):
+            raise
+        raise _with_preflight(error, normalized, getattr(request.request, "ending", "loop")) from error
     return package, normalizations
 
 
@@ -296,7 +324,7 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
         raw, usage = call_claude(task, schema, model=model, effort=effort)
         _add_usage(usage_total, usage, "script" if attempt == 0 else "script repair")
         try:
-            package, normalizations = _validate_once(raw, request, version)
+            package, normalizations = _validate_once(raw, request, version, final=attempt == 1)
             break
         except (ValidationError, ProviderValidationError) as error:
             if isinstance(error, InsufficientSourcesError):
