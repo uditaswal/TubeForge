@@ -46,6 +46,24 @@ def unwrap_generation(raw: object, *, request: ContentRequest | None = None) -> 
     return result.package.model_dump(mode="json")
 
 
+MAX_WHISPERS_PER_VIDEO = 2
+
+
+def split_delivery_cues(narration: str) -> tuple[str, list[dict]]:
+    """Clean narration plus bound cue dicts; malformed cues degrade to plain speech, never a rejection."""
+    import re
+    from tubeforge.rendering.shorts.cues import has_cues, parse
+    if not isinstance(narration, str) or not has_cues(narration):
+        return narration, []
+    try:
+        clean, cues = parse(narration)
+    except ValueError:
+        stripped = re.sub(r"\[(?:pause(?:\s+[0-9.]+)?|breath|whisper|/whisper)\]", " ", narration, flags=re.I)
+        stripped = re.sub(r"(?<!\w)\*+|\*+(?!\w)", "", stripped)
+        return " ".join(stripped.split()), []
+    return clean, [cue.model_dump(exclude_none=True) for cue in cues]
+
+
 def bind_reference_output(package: dict, request: ContentRequest) -> dict:
     """Bind narration and trusted attribution; never invent scene content."""
     from tubeforge.core.errors import ProviderValidationError
@@ -57,12 +75,28 @@ def bind_reference_output(package: dict, request: ContentRequest) -> dict:
     if not isinstance(scenes, list) or len(scenes) != len(sections):
         raise ProviderValidationError("reference scene count differs from narration")
     bound = []
-    for scene, section in zip(scenes, sections, strict=True):
+    for index, (scene, section) in enumerate(zip(scenes, sections, strict=True)):
         if not isinstance(scene, dict) or not isinstance(section, dict) or scene.get("scene_id") != section.get("scene_id"):
             raise ProviderValidationError("reference scenes are not in narration order")
         if "vo" in scene and scene["vo"] != section.get("narration"):
             raise ProviderValidationError("reference speech echo conflicts with canonical narration")
-        bound.append({**scene, "vo": section["narration"]})
+        clean, cue_list = split_delivery_cues(section.get("narration", ""))
+        sections[index] = {**section, "narration": clean}
+        scene = {key: value for key, value in scene.items() if key != "cues"}
+        bound.append({**scene, "vo": clean, **({"cues": cue_list} if cue_list else {})})
+    whispers = 0  # a whole video may whisper at most twice; extras degrade to normal speech
+    for scene in bound:
+        kept = []
+        for cue in scene.get("cues", []):
+            if cue["kind"] == "whisper":
+                whispers += 1
+                if whispers > MAX_WHISPERS_PER_VIDEO:
+                    continue
+            kept.append(cue)
+        if kept:
+            scene["cues"] = kept
+        else:
+            scene.pop("cues", None)
     sources = [{"source_id": s.source_id, "name": (s.author or s.title)[:42], "url": str(s.url)} for s in request.sources]
     if "sources" in topic and topic["sources"] != sources:
         raise ProviderValidationError("reference source echo conflicts with trusted request")

@@ -999,6 +999,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if schedule is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found")
         return runtime.scheduler.run(schedule, run_key=f"manual-{uuid4().hex}")
 
+    from tubeforge.api.batch import register_batch_routes
+    def batch_request(short):
+        from tubeforge.scheduling.batch_requests import build_batch_request
+        return build_batch_request(short, application_settings)
+    runtime.scheduler.batch_request_factory = batch_request
+    register_batch_routes(app, runtime, batch_request)
+
     @app.post("/api/jobs", status_code=status.HTTP_201_CREATED, tags=["jobs"])
     def create_job(request: ContentRequest) -> dict[str, object]:
         """Create a durable job; a separate worker advances it."""

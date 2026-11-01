@@ -60,6 +60,15 @@ class SchedulerService:
 
     def run(self, schedule: Schedule, *, now: datetime | None = None, run_key: str | None = None) -> dict[str, object]:
         now = now or datetime.now(UTC)
+        if 'batch_plan_id' in schedule.options:
+            from tubeforge.scheduling.batch import run_batch_schedule
+            factory = getattr(self, 'batch_request_factory', None)
+            if factory is None:
+                from tubeforge.core.config import load_settings
+                from tubeforge.scheduling.batch_requests import build_batch_request
+                settings = load_settings()
+                factory = lambda short: build_batch_request(short, settings)
+            return run_batch_schedule(self.schedules._session_factory, schedule.id, factory, now=now, run_key=run_key)
         key = run_key or now.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
         run_id = uuid4().hex
         if not self.schedules.begin_run(run_id=run_id, schedule_id=schedule.id, run_key=key, now=now):

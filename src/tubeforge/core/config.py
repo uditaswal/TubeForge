@@ -649,6 +649,8 @@ class ReferenceShortConfig(BaseModel):
     pronunciation_lexicon: dict[str, str] = Field(default_factory=dict)
     speech_group_size: int = Field(default=1, ge=1, le=2)
     voice_processing: Literal["off", "gentle-v1"] = "off"
+    # Honour pause/breath/stress/whisper cues bound from the narration; scenes without cues are unaffected.
+    delivery_cues: Literal["off", "cues-v1"] = "cues-v1"
 
 
 class PixabayConfig(BaseModel):

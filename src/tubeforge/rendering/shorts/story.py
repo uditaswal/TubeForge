@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -46,7 +47,8 @@ html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:{BG
 .note {{ position:absolute; left:60px; right:130px; font:700 32px/1.3 Inter; color:{MUTED}; }}
 #captions {{ position:absolute; left:40px; right:40px; top:1330px; }}
 .cap-group {{ position:absolute; left:0; right:0; text-align:center; font:104px/1 Anton; text-transform:uppercase; opacity:0; }}
-.cap-word {{ color:{INK}; -webkit-text-stroke:7px {BG}; paint-order:stroke fill; }}
+.cap-word {{ color:{INK}; -webkit-text-stroke:7px {BG}; paint-order:stroke fill; position:relative; display:inline-block; isolation:isolate; }}
+.cap-word .mark {{ position:absolute; left:-12px; right:-12px; top:12%; bottom:0; background:var(--mark,#ffb020); border-radius:14px; z-index:-1; transform:scaleX(0); transform-origin:0 50%; }}
 """
 
 POP = ("function pop(sel,t,o){o=o||{};tl.fromTo(sel,{opacity:0,x:o.x||0,y:o.y===undefined?40:o.y,scale:o.s||.92},"
@@ -79,6 +81,129 @@ def _domain(url: str | None) -> str | None:
     return host.removeprefix("www.") if host else None
 
 
+def _caption_groups(scene, words: list[tuple[float, float]]) -> list[dict]:
+    """Caption groups plus per-word times and key-word flags (the scene's reveal words)."""
+    groups = _word_groups(scene.caption, words)
+    keys, cursor = set(scene.reveal_words), 0
+    for group in groups:
+        count = len(group["words"])
+        group["times"] = [[round(start, 3), round(end, 3)] for start, end in words[cursor:cursor + count]]
+        group["keys"] = [(cursor + offset) in keys for offset in range(count)]
+        cursor += count
+    return groups
+
+
+def _node_fit(text: str, width: int) -> int:
+    """Largest Anton size (<=52px) at which the node text wraps to at most two lines."""
+    for size in range(52, 31, -2):
+        if len(text) * size * .5 <= (width - 44) * 2 * .92:
+            return size
+    return 32
+
+
+def _diagram(sid: str, scene, reveal: list[float], a: float, b: float, accent: str) -> tuple[str, str]:
+    """Minimalist architecture diagram: nodes pop in as the narration reaches them; connectors draw
+    and a packet travels along each, so the viewer sees the path the attack takes."""
+    nodes, danger = list(scene.nodes), set(scene.danger)
+    count = len(nodes)
+    colour = lambda k: RED if k in danger else CYAN
+    boxes: list[tuple[int, int, int, int]] = []          # left, top, width, height
+    if scene.diagram == "branch":
+        children = count - 1
+        entry_width = 560
+        boxes.append((505 - entry_width // 2, 590, entry_width, 140))
+        width = (890 - (children - 1) * 30) // children
+        for k in range(children):
+            boxes.append((60 + k * (width + 30), 900, width, 170))
+    else:  # zigzag ladder
+        step = min(200, (1230 - 590 - 128) // max(1, count - 1))
+        for k in range(count):
+            boxes.append((60 if k % 2 == 0 else 540, 590 + k * step, 410, 128))
+    body = _heading(scene.heading, accent)
+    anim = ""
+    setters = ""
+    for k, (left, top, width, height) in enumerate(boxes):
+        col = colour(k)
+        body += (f'<div class="card" id="{sid}n{k}" style="left:{left}px;top:{top}px;width:{width}px;height:{height}px;'
+                 f'border-color:{col};border-width:3px;display:flex;align-items:center;justify-content:center;padding:0 22px;text-align:center">'
+                 f'<span style="font:400 {_node_fit(nodes[k], width)}px/1.05 Anton;color:{col};text-transform:uppercase">{html.escape(nodes[k])}</span></div>')
+        at = reveal[min(k, len(reveal) - 1)] if len(reveal) > 1 else a + .3 + k * (b - a) * .22
+        anim += f'pop("#{sid}n{k}",{at:.3f},{{x:0,y:30}});'
+        if k in danger:
+            anim += (f'tl.fromTo("#{sid}n{k}",{{boxShadow:"0 0 0 0 rgba(255,77,61,.75)"}},'
+                     f'{{boxShadow:"0 0 0 30px rgba(255,77,61,0)",duration:.8,ease:"power2.out"}},{at + .15:.3f});')
+    for k in range(1, count):
+        source = boxes[0] if scene.diagram == "branch" else boxes[k - 1]
+        target = boxes[k]
+        if scene.diagram == "branch":
+            x0, y0 = source[0] + source[2] / 2, source[1] + source[3]
+            x1, y1 = target[0] + target[2] / 2, target[1]
+        else:
+            right = target[0] > source[0]
+            x0, y0 = (source[0] + source[2] if right else source[0]), source[1] + source[3] / 2
+            x1, y1 = (target[0] if right else target[0] + target[2]), target[1] + target[3] / 2
+        length = math.hypot(x1 - x0, y1 - y0)
+        angle = math.degrees(math.atan2(y1 - y0, x1 - x0))
+        col = colour(k)
+        arrive = reveal[min(k, len(reveal) - 1)] if len(reveal) > 1 else a + .3 + k * (b - a) * .22
+        travel = min(.7, max(.35, arrive - a - .2))
+        begin = max(a + .05, arrive - travel)
+        ux, uy = (x1 - x0) / length, (y1 - y0) / length
+        body += (f'<div id="{sid}l{k}" style="position:absolute;left:{x0:.1f}px;top:{y0 - 2:.1f}px;width:{length - 14:.1f}px;height:4px;'
+                 f'background:{col};border-radius:2px;opacity:.9"></div>'
+                 f'<div id="{sid}h{k}" style="position:absolute;left:{x1 - ux * 12 - 14:.1f}px;top:{y1 - uy * 12 - 12:.1f}px;width:0;height:0;'
+                 f'border-left:14px solid transparent;border-right:14px solid transparent;border-bottom:24px solid {col};opacity:0"></div>'
+                 f'<div id="{sid}p{k}" style="position:absolute;left:{x0 - 13:.1f}px;top:{y0 - 13:.1f}px;width:26px;height:26px;border-radius:13px;'
+                 f'background:{col};box-shadow:0 0 22px 6px {col};opacity:0"></div>')
+        setters += (f'gsap.set("#{sid}l{k}",{{rotation:{angle:.2f},transformOrigin:"0 50%",scaleX:0}});'
+                    f'gsap.set("#{sid}h{k}",{{rotation:{angle + 90:.2f}}});')
+        anim += (f'tl.to("#{sid}l{k}",{{scaleX:1,duration:{travel:.3f},ease:"power1.inOut"}},{begin:.3f});'
+                 f'tl.set("#{sid}p{k}",{{opacity:1}},{begin:.3f});'
+                 f'tl.fromTo("#{sid}p{k}",{{x:0,y:0}},{{x:{x1 - x0:.1f},y:{y1 - y0:.1f},duration:{travel:.3f},ease:"power1.inOut"}},{begin:.3f});'
+                 f'tl.set("#{sid}p{k}",{{opacity:0}},{begin + travel:.3f});'
+                 f'tl.set("#{sid}h{k}",{{opacity:1}},{begin + travel - .05:.3f});')
+    return body, setters + anim
+
+
+def _terminal(sid: str, scene, reveal: list[float], a: float, b: float, accent: str) -> tuple[str, str]:
+    """A terminal window: commands type out when the narration reaches them, output lines appear whole."""
+    size, per_row, row_h = 44, 30, 64
+    rows = [max(1, math.ceil((len(line.text) + (2 if line.kind == "command" else 0)) / per_row)) for line in scene.lines]
+    inner = sum(r * row_h + 24 for r in rows)
+    card_h = max(560, 96 + inner + 90)
+    body = _heading(scene.heading, accent)
+    body += (f'<div class="card" id="{sid}term" style="left:50px;top:520px;width:900px;height:{card_h}px;overflow:hidden;background:#0d1019">'
+             f'<div style="position:absolute;left:0;right:0;top:0;height:72px;background:#1a1e2e;border-bottom:2px solid #262b40"></div>'
+             + "".join(f'<div style="position:absolute;left:{34 + 34 * i}px;top:26px;width:20px;height:20px;border-radius:10px;background:{c}"></div>'
+                       for i, c in enumerate((RED, AMBER, GREEN)))
+             + f'<div class="mono" style="position:absolute;left:0;right:0;top:20px;text-align:center;font-size:26px;color:{MUTED}">bash</div>')
+    anim = f'pop("#{sid}term",{a + .1:.3f},{{y:30}});'
+    top = 96
+    for k, (line, row_count) in enumerate(zip(scene.lines, rows, strict=True)):
+        at = reveal[min(k, len(reveal) - 1)] if len(reveal) > 1 else a + .5 + k * (b - a) * .25
+        nxt = reveal[min(k + 1, len(reveal) - 1)] if k + 1 < len(scene.lines) and len(reveal) > 1 else b - .3
+        style = (f'position:absolute;left:40px;right:40px;top:{top}px;font-size:{size}px;line-height:{row_h}px;'
+                 f'white-space:pre-wrap;word-break:break-all;opacity:0')
+        if line.kind == "command":
+            text = line.text
+            duration = min(2.2, max(.6, (nxt - at) * .6))
+            body += (f'<div class="mono" id="{sid}c{k}" style="{style};color:{INK}"><span style="color:{GREEN}">$ </span>'
+                     f'<span id="{sid}t{k}"></span><span id="{sid}u{k}" style="color:{CYAN};opacity:0">█</span></div>')
+            anim += (f'tl.set("#{sid}c{k}",{{opacity:1}},{at:.3f});tl.set("#{sid}u{k}",{{opacity:1}},{at:.3f});'
+                     f'var ty{sid}{k}={{n:0}};var tx{sid}{k}={json.dumps(text)};'
+                     f'tl.to(ty{sid}{k},{{n:{len(text)},duration:{duration:.3f},ease:"none",onUpdate:function(){{'
+                     f'document.querySelector("#{sid}t{k}").textContent=tx{sid}{k}.slice(0,Math.round(ty{sid}{k}.n))}}}},{at:.3f});'
+                     f'tl.set("#{sid}u{k}",{{opacity:0}},{at + duration + .35:.3f});')
+        else:
+            body += f'<div class="mono" id="{sid}c{k}" style="{style};color:{GREEN}">{html.escape(line.text)}</div>'
+            anim += f'pop("#{sid}c{k}",{at:.3f},{{x:0,y:10,s:1}});'
+        top += row_count * row_h + 24
+    body += (f'<div class="pill" id="{sid}ev" style="left:40px;top:{card_h - 76}px;height:48px;font-size:24px;'
+             f'background:rgba(83,224,239,.12);border:2px solid rgba(83,224,239,.5);color:{INK}">{html.escape(scene.evidence_label)}</div></div>')
+    anim += f'pop("#{sid}ev",{a + .5:.3f},{{y:10}});'
+    return body, anim
+
+
 def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest: dict) -> dict:
     """Write one self-contained HyperFrames project for the whole Short and report what it used."""
     assets = out / "assets"
@@ -98,7 +223,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
         timing = timeline.timings[i]
         a, b = timing.start, timing.end
         words = [(w.start, w.end) for w in timing.words]
-        captions += _word_groups(scene.caption, words)
+        captions += _caption_groups(scene, words)
         reveal = [words[r][0] for r in scene.reveal_words if r < len(words)] or [a + .5]
         sid, accent = f"s{i}", ACCENTS[i % 3]
         visual = getattr(scene, "visual", None)
@@ -150,6 +275,10 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                 body += (f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{880 + k * 100}px;background:{RED if k == 0 else "#1b2036"};'
                          f'border:2px solid {RED if k == 0 else "#333a58"};color:#fff;font:400 60px/1 Anton;height:84px;border-radius:14px;text-transform:uppercase">{html.escape(chip)}</div>')
                 anim += f'pop("#{sid}c{k}",{reveal[min(k, len(reveal) - 1)]:.3f},{{x:-60,y:0}});'
+        elif template == "flow" and scene.diagram != "stack":
+            body, anim = _diagram(sid, scene, reveal, a, b, accent)
+        elif template == "terminal":
+            body, anim = _terminal(sid, scene, reveal, a, b, accent)
         elif template == "flow":
             body = _heading(scene.heading, accent)
             nodes = list(scene.nodes)
@@ -198,7 +327,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                      f'<div id="{sid}l" style="position:absolute;left:60px;top:930px;font:800 44px/1.2 Inter;color:{INK}">{html.escape(scene.after_label)}</div>')
             anim = (f'var o={{v:{scene.before}}};tl.to(o,{{v:{scene.after},duration:.8,ease:"power3.out",onUpdate:function(){{document.querySelector("#{sid}v").textContent=o.v.toFixed({fmt})}}}},{reveal[-1]:.3f});'
                     f'pop("#{sid}l",{reveal[-1] + .3:.3f});')
-        else:  # terminal, cta or anything new: heading plus its chips, never a crash
+        else:  # cta or anything new: heading plus its chips, never a crash
             heading = getattr(scene, "heading", None) or " ".join(getattr(scene, "headline", ())) or scene.caption
             body = _heading(heading, accent)
             for k, chip in enumerate(getattr(scene, "chips", ())):
@@ -215,7 +344,12 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
 var CAPTIONS={json.dumps(captions)}; var host=document.getElementById("captions");
 CAPTIONS.forEach(function(g,gi) {{
  var el=document.createElement("div"); el.className="cap-group";
- g.words.forEach(function(w,wi) {{ var s=document.createElement("span"); s.className="cap-word"; s.textContent=w+(wi<g.words.length-1?" ":""); el.appendChild(s); }});
+ g.words.forEach(function(w,wi) {{
+  var s=document.createElement("span"); s.className="cap-word"; s.appendChild(document.createTextNode(w));
+  if (g.keys && g.keys[wi]) {{ var m=document.createElement("i"); m.className="mark"; s.appendChild(m);
+   tl.fromTo(m,{{scaleX:0}},{{scaleX:1,duration:Math.max(.14,g.times[wi][1]-g.times[wi][0]),ease:"none"}},g.times[wi][0]); }}
+  el.appendChild(s); if (wi<g.words.length-1) el.appendChild(document.createTextNode(" "));
+ }});
  host.appendChild(el);
  var st=Math.max(0,g.start-.02), nx=gi+1<CAPTIONS.length?Math.max(0,CAPTIONS[gi+1].start-.02):Infinity;
  var en=Math.max(st+.08,Math.min(g.end,nx-.01));

@@ -5,6 +5,7 @@ import re
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_serializer, model_validator
 
+from .cues import Cue, validate_cues
 from .icons import ICON_NAMES
 from .logos import LOGO_NAMES
 
@@ -61,17 +62,26 @@ class Scene(StrictModel):
     vo: str = Field(min_length=1, max_length=400)
     caption: str = Field(min_length=1, max_length=400)
     source_ids: tuple[str, ...] = Field(default=(), max_length=3)
-    reveal_words: tuple[int, ...] = Field(min_length=1, max_length=3)
+    reveal_words: tuple[int, ...] = Field(min_length=1, max_length=4)
     # Optional badge from the fixed procedural icon set; never a file or URL.
     icon: IconName | None = None
     # Optional brand logo for a named technology; replaces the icon glyph in the badge.
     logo: LogoName | None = None
     # Optional real imagery for the scene; None keeps the code-drawn template only.
     visual: Visual | None = None
+    # Optional narrator delivery (pauses, breaths, stress, whispers) anchored to indices in ``vo``;
+    # bound by Python from tags in the canonical narration, never written by the model directly.
+    cues: tuple[Cue, ...] = ()
 
     @model_serializer(mode="wrap")
     def omit_empty_visual(self, handler):
         value = handler(self)
+        if not self.cues:
+            value.pop("cues", None)
+        if getattr(self, "diagram", "stack") == "stack":
+            value.pop("diagram", None)  # Flow only: the default stack layout stays implicit
+        if not getattr(self, "danger", ()):
+            value.pop("danger", None)
         if self.visual is None:
             value.pop("visual", None)
         if self.logo is None:
@@ -87,6 +97,8 @@ class Scene(StrictModel):
             raise ValueError("reveal_words must be ordered, distinct narration word indices")
         if "\n" in self.caption:
             raise ValueError("caption input is continuous display text, not a multiline layout")
+        if self.cues:
+            validate_cues(self.cues, len(words))
         return self
 
 
@@ -122,7 +134,23 @@ class BeforeAfter(Scene):
 class Flow(Scene):
     template: Literal["flow"]
     heading: str = Field(min_length=1, max_length=42)
-    nodes: tuple[str, ...] = Field(min_length=2, max_length=3)
+    nodes: tuple[str, ...] = Field(min_length=2, max_length=4)
+    # "stack" is the original vertical card stack. "zigzag" (a ladder of alternating nodes) and
+    # "branch" (one entry node fanning out to the rest) draw a minimalist architecture diagram
+    # whose connectors animate in the order the narration reaches each node.
+    diagram: Literal["stack", "zigzag", "branch"] = "stack"
+    # Indices of nodes drawn as the attacker or a compromised system (red, pulsing).
+    danger: tuple[int, ...] = Field(default=(), max_length=4)
+
+    @model_validator(mode="after")
+    def diagram_shape(self):
+        if self.diagram == "stack" and len(self.nodes) > 3:
+            raise ValueError("a stack flow holds at most 3 nodes; use diagram zigzag or branch for 4")
+        if self.diagram == "branch" and len(self.nodes) < 3:
+            raise ValueError("a branch diagram needs an entry node and at least two targets")
+        if tuple(sorted(set(self.danger))) != self.danger or not all(0 <= i < len(self.nodes) for i in self.danger):
+            raise ValueError("danger must be ordered, distinct node indices")
+        return self
 
 
 class Checklist(Scene):

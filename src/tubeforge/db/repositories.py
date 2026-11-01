@@ -156,7 +156,7 @@ class JobRepository:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
 
-    def create(self, job_id: str, request: ContentRequest, *, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None) -> PipelineJob:
+    def create(self, job_id: str, request: ContentRequest, *, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None, transaction: Session | None = None) -> PipelineJob:
         now = datetime.now(UTC)
         record = PipelineJobRecord(
             id=job_id, request_json=request.model_dump_json(), video_description=video_description.strip() if video_description is not None else None, state=JobState.TOPIC_CREATED.value,
@@ -165,6 +165,11 @@ class JobRepository:
             attempt_count=0, next_retry_at=None, cancellation_requested_at=None,
             authentication_restored_at=None,
         )
+        if transaction is not None:
+            transaction.add(record)
+            _snapshot_video_destinations(transaction, job_id, destination_account_ids, video_description, now)
+            transaction.flush()
+            return _job_from_record(record)
         try:
             with self._session_factory.begin() as session:
                 session.add(record)
@@ -326,7 +331,46 @@ class JobRepository:
                 and_(PipelineJobRecord.state == JobState.AUTH_REQUIRED.value, PipelineJobRecord.authentication_restored_at.is_not(None)),
                 and_(PipelineJobRecord.state == JobState.PUBLICATION_VERIFICATION_PENDING.value, PipelineJobRecord.next_retry_at <= now),
             )
-            candidate = session.scalar(select(PipelineJobRecord.id).where(eligible, PipelineJobRecord.claim_owner.is_(None)).order_by(PipelineJobRecord.created_at, PipelineJobRecord.id).limit(1))
+            # Batch jobs remain FIFO even across worker processes and approval waits.
+            # Completed batches never advance into the publication pipeline.
+            from sqlalchemy.orm import aliased
+            batch_topic, earlier_topic = aliased(TopicRecord), aliased(TopicRecord)
+            earlier_job = aliased(PipelineJobRecord)
+            # A crash between a terminal checkpoint and QA must resume only QA.
+            pending_qa_topic = aliased(TopicRecord)
+            eligible = or_(eligible, and_(
+                PipelineJobRecord.state.in_([JobState.FAILED_VALIDATION.value, JobState.FAILED_EXHAUSTED.value, JobState.CANCELLED.value]),
+                exists(select(pending_qa_topic.id).where(
+                    pending_qa_topic.generation_job_id == PipelineJobRecord.id,
+                    func.json_extract(pending_qa_topic.options_json, "$.batch_plan.id").is_not(None),
+                    func.json_extract(pending_qa_topic.options_json, "$.batch_qa").is_(None),
+                ).correlate(PipelineJobRecord)),
+            ))
+            finished = [JobState.FINAL_READY.value, JobState.FAILED_VALIDATION.value,
+                        JobState.FAILED_EXHAUSTED.value, JobState.CANCELLED.value,
+                        JobState.FAILED_RETRYABLE.value, JobState.AUTH_REQUIRED.value]
+            batch_blocked = exists(select(batch_topic.id).where(
+                batch_topic.generation_job_id == PipelineJobRecord.id,
+                func.json_extract(batch_topic.options_json, "$.batch_plan.id").is_not(None),
+                or_(and_(PipelineJobRecord.state == JobState.FINAL_READY.value,
+                         func.json_extract(batch_topic.options_json, "$.batch_qa").is_not(None),
+                         or_(func.json_extract(batch_topic.options_json, "$.batch_thumbnail").is_not(None),
+                             func.json_extract(batch_topic.options_json, "$.batch_history") == 1)),
+                    exists(select(earlier_topic.id).join(earlier_job, earlier_job.id == earlier_topic.generation_job_id).where(
+                        func.json_extract(earlier_topic.options_json, "$.batch_plan.id").is_not(None),
+                        or_(earlier_job.created_at < PipelineJobRecord.created_at,
+                            and_(earlier_job.created_at == PipelineJobRecord.created_at, earlier_job.id < PipelineJobRecord.id)),
+                        earlier_job.state.not_in(finished),
+                    ).correlate(PipelineJobRecord)))
+            ).correlate(PipelineJobRecord))
+            from tubeforge.db.batch_automation import is_held
+            if is_held(session):
+                held_topic = aliased(TopicRecord)
+                eligible = and_(eligible, ~exists(select(held_topic.id).where(
+                    held_topic.generation_job_id == PipelineJobRecord.id,
+                    func.json_extract(held_topic.options_json, "$.batch_plan.id").is_not(None),
+                ).correlate(PipelineJobRecord)))
+            candidate = session.scalar(select(PipelineJobRecord.id).where(eligible, ~batch_blocked, PipelineJobRecord.claim_owner.is_(None)).order_by(PipelineJobRecord.created_at, PipelineJobRecord.id).limit(1))
             if candidate is None:
                 return None
             result = session.execute(update(PipelineJobRecord).where(PipelineJobRecord.id == candidate, PipelineJobRecord.claim_owner.is_(None)).values(claim_owner=worker_id, claimed_at=now, heartbeat_at=now, lease_expires_at=lease_expiry, updated_at=now))
@@ -554,11 +598,24 @@ class TopicRepository:
             if record is None: raise KeyError("topic not found")
             return _topic_from_record(record)
 
-    def reserve_and_create_job(self, *, topic_id: str, scheduler_id: str, job_id: str, request: ContentRequest, lease_seconds: int, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None, account_id: str | None = None) -> PipelineJob | None:
+    def reserve_and_create_job(self, *, topic_id: str, scheduler_id: str, job_id: str, request: ContentRequest, lease_seconds: int, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None, account_id: str | None = None, batch_run=None) -> PipelineJob | None:
         """Atomically convert one READY topic into exactly one ordinary job."""
         now = datetime.now(UTC)
         with self._session_factory.begin() as session:
             _require_active_account(session, account_id)
+            existing = session.get(TopicRecord, topic_id)
+            if existing and 'batch_plan' in json.loads(existing.options_json):
+                from tubeforge.db.batch_automation import is_held
+                if is_held(session):
+                    raise ValueError('batch production is on hold')
+                if batch_run:
+                    run_id, token, run_now = batch_run
+                    run = session.get(ScheduleRunRecord, run_id)
+                    details = json.loads(run.details_json) if run else {}
+                    if not run or run.state != 'running' or details.get('owner') != token or datetime.fromisoformat(details['lease_until']) <= run_now:
+                        raise ValueError('batch scheduler ownership lost')
+            if existing and 'batch_plan' in json.loads(existing.options_json) and scheduler_id != 'batch-operator':
+                return None
             result = session.execute(update(TopicRecord).where(TopicRecord.id == topic_id, TopicRecord.account_id == account_id, TopicRecord.status == "ready").values(status="generating", generation_job_id=job_id, reserved_by=scheduler_id, reserved_at=now, lease_expires_at=now + timedelta(seconds=lease_seconds), attempts=TopicRecord.attempts + 1, updated_at=now))
             if result.rowcount != 1:
                 return None

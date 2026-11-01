@@ -19,6 +19,7 @@ class SpokenScene:
     alignment_text: str
     display_spans: tuple[tuple[int, int], ...]
     applied: tuple[dict[str, str | int], ...]
+    tokens: tuple[str, ...] = ()  # spoken form of each display word, in order (for cue segmentation)
 
 
 def _integer(number: int) -> str:
@@ -59,9 +60,12 @@ def validated_lexicon(lexicon: dict[str, str]) -> dict[str, str]:
     return result
 
 
-def profile_hash(*, profile: str, lexicon: dict[str, str], group_size: int, voice_processing: str) -> str:
+def profile_hash(*, profile: str, lexicon: dict[str, str], group_size: int, voice_processing: str,
+                 delivery: str = "off") -> str:
     material = {"version": VERSION, "profile": profile, "lexicon": validated_lexicon(lexicon),
                 "group_size": group_size, "voice_processing": voice_processing}
+    if delivery != "off":
+        material["delivery"] = delivery  # absent when off, so existing profile hashes are unchanged
     return hashlib.sha256(json.dumps(material, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -93,7 +97,7 @@ def prepare_spoken(display: str, *, profile: str, lexicon: dict[str, str]) -> Sp
         if reason:
             applied.append({"display_index": index, "display": token, "spoken": replacement, "rule": reason})
     text = " ".join(spoken)
-    return SpokenScene(text, _DECIMAL.sub("’", text), tuple(spans), tuple(applied))
+    return SpokenScene(text, _DECIMAL.sub("’", text), tuple(spans), tuple(applied), tuple(spoken))
 
 
 def collapse_alignment(measured, spans: tuple[tuple[int, int], ...]):

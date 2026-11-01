@@ -28,6 +28,8 @@ class KokoroVoiceProvider:
         text = normalize_narration_text(request.text)
         if not text:
             raise ProviderValidationError("Kokoro narration text is empty")
+        scale = dict(request.settings).get("speed_scale")
+        speed = self.settings.speed * min(max(float(scale), .5), 1.5) if scale else self.settings.speed
         blend_spec = self.settings.voice_blends.get(request.voice_id)
         if blend_spec is None and request.voice_id not in self.settings.voices:
             raise ProviderValidationError(f"unsupported Kokoro voice: {request.voice_id}")
@@ -38,7 +40,7 @@ class KokoroVoiceProvider:
         model_identity = (digest(model), digest(voices))
         key = hashlib.sha256(json.dumps({"text": text, "voice": request.voice_id, "provider": self.provider_name,
                                         "version": self.settings.adapter_version, "model": model_identity,
-                                        "speed": self.settings.speed, "language": "en-us",
+                                        "speed": speed, "language": "en-us",
                                         "request_settings": request.settings}, sort_keys=True).encode()).hexdigest()
         destination = Path(request.output_path) if request.output_path else self._path(self.settings.cache_root) / request.voice_id / f"{key}.wav"
         if self._valid_wave(destination):
@@ -57,7 +59,7 @@ class KokoroVoiceProvider:
             if blend_spec is not None:
                 from .voice_blend import resolve_blend
                 voice = resolve_blend(self._pipeline.get_voice_style, blend_spec)
-            samples, sample_rate = self._pipeline.create(text, voice=voice, speed=self.settings.speed, lang="en-us")
+            samples, sample_rate = self._pipeline.create(text, voice=voice, speed=speed, lang="en-us")
             if sample_rate != self.settings.sample_rate:
                 raise ProviderValidationError(f"Kokoro returned unexpected sample rate: {sample_rate}")
             chunks = [float(value) for value in samples]
