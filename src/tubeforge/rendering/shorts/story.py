@@ -102,6 +102,21 @@ def _node_fit(text: str, width: int) -> int:
     return 32
 
 
+def diagram_packet_times(scene, reveal: list[float], a: float, b: float) -> list[float]:
+    """Arrival time of each diagram connector's travelling packet (one per edge, node 1..N-1).
+
+    Mirrors ``_diagram``'s own ``arrive`` pacing math exactly, so a caller that needs these
+    instants before the visual renderer runs — mastering audio happens before ``render_silent``
+    builds the diagram markup — gets identical timing, not an approximation that could drift
+    from what actually appears on screen. Keep in sync with ``_diagram``'s own ``arrive`` formula
+    by hand; it is duplicated rather than shared because ``_diagram`` also needs ``begin``
+    (clamped to the scene start) for the connector-draw animation, which this caller does not.
+    """
+    count = len(scene.nodes)
+    return [reveal[min(k, len(reveal) - 1)] if len(reveal) > 1 else a + .3 + k * (b - a) * .22
+            for k in range(1, count)]
+
+
 def _diagram(sid: str, scene, reveal: list[float], a: float, b: float, accent: str) -> tuple[str, str]:
     """Minimalist architecture diagram: nodes pop in as the narration reaches them; connectors draw
     and a packet travels along each, so the viewer sees the path the attack takes."""

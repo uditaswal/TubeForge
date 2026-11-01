@@ -99,6 +99,7 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
            templates: tuple[str, ...], title: str, bed: "Path | str | None" = "synthesized",
            sfx_enabled: bool = True, sfx_max_per_minute: int = 4, sfx_min_gap_s: float = 6.0,
            sfx_peak: float = .18, reveal_times: tuple[float, ...] | None = None,
+           packet_times: tuple[tuple[float, ...], ...] | None = None,
            cancelled=lambda: False, ffmpeg="ffmpeg"):
     """Mix locally, retain separate stems, then leave AAC true-peak headroom.
 
@@ -114,7 +115,9 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     only an explicit choice does.
 
     ``sfx_enabled`` retains the explicit off switch. When enabled, the budget scheduler
-    chooses a few caused cues; ``reveal_times`` aligns number/typed cues to actual words.
+    chooses a few caused cues; ``reveal_times`` aligns number/typed cues to actual words;
+    ``packet_times`` (one tuple per scene, empty where there is no diagram) adds a quiet
+    whoosh synced to each attack-diagram connector's travelling packet.
     """
     if len(templates) != len(scene_starts):
         raise ValueError("templates must name every scene (one per scene_starts entry)")
@@ -145,6 +148,7 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     if sfx_enabled:
         cues_placed, cues_dropped = sfx.schedule(scene_starts, templates, n / SR,
                                                   reveal_times=reveal_times,
+                                                  packet_times=packet_times,
                                                   max_per_minute=sfx_max_per_minute,
                                                   min_gap_s=sfx_min_gap_s)
         for event in cues_placed:

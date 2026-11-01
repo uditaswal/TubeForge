@@ -14,21 +14,29 @@ _MANIFEST = json.loads((SFX_ROOT / "manifest.json").read_text())
 CUE_PEAK = .18
 RISER_CUE = "riser"
 TAKES = {"number": ("pop", "ping"), "typed": ("key-press", "typing"),
-         "whoosh": ("whoosh-short", "whoosh"), "payoff": ("riser", "impact-bass-1")}
-PRIORITY = {"payoff": 0, "number": 1, "typed": 2, "whoosh": 3}
+         "whoosh": ("whoosh-short", "whoosh"), "payoff": ("riser", "impact-bass-1"),
+         "packet": ("whoosh-short",)}
+PRIORITY = {"payoff": 0, "number": 1, "typed": 2, "whoosh": 3, "packet": 4}
 
 
 def schedule(scene_starts: tuple[float, ...], templates: tuple[str, ...], duration: float, *,
              reveal_times: tuple[float, ...] | None = None,
              hard_topic_changes: frozenset[int] = frozenset(),
+             packet_times: tuple[tuple[float, ...], ...] | None = None,
              max_per_minute: int = 4, min_gap_s: float = 6.0) -> tuple[list[dict], list[dict]]:
     """Select strongest on-screen causes first; the final payoff may break the gap.
 
-    A hard topic change must be explicitly marked; ordinary cuts are silent.
+    A hard topic change must be explicitly marked; ordinary cuts are silent. ``packet_times``
+    names, per scene, the arrival instant of each attack-diagram connector's travelling packet
+    (empty for scenes with no diagram) — every one becomes a "packet" candidate; the scheduler's
+    own rate cap and ``min_gap_s`` naturally collapse several close edges in one diagram down to
+    the one or two that actually get a quiet whoosh, the same way it already thins any other cause.
     The rate cap is proportional to duration, rounded down (30 s permits two).
     """
     if len(scene_starts) != len(templates) or (reveal_times is not None and len(reveal_times) != len(templates)):
         raise ValueError("sound-effect timings must name every scene")
+    if packet_times is not None and len(packet_times) != len(templates):
+        raise ValueError("packet timings must name every scene")
     if max_per_minute < 0 or min_gap_s < 0 or duration <= 0:
         raise ValueError("invalid sound-effect budget")
     if any(i <= 0 or i >= len(templates) for i in hard_topic_changes):
@@ -50,6 +58,12 @@ def schedule(scene_starts: tuple[float, ...], templates: tuple[str, ...], durati
         if not scene_starts[index] <= at < duration:
             raise ValueError("sound-effect reveal lies outside the video")
         candidates.append({"scene_index": index, "template": template, "cause": cause, "at_seconds": at})
+    if packet_times is not None:
+        for index, times in enumerate(packet_times):
+            for at in times:
+                if not scene_starts[index] <= at < duration:
+                    raise ValueError("sound-effect reveal lies outside the video")
+                candidates.append({"scene_index": index, "template": templates[index], "cause": "packet", "at_seconds": at})
     limit = math.floor(duration * max_per_minute / 60 + 1e-9)
     chosen, dropped = [], []
     for candidate in sorted(candidates, key=lambda c: (PRIORITY[c["cause"]], c["at_seconds"], c["scene_index"])):

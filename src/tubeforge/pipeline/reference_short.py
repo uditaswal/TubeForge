@@ -164,12 +164,29 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
     templates = tuple(scene.template for scene in timeline.topic.scenes)
     reveal_times = tuple(t.words[s.reveal_words[0]].start
                          for s, t in zip(timeline.topic.scenes, timeline.timings, strict=True))
+    # Attack-diagram scenes only exist in the Story renderer; computed here (mirroring
+    # story.build_story's own "reveal" list and story.diagram_packet_times's pacing math)
+    # because mastering happens before the visual renderer builds the diagram markup, so that
+    # module's own timing isn't available yet.
+    packet_times: tuple[tuple[float, ...], ...] | None = None
+    if load_style(directory) == "story":
+        from tubeforge.rendering.shorts.story import diagram_packet_times
+
+        def _scene_packet_times(scene, timing) -> tuple[float, ...]:
+            if scene.template != "flow" or getattr(scene, "diagram", "stack") == "stack":
+                return ()
+            word_starts = [w.start for w in timing.words]
+            reveal = [word_starts[r] for r in scene.reveal_words if r < len(word_starts)] or [timing.start + .5]
+            return tuple(diagram_packet_times(scene, reveal, timing.start, timing.end))
+
+        packet_times = tuple(_scene_packet_times(scene, timing)
+                             for scene, timing in zip(timeline.topic.scenes, timeline.timings, strict=True))
     try:
         mix = master(directory / "narration.wav", starts, directory / "mix",
                      templates=templates, title=timeline.topic.title, bed=bed, sfx_enabled=sfx_enabled,
                      sfx_max_per_minute=config.sfx.max_per_minute,
                      sfx_min_gap_s=config.sfx.min_gap_s, sfx_peak=config.sfx.peak,
-                     reveal_times=reveal_times,
+                     reveal_times=reveal_times, packet_times=packet_times,
                      cancelled=cancelled, ffmpeg=config.ffmpeg_executable)
         narration_health = json.loads((directory / "mix" / "audio-provenance.json").read_text())["narration_health"]
         story = load_style(directory) == "story"

@@ -86,6 +86,23 @@ def test_whoosh_requires_explicit_topic_change_and_ten_second_gap():
     assert any(c["scene_index"] == 2 and c["reason"] == "whoosh_gap" for c in dropped)
 
 
+def test_packet_times_schedule_a_quiet_whoosh_per_diagram_and_thin_close_edges():
+    starts = (0, 8, 18)
+    templates = ("hook", "flow", "flow")  # no cta/loop ending: nothing competes with "packet" for the budget
+    # Three connector arrivals half a second apart: the existing min-gap rule should collapse
+    # them to the single strongest (earliest) packet cue, same as any other cause's close cuts.
+    placed, dropped = sfx.schedule(starts, templates, 25, packet_times=((), (10.0, 10.5, 11.0), ()),
+                                    max_per_minute=10)
+    packets = [c for c in placed if c["cause"] == "packet"]
+    assert len(packets) == 1 and packets[0]["at_seconds"] == 10.0
+    assert sum(1 for c in dropped if c["cause"] == "packet") == 2
+
+
+def test_packet_times_must_name_every_scene():
+    with pytest.raises(ValueError):
+        sfx.schedule((0, 8), ("hook", "loop"), 15, packet_times=((),))
+
+
 def test_sfx_manifest_entries_all_carry_a_named_license():
     for entry in sfx._MANIFEST.values():
         assert "Pixabay Content License" in entry["license"]
@@ -161,6 +178,20 @@ def test_master_places_budgeted_cues_and_riser_by_default(tmp_path):
     assert np.max(np.abs(effects)) <= .18 + 1e-5
     assert provenance["mastered_measurement"]["input_tp"] <= -1.5
     assert abs(provenance["mastered_measurement"]["input_i"] - (-14)) <= 1.0
+
+
+def test_master_places_a_packet_cue_for_a_diagram_scene(tmp_path):
+    narration = _synthetic_narration(tmp_path, 30.0)
+    scene_starts = (0.0, 4.0, 20.0)
+    templates = ("hook", "flow", "flow")  # no cta/loop: isolates the packet cue from payoff
+
+    mix = master(narration, scene_starts, tmp_path / "mix", templates=templates, title="Railway breach",
+                 packet_times=((), (6.5,), ()), sfx_max_per_minute=10)
+
+    provenance = json.loads((mix.parent / "audio-provenance.json").read_text())
+    cues = provenance["sound_effects"]
+    assert [c["cause"] for c in cues] == ["packet"]
+    assert cues[0]["at_seconds"] == 6.5 and cues[0]["cue"] == "whoosh-short"
 
 
 def test_master_is_byte_deterministic_for_same_title_and_scenes(tmp_path):
@@ -240,7 +271,7 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
     captured = {}
 
     def fake_master(narration, scene_starts, output, *, templates, title, bed="synthesized", sfx_enabled=True,
-                    sfx_max_per_minute=4, sfx_min_gap_s=6.0, sfx_peak=.18, reveal_times=None,
+                    sfx_max_per_minute=4, sfx_min_gap_s=6.0, sfx_peak=.18, reveal_times=None, packet_times=None,
                     cancelled=lambda: False, ffmpeg="ffmpeg"):
         captured["templates"] = templates
         captured["title"] = title
@@ -248,6 +279,7 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
         captured["sfx_enabled"] = sfx_enabled
         captured["budget"] = (sfx_max_per_minute, sfx_min_gap_s, sfx_peak)
         captured["reveal_times"] = reveal_times
+        captured["packet_times"] = packet_times
         output.mkdir(parents=True, exist_ok=True)
         (output / "audio-provenance.json").write_text(json.dumps({"narration_health": {}}))
         return output / "mix.wav"
@@ -267,6 +299,7 @@ def test_reference_short_render_passes_templates_and_title(monkeypatch, tmp_path
     assert captured["sfx_enabled"] is True  # default: on, per the operator's 27 Oct preference
     assert captured["budget"] == (4, 6.0, .18)
     assert captured["reveal_times"][1] == timings[1].words[topic.scenes[1].reveal_words[0]].start
+    assert captured["packet_times"] is None  # no options.json -> "classic" style, no diagram timing to compute
 
 
 def test_reference_sfx_config_defaults():

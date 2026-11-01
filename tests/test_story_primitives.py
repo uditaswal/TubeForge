@@ -80,6 +80,22 @@ def test_branch_diagram_fans_out_from_the_entry_node(tmp_path):
     assert page.count('id="s0l') == 3                       # one connector per target
 
 
+def test_diagram_packet_times_matches_connector_arrival_count_and_order():
+    scene = flow(diagram="zigzag", danger=[0, 3])
+    reveal = [0.0, 1.2, 2.5, 4.0]
+    times = story.diagram_packet_times(scene, reveal, a=0.0, b=5.0)
+    assert len(times) == len(scene.nodes) - 1 == 3
+    assert times == sorted(times)                              # later edges arrive later
+    assert times == [reveal[1], reveal[2], reveal[3]]           # mirrors `_diagram`'s own arrive formula
+
+
+def test_diagram_packet_times_falls_back_without_enough_reveal_words():
+    scene = flow(diagram="branch", nodes=["A", "B", "C"], reveal_words=[0])
+    times = story.diagram_packet_times(scene, [0.0], a=0.0, b=6.0)
+    assert len(times) == 2
+    assert all(0.0 < t < 6.0 for t in times)
+
+
 def test_stack_flow_is_unchanged(tmp_path):
     plain = Flow.model_validate(dict(template="flow", scene_id="f", vo=VO, caption=VO, heading="STEPS",
                                      nodes=["A", "B"], reveal_words=[0, 3]))
