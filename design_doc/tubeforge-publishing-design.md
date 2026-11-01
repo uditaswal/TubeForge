@@ -81,7 +81,21 @@ E2E phases (19 Oct): E2E-1 creative→render contract **IMPLEMENTED**; E2E-2 loc
 
 ## 11. Current release status and next action
 
-Updated 27 October 2026 for the A/V renderer trial. Evidence detail: local `AUTONOMOUS_PROGRESS.md` (current + `_N` archives), `docs/HANDOFF.md`, and the archive of this plan.
+Updated 28 October 2026 for the Story host-request repair. Evidence detail: local `AUTONOMOUS_PROGRESS.md` (current + `_N` archives), `docs/HANDOFF.md`, and the archive of this plan.
+
+### Story script preflight repair (28 October 2026)
+
+**IMPLEMENTED** on `main`: job `1618f05e0a674adc890428f1cdb4a96d` failed before a Claude
+invocation (`attempt_count=0`) because the worker sent render-only `video_style: story`
+to an older host request schema. `generation_request_content()` now removes render-only
+options from every host operation and script-cache identity while the job retains its
+Story choice for rendering. The focused contract/provider suite passed (41 tests),
+the bind-mounted worker was restarted and confirmed to load the fix, and the
+real Claude runner returned `preflight_ok=True` for this job's sanitized
+`PreflightContentV1` request without a model call. The Studio API test stalled
+twice on this host. **Next:** create a new job from the same brief and inspect
+its output; do not reset this job's allowance or claim a rendered Story video
+until its artifact is inspected.
 
 ### A/V renderer trial (27 October 2026)
 

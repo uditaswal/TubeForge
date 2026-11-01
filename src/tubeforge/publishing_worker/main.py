@@ -76,5 +76,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    main()
+    from tubeforge.core.app_logging import configure_logging
+
+    configure_logging("publisher")
+    try:
+        main()
+    except Exception:
+        logging.getLogger("tubeforge.publisher").exception("service_crashed", extra={"event": "service_crashed"})
+        raise

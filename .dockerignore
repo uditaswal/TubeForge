@@ -38,3 +38,9 @@ AUTONOMOUS_PROGRESS.md*
 .github
 .pre-commit-config.yaml
 .gitleaks.toml
+
+# HyperFrames render scratch and review media
+.hyperframes-proto-test-tmp
+**/node_modules
+*.mp4
+*.wav

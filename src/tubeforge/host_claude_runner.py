@@ -43,6 +43,9 @@ from tubeforge.providers.content.prompts import (
 MAX_MESSAGE_BYTES = 65_536
 TIMEOUT_SECONDS = 540
 MAX_OUTPUT_BYTES = 2_000_000
+# Script-prompt ceiling. Keep it equal to pipeline.claude.max_prompt_chars in config/production.yaml: a 90 s
+# Short with a ~15k-character source excerpt assembles ~65k characters (fixed instructions are ~47k).
+MAX_PROMPT_CHARS = int(os.environ.get("TUBEFORGE_CLAUDE_MAX_PROMPT_CHARS", "90000"))
 # Per-job model choices (ContentRequest.script_model) -> (CLI model, reasoning effort).
 MODELS = {"sonnet-medium": ("claude-sonnet-5-5", "medium"), "opus": ("claude-opus-5-5", "high")}
 DEFAULT_CHOICE = "sonnet-medium"
@@ -170,11 +173,17 @@ def writers_room_enabled() -> bool:
     return os.environ.get("TUBEFORGE_WRITERS_ROOM", "1") != "0"
 
 
-def _add_usage(total: dict, usage: dict) -> None:
+TOKEN_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def _add_usage(total: dict, usage: dict, stage: str = "call") -> None:
+    """Add one Claude call to the running total and keep a per-call record (`calls`) for the dashboard."""
     total["attempts"] += 1
     total["total_cost_usd"] += float(usage.get("total_cost_usd") or 0)
-    for key in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
+    for key in TOKEN_KEYS:
         total[key] = int(total.get(key, 0)) + int(usage.get(key) or 0)
+    total.setdefault("calls", []).append(
+        {"stage": stage, "total_cost_usd": float(usage.get("total_cost_usd") or 0), **{key: int(usage.get(key) or 0) for key in TOKEN_KEYS}})
 
 
 def angle_pass(request, root, *, model, effort, usage_total) -> tuple[dict | None, dict]:
@@ -184,7 +193,7 @@ def angle_pass(request, root, *, model, effort, usage_total) -> tuple[dict | Non
         consume_invocation(request, root, salt="angle", limit=1)
         encoded = json.dumps(normalize_content_request(request.request), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         raw, usage = call_claude(ANGLE_INSTRUCTIONS + "\nREQUEST=" + encoded, ANGLE_SCHEMA, model=model, effort=effort)
-        _add_usage(usage_total, usage)
+        _add_usage(usage_total, usage, "angle")
         chosen = raw["theses"][int(raw["chosen_index"])]
         note = {"ran": True, "chosen_index": raw["chosen_index"], "theses": raw["theses"]}
         return chosen, note
@@ -211,7 +220,7 @@ def editor_pass(request, root, raw, *, model, effort, schema, version, usage_tot
             consume_invocation(request, root, salt="editor", limit=2)
             edited, usage = call_claude(task, schema, model=model, effort=effort)
             note["calls"] += 1
-            _add_usage(usage_total, usage)
+            _add_usage(usage_total, usage, "editor")
             package, normalizations = _validate_once(edited, request, version)
             note["applied"] = True
             return package, normalizations, note
@@ -256,7 +265,7 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
     room = None
     if version == "m6-content-v8" and writers_room_enabled():
         room, room_notes["angle"] = angle_pass(request, root, model=model, effort=effort, usage_total=usage_total)
-    prompt = build_content_prompt(request.request, template_version=version, max_chars=60_000, writers_room=room)
+    prompt = build_content_prompt(request.request, template_version=version, max_chars=MAX_PROMPT_CHARS, writers_room=room)
     from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, preflight
     skill_hashes = preflight(template_version=version) if version in SKILL_TEMPLATES else None
     if version in CONTENT_ENVELOPE_TEMPLATES:
@@ -275,10 +284,7 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
                 raise ProviderValidationError("Claude output failed validation and no attempt remains: " + last_error) from None
             raise
         raw, usage = call_claude(task, schema, model=model, effort=effort)
-        usage_total["attempts"] += 1
-        usage_total["total_cost_usd"] += float(usage.get("total_cost_usd") or 0)
-        for key in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
-            usage_total[key] = int(usage_total.get(key, 0)) + int(usage.get(key) or 0)
+        _add_usage(usage_total, usage, "script" if attempt == 0 else "script repair")
         try:
             package, normalizations = _validate_once(raw, request, version)
             break
@@ -325,7 +331,7 @@ def _concise(error: Exception) -> str:
 
 def run_research(request: GenerateShortsScriptRequest, *, model: str | None = None, root: Path = RUNNER_ROOT) -> HostRunnerSuccess:
     """One cached research call per exact brief, with Claude's WebSearch tool."""
-    from tubeforge.providers.content.research import ResearchResult, research_prompt
+    from tubeforge.providers.content.research import ResearchResult, clip_assessment, research_prompt
     material = json.dumps(generation_request_key_payload(request.request), sort_keys=True).encode()
     cache_path = root / "research-cache" / (hashlib.sha256(material).hexdigest() + ".json")
     if cache_path.is_file():
@@ -337,7 +343,7 @@ def run_research(request: GenerateShortsScriptRequest, *, model: str | None = No
     consume_invocation(request, root)
     started = time.monotonic()
     structured, usage = call_claude(prompt, codex_output_schema_for_research(ResearchResult), model=model, effort=effort, web_search=True)
-    result = ResearchResult.model_validate(structured)
+    result = ResearchResult.model_validate(clip_assessment(structured))
     if not usage.get("web_search_requests"):
         raise ValueError("research did not record any web search; refusing unverified citations")
     response = HostRunnerSuccess(package=result.model_dump(mode="json"), usage=usage, provenance={
@@ -373,7 +379,7 @@ def codex_output_schema_for_research(model_class) -> dict:
 def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunnerSuccess:
     if request.operation == "PreflightContentV1":
         from tubeforge.providers.content.youtube_skills import preflight
-        prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
+        prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=MAX_PROMPT_CHARS)
         claude_binary()
         return HostRunnerSuccess(package={}, provenance={"resource_hashes": preflight(template_version=request.request.prompt_version), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
                                                          "preflight": True, "operations": ["ResearchSourcesV1"], "runner": "claude"})
@@ -418,6 +424,9 @@ def serve(path: Path, model: str | None) -> None:
 
 
 def main() -> None:
+    from tubeforge.core.app_logging import configure_logging
+
+    configure_logging("claude-runner")
     default = Path(__file__).resolve().parents[2] / "data" / "run" / "claude" / "claude.sock"
     serve(Path(os.environ.get("TUBEFORGE_CLAUDE_SOCKET", default)), os.environ.get("TUBEFORGE_CLAUDE_MODEL"))
 

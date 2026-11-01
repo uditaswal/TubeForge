@@ -8,6 +8,7 @@ import logging
 import math
 import re
 import shutil
+import time
 import uuid
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -76,6 +77,7 @@ class PipelineOrchestrator:
     def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None, youtube_config: YouTubePublishingConfig | None = None, verification_config: PublicationVerificationConfig | None = None, source_ingestor: SourceIngestor | None = None, source_clips: SourceClipConfig | None = None, source_provider: YtDlpSourceProvider | None = None, source_media: SourceMediaRepository | None = None, shorts_preview_config: ShortsPreviewRenderConfig | None = None, shorts_final_config: ShortsFinalRenderConfig | None = None, word_aligner: LocalWordAligner | None = None, shorts_preview_renderer: PreviewRenderer | None = None, shorts_final_renderer: PreviewRenderer | None = None, music_catalog: MusicCatalog | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.events = JobEventRepository(artifacts._session_factory)
+        self._state_clock: dict[str, tuple[JobState, float]] = {}
         self.content, self.media, self.voice, self.publisher = content, media, voice, publisher
         self.artifact_root, self.machine = artifact_root, PipelineStateMachine()
         self.external_operations = external_operations
@@ -1195,6 +1197,10 @@ class PipelineOrchestrator:
 
     def _update_state(self, job_id: str, state: JobState, resume_state: JobState | None = None, failure_message: str | None = None) -> None:
         self._ensure_ownership(force=True)
+        now = time.monotonic()
+        previous = self._state_clock.get(job_id)
+        _event("job_state", job_id=job_id, state=state.value, previous_state=previous[0].value if previous else None, previous_state_duration_ms=round((now - previous[1]) * 1000, 1) if previous else None, error=failure_message)
+        self._state_clock[job_id] = (state, now)
         check = _ownership_check.get()
         if check is None:
             self.jobs.update_state(job_id, state, resume_state, failure_message)
@@ -1280,7 +1286,9 @@ class PipelineOrchestrator:
             return ContentRequest.model_validate(existing)
         if packet is None:
             from tubeforge.providers.content.research import needs_research, ResearchResult, fetch_research_packet
-            if self.research_enabled and job.request.prompt_version == CONTENT_TEMPLATE_VERSION and needs_research(job.request):
+            # Reference Shorts (m6-content-v8) research the same way: a notes-only brief has no evidence, and the
+            # writer correctly refuses "insufficient_sources" rather than inventing facts for it.
+            if self.research_enabled and job.request.prompt_version in (CONTENT_TEMPLATE_VERSION, "m6-content-v8") and needs_research(job.request):
                 research = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "source_research")
                 if research is None:
                     if self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "source_research") is not None:
@@ -1288,7 +1296,7 @@ class PipelineOrchestrator:
                     researcher = getattr(self.content, "research_sources", None)
                     if researcher is None:
                         raise ProviderValidationError("Automatic topic research requires the host Codex provider")
-                    self.events.append(job.id, "source_research_started", provider="host-codex-research")
+                    self.events.append(job.id, "source_research_started", provider=f"host-{job.request.script_owner}-research")
                     research = researcher(job.request)
                     self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "source_research", research)
                 packet = fetch_research_packet(ResearchResult.model_validate(research["package"]))

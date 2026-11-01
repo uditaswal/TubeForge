@@ -22,7 +22,7 @@ Large files and generated trees are fine to use for debugging, but read them by 
 
 ## Working policy
 
-- Branching: never commit on `main`. Work on `dev` or a new feature branch/worktree and post a review (changes + validation evidence); the operator merges to `main`. Agents do not merge or push `main`; delete temporary branches/worktrees after merge.
+- Branching: never commit on `main`. Work on `dev` or a new feature branch/worktree and post a review (changes + validation evidence); merge to `main` only after the operator explicitly approves that specific merge in the current conversation (always ask first; one approval covers one merge, never a push to a remote or a force-push); delete temporary branches/worktrees after merge.
 - Inspect the existing architecture first; implement the requested milestone completely.
 - Run relevant tests after a coherent stage and before reporting acceptance; do not rerun suites after each small edit. Diagnose and fix failures rather than reporting them. No completion claim until validation passes.
 - Preserve worker leases, ownership fencing, checkpoint/restart safety, atomic artifact promotion and cancellation handling.

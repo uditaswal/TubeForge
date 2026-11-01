@@ -107,3 +107,16 @@ def test_soft_redirect_is_excluded_and_never_counts_as_evidence():
     raw["sources"].pop(0)
     with pytest.raises(InsufficientSourcesError, match="substantive"):
         fetch_research_packet(ResearchResult.model_validate(raw), ingestor_factory=Fetcher)
+
+
+def test_overlong_assessment_is_clipped_on_a_sentence_instead_of_failing_validation():
+    from tubeforge.providers.content.research import ASSESSMENT_LIMIT, ResearchResult, clip_assessment
+    sources = [{"source_id": "one", "url": "https://example.com/one", "title": "One"},
+               {"source_id": "two", "url": "https://example.com/two", "title": "Two"}]
+    long = {"status": "ready", "assessment": "Supported claim. " * 200, "sources": sources}
+    with pytest.raises(Exception):
+        ResearchResult.model_validate(long)
+    clipped = ResearchResult.model_validate(clip_assessment(long))
+    assert len(clipped.assessment) <= ASSESSMENT_LIMIT and clipped.assessment.endswith("claim.")
+    short = {"status": "ready", "assessment": "Fine.", "sources": sources}
+    assert clip_assessment(short) is short

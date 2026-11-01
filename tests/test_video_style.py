@@ -9,7 +9,9 @@ import pytest
 from pydantic import ValidationError
 
 from test_ending_and_length import request
+from tubeforge.domain.contracts import generation_request_content, generation_request_key_payload
 from tubeforge.pipeline import reference_short
+from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest
 
 JOB = Path(__file__).resolve().parents[2] / "Youtube_Video_Producer" / "data" / "artifacts" / "e53f4e8387424f65b6a6b50fbb166efa" / "reference"
 
@@ -19,6 +21,20 @@ def test_style_defaults_to_classic_and_is_omitted_from_the_request():
     assert request(video_style="story").model_dump(mode="json")["video_style"] == "story"
     with pytest.raises(ValidationError):
         request(video_style="neon")
+
+
+def test_story_style_is_not_sent_to_the_host_writer_or_script_cache():
+    classic = request()
+    story = request(video_style="story", show_source_credit=True, show_mascot=True,
+                    channel_watermark="TubeForge")
+    assert generation_request_key_payload(story) == generation_request_key_payload(classic)
+    assert story.video_style == "story"  # the job still keeps its render choice
+    writer = generation_request_content(story)
+    assert writer.video_style == "classic"
+    for operation in ("PreflightContentV1", "GenerateShortsScriptV1", "ResearchSourcesV1"):
+        payload = json.loads(GenerateShortsScriptRequest(operation=operation, request=writer).model_dump_json())
+        assert all(field not in payload["request"] for field in
+                   ("video_style", "show_source_credit", "show_mascot", "channel_watermark"))
 
 
 def test_options_file_records_only_a_non_default_style(tmp_path):
@@ -78,3 +94,58 @@ def test_story_layout_covers_every_template_and_uses_only_topic_text(tmp_path):
     bare = story.build_story(timeline, tmp_path / "bare", plates_directory=None, manifest={"scenes": {}})
     assert bare["evidence_quote"] == []
     assert "assets/hero-" not in (tmp_path / "bare" / "index.html").read_text()
+
+
+def test_claude_runner_accepts_the_long_excerpt_prompt_that_the_old_60k_limit_rejected():
+    from test_ending_and_length import request as make_request
+    from tubeforge import host_claude_runner
+    from tubeforge.domain.contracts import SourceReference
+    from tubeforge.providers.content.prompts import build_content_prompt
+    long = make_request(90).model_copy(update={"sources": (
+        SourceReference(source_id="s", title="T", url="https://example.com/a", excerpt="word " * 3100),)})
+    prompt = build_content_prompt(long, template_version="m6-content-v8", max_chars=host_claude_runner.MAX_PROMPT_CHARS)
+    assert 60_000 < len(prompt) <= host_claude_runner.MAX_PROMPT_CHARS
+
+
+def test_hyperframes_gets_a_writable_home_so_chromium_starts_under_the_worker_uid(tmp_path, monkeypatch):
+    """The worker's HOME is '/', unwritable for Chromium's profile; both HyperFrames paths must override it."""
+    from test_hyperframes_evidence_quote import _fixture
+    from tubeforge.rendering.shorts import hyperframes_compose, story
+    seen = []
+    def fake_check(project, **kwargs):
+        seen.append(kwargs["extra_env"])
+        raise RuntimeError("stop after the first check")
+    for module in (story, hyperframes_compose):
+        monkeypatch.setattr(module.cli, "check", fake_check)
+    timeline = _fixture()
+    for module in (story, hyperframes_compose):
+        with pytest.raises(RuntimeError, match="stop after"):
+            module.render_silent(timeline, tmp_path / "out.mp4", draft=True, plates_directory=None, hyperframes_bin="/bin/true")
+    assert len(seen) == 2
+    for env in seen:
+        assert env["HOME"] == env["TMPDIR"] == env["XDG_CONFIG_HOME"] == env["XDG_CACHE_HOME"]
+
+
+def test_short_scratch_keeps_chromium_profile_socket_paths_under_the_unix_limit(tmp_path):
+    from tubeforge.rendering.hyperframes_proto.cli import short_scratch
+    root = tmp_path / ("artifacts-" + "a" * 32) / "hyperframes-stage-6q82sxgp" / "story-render-wlink6pt"
+    root.mkdir(parents=True)
+    with short_scratch(root) as short:
+        socket_path = short / "puppeteer_dev_chrome_profile-abcdef" / "SingletonSocket"
+        assert len(str(socket_path)) < 107 and short.resolve() == root.resolve()
+    assert not short.exists()
+
+
+def test_a_hyperframes_failure_fails_the_render_instead_of_crashing_the_worker(tmp_path, monkeypatch):
+    from test_hyperframes_evidence_quote import _fixture
+    from tubeforge.core.config import ReferenceShortConfig
+    from tubeforge.core.errors import ProviderValidationError
+    from tubeforge.pipeline import reference_short
+    from tubeforge.rendering.hyperframes_proto.cli import HyperFramesError
+    timeline = _fixture()
+    def boom(*args, **kwargs):
+        raise HyperFramesError("hyperframes check failed: Target closed")
+    monkeypatch.setattr(reference_short, "master", boom)
+    with pytest.raises(ProviderValidationError, match="Target closed"):
+        reference_short.render(timeline, tmp_path, tmp_path / "out.mp4", ReferenceShortConfig(renderer="hyperframes"),
+                               draft=True, cancelled=lambda: False)

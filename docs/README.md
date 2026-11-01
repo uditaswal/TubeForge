@@ -17,6 +17,7 @@ Agents: start with [HANDOFF.md](HANDOFF.md) and [AGENTS.md](../AGENTS.md); open 
 ## Operations
 - [Operator guide](../readme.md) — setup and day-to-day workflow
 - [operations/homeserver.md](operations/homeserver.md) — homeserver startup and SSH-tunnel access
+- [operations/logging.md](operations/logging.md) — persistent rotating application logs, fields, OpsDetective hook-up
 - [operations/api-workflow.md](operations/api-workflow.md) — authenticated API script review
 - [operations/platform-integrations.md](operations/platform-integrations.md) — platform/OAuth contracts
 - [deploy/codex-runner-runtime.md](deploy/codex-runner-runtime.md) — isolated Codex host runner; systemd units in `deploy/`

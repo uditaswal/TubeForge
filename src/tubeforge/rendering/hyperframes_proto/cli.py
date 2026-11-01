@@ -13,12 +13,29 @@ import os
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
+import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 
 class HyperFramesError(RuntimeError):
     pass
+
+
+@contextmanager
+def short_scratch(root: Path) -> Iterator[Path]:
+    """A short symlink to ``root`` to use as TMPDIR/HOME for Chromium.
+
+    Chromium creates a unix socket inside its profile directory, and a socket path is limited to ~107
+    characters. A worker scratch directory under ``/app/data/artifacts/<32-char job id>/...`` plus
+    Chromium's profile folder is ~138, so the browser exits at once ("Target closed")."""
+    link = Path(tempfile.gettempdir()) / f"hf-{uuid.uuid4().hex[:8]}"
+    link.symlink_to(root, target_is_directory=True)
+    try:
+        yield link
+    finally:
+        link.unlink(missing_ok=True)
 
 
 def _env(extra_env: dict[str, str] | None) -> dict[str, str]:

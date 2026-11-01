@@ -632,6 +632,10 @@ within the configured safe-area line width. The first corrected Docker example
 and its unresolved final-render gate were recorded in the former
 `docs/TASK4_VIDEO_REVIEW.md` (git history).
 
+## Application logs
+
+All services write rotating, redacted JSON-lines logs to `data/logs/<service>.log` (rolled to `<service>.1.log`, `.2.log`… at 10 MB, deleted after 5 days; git-ignored). Details, fields and OpsDetective hook-up: [docs/operations/logging.md](docs/operations/logging.md).
+
 ## Creator Studio UI contract
 
 For newly rendered reference Shorts, Generations → Generation record shows
@@ -940,3 +944,36 @@ the host runner wheel before using them in an isolated deployed runner.
 Animated landscape scenes receive local word timing and native 16:9 layouts. The default waveform timing remains an estimate requiring listening review; it is not independently measured word alignment.
 
 Ready, unapproved previews can use the same media-stage refresh after a renderer repair; approved previews require the revision workflow. Animated landscape captions use short word-timed ASS chunks below the diagrams. Production preview and final profiles both normalize audio and measure the encoded result.
+
+### Batch plan import
+
+In signed-in Studio, open **Batch plans**. Choose a markdown file (or paste it),
+select **Validate and preview**, review the table and any line-numbered errors,
+then **Commit import**. Each `## Heading` requires exactly one fenced `yaml`
+block with `id`, `title`, `concept`, and `beats: [{t: 0, point: Hook}]`.
+Optional fields include `length_s` (30–90; default 60), `ending` (`loop` or
+`debate`), `channel`, `publish_at`, `hook`, `cta`, `claims_to_verify`, `sources`,
+`thumbnail: {text: ..., visual: ...}`, `tags`, and opaque `narration` text.
+Publish dates are metadata; importing never schedules or uploads anything.
+Re-importing skips identical IDs, updates unused shorts, and reports conflicts
+for changed shorts already reserved or produced. A validation error saves nothing.
+
+Filter Batch plans by day, select shorts, then choose **Produce selected shorts**.
+A configured vertical preset must support every selected duration. Each short
+becomes one normal generation; repeat clicks reuse its existing job. Script and
+preview approvals remain in Generations. The queue waits for these approvals,
+uses the existing heavy-work lease, and records checker results in Activity.
+A failed or cancelled short does not block later work; exhausted script allowances
+require an operator decision. Finished batch jobs stop before publication.
+Progress uses measured completed work; ETA stays unavailable before timing evidence
+or while approvals are pending. No script attempt allowance is reset.
+
+Open **Batch plans → Day review queue** to inspect a day's final videos, available
+thumbnails, QA output, and script/beats. **Approve** binds the exact video and
+review identity; **Stage as ready** requires that approval and matching successful
+QA. Ready is local staging only. **Reject** returns the item to needs review.
+**Regenerate** creates a new ordinary generation with fresh script/preview/final
+review requirements; it preserves the exact brief and its script allowance.
+An unchanged script may replay its accepted cache. Existing decisions are invalid
+if reviewed artifacts change. Missing thumbnails and unfinished videos are shown
+truthfully; the player stays open during background refresh.

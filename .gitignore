@@ -106,3 +106,8 @@ Thumbs.db
 *.swp
 *~
 *.bundle
+
+# --- Application logs (rotating JSON lines; also covered by data/) ---
+logs/
+*.log
+*.[0-9]*.log
