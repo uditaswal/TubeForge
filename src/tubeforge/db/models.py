@@ -629,3 +629,10 @@ class GenerationCacheRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BatchProductionControlRecord(Base):
+    """One global admission hold across all local batch plans."""
+    __tablename__ = 'batch_production_control'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hold: Mapped[bool] = mapped_column(nullable=False, default=False)

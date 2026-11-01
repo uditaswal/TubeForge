@@ -105,6 +105,9 @@ class BatchReviewRepository:
             elif action == 'reject':
                 state, decision = 'needs_review', 'rejected'
             elif action == 'regenerate':
+                from tubeforge.db.batch_automation import is_held
+                if is_held(session):
+                    raise ValueError('batch production is on hold')
                 # Archive the old association so it can never become a publishable
                 # ordinary FINAL_READY job when the current topic points to a child.
                 archive = TopicRecord(id='batch-history-' + uuid4().hex, title=row.title, notes=row.notes,

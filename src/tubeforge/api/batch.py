@@ -12,6 +12,7 @@ class BatchImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     markdown: str = Field(max_length=2_000_000)
     commit: bool = False
+    plan_id: str = Field(default="default", pattern=r"^[a-z0-9-]{1,80}$")
 
 
 class BatchProduceRequest(BaseModel):
@@ -25,6 +26,19 @@ class BatchReviewRequest(BaseModel):
     reviewed_identity: str = Field(pattern=r'^[a-f0-9]{64}$')
 
 
+class BatchAutomationRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: bool = False
+    start_time: str = Field(default='22:00', pattern=r'^([01][0-9]|2[0-3]):[0-5][0-9]$')
+    timezone: str = 'Asia/Kolkata'
+    day_offset: int = Field(default=1, ge=0, le=7)
+
+
+class BatchHoldRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    hold: bool
+
+
 def register_batch_routes(app, runtime, build_request):
     repository = BatchPlanRepository(runtime.database.session_factory)
 
@@ -33,11 +47,13 @@ def register_batch_routes(app, runtime, build_request):
         plan = parse_batch(value.markdown)
         if plan.errors:
             raise HTTPException(422, detail=[error.model_dump() for error in plan.errors])
-        return {'committed': value.commit, 'items': repository.import_shorts(plan.shorts, commit=value.commit)}
+        return {'committed': value.commit, 'items': repository.import_shorts(plan.shorts, commit=value.commit, plan_id=value.plan_id)}
 
     @app.get('/api/batch-plans', tags=['batch'])
-    def list_plans(day: date | None = None):
+    def list_plans(day: date | None = None, plan_id: str | None = None):
         items = repository.list()
+        if plan_id:
+            items = [item for item in items if item['plan_id'] == plan_id]
         if day:
             items = [item for item in items if (item['short'].get('publish_at') or '')[:10] == day.isoformat()]
         for item in items:
@@ -105,3 +121,31 @@ def register_batch_routes(app, runtime, build_request):
     def day_review_page():
         from tubeforge.api.batch_review_ui import REVIEW_HTML
         return REVIEW_HTML
+
+    from tubeforge.db.batch_automation import BatchAutomationRepository
+    automation = BatchAutomationRepository(runtime.database.session_factory)
+
+    @app.get('/api/batch-plans/automation/{plan_id}', tags=['batch'])
+    def automation_state(plan_id: str):
+        result = automation.get(plan_id)
+        last = result.get('last_run')
+        if last and last.get('result'):
+            for item in last['result'].get('items', []):
+                if item.get('job_id'):
+                    job = runtime.jobs.get(item['job_id'])
+                    item['status'] = 'needs operator decision' if job.failure_message and 'exhaust' in job.failure_message.lower() else job.state.value
+        return result
+
+    @app.put('/api/batch-plans/automation/{plan_id}', tags=['batch'])
+    def configure_automation(plan_id: str, value: BatchAutomationRequest):
+        import re
+        if not re.fullmatch(r'[a-z0-9-]{1,80}', plan_id):
+            raise HTTPException(422, detail='invalid plan id')
+        try:
+            return automation.configure(plan_id, **value.model_dump())
+        except (ValueError, KeyError) as error:
+            raise HTTPException(422, detail=str(error)) from error
+
+    @app.put('/api/batch-plans/hold', tags=['batch'])
+    def set_batch_hold(value: BatchHoldRequest):
+        return {'hold': automation.hold(value.hold)}
