@@ -20,3 +20,14 @@ Claude-specific notes:
 - Python with the renderer deps: `.venv-benchmark/bin/python`.
 - Before stopping or near your token limit: commit at a green checkpoint and update the
   "Next step" section of `docs/HANDOFF.md` with a concrete file/command.
+- **A cloud/remote Claude Code session (claude.ai/code, "remote execution environment") runs
+  in an isolated sandbox with its own fresh clone — it is not the operator's machine.**
+  `docker compose`, `scripts/restart_stack.sh`, etc. run there only act on that sandbox's own
+  throwaway stack; they do **not** restart or affect the dashboard the operator reaches over
+  their SSH tunnel. Commits made in such a session only exist in that sandbox's local branch
+  until explicitly pushed (never push without asking first — see `AGENTS.md`). If the operator
+  reports "I don't see the change" after you "restarted" something, check first whether you are
+  in a remote/cloud session (`pwd`/environment banner) before debugging caching or deployment —
+  the actual cause is usually that the operator's machine never received the commit. Push only
+  on request, then give the operator the exact `git fetch`/`merge`/`restart_stack.sh` commands
+  to run themselves.
