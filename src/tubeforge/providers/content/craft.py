@@ -171,7 +171,7 @@ def craft_problems(package) -> list[str]:
     problems += loop_problems(package)
     problems += visual_problems(package)
     problems += thumbnail_problems(package)
-    problems += fact_dump_problems(package)
+    problems += fact_dump_problems(package, hard_only=True)
     problems += unexplained_score_problems(package)
     # One copy of the words: a heading that just repeats the narration adds nothing to the frame.
     for index, scene in enumerate(scenes[1:-1], 2):
@@ -231,8 +231,13 @@ def unexplained_score_problems(package) -> list[str]:
     return problems
 
 
-def fact_dump_problems(package) -> list[str]:
-    """Narration that reads like a list of facts: stacked numbers or versions, repeated frames, unexplained jargon."""
+def fact_dump_problems(package, *, hard_only: bool = False) -> list[str]:
+    """Narration that reads like a list of facts: stacked numbers or versions, repeated frames, unexplained jargon.
+
+    ``hard_only`` keeps the rules a writer can fix in one repair pass (version litanies, too many numbers in one scene);
+    the rest (back-to-back figures, jargon totals, repeated openings, nothing for the viewer) stay advisory for the scorecard
+    and the editor, because a hard gate on them burned both attempts in a live trial.
+    """
     scenes = package.reference_short.scenes
     spoken = [scene.vo for scene in scenes]
     problems: list[str] = []
@@ -248,6 +253,8 @@ def fact_dump_problems(package) -> list[str]:
             if len(_numbers(sentence)) >= 3 and len(versions) < 2:
                 problems.append(f"scene {index} has a sentence with {len(_numbers(sentence))} figures in a row; it will sound like a list")
                 break
+    if hard_only:
+        return problems
     if sum(counts) > MAX_NUMBERS_PER_VIDEO:
         problems.append(f"the narration contains {sum(counts)} numbers or versions; more than {MAX_NUMBERS_PER_VIDEO} makes a fact dump. Keep the two that matter and show the rest as text on screen")
     back_to_back = [i + 1 for i, (a, b) in enumerate(zip(counts, counts[1:])) if a >= 2 and b >= 2]

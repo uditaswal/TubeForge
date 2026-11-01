@@ -112,3 +112,12 @@ def test_a_score_without_its_scale_is_flagged_and_an_explained_one_is_not():
 def test_filler_phrases_are_banned():
     from tubeforge.providers.content.craft import BANNED_PHRASES
     assert "think about that" in BANNED_PHRASES
+
+
+def test_only_the_repairable_rules_are_hard():
+    lines = ["Plain opening here that says nothing numeric at all today.",
+             "It rose 10 percent in 2 weeks.", "Then it fell 20 percent in 3 days.", "Because that means you should check twice.",
+             "Plain closing line that tells you what to do next time around.", "So you check, then you fix, then you move on."]
+    assert any("both stack numbers" in p for p in fact_dump_problems(package(lines)))
+    assert not any("both stack numbers" in p for p in fact_dump_problems(package(lines), hard_only=True))
+    assert any("version numbers" in p for p in fact_dump_problems(package(PILOT), hard_only=True))
