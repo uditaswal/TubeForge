@@ -120,3 +120,21 @@ def test_overlong_assessment_is_clipped_on_a_sentence_instead_of_failing_validat
     assert len(clipped.assessment) <= ASSESSMENT_LIMIT and clipped.assessment.endswith("claim.")
     short = {"status": "ready", "assessment": "Fine.", "sources": sources}
     assert clip_assessment(short) is short
+
+
+def test_one_unfetchable_researched_source_is_audited_and_the_rest_still_count():
+    from tubeforge.core.errors import ProviderValidationError
+    raw = research()
+    raw["sources"].append({"source_id": "moved", "url": "https://example.net/moved", "title": "Moved"})
+    class Fetcher:
+        def __init__(self, *args, **kwargs): pass
+        def ingest(self, source):
+            if source.source_id == "moved":
+                raise ProviderValidationError("source redirects are not permitted")
+            return SourceSnapshot(source.source_id, str(source.url), source.title, datetime.now(UTC), source.source_id * 32, "Substantive source text. " * 30)
+    packet = fetch_research_packet(ResearchResult.model_validate(raw), ingestor_factory=Fetcher)
+    assert [s["source_id"] for s in packet["sources"]] == ["one", "two"]
+    assert packet["excluded_sources"][0]["source_id"] == "moved" and "redirects" in packet["excluded_sources"][0]["reason"]
+    raw["sources"] = raw["sources"][1:]
+    with pytest.raises(InsufficientSourcesError, match="substantive"):
+        fetch_research_packet(ResearchResult.model_validate(raw), ingestor_factory=Fetcher)

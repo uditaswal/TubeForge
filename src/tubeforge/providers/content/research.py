@@ -80,11 +80,18 @@ def fetch_research_packet(result: ResearchResult, *, ingestor_factory=None) -> d
     factory = ingestor_factory or SourceIngestor
     hosts = frozenset(urlparse(s.url).hostname for s in result.sources)
     ingestor = factory(hosts, max_chars=10000 // len(result.sources), timeout_seconds=20)
-    snapshots = tuple(ingestor.ingest(SourceReference(source_id=s.source_id, url=s.url, title=s.title)) for s in result.sources)
+    from tubeforge.core.errors import ProviderValidationError
+    snapshots, unfetched = [], []
+    for item in result.sources:
+        try:
+            snapshots.append(ingestor.ingest(SourceReference(source_id=item.source_id, url=item.url, title=item.title)))
+        except ProviderValidationError as error:  # e.g. a cross-host redirect: audit it, keep the others
+            unfetched.append({"source_id": item.source_id, "url": item.url, "reason": f"Source could not be fetched safely: {error}"})
+    snapshots = tuple(snapshots)
     # HTTP 200 can still be a redirect/interstitial rather than article text.
     # Keep it in the audit, but never present it as factual evidence to the writer.
     usable = tuple(source for source in snapshots if len(source.excerpt.strip()) >= 200)
-    excluded = [{"source_id": source.source_id, "url": source.url,
+    excluded = unfetched + [{"source_id": source.source_id, "url": source.url,
                  "reason": "Fetched page has fewer than 200 readable characters; not usable evidence"}
                 for source in snapshots if source not in usable]
     packet = source_packet(usable)
