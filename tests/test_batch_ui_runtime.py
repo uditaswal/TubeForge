@@ -74,3 +74,31 @@ def test_upload_validate_commit_with_real_authenticated_api(tmp_path):
         context.eval('input.value="bad";input.oninput()')
         assert context.eval('commit.disabled') is True
     db.dispose()
+
+
+def test_automatic_production_settings_and_hold_use_signed_in_api(tmp_path):
+    from fastapi.testclient import TestClient
+    from tubeforge.api.app import create_app
+    from tubeforge.core.config import AppConfig, AuthConfig, DatabaseConfig, Settings
+    from tubeforge.db.models import Base
+    from tubeforge.db.session import create_database
+    settings = Settings(app=AppConfig(name='test', environment='test'), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'auto-js.db'}"), auth=AuthConfig(enabled=True))
+    db = create_database(settings.database)
+    Base.metadata.create_all(db.engine)
+    with TestClient(create_app(settings)) as client:
+        assert client.put('/api/batch-plans/hold', json={'hold':True}).status_code == 401
+        client.app.state.runtime.auth.create_admin('operator', 'correct-horse-battery-staple')
+        client.post('/login', json={'username':'operator', 'password':'correct-horse-battery-staple'})
+        assert client.put('/api/batch-plans/hold', json={'hold':True}).status_code == 403
+        context, run = runtime(client, client.get('/batch').text)
+        assert context.eval('setting("autoEnabled").checked') is False
+        context.eval('setting("autoEnabled").checked=true;setting("autoTime").value="22:00";setting("autoZone").value="Asia/Kolkata";setting("autoOffset").value="1"')
+        run('setting("saveAutomation").onclick()')
+        saved = client.get('/api/batch-plans/automation/default').json()
+        assert saved['enabled'] and saved['next_run_at']
+        assert context.eval('setting("automationState").textContent.includes("Enabled")')
+        context.eval('setting("batchHold").checked=true')
+        run('setting("saveHold").onclick()')
+        assert client.get('/api/batch-plans/automation/default').json()['hold']
+        assert context.eval('setting("holdState").textContent.includes("Hold on")')
+    db.dispose()

@@ -11,7 +11,7 @@ class BatchPlanRepository:
     def __init__(self, session_factory):
         self.sessions = session_factory
 
-    def import_shorts(self, shorts: list[BatchShort], *, commit: bool = False):
+    def import_shorts(self, shorts: list[BatchShort], *, commit: bool = False, plan_id: str = "default"):
         results = []
         with self.sessions() as session:
             # Serialize intake with scheduler reservation and concurrent imports.
@@ -21,7 +21,9 @@ class BatchPlanRepository:
                 payload = short.model_dump(mode="json")
                 row = session.get(TopicRecord, key)
                 existing = json.loads(row.options_json).get("batch_plan") if row else None
-                if row and existing == payload:
+                if row and json.loads(row.options_json).get('batch_plan_id', 'default') != plan_id:
+                    action = 'conflict'
+                elif row and existing == payload:
                     action = "skipped"
                 elif row and (row.generation_job_id or row.status != "ready" or existing is None):
                     action = "conflict"
@@ -35,6 +37,7 @@ class BatchPlanRepository:
                         row.title, row.notes = short.title, short.concept
                         options = json.loads(row.options_json)
                         options["batch_plan"] = payload
+                        options["batch_plan_id"] = plan_id
                         row.options_json = json.dumps(options, sort_keys=True)
                         row.updated_at = now
                 results.append({"id": short.id, "action": action, "short": payload})
@@ -47,7 +50,7 @@ class BatchPlanRepository:
     def list(self):
         with self.sessions() as session:
             rows = session.scalars(select(TopicRecord).where(TopicRecord.id.like("batch-%")).order_by(TopicRecord.created_at, TopicRecord.id))
-            return [{"id": row.id, "short": json.loads(row.options_json)["batch_plan"], "status": row.status, "job_id": row.generation_job_id} for row in rows if "batch_plan" in json.loads(row.options_json) and not json.loads(row.options_json).get("batch_history")]
+            return [{"id": row.id, "short": json.loads(row.options_json)["batch_plan"], "status": row.status, "job_id": row.generation_job_id, "plan_id": json.loads(row.options_json).get("batch_plan_id", "default")} for row in rows if "batch_plan" in json.loads(row.options_json) and not json.loads(row.options_json).get("batch_history")]
 
     def for_job(self, job_id):
         with self.sessions() as session:
@@ -70,7 +73,7 @@ class BatchPlanRepository:
                 row.options_json = json.dumps(options, sort_keys=True)
             session.commit()
 
-    def produce(self, ids, build_request):
+    def produce(self, ids, build_request, *, batch_run=None):
         from hashlib import sha256
         from tubeforge.db.repositories import TopicRepository
         topics = TopicRepository(self.sessions)
@@ -83,7 +86,7 @@ class BatchPlanRepository:
         for key in ids:
             item = selected[key]
             job_id = 'batch-' + sha256(key.encode()).hexdigest()[:48]
-            job = topics.reserve_and_create_job(topic_id=item['id'], scheduler_id='batch-operator', job_id=job_id, request=requests[key], lease_seconds=600)
+            job = topics.reserve_and_create_job(topic_id=item['id'], scheduler_id='batch-operator', job_id=job_id, request=requests[key], lease_seconds=600, batch_run=batch_run)
             existing = topics.get(item['id'])
             results.append({'id': key, 'job_id': job.id if job else existing.generation_job_id, 'action': 'created' if job else 'skipped'})
         return results

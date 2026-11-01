@@ -363,6 +363,13 @@ class JobRepository:
                         earlier_job.state.not_in(finished),
                     ).correlate(PipelineJobRecord)))
             ).correlate(PipelineJobRecord))
+            from tubeforge.db.batch_automation import is_held
+            if is_held(session):
+                held_topic = aliased(TopicRecord)
+                eligible = and_(eligible, ~exists(select(held_topic.id).where(
+                    held_topic.generation_job_id == PipelineJobRecord.id,
+                    func.json_extract(held_topic.options_json, "$.batch_plan.id").is_not(None),
+                ).correlate(PipelineJobRecord)))
             candidate = session.scalar(select(PipelineJobRecord.id).where(eligible, ~batch_blocked, PipelineJobRecord.claim_owner.is_(None)).order_by(PipelineJobRecord.created_at, PipelineJobRecord.id).limit(1))
             if candidate is None:
                 return None
@@ -591,12 +598,22 @@ class TopicRepository:
             if record is None: raise KeyError("topic not found")
             return _topic_from_record(record)
 
-    def reserve_and_create_job(self, *, topic_id: str, scheduler_id: str, job_id: str, request: ContentRequest, lease_seconds: int, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None, account_id: str | None = None) -> PipelineJob | None:
+    def reserve_and_create_job(self, *, topic_id: str, scheduler_id: str, job_id: str, request: ContentRequest, lease_seconds: int, destination_account_ids: tuple[str, ...] = (), video_description: str | None = None, account_id: str | None = None, batch_run=None) -> PipelineJob | None:
         """Atomically convert one READY topic into exactly one ordinary job."""
         now = datetime.now(UTC)
         with self._session_factory.begin() as session:
             _require_active_account(session, account_id)
             existing = session.get(TopicRecord, topic_id)
+            if existing and 'batch_plan' in json.loads(existing.options_json):
+                from tubeforge.db.batch_automation import is_held
+                if is_held(session):
+                    raise ValueError('batch production is on hold')
+                if batch_run:
+                    run_id, token, run_now = batch_run
+                    run = session.get(ScheduleRunRecord, run_id)
+                    details = json.loads(run.details_json) if run else {}
+                    if not run or run.state != 'running' or details.get('owner') != token or datetime.fromisoformat(details['lease_until']) <= run_now:
+                        raise ValueError('batch scheduler ownership lost')
             if existing and 'batch_plan' in json.loads(existing.options_json) and scheduler_id != 'batch-operator':
                 return None
             result = session.execute(update(TopicRecord).where(TopicRecord.id == topic_id, TopicRecord.account_id == account_id, TopicRecord.status == "ready").values(status="generating", generation_job_id=job_id, reserved_by=scheduler_id, reserved_at=now, lease_expires_at=now + timedelta(seconds=lease_seconds), attempts=TopicRecord.attempts + 1, updated_at=now))

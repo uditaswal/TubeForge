@@ -181,6 +181,8 @@ class _ExecutionLease:
 
     def acquire(self) -> bool:
         now = self.clock()
+        if self._batch_held():
+            return False
         if not self.heavy_work.acquire(self.worker_id, now=now, lease_seconds=self.config.lease_seconds):
             return False
         if not self.jobs.heartbeat(self.job_id, self.worker_id, now=now, lease_seconds=self.config.lease_seconds):
@@ -189,7 +191,15 @@ class _ExecutionLease:
         self._last_heartbeat = now
         return True
 
+    def _batch_held(self):
+        from tubeforge.db.batch_plans import BatchPlanRepository
+        from tubeforge.db.batch_automation import BatchAutomationRepository
+        sessions = self.jobs._session_factory
+        return BatchPlanRepository(sessions).for_job(self.job_id) is not None and BatchAutomationRepository(sessions).hold()
+
     def check(self, *, force: bool = False) -> bool:
+        if self._batch_held():
+            return False
         now = self.clock()
         if self._last_heartbeat is None or force or (now - self._last_heartbeat).total_seconds() >= self.config.heartbeat_seconds:
             if not self.jobs.heartbeat(self.job_id, self.worker_id, now=now, lease_seconds=self.config.lease_seconds):

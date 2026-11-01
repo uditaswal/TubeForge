@@ -983,3 +983,24 @@ thumbnail composer. Plan `thumbnail.text` takes precedence over the generated
 package's first nonblank thumbnail option. The visual hint is advisory; no image
 is fetched. A thumbnail failure leaves the video intact and appears as a truthful
 unavailable reason in Day review. Worker restart resumes missing thumbnail work.
+
+### Overnight batch production
+
+Apply the current database migrations before starting updated web, scheduler and
+worker processes (`alembic upgrade head`). On Batch plans, use a **Plan ID**
+(default `default`) when importing a file. Short IDs remain globally unique;
+importing an existing ID under a different plan reports a conflict.
+
+**Produce automatically** is off by default. Save a local start time, IANA time
+zone (default Asia/Kolkata), and target day offset (`1` produces tomorrow's dated
+shorts tonight). The existing scheduler submits ordinary manual-review jobs;
+no approvals or staging happen automatically. Next run and last submission result
+are shown in Studio. “Done” means submission finished, not that videos passed review.
+Interrupted submissions resume the same short IDs after their five-minute lease;
+repeated fires reuse existing jobs and preserve script allowances.
+
+**Hold all batch production** prevents manual/automatic batch creation,
+regeneration, and new batch worker admission across every plan. Running work
+stops at its next ownership/checkpoint check; the current operation may finish.
+Turn hold off to resume. Hold does not affect unrelated non-batch jobs or approve,
+stage, upload, or publish anything.
