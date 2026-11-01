@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from test_reference_shorts import topic_data
-from tubeforge.providers.content.craft import craft_problems
+from tubeforge.providers.content.craft import craft_problems, script_scorecard
 from tubeforge.rendering.shorts.schema import ShortsTopic
 
 
@@ -100,6 +100,16 @@ def test_loop_ending_rules():
     assert "template loop" in legacy
     greeting = " | ".join(loop_problems(package({0: {"vo": "Hello guys welcome back to the channel everyone today.", "caption": "Hello guys welcome back to the channel everyone today."}})))
     assert "greeting" in greeting
+
+
+def test_scorecard_counts_delivery_cues_from_structured_cue_data():
+    # M-AU2: the scorecard counts the structured Cue objects a scene already carries
+    # (populated upstream when narration tags are parsed), not raw text.
+    bare = package()
+    assert script_scorecard(bare)["delivery_cues_total"] == 0
+    tagged = package({1: {"cues": [{"kind": "emphasis", "at": 0, "end": 1}]},
+                      3: {"cues": [{"kind": "breath", "at": 1}, {"kind": "pause", "at": 2, "seconds": 0.4}]}})
+    assert script_scorecard(tagged)["delivery_cues_total"] == 3
 
 
 def test_loop_scene_rejects_follow_requests_but_legacy_cta_still_validates():

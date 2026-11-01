@@ -296,6 +296,12 @@ def script_scorecard(package) -> dict:
         "distinct_openings_share": round(len(set(firsts)) / len(firsts), 2) if firsts else 1.0,
         "avg_words_per_sentence": round(words / max(1, len(sentences)), 1),
         "fact_dump_problems": len(fact_dump_problems(package)),
+        # M-AU2: scorecard-only (not a hard gate — a forced minimum risks an awkward, tacked-on
+        # cue just to satisfy a rule). The prompt's DELIVERY CUES section sets its own ceiling
+        # (at most 4 tags/scene, 2 stress words/scene, 2 whispers total); this just counts what
+        # actually landed, so "the first live job used none" (M-AU2's finding) is visible without
+        # an operator having to open content_package.json and count tags by hand.
+        "delivery_cues_total": sum(len(getattr(scene, "cues", ()) or ()) for scene in package.reference_short.scenes),
     }
 
 

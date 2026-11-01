@@ -14,7 +14,7 @@ from tubeforge.providers.content.craft import fact_dump_problems, script_scoreca
 def main(paths: list[str]) -> int:
     for path in paths:
         scenes = json.loads(Path(path).read_text())["reference_short"]["scenes"]
-        package = SimpleNamespace(reference_short=SimpleNamespace(scenes=[SimpleNamespace(vo=s["vo"], template=s["template"]) for s in scenes]))
+        package = SimpleNamespace(reference_short=SimpleNamespace(scenes=[SimpleNamespace(vo=s["vo"], template=s["template"], cues=s.get("cues", [])) for s in scenes]))
         print(path)
         for key, value in script_scorecard(package).items():
             print(f"  {key:28} {value}")
