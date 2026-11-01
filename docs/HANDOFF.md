@@ -53,7 +53,9 @@ Pilot: one 60 s Log4Shell Short rendered end to end on 1 Nov (loudness/loop chec
 3. **Operator watches pending:** voice cue A/B, the Story output, evidence-quote step (then design tokens in `doc-internal/video-quality/reference-quality-plan.md`).
 4. `qa_check.py` still uses an old 25–45 s duration window (Shorts profile is 30–90 s); fixing it means a skill change and a host wheel redeploy.
 5. **Batch UI overhaul** (Track C, M-U1–M-U4, Claude): Batch plans and Day review look poor to the operator; redesign after Codex's M-S5–M-S8 land.
-6. Publishing (scheduler → private YouTube, then Instagram) stays deferred until video generation is accepted.
+6. **Audio track D** (pronunciation check, cue adoption, mix checks; Claude) and **provider fallback track E** (dashboard mode: Claude only / Codex only / automatic fallback, so one membership can be cancelled; Codex builds the dashboard/router, Claude the runner error codes).
+7. Parked until better hardware: per-channel look and UTMOS scoring (3 GB RAM, no GPU).
+8. Publishing (scheduler → private YouTube, then Instagram) stays deferred until video generation is accepted.
 
 ## Gotchas learned
 - Restart everything with `scripts/restart_stack.sh` (rebuild image, migrate, web/worker/scheduler, Claude runner; no sudo needed). The runner imports code at start, so restart it after any prompt/layout change.
