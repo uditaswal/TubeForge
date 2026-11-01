@@ -304,7 +304,12 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                                for r in reveal) if hl else "")
                     + f'pop("#{sid}pill",{a + .8:.3f});')
         elif template in ("hook", "loop"):
-            body = _heading(scene.headline, RED, top=280, size=176)
+            lines = list(scene.headline)
+            # Anton caps are about 0.46 em wide: shrink the headline until its longest line fits the 890 px column,
+            # and start the chips below the (possibly taller) headline, so a long line never wraps into them.
+            size = max(84, min(176, int(890 / (0.46 * max(len(line) for line in lines)))))
+            chips_top = max(880, 280 + round(len(lines) * size * 1.02) + 70)
+            body = _heading(scene.headline, RED, top=280, size=size)
             backdrop = _backdrop(i, scene, topic, plates_directory, manifest, assets)
             if backdrop is not None:
                 backdrops.append(backdrop)
@@ -318,7 +323,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             chips = list(scene.chips)
             anim = backdrop_anim + f'tl.fromTo("#{sid} .h1",{{opacity:0,y:60}},{{opacity:1,y:0,duration:.5,ease:"power3.out"}},{a:.3f});'
             for k, chip in enumerate(chips):
-                body += (f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{880 + k * 100}px;background:{RED if k == 0 else "#1b2036"};'
+                body += (f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{chips_top + k * 100}px;background:{RED if k == 0 else "#1b2036"};'
                          f'border:2px solid {RED if k == 0 else "#333a58"};color:#fff;font:400 60px/1 Anton;height:84px;border-radius:14px;text-transform:uppercase">{html.escape(chip)}</div>')
                 anim += f'pop("#{sid}c{k}",{reveal[min(k, len(reveal) - 1)]:.3f},{{x:-60,y:0}});'
         elif template == "flow" and scene.diagram != "stack":

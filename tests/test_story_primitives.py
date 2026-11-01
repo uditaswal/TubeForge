@@ -160,3 +160,17 @@ def test_without_a_stock_plate_the_hook_keeps_its_plain_background(tmp_path):
     assert report["stock_backdrops"] == [] and "backdrop-" not in (tmp_path / "p" / "index.html").read_text()
     missing = {"scenes": {"0": {"kind": "stock", "media": "photo", "file": "plates/gone.png"}}}
     assert story.build_story(timeline, tmp_path / "q", plates_directory=tmp_path, manifest=missing)["stock_backdrops"] == []
+
+
+def test_a_long_hook_headline_shrinks_to_fit_and_pushes_the_chips_down(tmp_path):
+    from tubeforge.rendering.shorts.schema import Hook
+    long = Hook.model_validate(dict(template="hook", scene_id="h", vo=VO, caption=VO, source_ids=["fixture"], reveal_words=[0],
+                                    headline=["In 1998,", "NoSQL was", "still relational"], chips=["speed"]))
+    short = _hook("hook")
+    long_page = build([long], tmp_path / "a")
+    short_page = build([short], tmp_path / "b")
+    import re
+    size = lambda page: int(re.search(r'class="h1" style="top:280px;font-size:(\d+)px"', page).group(1))
+    top = lambda page: int(re.search(r'id="s0c0" style="left:60px;top:(\d+)px', page).group(1))
+    assert size(long_page) < 140 <= size(short_page) and size(long_page) >= 84
+    assert top(long_page) >= 880 and top(short_page) == 880 or top(short_page) >= 880
