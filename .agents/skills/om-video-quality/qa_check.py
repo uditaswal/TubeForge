@@ -136,6 +136,25 @@ def check(job: Path) -> list[tuple[str, str, str]]:
         else:
             add("WARN", "line-unread", "no reference/timeline.json; scene hold times not checked")
         audio_provenance = load(job / "reference" / "mix" / "audio-provenance.json")
+        narration_health = (audio_provenance or {}).get("narration_health") or {}
+        if narration_health:
+            nh_warnings = narration_health.get("warnings", [])
+            clipping = [w for w in nh_warnings if w["kind"] == "clipping"]
+            silence = [w for w in nh_warnings if w["kind"] == "silence"]
+            jumps = [w for w in nh_warnings if w["kind"] in ("loud", "quiet")]
+            add("FAIL" if clipping else "PASS", "audio-clipping", f"{len(clipping)} clipped window(s) in the narration")
+            add("FAIL" if silence else "PASS", "audio-silence", f"{len(silence)} long silent gap(s) (≥{1.0:.0f}s) in the narration")
+            add("WARN" if jumps else "PASS", "audio-level-jumps", f"{len(jumps)} abrupt scene-level change(s) ({sum(1 for w in jumps if w['kind'] == 'loud')} loud, {sum(1 for w in jumps if w['kind'] == 'quiet')} quiet)")
+        else:
+            add("WARN", "audio-health", "no narration_health in audio-provenance.json; clipping/silence/level-jump checks not run (job predates M-AU6 or isn't a reference Short)")
+        music_under_speech = (audio_provenance or {}).get("music_under_speech")
+        if music_under_speech:
+            masked = music_under_speech.get("windows_masked", 0)
+            add("WARN" if masked else "PASS", "music-under-speech",
+                f"{len(music_under_speech.get('warnings', []))} stretch(es) where the music bed sits within "
+                f"{music_under_speech.get('mask_margin_db', 12):.0f} dB of active speech")
+        elif audio_provenance is not None:
+            add("WARN", "music-under-speech", "audio-provenance.json has no music_under_speech (renderer predates M-AU6)")
         cues = (audio_provenance or {}).get("sound_effects")
         # sfx_enabled is off by default since 26 Oct (operator preference, heard on a real
         # render and asked off) — an empty cue list then is the intended state, not a finding.

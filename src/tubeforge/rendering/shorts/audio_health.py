@@ -81,3 +81,45 @@ def scan_wav(path: Path, *, scene_starts: tuple[float, ...] = ()) -> dict:
         result = scan_samples(audio, source.samplerate, scene_starts=scene_starts)
     result["artifact_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
+
+
+SPEECH_FLOOR_DBFS = -40.0  # a window this quiet or quieter is treated as a gap between words, not active speech
+MASK_MARGIN_DB = 12.0      # the ducked bed is "too loud under speech" once it comes within this many dB of the voice
+
+
+def music_under_speech(voice: np.ndarray, bed: np.ndarray, sample_rate: int, *,
+                       speech_floor_dbfs: float = SPEECH_FLOOR_DBFS,
+                       mask_margin_db: float = MASK_MARGIN_DB) -> dict:
+    """Stretches where the ducked music bed sits within ``mask_margin_db`` of active speech —
+    an advisory signal that the duck curve did not pull the bed down enough, not a mixing verdict.
+    ``voice`` and ``bed`` must be the same length, mono, same sample rate (the pre-limiter voice
+    and the already-ducked bed, both still in ``master``'s working arrays)."""
+    if sample_rate <= 0:
+        raise ValueError("music-under-speech check requires a positive sample rate")
+    if voice.ndim != 1 or bed.ndim != 1 or len(voice) != len(bed):
+        raise ValueError("music-under-speech check requires equal-length mono voice and bed arrays")
+    duration = len(voice) / sample_rate
+    if duration > MAX_SECONDS + WINDOW_SECONDS:
+        raise ValueError("audio health scan exceeds the two-minute Short limit")
+    width = max(1, round(sample_rate * WINDOW_SECONDS))
+    voice_db, bed_db = [], []
+    for start in range(0, len(voice), width):
+        v_rms = float(np.sqrt(np.mean(voice[start:start + width].astype(np.float64) ** 2)))
+        b_rms = float(np.sqrt(np.mean(bed[start:start + width].astype(np.float64) ** 2)))
+        voice_db.append(20 * np.log10(max(v_rms, 1e-12)))
+        bed_db.append(20 * np.log10(max(b_rms, 1e-12)))
+    voice_db, bed_db = np.asarray(voice_db), np.asarray(bed_db)
+    if not len(voice_db):
+        return {"schema_version": "music-under-speech-v1", "scope": "advisory_signal_only",
+                "mask_margin_db": mask_margin_db, "speech_floor_dbfs": speech_floor_dbfs,
+                "windows_checked": 0, "windows_masked": 0, "warnings": []}
+    masked = (voice_db > speech_floor_dbfs) & (bed_db > voice_db - mask_margin_db)
+    warnings = []
+    edges = np.diff(np.concatenate(([False], masked, [False])).astype(np.int8))
+    for first, last in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1), strict=True):
+        warnings.append({"start": round(float(first * width / sample_rate), 3),
+                         "end": round(float(min(last * width / sample_rate, duration)), 3)})
+    return {"schema_version": "music-under-speech-v1", "scope": "advisory_signal_only",
+            "mask_margin_db": mask_margin_db, "speech_floor_dbfs": speech_floor_dbfs,
+            "windows_checked": int(len(voice_db)), "windows_masked": int(np.count_nonzero(masked)),
+            "warnings": warnings[:MAX_WARNINGS]}

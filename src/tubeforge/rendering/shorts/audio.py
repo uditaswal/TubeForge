@@ -11,6 +11,7 @@ import soundfile as sf
 
 from tubeforge.rendering.loudness import analyze
 from . import sfx
+from . import audio_health
 from .audio_health import scan_wav
 from .encode import checked, file_hash
 from .schema import REFERENCE_SHORT_MAX_SECONDS, REFERENCE_SHORT_MIN_SECONDS
@@ -144,6 +145,7 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
     smooth = np.convolve(levels, np.ones(15) / 15, mode="same")
     duck = np.interp(np.arange(n) / 480, np.arange(len(smooth)), 1 - .75 * np.clip(smooth / .08, 0, 1))
     bed *= duck
+    mix_health = audio_health.music_under_speech(voice, bed, SR)
     cues_placed, cues_dropped = [], []
     if sfx_enabled:
         cues_placed, cues_dropped = sfx.schedule(scene_starts, templates, n / SR,
@@ -204,5 +206,6 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
                   "rights_note": "Synthesis does not establish voice/model/font licensing; retain their provenance separately. "
                                  "Sound effects carry the Pixabay Content License named above, independent of voice/font/model licensing."}
     provenance["narration_health"] = scan_wav(narration, scene_starts=scene_starts)
+    provenance["music_under_speech"] = mix_health
     (output / "audio-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     return final

@@ -178,6 +178,7 @@ def test_master_places_budgeted_cues_and_riser_by_default(tmp_path):
     assert np.max(np.abs(effects)) <= .18 + 1e-5
     assert provenance["mastered_measurement"]["input_tp"] <= -1.5
     assert abs(provenance["mastered_measurement"]["input_i"] - (-14)) <= 1.0
+    assert provenance["music_under_speech"]["schema_version"] == "music-under-speech-v1"
 
 
 def test_master_places_a_packet_cue_for_a_diagram_scene(tmp_path):
