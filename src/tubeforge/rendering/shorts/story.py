@@ -225,7 +225,7 @@ def _backdrop(index: int, scene, topic, plates_directory: Path | None, manifest:
         return None
     target = assets / f"backdrop-{source_index}.jpg"
     if not target.exists():
-        filters = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=14,eq=brightness=-0.22:saturation=0.8"
+        filters = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=12,eq=brightness=-0.10:saturation=0.9"
         command = [ffmpeg, "-y", "-v", "error", *(["-ss", "1.0"] if entry.get("media") == "video" else []), "-i", str(path),
                    "-frames:v", "1", "-vf", filters, "-q:v", "4", str(target)]
         try:
@@ -311,7 +311,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                 body = (f'<div id="{sid}bg" style="position:absolute;left:-60px;top:-60px;width:1200px;height:2040px;'
                         f'background:url(assets/{backdrop["file"]}) center/cover"></div>'
                         f'<div style="position:absolute;left:0;top:0;width:1080px;height:1920px;'
-                        f'background:linear-gradient(180deg,rgba(10,11,16,.55) 0%,rgba(10,11,16,.25) 45%,rgba(10,11,16,.7) 100%)"></div>' + body)
+                        f'background:linear-gradient(180deg,rgba(10,11,16,.40) 0%,rgba(10,11,16,.10) 45%,rgba(10,11,16,.55) 100%)"></div>' + body)
                 backdrop_anim = f'tl.fromTo("#{sid}bg",{{scale:1}},{{scale:1.12,duration:{b - a:.2f},ease:"none"}},{a:.3f});'
             else:
                 backdrop_anim = ""
