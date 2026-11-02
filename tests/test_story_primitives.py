@@ -199,7 +199,8 @@ def _terminal_scene():
 
 def test_select_layout_family_tracks_scene_mix_and_is_deterministic():
     terminal_topic = SimpleNamespace(scenes=(_terminal_scene(), _terminal_scene()))
-    diagram_topic = SimpleNamespace(scenes=(flow(diagram="zigzag"), flow(diagram="branch", nodes=["A", "B"], reveal_words=[0, 3])))
+    diagram_topic = SimpleNamespace(scenes=(flow(diagram="zigzag"),
+                                            flow(diagram="branch", nodes=["Entry", "Target A", "Target B"], reveal_words=[0, 3, 6])))
     plain_topic = SimpleNamespace(scenes=(_hook("hook"), _hook("loop")))
     assert story.select_layout_family(terminal_topic) == "terminal_led"
     assert story.select_layout_family(diagram_topic) == "cinematic_code"
@@ -224,4 +225,4 @@ def test_build_story_records_and_visibly_applies_the_chosen_layout_family(tmp_pa
     report = story.build_story(story_timeline([_hook("hook")]), tmp_path / "plain", plates_directory=None, manifest={"scenes": {}})
     assert report["layout_family"] == "walkthrough_statement"
     plain_page = (tmp_path / "plain" / "index.html").read_text()
-    assert "back.out(1.6)" in plain_page and "scale:1.1," in plain_page      # unchanged default house style
+    assert "back.out(1.6)" in plain_page and story._FAMILY_STYLE["walkthrough_statement"]["mark"] in plain_page

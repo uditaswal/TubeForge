@@ -170,3 +170,27 @@ def test_review_javascript_disables_stale_artifact_without_replacing_player(revi
     assert context.eval('detail.children.includes(originalPlayer)')
     assert context.eval('detail.querySelectorAll("#actions button").every(x=>x.disabled)')
     assert context.eval('notice.textContent.includes("artifact changed")')
+
+
+def test_script_and_beats_panel_shows_narration_not_the_raw_content_package(review):
+    """A real content package carries large internal fields (clip_candidates, scene_plans,
+    reference_short geometry, ...) that blew the detail panel out to tens of thousands of
+    pixels tall when dumped verbatim (found by rendering /batch/review with real batch data).
+    Only the narration/hook/beats/cta a reviewer actually needs should be shown."""
+    from test_batch_ui_runtime import runtime
+    client, backend, repo, job_id, root = review
+    package = {'script_sections': [{'scene_id': 'scene-1', 'narration': 'A short, reviewable line of narration.'}],
+               'clip_candidates': [{'huge': 'x' * 2000}] * 20, 'scene_plans': [{'huge': 'y' * 2000}] * 20,
+               'reference_short': {'huge': 'z' * 2000}, 'schema_version': 1}
+    content = json.dumps(package).encode()
+    path = root / 'content_package'
+    path.write_bytes(content)
+    checksum = hashlib.sha256(content).hexdigest()
+    backend.artifacts.save(Artifact(job_id, JobState.CONTENT_GENERATING, 'content_package', str(path), checksum, {}))
+    context, run = runtime(client, client.get('/batch/review').text)
+    run('list.children[0].children[0].onclick()')
+    pres = context.eval('detail.children.filter(x=>x.tagName==="pre").length')
+    shown = context.eval('detail.children.filter(x=>x.tagName==="pre")[' + str(pres - 1) + '].textContent')
+    assert 'A short, reviewable line of narration.' in shown
+    assert 'clip_candidates' not in shown and 'scene_plans' not in shown and 'reference_short' not in shown
+    assert len(shown) < 2000
