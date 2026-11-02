@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
 from test_reference_shorts import topic_data
-from tubeforge.providers.content.craft import craft_problems, script_scorecard
+from tubeforge.domain.contracts import SourceReference
+from tubeforge.providers.content.craft import craft_problems, originality_problems, script_scorecard
 from tubeforge.rendering.shorts.schema import ShortsTopic
 
 
@@ -121,3 +122,34 @@ def test_loop_scene_rejects_follow_requests_but_legacy_cta_still_validates():
     with pytest.raises(ValidationError, match="follow or subscribe"):
         ShortsTopic.model_validate(data)
     assert ShortsTopic.model_validate(topic_data()).scenes[-1].template == "cta"  # saved legacy jobs keep rendering
+
+
+def _cited(pkg, excerpt, *, source_id="fixture"):
+    pkg.request = SimpleNamespace(sources=[SourceReference(source_id=source_id, url="https://example.com/x", title="t", excerpt=excerpt)])
+    return pkg
+
+
+# Long enough for real 7-word runs to overlap; the scene vo below is a direct 8-15 word slice of it.
+EXCERPT = ("the migration moved every production database to the new cluster over a single weekend "
+          "without a single customer noticing any downtime at all during the entire process")
+
+
+def test_originality_gate_flags_near_verbatim_source_copying():
+    copied_vo = "the migration moved every production database to the new cluster over a single weekend"  # 14 words, verbatim from EXCERPT
+    pkg = _cited(package({1: {"vo": copied_vo, "caption": copied_vo}}, late_stat=True), EXCERPT)
+    problems = " | ".join(craft_problems(pkg))
+    assert "scene 2" in problems and "copied" in problems and "7-word" in problems
+
+
+def test_originality_gate_allows_a_genuine_paraphrase_of_the_same_fact():
+    paraphrase = "Engineers switched every database to the new servers in one weekend and nobody noticed"  # 14 words
+    pkg = _cited(package({1: {"vo": paraphrase, "caption": paraphrase}}, late_stat=True), EXCERPT)
+    assert originality_problems(pkg) == []
+
+
+def test_originality_gate_is_inert_without_a_request_or_matching_source_id():
+    assert originality_problems(package(late_stat=True)) == []  # no .request at all: the bare fixture used everywhere else
+    copied_vo = "the migration moved every production database to the new cluster over a single weekend"
+    # request.sources only has "different-id", but every scene cites "fixture" — nothing matches, so nothing is checked.
+    pkg = _cited(package({1: {"vo": copied_vo, "caption": copied_vo}}, late_stat=True), EXCERPT, source_id="different-id")
+    assert originality_problems(pkg) == []

@@ -57,6 +57,42 @@ def visual_problems(package) -> list[str]:
     return problems
 
 
+ORIGINALITY_NGRAM_WORDS, ORIGINALITY_OVERLAP_MAX = 7, 0.5
+
+
+def _ngrams(words: list[str], n: int) -> set[tuple[str, ...]]:
+    return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def originality_problems(package, *, n: int = ORIGINALITY_NGRAM_WORDS, threshold: float = ORIGINALITY_OVERLAP_MAX) -> list[str]:
+    """M-S2: a scene must not just restate its cited source verbatim.
+
+    Flags a scene whose narration is mostly made of long word-runs that also appear, verbatim, in
+    the excerpt(s) of the sources it cites — a sign the writer paraphrased too little. A verbatim
+    on-screen quote (`visual.kind == "source"`) is a *different*, already-checked thing (it must
+    match exactly, by `visual_problems` above); this checks the *spoken* narration, which should
+    not read like a copy of the same text. No request/sources on the package (e.g. a bare fixture
+    in a unit test) skips this check entirely, same convention as `visual_problems`.
+    """
+    sources = {source.source_id: source for source in getattr(getattr(package, "request", None), "sources", ())}
+    if not sources:
+        return []
+    problems: list[str] = []
+    for index, scene in enumerate(package.reference_short.scenes, 1):
+        cited = [sources[s] for s in scene.source_ids if s in sources and sources[s].excerpt]
+        if not cited:
+            continue
+        source_grams = _ngrams(" ".join(_norm(source.excerpt) for source in cited).split(), n)
+        scene_grams = _ngrams(_norm(scene.vo).split(), n)
+        if not source_grams or not scene_grams:
+            continue
+        overlap = sum(1 for gram in scene_grams if gram in source_grams) / len(scene_grams)
+        if overlap >= threshold:
+            problems.append(f"scene {index} narration is {overlap:.0%} copied {n}-word runs from its cited source; "
+                            "say the same fact in your own words, with your own analysis or a concrete example, not the source's sentences")
+    return problems
+
+
 GREETING = re.compile(r"^\W*(hi|hello|hey|yo|welcome|what'?s up|good (morning|evening)|in this video|today (we|i)|so today|guys)\b", re.I)
 OPEN_ENDING = re.compile(r"[.!?\u2026]\W*$")
 
@@ -173,6 +209,7 @@ def craft_problems(package) -> list[str]:
     problems += thumbnail_problems(package)
     problems += fact_dump_problems(package, hard_only=True)
     problems += unexplained_score_problems(package)
+    problems += originality_problems(package)
     # One copy of the words: a heading that just repeats the narration adds nothing to the frame.
     for index, scene in enumerate(scenes[1:-1], 2):
         heading = _content(getattr(scene, "heading", ""))
