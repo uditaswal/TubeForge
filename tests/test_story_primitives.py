@@ -190,3 +190,38 @@ def test_a_long_hook_headline_shrinks_to_fit_and_pushes_the_chips_down(tmp_path)
     top = lambda page: int(re.search(r'id="s0c0" style="left:60px;top:(\d+)px', page).group(1))
     assert size(long_page) < 140 <= size(short_page) and size(long_page) >= 84
     assert top(long_page) >= 880 and top(short_page) == 880 or top(short_page) >= 880
+
+
+def _terminal_scene():
+    data = topic_data()["scenes"][5] | {"scene_id": "t", "caption": VO, "vo": VO}
+    return ShortsTopic.model_validate(topic_data() | {"scenes": topic_data()["scenes"][:5] + [data] + topic_data()["scenes"][6:]}).scenes[5]
+
+
+def test_select_layout_family_tracks_scene_mix_and_is_deterministic():
+    terminal_topic = SimpleNamespace(scenes=(_terminal_scene(), _terminal_scene()))
+    diagram_topic = SimpleNamespace(scenes=(flow(diagram="zigzag"), flow(diagram="branch", nodes=["A", "B"], reveal_words=[0, 3])))
+    plain_topic = SimpleNamespace(scenes=(_hook("hook"), _hook("loop")))
+    assert story.select_layout_family(terminal_topic) == "terminal_led"
+    assert story.select_layout_family(diagram_topic) == "cinematic_code"
+    assert story.select_layout_family(plain_topic) == "walkthrough_statement"
+    # Pure function of the scene mix: no randomness, same input always gives the same family.
+    assert story.select_layout_family(terminal_topic) == story.select_layout_family(terminal_topic)
+    assert story.select_layout_family(SimpleNamespace(scenes=())) == "walkthrough_statement"
+
+
+def test_build_story_records_and_visibly_applies_the_chosen_layout_family(tmp_path):
+    report = story.build_story(story_timeline([_terminal_scene()]), tmp_path / "term", plates_directory=None, manifest={"scenes": {}})
+    assert report["layout_family"] == "terminal_led"
+    term_page = (tmp_path / "term" / "index.html").read_text()
+    assert story._FAMILY_STYLE["terminal_led"]["mark"] in term_page          # caption highlight colour follows the family
+    assert "power4.out" in term_page                                        # terminal_led's snappier pop ease
+
+    report = story.build_story(story_timeline([flow(diagram="zigzag")]), tmp_path / "diag", plates_directory=None, manifest={"scenes": {}})
+    assert report["layout_family"] == "cinematic_code"
+    diag_page = (tmp_path / "diag" / "index.html").read_text()
+    assert "power1.out" in diag_page and story._FAMILY_STYLE["cinematic_code"]["mark"] in diag_page
+
+    report = story.build_story(story_timeline([_hook("hook")]), tmp_path / "plain", plates_directory=None, manifest={"scenes": {}})
+    assert report["layout_family"] == "walkthrough_statement"
+    plain_page = (tmp_path / "plain" / "index.html").read_text()
+    assert "back.out(1.6)" in plain_page and "scale:1.1," in plain_page      # unchanged default house style

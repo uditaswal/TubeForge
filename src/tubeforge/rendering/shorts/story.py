@@ -33,6 +33,44 @@ BG, INK, MUTED = "#0a0b10", "#f4f6fb", "#8d93a6"
 RED, AMBER, CYAN, GREEN = "#ff4d3d", "#ffb020", "#53e0ef", "#35d07f"
 ACCENTS = [RED, AMBER, CYAN]
 
+# M-S1: three layout families, picked deterministically from a short's own scene mix (never
+# random), so a batch of videos has visible structural/motion variety that tracks its actual
+# content instead of a fixed house style. Each family only changes accent rotation, caption
+# highlight colour, and motion pacing/ease — the per-template body markup (headline, diagram,
+# terminal, etc.) stays the single shared implementation below; this is deliberately not a
+# second full rendering pipeline per family.
+LAYOUT_FAMILIES = ("terminal_led", "cinematic_code", "walkthrough_statement")
+
+_FAMILY_STYLE = {
+    "terminal_led": {"accents": [GREEN, CYAN, AMBER], "mark": GREEN,
+                      "pop_duration": .28, "pop_ease": "power4.out", "zoom_scale": 1.06},
+    "cinematic_code": {"accents": [CYAN, AMBER, RED], "mark": CYAN,
+                        "pop_duration": .55, "pop_ease": "power1.out", "zoom_scale": 1.16},
+    "walkthrough_statement": {"accents": [RED, AMBER, CYAN], "mark": AMBER,
+                               "pop_duration": .4, "pop_ease": "back.out(1.6)", "zoom_scale": 1.1},
+}
+
+
+def select_layout_family(topic) -> str:
+    """Pick one of LAYOUT_FAMILIES from the short's own scene templates and visuals.
+
+    Pure function of the approved script (template names + CodeVisual presence); no randomness,
+    so the same topic always renders the same family. Terminal/code-heavy scripts lead with
+    "terminal_led"; diagram-heavy scripts (without being terminal-led) get the slower,
+    wider-panning "cinematic_code" treatment; anything else (checklists, before/after, stat
+    reveals, plain statements) gets "walkthrough_statement", the default house style.
+    """
+    scenes = list(topic.scenes)
+    if not scenes:
+        return "walkthrough_statement"
+    terminal = sum(1 for s in scenes if s.template == "terminal" or isinstance(getattr(s, "visual", None), CodeVisual))
+    diagram = sum(1 for s in scenes if s.template == "flow")
+    if terminal and terminal / len(scenes) >= 0.25:
+        return "terminal_led"
+    if diagram and diagram / len(scenes) >= 0.25:
+        return "cinematic_code"
+    return "walkthrough_statement"
+
 CSS = f"""
 @font-face {{ font-family: Anton; src: url("assets/Anton-Regular.ttf"); }}
 @font-face {{ font-family: Inter; src: url("assets/Inter-Variable.ttf"); font-weight: 100 900; }}
@@ -52,8 +90,11 @@ html,body {{ width:{WIDTH}px; height:{HEIGHT}px; overflow:hidden; background:{BG
 .cap-word .mark {{ position:absolute; left:2px; right:2px; bottom:-10px; height:8px; background:#ffb020; border-radius:4px; transform:scaleX(0); transform-origin:0 50%; }}
 """
 
-POP = ("function pop(sel,t,o){o=o||{};tl.fromTo(sel,{opacity:0,x:o.x||0,y:o.y===undefined?40:o.y,scale:o.s||.92},"
-       "{opacity:1,x:0,y:0,scale:1,duration:o.d||.4,ease:'back.out(1.6)'},t);}")
+def _pop_js(duration: float, ease: str) -> str:
+    """The pop-in helper, with this layout family's default duration/ease baked in
+    (a call site can still override duration via o.d, as before)."""
+    return ("function pop(sel,t,o){o=o||{};tl.fromTo(sel,{opacity:0,x:o.x||0,y:o.y===undefined?40:o.y,scale:o.s||.92},"
+            f"{{opacity:1,x:0,y:0,scale:1,duration:o.d||{duration},ease:'{ease}'}},t);}}")
 
 
 def _heading(text: str | tuple[str, ...], accent: str, *, top: int = 150, size: int | None = None) -> str:
@@ -260,10 +301,13 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
     shutil.copy(FONTS / "Anton-Regular.ttf", assets / "Anton-Regular.ttf")
     shutil.copy(FONTS / "Inter-Variable.ttf", assets / "Inter-Variable.ttf")
     topic, total = timeline.topic, timeline.duration
+    family = select_layout_family(topic)
+    style = _FAMILY_STYLE[family]
     source_urls = {s.source_id: str(s.url) for s in topic.sources}
     divs: list[str] = []
     js = ["var tl=gsap.timeline({paused:true});",
-          "function show(id,a,b){tl.set('#'+id,{opacity:1},a);tl.set('#'+id,{opacity:0},b);}", POP]
+          "function show(id,a,b){tl.set('#'+id,{opacity:1},a);tl.set('#'+id,{opacity:0},b);}",
+          _pop_js(style["pop_duration"], style["pop_ease"])]
     captions: list[dict] = []
     heroes: list[dict] = []
     backdrops: list[dict] = []
@@ -274,7 +318,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
         words = [(w.start, w.end) for w in timing.words]
         captions += _caption_groups(scene, words)
         reveal = [words[r][0] for r in scene.reveal_words if r < len(words)] or [a + .5]
-        sid, accent = f"s{i}", ACCENTS[i % 3]
+        sid, accent = f"s{i}", style["accents"][i % 3]
         visual = getattr(scene, "visual", None)
         template = scene.template
         label = next((_domain(source_urls.get(s)) for s in scene.source_ids if source_urls.get(s)), None)
@@ -314,7 +358,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                     + '</div></div>'
                     f'<div class="pill" id="{sid}pill" style="left:60px;top:{top + height + 40}px;background:rgba(83,224,239,.14);border:2px solid rgba(83,224,239,.6);color:{INK}">SOURCE · {html.escape(treatment["source_label"])}</div>')
             anim += (f'tl.fromTo("#{sid}card",{{opacity:0,y:80,scale:.94}},{{opacity:1,y:0,scale:1,duration:.5,ease:"power3.out"}},{a + .15:.3f});'
-                    f'tl.fromTo("#{sid}zoom",{{scale:1}},{{scale:1.1,transformOrigin:"50% 40%",duration:{b - a:.2f},ease:"power1.inOut"}},{a:.3f});'
+                    f'tl.fromTo("#{sid}zoom",{{scale:1}},{{scale:{style["zoom_scale"]},transformOrigin:"50% 40%",duration:{b - a:.2f},ease:"power1.inOut"}},{a:.3f});'
                     + ("".join(f'tl.set("#{sid}hl",{{clipPath:"inset(0 100% 0 0)"}},{r:.3f});tl.to("#{sid}hl",{{clipPath:"inset(0 0% 0 0)",duration:.5,ease:"none"}},{r:.3f});'
                                for r in reveal) if hl else "")
                     + f'pop("#{sid}pill",{a + .8:.3f});')
@@ -349,7 +393,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             body = _heading(scene.heading, accent)
             nodes = list(scene.nodes)
             for k, node in enumerate(nodes):
-                col = ACCENTS[k % 3]
+                col = style["accents"][k % 3]
                 body += (f'<div class="card" id="{sid}n{k}" style="left:60px;top:{540 + k * 200}px;width:840px;height:136px;border-color:{col};display:flex;align-items:center;padding:0 36px">'
                          f'<span style="font:400 56px/1.05 Anton;color:{col};text-transform:uppercase;white-space:nowrap">{html.escape(node)}</span></div>')
                 if k < len(nodes) - 1:
@@ -414,7 +458,7 @@ CAPTIONS.forEach(function(g,gi) {{
   var s=document.createElement("span"); s.className="cap-word"; s.appendChild(document.createTextNode(w));
   if (g.keys && g.keys[wi]) {{ var m=document.createElement("i"); m.className="mark"; s.appendChild(m);
    tl.fromTo(m,{{scaleX:0}},{{scaleX:1,duration:Math.max(.16,g.times[wi][1]-g.times[wi][0]),ease:"power1.out"}},g.times[wi][0]);
-   tl.to(s,{{color:"#ffb020",duration:.1}},g.times[wi][0]); }}
+   tl.to(s,{{color:"{style['mark']}",duration:.1}},g.times[wi][0]); }}
   el.appendChild(s); if (wi<g.words.length-1) el.appendChild(document.createTextNode(" "));
  }});
  host.appendChild(el);
@@ -425,7 +469,7 @@ CAPTIONS.forEach(function(g,gi) {{
 window.__timelines=window.__timelines||{{}}; window.__timelines["story"]=tl; tl.seek(0);"""
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width={WIDTH}, height={HEIGHT}" />
-<script src="assets/gsap.min.js"></script><style>{CSS}</style></head><body>
+<script src="assets/gsap.min.js"></script><style>{CSS}.cap-word .mark{{background:{style['mark']}}}</style></head><body>
 <div id="root" class="clip" data-composition-id="story" data-start="0" data-duration="{total:.3f}" data-width="{WIDTH}" data-height="{HEIGHT}" data-fps="{FPS}">
 <div class="glow"></div>
 {''.join(divs)}
@@ -439,7 +483,7 @@ window.__timelines=window.__timelines||{{}}; window.__timelines["story"]=tl; tl.
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
         "media": {"autoProxy": False}}, indent=2), encoding="utf-8")
-    return {"evidence_quote": heroes, "stock_backdrops": backdrops}
+    return {"evidence_quote": heroes, "stock_backdrops": backdrops, "layout_family": family}
 
 
 def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callable[[], bool] = lambda: False,
@@ -479,4 +523,4 @@ def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callab
         scaled.replace(destination)
     return {"scene_count": len(timeline.topic.scenes), "frames": round(timeline.duration * FPS),
             "duration": timeline.duration, "checks": [check], "evidence_quote": report["evidence_quote"], "stock_backdrops": report.get("stock_backdrops", []),
-            "source_fallbacks": [], "style": "story", "render_seconds": time.monotonic() - started}
+            "source_fallbacks": [], "style": "story", "layout_family": report["layout_family"], "render_seconds": time.monotonic() - started}
