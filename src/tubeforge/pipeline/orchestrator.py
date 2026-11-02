@@ -853,6 +853,7 @@ class PipelineOrchestrator:
             self._ensure_ownership(force=True)
             voice = job.request.voice_id if job.request.voice_id and job.request.voice_id != "piper" else None
             timeline = reference_short.prepare_speech(topic, directory, self.reference_config, voice=voice,
+                                                      speed_scale=job.request.voice_speed_scale,
                                                       cancelled=cancellation_requested or (lambda: False))
         self._save_file(job.id, JobState.VOICE_GENERATION, "narration", directory / "narration.wav", {"generator": "rendering.shorts.prepare", "sample_rate": 48000})
         self._save_file(job.id, JobState.VOICE_GENERATION, "voice_manifest", directory / "voice-manifest.json", {"generator": "rendering.shorts.prepare"})

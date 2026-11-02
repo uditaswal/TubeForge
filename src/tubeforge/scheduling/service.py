@@ -35,9 +35,11 @@ def request_from_topic(topic: Topic, schedule: Schedule, codex_config=None) -> C
     options = {**schedule.options, **topic.options}
     notes = tuple(line.strip() for line in topic.notes.splitlines() if line.strip()) or ("Operator supplied topic.",)
     from tubeforge.core.config import CodexProviderConfig
-    from tubeforge.providers.content.youtube_skills import voice_for
+    from tubeforge.providers.content.youtube_skills import channel_voice_character_for, voice_for
     config = codex_config or CodexProviderConfig()
     channel, profile = voice_for(config, options.get("channel_identity"))
+    requested_voice_id = options.get("voice_id")
+    voice_id, voice_speed_scale = channel_voice_character_for(config, options.get("channel_identity"), requested_voice_id if isinstance(requested_voice_id, str) else None)
     aspect = str(options.get("aspect_ratio", "16:9"))
     duration = int(options.get("duration_seconds", 45 if aspect == "9:16" else 60))
     if aspect == "9:16" and not SHORTS_MIN_DURATION_SECONDS <= duration <= SHORTS_MAX_DURATION_SECONDS:
@@ -50,6 +52,7 @@ def request_from_topic(topic: Topic, schedule: Schedule, codex_config=None) -> C
         prompt_version=config.prompt_template_version, sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes", title="Operator-provided notes", excerpt="\n".join(notes)),),
         notes=notes, review_mode=str(options.get("review_mode", "auto")), captions_enabled=bool(options.get("captions_enabled", True)),
         visual_style=str(options.get("visual_style", "cinematic-tech")),
+        voice_id=voice_id, voice_speed_scale=voice_speed_scale,
     )
 
 

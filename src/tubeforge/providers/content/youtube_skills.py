@@ -135,6 +135,22 @@ def voice_for(config, channel: str | None = None) -> tuple[str, str]:
     return identity, profile
 
 
+def channel_voice_character_for(config, channel: str | None, requested_voice_id: str | None) -> tuple[str | None, float]:
+    """A channel's optional acoustic narrator character (M-AU3): (voice_id, speed_scale).
+
+    Config-only and opt-in. A channel absent from ``channel_voice_characters`` returns the
+    operator's requested voice id unchanged and a speed scale of 1.0 (no effect). When a channel
+    does have a configured character, an operator's explicit voice choice still wins over the
+    channel's default voice id, but the channel's speed scale always applies — it is a per-channel
+    acoustic trait, not something the structured "pick a voice" control expresses.
+    """
+    identity = channel or config.default_channel_identity
+    character = getattr(config, "channel_voice_characters", {}).get(identity)
+    if character is None:
+        return requested_voice_id, 1.0
+    return requested_voice_id or character.voice_id, character.speed_scale
+
+
 def select_hook(package):
     """Score hook candidates while leaving all creative bytes under Codex control."""
     report = evaluate(package)

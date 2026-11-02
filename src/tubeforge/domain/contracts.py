@@ -62,6 +62,9 @@ class ContentRequest(DomainModel):
     # never enter a production job because their reuse rights are unknown.
     visual_source: str = Field(default="generated", pattern=r"^(generated|stock)$")
     voice_id: str | None = Field(default=None, min_length=1, max_length=200)
+    # Optional per-channel acoustic speed multiplier (M-AU3), resolved from
+    # `channel_voice_characters` at request-creation time; 1.0 is today's unscaled default.
+    voice_speed_scale: float = Field(default=1.0, ge=0.7, le=1.3)
     mcp_servers: tuple[str, ...] = Field(default=(), max_length=50)
     # A source-clip job is intentionally still a ContentRequest: it uses the
     # same job, lease, approval, and artifact records as generated videos.

@@ -91,7 +91,7 @@ def layout_review(topic: ShortsTopic, directory: Path) -> list[Path]:
 
 
 def prepare_speech(topic: ShortsTopic, directory: Path, config: ReferenceShortConfig, *,
-                   voice: str | None, cancelled: Callable[[], bool]) -> Timeline:
+                   voice: str | None, speed_scale: float = 1.0, cancelled: Callable[[], bool]) -> Timeline:
     """Kokoro speech then forced alignment, one model per child process."""
     if config.alignment_model_path is None:
         raise ProviderValidationError("pipeline.reference_short.alignment_model_path is not configured")
@@ -101,7 +101,7 @@ def prepare_speech(topic: ShortsTopic, directory: Path, config: ReferenceShortCo
     settings_path = resolve(Path(os.environ.get("TUBEFORGE_CONFIG", "config/default.yaml")))
     try:
         return prepare(topic, directory, config=settings_path, alignment_model=model,
-                       voice=voice or config.voice, cancelled=cancelled)
+                       voice=voice or config.voice, speed_scale=speed_scale, cancelled=cancelled)
     except RenderCancelled:
         raise
     except (ValueError, TimeoutError) as error:

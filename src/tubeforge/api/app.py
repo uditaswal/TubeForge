@@ -310,7 +310,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source URL must be an absolute HTTP(S) URL") from error
         elif value.source_title or value.source_excerpt:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source title and excerpt require a source URL")
-    from tubeforge.providers.content.youtube_skills import voice_for
+    from tubeforge.providers.content.youtube_skills import channel_voice_character_for, voice_for
     choice = value.script_model or ("gpt-sol" if value.script_owner == "codex" else DEFAULT_SCRIPT_MODEL)
     if choice != "gpt-sol" and not settings.pipeline.claude.enabled:
         if value.script_model is None and value.script_owner is None:
@@ -319,6 +319,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Claude script writers are not enabled in this TubeForge configuration")
     owner, claude_model = SCRIPT_MODELS[choice]
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
+    voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
     return ContentRequest(
         script_owner=owner, script_model=claude_model, ending=value.ending, video_style=value.video_style,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
@@ -328,7 +329,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         sources=tuple(sources),
         notes=notes, review_mode=value.review_mode or preset.review_mode,
         captions_enabled=preset.captions_enabled if value.captions_enabled is None else value.captions_enabled,
-        music_track=music, visual_style=value.visual_style or preset.visual_style, visual_source=value.visual_source, mcp_servers=tuple(mcp), voice_id=value.voice_id,
+        music_track=music, visual_style=value.visual_style or preset.visual_style, visual_source=value.visual_source, mcp_servers=tuple(mcp), voice_id=voice_id, voice_speed_scale=voice_speed_scale,
         preset_name=name, aspect_ratio=preset.aspect_ratio,
     )
 

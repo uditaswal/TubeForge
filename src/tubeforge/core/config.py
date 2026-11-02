@@ -138,6 +138,17 @@ class SourceClipConfig(BaseModel):
             raise ValueError("source_clips.min_clip_seconds must not exceed max_clip_seconds")
         return self
 
+class ChannelVoiceCharacter(BaseModel):
+    """One channel's optional acoustic narrator character (M-AU3): a Kokoro voice or
+    configured blend id, and a speed multiplier applied on top of the renderer's own
+    pacing default. Config-only and opt-in — a channel with no entry here is unaffected."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    voice_id: str = Field(min_length=1, max_length=200)
+    speed_scale: float = Field(default=1.0, ge=0.7, le=1.3)
+
+
 class CodexProviderConfig(BaseModel):
     """Non-secret limits for the worker-to-host Codex runner client."""
 
@@ -151,6 +162,11 @@ class CodexProviderConfig(BaseModel):
     reservation_seconds: int = Field(default=1_200, ge=10, le=14_400)
     repair_attempt_limit: int = Field(default=0, ge=0, le=5)
     voice_profiles: dict[str, str] = Field(default_factory=dict)
+    # Optional, opt-in acoustic narrator character per channel (Kokoro voice/blend id + a
+    # speed multiplier). A channel absent here keeps today's single global default voice and
+    # speed unchanged (M-AU3). Distinct from `voice_profiles` above, which is writing *tone*
+    # guidance for the script prompt, not the synthesized audio.
+    channel_voice_characters: dict[str, ChannelVoiceCharacter] = Field(default_factory=dict)
     default_channel_identity: str = Field(default="default", pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     prompt_template_version: str = Field(default="m6-content-v7", min_length=1, max_length=100)
     max_prompt_chars: int = Field(default=75_000, ge=1_000, le=200_000)
@@ -168,6 +184,17 @@ class CodexProviderConfig(BaseModel):
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", identity) or not profile.strip() or len(profile) > 4000:
                 raise ValueError("voice profiles require bounded channel IDs and nonblank text up to 4000 characters")
         return profiles
+
+    @field_validator("channel_voice_characters")
+    @classmethod
+    def validate_channel_voice_characters(cls, characters: dict[str, ChannelVoiceCharacter]) -> dict[str, ChannelVoiceCharacter]:
+        import re
+        if len(characters) > 100:
+            raise ValueError("at most 100 channel voice characters")
+        for identity in characters:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", identity):
+                raise ValueError("channel voice characters require bounded channel IDs")
+        return characters
 
     @field_validator("executable", "model", "prompt_template_version")
     @classmethod

@@ -71,9 +71,18 @@ def scene_cues(scene, form, pacing):
     return script + gaps
 
 
-def synthesize(topic, settings, output, voice):
+def channel_scaled_speed(base_voice_speed: float, channel_speed_scale: float) -> float:
+    """A channel's (M-AU3) speed multiplier applied on top of the renderer's own pacing
+    default, clamped to the same safe bounds as ``voice_speed`` itself regardless of the
+    channel's configured scale, so a misconfigured channel cannot push narration outside
+    tested limits."""
+    return min(max(base_voice_speed * channel_speed_scale, 0.8), 1.4)
+
+
+def synthesize(topic, settings, output, voice, channel_speed_scale=1.0):
     pacing = settings.pipeline.reference_short
-    primary = KokoroVoiceProvider(settings.pipeline.kokoro.model_copy(update={"speed": pacing.voice_speed}))
+    base_speed = channel_scaled_speed(pacing.voice_speed, channel_speed_scale)
+    primary = KokoroVoiceProvider(settings.pipeline.kokoro.model_copy(update={"speed": base_speed}))
     fallback = PiperVoiceProvider(settings.pipeline.piper)
     identity = profile_hash(profile=pacing.spoken_profile, lexicon=pacing.pronunciation_lexicon,
                             group_size=pacing.speech_group_size, voice_processing=pacing.voice_processing,
@@ -340,13 +349,14 @@ def pronunciation_report(topic, output, manifest, aligner, pacing) -> dict | Non
 
 
 def prepare(topic: ShortsTopic, output: Path, *, config: Path, alignment_model: Path,
-            voice="af_bella", cancelled=lambda: False):
+            voice="af_bella", speed_scale=1.0, cancelled=lambda: False):
     output.mkdir(parents=True, exist_ok=True)
     topic_path = output / "topic.json"
     topic_path.write_text(topic.model_dump_json(indent=2) + "\n")
     common = [sys.executable, "-m", __name__, "--topic", str(topic_path),
               "--output", str(output), "--config", str(config),
-              "--alignment-model", str(alignment_model), "--voice", voice]
+              "--alignment-model", str(alignment_model), "--voice", voice,
+              "--speed-scale", f"{speed_scale:.3f}"]
     # Each process exits before loading the other model, limiting live RAM.
     for stage in ("synthesize", "align"):
         checked([*common, "--stage", stage], deadline=time.monotonic() + 600, cancelled=cancelled)
@@ -363,12 +373,13 @@ def main():
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--alignment-model", type=Path, required=True)
     parser.add_argument("--voice", default="af_bella")
+    parser.add_argument("--speed-scale", type=float, default=1.0)
     parser.add_argument("--stage", choices=("synthesize", "align"), required=True)
     args = parser.parse_args()
     topic = ShortsTopic.model_validate_json(args.topic.read_text())
     args.output.mkdir(parents=True, exist_ok=True)
     if args.stage == "synthesize":
-        synthesize(topic, load_settings(args.config), args.output, args.voice)
+        synthesize(topic, load_settings(args.config), args.output, args.voice, args.speed_scale)
     else:
         pacing = load_settings(args.config).pipeline.reference_short
         align(topic, args.output, args.alignment_model, pacing.scene_tail_seconds, pacing=pacing)
