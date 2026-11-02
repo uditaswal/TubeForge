@@ -142,6 +142,35 @@ def test_real_encoder_and_cancel_preserve_existing_output(tmp_path):
     assert json.loads(target.with_suffix(".qa.json").read_text())["passed"] is False
 
 
+def test_encode_never_sets_container_metadata_including_fake_device_or_encoder_tags(tmp_path):
+    """M-S4: no detection-evasion metadata spoofing — the encoder carries whatever ffmpeg's own
+    real build truthfully reports, nothing invented, and nothing from `-metadata`."""
+    import json
+    import shutil
+    import subprocess
+    from tubeforge.rendering.shorts.encode import encode
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        pytest.skip("FFmpeg required for real encoder test")
+    timeline = fixture_timeline()
+    audio = tmp_path / "tone.wav"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=440:sample_rate=48000:duration=28",
+                    "-af", "loudnorm=I=-14:TP=-2.5:LRA=9", "-ar", "48000", str(audio)], check=True)
+    target = tmp_path / "fixture.mp4"
+    encode(timeline, audio, target, draft=True, motion=False)
+    probed = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json",
+                                        "-show_format", str(target)], check=True, capture_output=True, text=True).stdout)
+    tags = {key.lower(): value for key, value in probed["format"].get("tags", {}).items()}
+    # ffmpeg always writes its own real build string here unless told otherwise; the pipeline
+    # never passes -metadata, so this can only be ffmpeg's truthful banner, never a fake one.
+    assert tags.get("encoder", "").lower().startswith("lavf")
+    # No device/software spoofing fields of any kind — these never come from a raw rawvideo+aac
+    # ffmpeg pipe unless something explicitly injects them, which this pipeline must never do.
+    spoofable = {"com.apple.quicktime.make", "com.apple.quicktime.model", "com.apple.quicktime.software",
+                "make", "model", "software", "comment", "creation_time"}
+    assert not (set(tags) & spoofable - {"creation_time"})  # ffmpeg itself stamps creation_time truthfully; not spoofing
+
+
 def test_compress_pauses_shortens_only_long_internal_silences():
     import numpy as np
     from tubeforge.rendering.shorts.prepare import compress_pauses
