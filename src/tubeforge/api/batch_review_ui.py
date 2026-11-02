@@ -21,6 +21,7 @@ main{max-width:1160px;margin:32px auto;padding:0 20px;display:flex;flex-directio
 .review-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(0,2fr);gap:20px;align-items:start}
 #reviewList{list-style:none;padding:0;margin:0}#reviewList button{display:block;text-align:left;width:100%;background:var(--studio-panel-alt);border:1px solid var(--line);border-radius:9px;color:inherit;margin:0 0 8px;padding:10px 12px}#reviewList li:last-child button{margin-bottom:0}
 video{display:block;width:100%;max-height:65vh;background:#000;border-radius:10px}img{max-width:240px;width:100%;height:auto;border-radius:8px;margin-top:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--studio-input);border:1px solid var(--line);border-radius:9px;padding:12px;font-size:12px}
+.qa-list{list-style:none;padding:0;margin:0 0 14px;display:grid;gap:6px}.qa-list li{display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:1.5}.qa-list .badge{flex:none;margin-top:1px}
 #actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}#actions button{min-height:44px}
 label{display:block;margin:14px 0 6px}
 @media(max-width:760px){.review-layout{grid-template-columns:1fr}main{margin:16px auto;padding:0 14px}}</style>
@@ -35,9 +36,24 @@ def render_review_html(username: str | None = None) -> str:
 <script>
 const list=document.querySelector('#reviewList'),detail=document.querySelector('#detail'),notice=document.querySelector('#notice'),day=document.querySelector('#day');let selected=null,items=[],busy=false,signature='';
 function node(tag,text){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;return el;}
+function qaChecks(qa){if(!qa||!qa.output)return null;try{const parsed=JSON.parse(qa.output);return Array.isArray(parsed)?parsed:null;}catch(_){return null;}}
+function qaList(qa){
+  const checks=qaChecks(qa);
+  if(!qa)return node('p','No QA result recorded. Approval is disabled until checks pass for this video.');
+  if(!checks){const fallback=node('pre',qa.error||qa.output||'QA did not record a readable result.');return fallback;}
+  const list=node('ul');list.className='qa-list';
+  for(const {level,check,detail} of checks){
+    const item=node('li');
+    const badge=node('span',level);badge.className='badge '+(level==='FAIL'?'failed':level==='WARN'?'pending':'ready');
+    item.append(badge,node('span',' '+check+': '+detail));
+    list.append(item);
+  }
+  if(!checks.length)list.append(node('li','No checks recorded.'));
+  return list;
+}
 function show(item){selected=item;detail.replaceChildren();const stateLabel=node('p',`Review: ${item.state}${item.decision?' · '+item.decision:''} · Production: ${item.production_state}`);stateLabel.id='reviewStatus';detail.append(node('h2',item.short.title),stateLabel);if(item.preview_url){const video=node('video');video.controls=true;video.preload='metadata';video.src=item.preview_url;if(item.thumbnail_url)video.poster=item.thumbnail_url;detail.append(video);}else detail.append(node('p',item.error||'The final video is not available for review yet.'));
 if(item.thumbnail_url){const image=node('img');image.src=item.thumbnail_url;image.alt=`Thumbnail for ${item.short.title}`;detail.append(image);}else detail.append(node('p',(item.thumbnail_result?.reason||'Thumbnail unavailable.')+' Brief: '+(item.short.thumbnail?.text||'No text')+' · '+(item.short.thumbnail?.visual||'No visual brief')));
-detail.append(node('h3','QA result'),node('pre',item.qa?JSON.stringify(item.qa,null,2):'No QA result recorded. Approval is disabled until checks pass for this video.'));
+detail.append(node('h3','QA result'),qaList(item.qa));
 const actions=node('div');actions.id='actions';for(const [action,label] of [['approve','Approve'],['reject','Reject'],['regenerate','Regenerate'],['ready','Stage as ready']]){const button=node('button',label);button.type='button';button.dataset.action=action;button.disabled=!item.available||busy||(action==='approve'&&!item.qa_ok)||(action==='ready'&&(!item.qa_ok||item.state!=='approved'||!item.thumbnail_url));button.onclick=()=>decide(action);actions.append(button);}const exportLink=node('a','Open export');exportLink.id='exportLink';exportLink.href=item.export_url||'#';exportLink.hidden=!item.export_url;exportLink.target='_blank';exportLink.rel='noopener';detail.append(exportLink);detail.append(actions,node('h3','Script and beats'),node('pre',JSON.stringify(item.script||{narration:item.short.narration,hook:item.short.hook,beats:item.short.beats,cta:item.short.cta},null,2)));
 }
 async function refresh(explicit=false){try{const response=await fetch('/api/batch-plans/review'+(day.value?'?day='+encodeURIComponent(day.value):''));if(!response.ok)throw Error('Could not refresh review queue.');items=await response.json();const nextSignature=JSON.stringify(items.map(x=>[x.id,x.state,x.decision,x.production_state,x.reviewed_identity,x.qa_ok,x.export_url]));if(nextSignature!==signature){signature=nextSignature;list.replaceChildren();for(const item of items){const li=node('li'),button=node('button',`${item.short.title} · ${item.state} · ${item.production_state}`);button.type='button';button.onclick=()=>show(item);li.append(button);if(item.export_url){const link=node('a','Open export');link.href=item.export_url;link.target='_blank';link.rel='noopener';li.append(link);}list.append(li);}if(!items.length)list.append(node('li','No shorts for this day. Import a plan or choose another day.'));}if(selected){const current=items.find(x=>x.id===selected.id);if(explicit&&current)show(current);else if(!current||current.reviewed_identity!==selected.reviewed_identity){detail.querySelectorAll('#actions button').forEach(b=>b.disabled=true);const link=[...detail.children].find(x=>x.id==='exportLink');if(link)link.hidden=true;notice.textContent='The selected artifact changed. Select it again before reviewing.';}else{selected=current;const exportLink=[...detail.children].find(x=>x.id==='exportLink');if(exportLink){exportLink.hidden=!current.export_url;exportLink.href=current.export_url||'#';}const label=[...detail.children].find(x=>x.id==='reviewStatus');if(label)label.textContent=`Review: ${current.state}${current.decision?' · '+current.decision:''} · Production: ${current.production_state}`;detail.querySelectorAll('#actions button').forEach(b=>{const a=b.dataset.action;b.disabled=busy||!current.available||(a==='approve'&&!current.qa_ok)||(a==='ready'&&(!current.qa_ok||current.state!=='approved'||!current.thumbnail_url));});}}if(explicit||!selected)notice.textContent=items.length?`${items.length} shorts · select a video to review.`:'No videos to review.';}catch(e){notice.textContent=e.message+' Showing the last loaded data.';}}

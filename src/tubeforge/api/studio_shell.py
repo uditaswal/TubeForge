@@ -70,7 +70,7 @@ label{color:#d5e0ee;font-size:12px;font-weight:540}
 .toolbar{margin:1px 0 15px;align-items:flex-end}
 .toolbar h2{font-size:18px}
 .toolbar select{min-width:160px;background:var(--studio-input)}
-.badge{background:#243c38;color:#c6f7dd}
+.badge{display:inline-flex;align-items:center;border-radius:99px;padding:4px 8px;font-size:11px;font-weight:800;white-space:nowrap;background:#243c38;color:#c6f7dd}
 .badge.pending{background:#403624;color:#f6dfad}
 .badge.failed{background:#4b3037;color:#ffd1d4}
 .badge.ready{background:#214333;color:#c3f6d5}
