@@ -162,9 +162,18 @@ def check(job: Path) -> list[tuple[str, str, str]]:
         if cues:
             distinct = {cue.get("cue") for cue in cues}
             ok = len(distinct) >= min(2, len(cues))
-            add("PASS" if ok else "WARN", "sfx-variety", f"{len(cues)} cut(s), {len(distinct)} distinct sound effect(s) ({sorted(distinct)})")
+            peak = (audio_provenance or {}).get("sound_effect_peak_measured")
+            peak_text = f", measured peak {peak:.3f}" if peak is not None else ""
+            add("PASS" if ok else "WARN", "sfx-variety", f"{len(cues)} cut(s), {len(distinct)} distinct sound effect(s) ({sorted(distinct)}){peak_text}")
+            if peak is not None and peak > 0.35:
+                add("FAIL", "sfx-peak", f"measured sound-effect peak {peak:.3f} exceeds 0.35 — louder than the modest, caused-SFX design intends")
         elif audio_provenance is not None and sfx_enabled:
             add("WARN", "sfx-variety", "audio-provenance.json has no sound_effects list (renderer predates the caused-SFX pipeline)")
+        audio_licenses = (audio_provenance or {}).get("audio_licenses")
+        if audio_licenses is not None:
+            add("PASS", "audio-licence-trail", f"{len(audio_licenses)} audio asset(s) recorded with source/licence (M-AU4)")
+        elif audio_provenance is not None:
+            add("WARN", "audio-licence-trail", "audio-provenance.json has no audio_licenses list (renderer predates M-AU4)")
     for text in brief.get("text_options", []):
         overlap = content(text) & content(hook)
         words_in = len(text.split())

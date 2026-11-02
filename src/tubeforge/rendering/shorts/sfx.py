@@ -93,6 +93,14 @@ def schedule(scene_starts: tuple[float, ...], templates: tuple[str, ...], durati
     return chosen, dropped
 
 
+def license_info(name: str) -> dict:
+    """This cue's source and licence, for the video's audio licence trail (M-AU4)."""
+    entry = _MANIFEST.get(name)
+    if entry is None:
+        raise ValueError(f"unknown sound-effect cue: {name!r}")
+    return {"source": entry["source"], "license": entry["license"]}
+
+
 def load(name: str, sample_rate: int, *, ffmpeg: str, deadline: float, cancelled) -> np.ndarray:
     """Decode a vendored cue to mono float32 PCM at sample_rate, peak-normalized to 1.0."""
     entry = _MANIFEST.get(name)

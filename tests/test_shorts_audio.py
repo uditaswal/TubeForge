@@ -43,6 +43,13 @@ def test_every_budgeted_cue_has_a_licensed_manifest_entry():
         assert (sfx.SFX_ROOT / sfx._MANIFEST[name]["file"]).is_file()
 
 
+def test_license_info_matches_the_manifest_and_rejects_unknown_cues():
+    info = sfx.license_info("pop")
+    assert info == {"source": sfx._MANIFEST["pop"]["source"], "license": sfx._MANIFEST["pop"]["license"]}
+    with pytest.raises(ValueError):
+        sfx.license_info("not-a-real-cue")
+
+
 def test_scheduler_prioritizes_payoff_and_caps_thirty_seconds():
     starts = (0, 3, 7, 11, 15, 19, 23, 27)
     templates = ("hook", "flow", "big_stat", "terminal", "big_stat", "terminal", "flow", "loop")
@@ -179,6 +186,26 @@ def test_master_places_budgeted_cues_and_riser_by_default(tmp_path):
     assert provenance["mastered_measurement"]["input_tp"] <= -1.5
     assert abs(provenance["mastered_measurement"]["input_i"] - (-14)) <= 1.0
     assert provenance["music_under_speech"]["schema_version"] == "music-under-speech-v1"
+    # M-AU4: every distinct audio asset used is recorded with its own licence.
+    assert provenance["sound_effect_variety"] == {"cues_placed": 2, "distinct_cues_used": 2}
+    assert 0 < provenance["sound_effect_peak_measured"] <= .18 + 1e-5
+    licenses = {entry["asset"]: entry for entry in provenance["audio_licenses"]}
+    assert licenses["music"]["mode"] == "synthesized"
+    assert "no sampled recording" in licenses["music"]["note"]
+    assert licenses["sfx:pop"]["source"] and licenses["sfx:pop"]["license"]
+    assert licenses[f"sfx:{sfx.RISER_CUE}"]["source"] and licenses[f"sfx:{sfx.RISER_CUE}"]["license"]
+
+
+def test_master_audio_licenses_cover_silence_and_real_track(tmp_path):
+    narration = _synthetic_narration(tmp_path, 30.0)
+    scene_starts = (0.0, 4.0, 9.0)
+    templates = ("hook", "flow", "flow")
+
+    silent = master(narration, scene_starts, tmp_path / "silent", templates=templates, title="t", bed=None, sfx_enabled=False)
+    provenance = json.loads((silent.parent / "audio-provenance.json").read_text())
+    assert provenance["audio_licenses"] == [{"asset": "music", "mode": "silence", "note": "no music bed was mixed in"}]
+    assert provenance["sound_effect_peak_measured"] == 0.0
+    assert provenance["sound_effect_variety"] == {"cues_placed": 0, "distinct_cues_used": 0}
 
 
 def test_master_places_a_packet_cue_for_a_diagram_scene(tmp_path):

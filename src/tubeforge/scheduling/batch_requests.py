@@ -1,5 +1,26 @@
 """Shared normal Studio request expansion for manual and automatic batch intake."""
+import hashlib
 import json
+
+
+def rotated_music_track(short, settings):
+    """A deterministic, varied music pick for one batch short (M-AU4).
+
+    Every batch-produced short previously left `music_track` unset, so a plan day always
+    rendered the same single synthesized bed for every short ("an endless loop"). This picks
+    across the synthesized bed plus the configured catalog, keyed by publish day and short id,
+    so different shorts on the same day consistently land on different tracks without needing
+    cross-request state (each call is independent, so this is a stable hash, not a literal
+    incrementing counter — see docs/HANDOFF.md for the acceptance tradeoff).
+    """
+    from tubeforge.pipeline.music import SYNTHESIZED_MUSIC_NAME
+    catalog_names = sorted({track.name for track in settings.pipeline.video_generation.music_catalog})
+    rotation = [SYNTHESIZED_MUSIC_NAME, *catalog_names]
+    if len(rotation) <= 1:
+        return None  # nothing to rotate between; keep today's unset/default behavior
+    day = short.publish_at.date().isoformat() if short.publish_at else 'unscheduled'
+    digest = hashlib.sha256(f'{day}:{short.id}'.encode()).digest()
+    return rotation[int.from_bytes(digest[:4], 'big') % len(rotation)]
 
 
 def build_batch_request(short, settings):
@@ -12,7 +33,8 @@ def build_batch_request(short, settings):
         notes=('Unverified operator batch brief: ' + json.dumps(short.model_dump(mode='json'), ensure_ascii=False),),
         angle=short.concept, duration_seconds=short.length_s, preset=preset,
         review_mode='manual', ending=short.ending, channel_identity=short.channel,
-        video_style='story')  # the approved look; Classic is the legacy renderer
+        video_style='story',  # the approved look; Classic is the legacy renderer
+        music_track=rotated_music_track(short, settings))
     request = None
     if short.sources:
         # The plan's own sources become the evidence (page text is read at request time), so no web research runs.

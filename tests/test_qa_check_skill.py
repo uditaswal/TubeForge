@@ -81,3 +81,34 @@ def test_missing_audio_provenance_warns_instead_of_crashing():
     assert _result(results, "audio-health")[0] == "WARN"
     names = {r[1] for r in results}
     assert "music-under-speech" not in names  # no audio-provenance.json at all: nothing to warn about either
+
+
+def test_sfx_peak_and_licence_trail_pass_when_modest_and_recorded():
+    provenance = {
+        "sfx_enabled": True,
+        "sound_effects": [{"cue": "pop", "template": "big_stat"}, {"cue": "whoosh-short", "template": "flow"}],
+        "sound_effect_peak_measured": 0.17,
+        "audio_licenses": [{"asset": "music", "mode": "synthesized", "note": "..."},
+                           {"asset": "sfx:pop", "source": "Pixabay", "license": "Pixabay Content License"}],
+    }
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        results = qa_check.check(_reference_job(Path(tmp), provenance))
+    assert _result(results, "sfx-variety")[0] == "PASS"
+    assert "0.170" in _result(results, "sfx-variety")[2]
+    names = {r[1] for r in results}
+    assert "sfx-peak" not in names  # no FAIL emitted below the 0.35 threshold
+    assert _result(results, "audio-licence-trail") == ("PASS", "audio-licence-trail", "2 audio asset(s) recorded with source/licence (M-AU4)")
+
+
+def test_sfx_peak_fails_above_threshold_and_missing_licence_trail_warns():
+    provenance = {
+        "sfx_enabled": True,
+        "sound_effects": [{"cue": "pop", "template": "big_stat"}],
+        "sound_effect_peak_measured": 0.5,
+    }
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        results = qa_check.check(_reference_job(Path(tmp), provenance))
+    assert _result(results, "sfx-peak")[0] == "FAIL"
+    assert _result(results, "audio-licence-trail")[0] == "WARN"

@@ -158,6 +158,7 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
             cue = sfx.load(cue_name, SR, ffmpeg=ffmpeg, deadline=deadline, cancelled=cancelled)
             start = round((at - (len(cue) / SR if cue_name == sfx.RISER_CUE else .035)) * SR)
             sfx.place(effects, cue, start, peak=sfx_peak)
+    sfx_peak_measured = float(np.max(np.abs(effects))) if cues_placed else 0.0
     mix = voice + bed + effects
     for name, samples in (("music-ducked", bed), ("effects", effects), ("mix-raw", mix)):
         sf.write(output / f"{name}.wav", samples, SR, subtype="FLOAT")
@@ -193,6 +194,19 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
                     "track": "Music: an operator-approved catalog track; see its own licence record."}[music_provenance["mode"]]
     sfx_origin = ("Sound effects: Pixabay Content License, see assets/sfx/LICENSE-pixabay.md" if sfx_enabled
                  else "Sound effects: off (operator preference, 26 Oct).")
+    # M-AU4: every audio asset actually used in this render, with its licence — the music bed
+    # (or a note that none applies) plus one entry per distinct sound-effect cue actually placed.
+    audio_licenses = [{"asset": "music", "mode": music_provenance["mode"], **(
+        {"source_path": music_provenance.get("source_path"), "source_sha256": music_provenance.get("source_sha256"),
+         "note": "operator-approved catalog track; see the music catalog record for the full licence"}
+        if music_provenance["mode"] == "track" else
+        {"note": "original synthesized signals, no sampled recording — no external licence applies"}
+        if music_provenance["mode"] == "synthesized" else
+        {"note": "no music bed was mixed in"}
+    )}]
+    distinct_cues = sorted({event["cue"] for event in cues_placed})
+    for cue_name in distinct_cues:
+        audio_licenses.append({"asset": f"sfx:{cue_name}", **sfx.license_info(cue_name)})
     provenance = {"algorithm": f"{music_provenance['mode']} music bed" + (" plus licensed scene-cause sound effects" if sfx_enabled else ""),
                   "origin": f"{music_origin} {sfx_origin}",
                   "music": music_provenance, "music_peak_before_duck": .12, "speech_duck_maximum": .75,
@@ -200,6 +214,9 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
                   "sound_effects_dropped": cues_dropped,
                   "sound_effect_budget": {"max_per_minute": sfx_max_per_minute, "min_gap_s": sfx_min_gap_s},
                   "sound_effect_peak": sfx_peak,
+                  "sound_effect_peak_measured": round(sfx_peak_measured, 4),
+                  "sound_effect_variety": {"cues_placed": len(cues_placed), "distinct_cues_used": len(distinct_cues)},
+                  "audio_licenses": audio_licenses,
                   "master_target_lufs": -14, "master_target_dbtp": -2.5,
                   "input_measurement": measured, "mastered_measurement": result, "mastering": "gain-matched true-peak limiter, up to 3 measured passes", "narration_sha256": file_hash(narration),
                   "mix_sha256": file_hash(final),
