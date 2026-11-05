@@ -105,11 +105,11 @@ claims of improved retention and broad rollout before acceptance.
 
 ## Next five actions
 
-1. Preserve and hash the GIF; inspect every animation state and record timing.
-2. Inspect existing design tokens and scene timing APIs on this branch.
-3. Render vertical command, multiline and maximum-width fixtures locally (landscape deferred).
-4. Review encoded clips against the reference and record defects before abstraction.
-5. Report phase 1 acceptance, then proceed to the reusable scene contract.
+1. Regenerate the current-profile source plates using the verified clean-capture policy.
+2. Implement Story code-animation parity without silently truncating accepted lines.
+3. Add purposeful terminal/highlight/output motion tied to reviewed cues.
+4. Inspect a complete updated vertical render and obtain full watch/listen review.
+5. Audit the checklist and submit the feature branch for review; merge requires approval.
 
 Stop after two failed repairs of the same root issue or 45 minutes of active
 debugging, per AGENTS.md; report evidence, two options and a recommendation.
@@ -128,7 +128,8 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Render an offline comparison with accepted narration and saved Whisper timing; inspect encoded frames.
 - [x] Verify signed-in desktop/mobile Chromium review and anchor visibility.
 - [x] Render a current-profile 49.7-second loop artifact; pass blocking delivery QA checks.
-- [ ] Complete full watch/listen acceptance and repair remaining visual review findings.
+- [x] Repair source-capture Ask AI controls and partial neighbouring-line fragments; inspect real recapture.
+- [ ] Regenerate the full Short with new captures, complete motion parity and full watch/listen acceptance.
 - [ ] Verify full narrated Short and signed-in workflow.
 
 ## First implementation checkpoint
@@ -317,3 +318,37 @@ listening. Story still truncates checklist code to three lines and uses its own
 reveal implementation. Next: repair source-capture UI pollution, then complete
 meaningful terminal/highlight/output motion and Story parity, with encoded review
 and renewed full watch/listen before declaring the overall goal achieved.
+
+## Clean source-capture stage — 6 November
+
+**VERIFIED for the local capture stage only.** New captures apply
+`source-capture-v4-clean-lines`: after quote selection settles, hide only matching
+interactive Ask AI/Copy controls, including controls inside open shadow roots.
+Ordinary article text, links and other buttons remain untouched. Visibility hiding
+preserves the quote layout; native-selection/caret/animation artifacts are excluded
+from the screenshot. Partial-paragraph fallback crops use complete matched line
+boxes without padding that exposes fragments of adjacent lines. Full paragraph
+crops retain their context padding when the paragraph fits.
+
+The first light-DOM-only attempt failed the real recapture despite passing its
+fixture. Inspection found an open shadow-root DIV; traversing it hid the actual
+Ask AI button. A second artifact inspection caught the adjacent-line fragments;
+the fallback crop was tightened and recaptured. This is not an image paint-over.
+
+Validation: 30 capture/plate tests passed (one opt-in browser check skipped there);
+the opt-in Chromium check passed separately in 2.59 s. It exercises normal and
+shadow-root controls, preserved literal article text/links and identical quote
+rectangles before/after cleanup. Real cited-page recapture matched all ten quoted
+words and recorded hidden_controls=['Ask AI']. The plain and highlighted output
+were inspected at full size and are clean. Evidence and exact hashes:
+`artifacts/review/reference-motion-capture-v4/capture-review.json`, `source.png`,
+`source-hl.png` and their native-resolution copies. Plain SHA-256:
+`0cf364cc7da1187e8b2f5fac1ae55b10a97c9c153358ac0ee32e0d92b8c0477c`.
+
+Capture policy and hidden-control labels are retained in the plate manifest's
+evidence, changing new manifest/render identity. Accepted originals and checkpoints
+were not rewritten or silently regenerated. The 49.7 s MP4 still uses its original
+plates; a new full render/review is required to show this improvement in that file.
+No provider calls, script/source-packet edits or production approvals occurred.
+Next: Story parity and purposeful terminal/output motion, then fresh source plates
+and an updated full Short for creative review.

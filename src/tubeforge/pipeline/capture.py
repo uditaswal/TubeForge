@@ -28,6 +28,32 @@ HIDE_OVERLAYS = """
 {display:none !important}
 html,body{overflow:visible !important;position:static !important}
 """
+CAPTURE_POLICY = "source-capture-v4-clean-lines"
+CLEAN_CONTROLS = """
+() => {
+  const hidden = [];
+  // Match interactive controls, not article prose, headings or quoted examples.
+  const names = /^(ask ai|ask ai about this page|copy page|copy link|copy code)$/i;
+  const roots = [document];
+  for (let i = 0; i < roots.length; i++) {
+    for (const el of roots[i].querySelectorAll('*')) {
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+    }
+  }
+  for (const root of roots) for (const el of root.querySelectorAll('button,[role="button"],input[type="button"]')) {
+    const labels = [el.getAttribute('aria-label'), el.getAttribute('title'), el.innerText, el.value]
+      .filter(Boolean).map(s => s.replace(/\\s+/g, ' ').trim());
+    const label = labels.find(s => names.test(s));
+    if (!label) continue;
+    el.style.setProperty('visibility', 'hidden', 'important');
+    el.style.setProperty('pointer-events', 'none', 'important');
+    hidden.push(label.slice(0, 100));
+  }
+  return hidden;
+}
+"""
+
+
 FIND = """
 (quote) => {
   const words = quote.replace(/[\\u2018\\u2019]/g, "'").replace(/[\\u201c\\u201d]/g, '"').split(/\\s+/).filter(Boolean);
@@ -82,7 +108,7 @@ def _guard(cache: dict[str, bool]):
 
 def plan_clip(rects: list[dict], doc_width: float, doc_height: float, block: dict | None = None) -> tuple[float, float, float, float]:
     """Crop (x, y, w, h) in CSS pixels aligned to whole text: the paragraph holding the match when it fits
-    the card, otherwise the matched lines plus one line of context, so no line is cut in half."""
+    the card, otherwise only the complete matched line boxes, so neighbouring lines are not cut in half."""
     top = min(r["y"] for r in rects)
     bottom = max(r["y"] + r["h"] for r in rects)
     line = max(r["h"] for r in rects)
@@ -93,9 +119,12 @@ def plan_clip(rects: list[dict], doc_width: float, doc_height: float, block: dic
                  and block["h"] + 2 * pad <= max_height and block["h"] <= max(3 * (bottom - top), 8 * line))
     if paragraph:
         top, bottom = block["y"], block["y"] + block["h"]
-    top = max(0.0, top - pad)  # otherwise: exactly the matched lines, so no neighbouring line is ever cut in half
+    # Match rects contain complete line boxes. Padding a subset can expose the
+    # descenders of the preceding line or ascenders of the following one.
+    pad = pad if paragraph else 0.0
+    top = max(0.0, top - pad)
     bottom = min(doc_height, bottom + pad)
-    return 0.0, top, doc_width, min(max(bottom - top, 40.0), max_height, doc_height)
+    return 0.0, top, doc_width, min(max(bottom - top, 1.0), max_height, doc_height)
 
 
 def draw_highlight(image: Image.Image, rects: list[dict], clip: tuple[float, float, float, float]) -> Image.Image:
@@ -150,8 +179,12 @@ def make_capture(config: SourceCaptureConfig):
                     if not found:
                         return {"reason": "quote not found on the page"}
                     page.evaluate("getSelection().removeAllRanges()")  # the native selection from window.find must not show
+                    # Selection-driven controls can appear after FIND. Settle their
+                    # update before hiding them; visibility preserves quote geometry.
+                    page.wait_for_timeout(250)
+                    hidden_controls = page.evaluate(CLEAN_CONTROLS)
                     clip = plan_clip(found["rects"], found["docWidth"], found["docHeight"], found.get("block"))
-                    shot = page.screenshot(clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]}, full_page=True)
+                    shot = page.screenshot(clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]}, full_page=True, animations="disabled", caret="hide")
                 finally:
                     browser.close()
         except (PlaywrightError, TimeoutError, OSError) as error:
@@ -167,5 +200,5 @@ def make_capture(config: SourceCaptureConfig):
         full.save(plain2)
         draw_highlight(full, found["rects"], clip).save(marked2)
         return {"file": f"plates/{plain.name}", "highlight": f"plates/{marked.name}", "matched": bool(found["complete"]),
-                "matched_words": found["words"], "file_2x": f"plates/{plain2.name}", "highlight_2x": f"plates/{marked2.name}"}
+                "matched_words": found["words"], "capture_policy": CAPTURE_POLICY, "hidden_controls": hidden_controls, "file_2x": f"plates/{plain2.name}", "highlight_2x": f"plates/{marked2.name}"}
     return capture

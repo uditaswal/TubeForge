@@ -58,6 +58,12 @@ Python 3.12/3.13 · FastAPI · SQLAlchemy 2 + Alembic (SQLite) · Pydantic · Do
 
 Pillow code visuals use syntax-coloured editor cards with a following cursor and a bounded frame cache. Code visuals may supply reviewed `line_reveal_words` (one narration word index per line) for the Pillow motion renderer; these resolve against the saved alignment, retain its provenance and require a one-second finished-code hold. Unanchored code keeps proportional scene timing. Story/HyperFrames reject explicit code-line anchors. Story/HyperFrames use their own rendering path. Pillow hooks are visible on frame one, and loop endpoints reuse the opening frame during the closing speech tail. Local code-line anchors are not yet requested from production writers. New rendered outputs require the existing artifact review.
 
+New source captures remove matching interactive Ask AI/Copy controls, including
+controls in open shadow roots, and record the capture policy and hidden controls
+in the plate manifest. Article text stays intact. Older captures and approved
+outputs retain their existing identity; regenerated assets need a new render and
+artifact review.
+
 ## Run Locally
 
 Prerequisites: Docker with Compose, FFmpeg for host-side checks, and operator-supplied voice models in `models/` (they are large and not committed).

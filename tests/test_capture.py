@@ -20,13 +20,13 @@ def test_plan_clip_aligns_to_the_paragraph_when_it_fits():
 def test_plan_clip_falls_back_to_matched_lines_for_tall_blocks():
     rects = [{"x": 40, "y": 830, "w": 450, "h": 26}, {"x": 40, "y": 856, "w": 450, "h": 26}]
     x, y, w, h = plan_clip(rects, 540, 5000, {"y": 100.0, "h": 2000.0})
-    assert y == 820.0 and y + h == 892.0  # exactly the matched lines plus 10 px padding
+    assert y == 830.0 and y + h == 882.0  # exactly the complete matched line boxes
 
 
 def test_plan_clip_ignores_a_container_that_is_not_the_paragraph():
     rects = [{"x": 40, "y": 830, "w": 450, "h": 26}]
     x, y, w, h = plan_clip(rects, 540, 5000, {"y": 700.0, "h": 400.0})
-    assert y == 820.0 and h == 46.0
+    assert y == 830.0 and h == 26.0
 
 
 def test_plan_clip_stays_inside_short_documents():
@@ -44,3 +44,50 @@ def test_private_and_unresolvable_hosts_are_rejected():
     cache = {}
     assert not _public("localhost", cache) and not _public("127.0.0.1", cache) and not _public("10.0.0.5", cache)
     assert not _public("does-not-exist.invalid", cache)
+
+
+def test_capture_cleanup_preserves_quote_and_records_controls_in_chromium():
+    import os
+    from pathlib import Path
+    import pytest
+    if os.environ.get('TUBEFORGE_CAPTURE_BROWSER') != '1':
+        pytest.skip('opt-in real Chromium source capture check')
+    from playwright.sync_api import sync_playwright
+    from tubeforge.pipeline.capture import CLEAN_CONTROLS, FIND
+    out = Path('artifacts/review/reference-motion-capture')
+    out.mkdir(parents=True, exist_ok=True)
+    quote = 'The bucket refills at a constant rate over time.'
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path='/usr/bin/chromium', headless=True,
+            args=['--no-sandbox','--disable-dev-shm-usage'])
+        try:
+            page = browser.new_page(viewport={'width':810,'height':300})
+            page.set_content('''<style>body{font:24px sans-serif;padding:20px}button{position:absolute;right:20px;top:20px}</style>
+                <article><p id="claim">The bucket refills at a constant rate over time.</p>
+                <p id="prose">Ask AI and Copy link are literal words in this article.</p>
+                <a href="#article">Ask AI</a></article><button>Ask AI</button>
+                <button style="top:60px" aria-label="Copy page">icon</button>
+                <button style="top:100px">Ask   AI</button><button style="top:140px">Run example</button>''')
+            page.evaluate("""() => {
+              const host=document.createElement('div');host.id='shadow-ui';document.body.append(host);
+              host.attachShadow({mode:'open'}).innerHTML='<button style="position:absolute;right:20px;top:180px">Ask AI</button>';
+            }""")
+            before = page.evaluate(FIND, quote)
+            assert before['complete']
+            page.evaluate('getSelection().removeAllRanges()')
+            page.screenshot(path=str(out/'fixture-before.png'))
+            labels = page.evaluate(CLEAN_CONTROLS)
+            assert labels == ['Ask AI','Copy page','Ask AI','Ask AI']
+            assert not page.locator('#shadow-ui').get_by_role('button',name='Ask AI').is_visible()
+            assert not page.get_by_role('button',name='Copy page',exact=True).is_visible()
+            after = page.evaluate(FIND, quote)
+            assert after['complete'] and before['rects'] == after['rects']
+            assert before['block'] == after['block']
+            assert page.locator('#claim').inner_text() == quote
+            assert page.locator('#prose').is_visible()
+            assert page.get_by_role('link',name='Ask AI',exact=True).is_visible()
+            assert page.get_by_role('button',name='Run example',exact=True).is_visible()
+            page.evaluate('getSelection().removeAllRanges()')
+            page.screenshot(path=str(out/'fixture-after.png'))
+        finally:
+            browser.close()

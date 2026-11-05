@@ -107,4 +107,5 @@ def _source(visual: SourceVisual, index: int, source_id: str, sources: dict[str,
         return {"kind": "none", "reason": result.get("reason", "quote not captured"), "url": url}
     return {"kind": "source", "url": url, "quote": visual.quote, "file": result["file"], "highlight": result.get("highlight"),
             **{key: result[key] for key in ("file_2x", "highlight_2x") if result.get(key)},
-            "matched": result.get("matched", False), "evidence": {"url": url, "captured_at": datetime.now(UTC).isoformat(), "provider": "headless-chromium"}}
+            "matched": result.get("matched", False), "evidence": {"url": url, "captured_at": datetime.now(UTC).isoformat(), "provider": "headless-chromium",
+                **{key: result[key] for key in ("capture_policy", "hidden_controls") if key in result}}}

@@ -177,3 +177,15 @@ def test_code_word_anchors_change_render_identity():
     ordinary = topic_with({1: CODE})
     anchored = topic_with({1: {**CODE, 'line_reveal_words': [0, 3, 6]}})
     assert render_identity(ordinary, 'a', 't', **kwargs) != render_identity(anchored, 'a', 't', **kwargs)
+
+
+def test_source_capture_cleanup_policy_is_retained_in_manifest(tmp_path):
+    from tubeforge.pipeline.capture import CAPTURE_POLICY
+    topic = topic_with({1: {'kind':'source','quote':'A sufficiently long source quote'}})
+    def capture(url, quote, base):
+        return {'file':'plates/source-1.png','matched':True,
+                'capture_policy':CAPTURE_POLICY,'hidden_controls':['Ask AI']}
+    manifest = prepare_plates(topic,tmp_path,pixabay=None,capture=capture)
+    evidence = manifest['scenes']['1']['evidence']
+    assert evidence['capture_policy'] == CAPTURE_POLICY
+    assert evidence['hidden_controls'] == ['Ask AI']
