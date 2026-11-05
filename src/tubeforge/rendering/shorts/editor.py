@@ -12,7 +12,7 @@ from pygments import lex
 from pygments.lexers import get_lexer_by_name
 from pygments.token import Comment, Keyword, Name, Number, Operator, String
 
-VERSION = "portrait-editor-v1"
+VERSION = "portrait-editor-v2"
 PALETTE = ((Comment, "#8799b0"), (Keyword, "#cf91ed"), (String, "#a4dfa0"),
            (Number, "#ffc66d"), (Name.Function, "#7ed4fa"), (Operator, "#b8cbde"))
 
@@ -25,11 +25,14 @@ class EditorScene:
     start: float = .4
     typing_seconds: float = 3.0
     hold_seconds: float = 2.0
+    # Scene-local intervals derived by the caller from accepted word anchors.
+    # Empty means explicitly synthetic proportional timing, never measured speech.
+    line_windows: tuple[tuple[float, float], ...] = ()
 
     def __post_init__(self):
         if not self.lines or len(self.lines) > 6:
             raise ValueError("editor needs one to six lines")
-        if any(len(line) > 30 or "\n" in line or "\t" in line for line in self.lines):
+        if any(len(line) > 30 or any(ord(char) < 32 for char in line) for line in self.lines):
             raise ValueError("use explicit lines of at most 30 characters without tabs")
         if not self.filename or len(self.filename) > 28:
             raise ValueError("filename must contain 1–28 characters")
@@ -37,6 +40,16 @@ class EditorScene:
             raise ValueError("timing must be finite")
         if self.start < 0 or self.typing_seconds <= 0 or self.hold_seconds < 1:
             raise ValueError("typing must be positive and finished text must hold at least one second")
+        if self.line_windows:
+            if len(self.line_windows) != len(self.lines):
+                raise ValueError("one reveal window is required per line")
+            previous = self.start
+            for begin, end in self.line_windows:
+                if not all(math.isfinite(v) for v in (begin, end)) or begin < previous or end <= begin:
+                    raise ValueError("line windows must be finite, ordered and nonoverlapping")
+                previous = end
+            if previous > self.start + self.typing_seconds:
+                raise ValueError("line windows must finish before the reading hold")
         get_lexer_by_name(self.language)
 
     @property
@@ -50,6 +63,15 @@ class EditorScene:
     def count(self, seconds: float) -> int:
         if not math.isfinite(seconds):
             raise ValueError("scene time must be finite")
+        if self.line_windows:
+            offset = 0
+            for line, (begin, end) in zip(self.lines, self.line_windows, strict=True):
+                if seconds < begin:
+                    return max(0, offset - 1)
+                if seconds < end:
+                    return offset + math.floor(len(line) * (seconds - begin) / (end - begin))
+                offset += len(line) + 1
+            return len(self.text)
         return math.floor(len(self.text) * min(1, max(0, (seconds - self.start) / self.typing_seconds)))
 
     def cursor(self, seconds: float) -> tuple[int, int]:
@@ -77,16 +99,17 @@ class EditorRenderer:
         self.cells = []
         offset = 0
         lexer = get_lexer_by_name(scene.language, stripnl=False, ensurenl=False)
+        # Lex the complete snippet so multiline strings/comments keep their state.
+        coloured = []
+        for kind, token in lex(scene.text, lexer):
+            color = next((c for group, c in PALETTE if kind in group), "#d2dbe7")
+            coloured.extend((char, color) for char in token)
+        if "".join(char for char, _ in coloured) != scene.text:
+            raise ValueError("lexer changed display text")
         for row, line in enumerate(scene.lines):
             d.text((85, 550 + 78*row), str(row+1), font=self.small, fill="#8799b0")
-            col = 0
-            for kind, token in lex(line, lexer):
-                color = next((c for group, c in PALETTE if kind in group), "#d2dbe7")
-                for char in token:
-                    if char == "\n":
-                        continue
-                    self.cells.append((offset+col, char, (140+col*self.advance, 540+78*row), color))
-                    col += 1
+            for col, (char, color) in enumerate(coloured[offset:offset+len(line)]):
+                self.cells.append((offset+col, char, (140+col*self.advance, 540+78*row), color))
             offset += len(line) + 1
 
     def frame(self, seconds: float) -> Image.Image:

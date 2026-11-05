@@ -28,3 +28,34 @@ def test_timing_is_clamped_and_reproducible():
 def test_invalid_or_unreadable_scenes_fail(kwargs):
     with pytest.raises(ValueError):
         EditorScene(**kwargs)
+
+
+def test_line_windows_hold_completed_text_until_next_speech_anchor():
+    scene = EditorScene(("abc", "def"), start=0, typing_seconds=5,
+                        line_windows=((0, 1), (3, 4)))
+    assert scene.count(.5) == 1
+    assert scene.count(2) == 3
+    assert scene.cursor(2) == (0, 3)
+    assert scene.cursor(3) == (1, 0)
+    assert scene.count(4) == 7
+    assert scene.count(6) == 7
+
+
+@pytest.mark.parametrize('windows', [((0, 1),), ((0, 2), (1, 3)),
+    ((0, 1), (2, 8)), ((0, 1), (2, float('nan')))])
+def test_invalid_line_windows_fail(windows):
+    with pytest.raises(ValueError):
+        EditorScene(("abc", "def"), start=0, line_windows=windows)
+
+
+def test_multiline_string_lexing_preserves_text_and_colour():
+    scene = EditorScene(('text = """first', 'second"""'))
+    renderer = EditorRenderer(scene)
+    second = [cell for cell in renderer.cells if cell[0] >= len(scene.lines[0])+1]
+    assert ''.join(cell[1] for cell in second) == scene.lines[1]
+    assert all(cell[3] == '#a4dfa0' for cell in second)
+
+
+def test_control_characters_cannot_change_layout():
+    with pytest.raises(ValueError):
+        EditorScene(('abc\rdef',))

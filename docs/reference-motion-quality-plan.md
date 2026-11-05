@@ -107,7 +107,7 @@ claims of improved retention and broad rollout before acceptance.
 
 1. Preserve and hash the GIF; inspect every animation state and record timing.
 2. Inspect existing design tokens and scene timing APIs on this branch.
-3. Build phase 1 fixtures and render both aspect ratios locally.
+3. Render vertical command, multiline and maximum-width fixtures locally (landscape deferred).
 4. Review encoded clips against the reference and record defects before abstraction.
 5. Report phase 1 acceptance, then proceed to the reusable scene contract.
 
@@ -121,7 +121,8 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Prioritize native vertical Shorts; defer landscape comparison.
 - [x] Inspect existing Pillow code-card reveal and geometry.
 - [x] Build and test portrait editor animation primitive (7 focused tests pass).
-- [ ] Render and inspect a vertical MP4 comparison.
+- [x] Render vertical MP4 fixtures; inspect encoded contact sheets and full-size hold frame.
+- [x] Add validated per-line reveal windows and multiline syntax colouring.
 - [ ] Integrate the proven primitive with accepted scene timing and render identity.
 - [ ] Verify full narrated Short and signed-in workflow.
 
@@ -142,3 +143,25 @@ code and label fit the safe area, with room for future headline/caption overlays
 No full narrated-video or operator creative acceptance is claimed. The job QA
 script requires a real content package and will run at the integrated-job phase;
 this labelled synthetic scene is not a production video job.
+
+## Second implementation checkpoint
+
+Reusable editor work is **IMPLEMENTED**, with validated scene-local per-line reveal
+windows, holds between lines and correct multiline lexer state. The caller must
+still bind these windows to exact accepted word anchors; the fixtures use synthetic
+timing explicitly. Fourteen tests pass, including ordered/nonoverlapping/finite
+window validation, cursor movement, held lines and multiline string colours.
+
+Reproduction now creates its output folders and checks FFmpeg exit/decode before
+promoting each benchmark MP4. Run `PYTHONPATH=src python
+scripts/benchmark_portrait_editor.py --fixture all`.
+
+Three 1080×1920/30fps H.264 clips fully decoded. Their encoded half-second contact
+sheets were inspected: command holds stable after typing; the 30-character line
+and cursor fit the right edge; multiline reveal keeps indentation and positions.
+Evidence is under `artifacts/review/reference-motion-v2/{command,width,multiline}/`;
+each folder contains a benchmark JSON with exact hash, timing provenance and runtime.
+This is sampled visual evidence, not a full motion/watch or speech review. Phase 2
+still needs highlights/output events and render-identity integration; phase 3 and
+full narrated QA remain pending. Next: adapt the primitive to the existing visual
+zone and bind opt-in scene timing/render identity through the shared pipeline.
