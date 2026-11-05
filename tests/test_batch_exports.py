@@ -126,7 +126,7 @@ def test_pointer_promotion_failure_preserves_previous_complete_version(review, m
     store = BatchExportStore(root)
     with pytest.raises(OSError, match='promotion failure'):
         store.prepare(plan_id='default', short=current['short'], package=current['script'],
-            qa={**current['qa'], 'output': 'new checker detail'}, reviewed_identity=identity,
+            disclosure=current['disclosure'], qa={**current['qa'], 'output': 'new checker detail'}, reviewed_identity=identity,
             reviewed_checksums=current['reviewed_checksums'], final=root / 'final', thumbnail=root / 'thumbnail',
             thumbnail_text='', script=root / 'content_package')
     assert pointer.resolve() == Path(previous['version'])
@@ -156,6 +156,7 @@ def test_ready_ui_shows_open_export_row_action(review):
     client, backend, repo, job_id, root = review
     context, run = javascript(client, client.get('/batch/review').text)
     run('list.children[0].children[0].onclick()')
+    run('document.querySelector("#disclosureChoice").value="yes"')
     run('detail.querySelectorAll("#actions button")[0].onclick()')
     run('detail.querySelectorAll("#actions button")[3].onclick()')
     assert context.eval('list.children[0].children.some(x=>x.tagName==="a"&&x.textContent==="Open export")')
@@ -179,3 +180,26 @@ def test_regeneration_clears_old_thumbnail_result_and_active_export(review):
     assert 'batch_thumbnail' not in child
     assert 'batch_export' not in child
     assert not Path(previous['path']).is_symlink()
+
+
+def test_disclosure_is_exported_and_changed_audio_requires_new_approval(review):
+    client, runtime, repo, job_id, root = review
+    csrf(client)
+    identity = stage(client)
+    manifest = json.loads((Path(info(runtime)['path']) / 'package.json').read_text())
+    assert manifest['disclosure']['platform_disclosure_required'] is True
+    assert manifest['disclosure']['job_id'] == job_id
+    assert manifest['originality_report']['status'] == 'pass'
+    audio = root / 'reference' / 'mix' / 'audio-provenance.json'
+    audio.write_text(json.dumps({'audio_licenses': []}))
+    assert snapshot(client)['reviewed_identity'] != identity
+    assert snapshot(client)['export_url'] is None
+    assert action(client, 'approve', snapshot(client)['reviewed_identity']).status_code == 409
+
+
+def test_approval_requires_explicit_disclosure_choice(review):
+    client, runtime, repo, job_id, root = review
+    csrf(client)
+    response = client.post('/api/batch-plans/one/review', json={'action': 'approve', 'reviewed_identity': snapshot(client)['reviewed_identity']})
+    assert response.status_code == 409
+    assert 'disclosure' in response.text

@@ -33,11 +33,14 @@ def review(tmp_path):
         runtime.jobs.update_state(job_id, JobState.FINAL_READY)
         media = tmp_path / 'artifacts'
         media.mkdir()
-        for name, stage, content in [('final', JobState.FINAL_RENDERING, b'stub final bytes'), ('content_package', JobState.CONTENT_GENERATING, b'{"script_sections": []}'), ('thumbnail', JobState.PUBLICATION_PREPARING, b'stub thumbnail')]:
+        for name, stage, content in [('final', JobState.FINAL_RENDERING, b'stub final bytes'), ('content_package', JobState.CONTENT_GENERATING, json.dumps({'script_sections': [], 'request': {'sources': [{'source_id': 'one', 'url': 'https://example.com', 'title': 'Source', 'excerpt': 'An independent explanation of the source.'}]}, 'reference_short': {'scenes': [{'vo': 'An original worked example.', 'source_ids': ['one']}]}}).encode()), ('thumbnail', JobState.PUBLICATION_PREPARING, b'stub thumbnail')]:
             path = media / name
             path.write_bytes(content)
             checksum = hashlib.sha256(content).hexdigest()
             runtime.artifacts.save(Artifact(job_id, stage, name, str(path), checksum, {}))
+        audio = media / 'reference' / 'mix'
+        audio.mkdir(parents=True)
+        (audio / 'audio-provenance.json').write_text(json.dumps({'audio_licenses': [{'asset': 'music', 'mode': 'synthesized', 'note': 'original signals'}]}))
         with runtime.database.session_factory.begin() as session:
             row = session.get(TopicRecord, 'batch-one')
             options = json.loads(row.options_json)
@@ -52,7 +55,7 @@ def snapshot(client):
 
 
 def action(client, name, identity):
-    return client.post('/api/batch-plans/one/review', json={'action': name, 'reviewed_identity': identity})
+    return client.post('/api/batch-plans/one/review', json={'action': name, 'reviewed_identity': identity, 'disclosure_required': True if name == 'approve' else None})
 
 
 def csrf(client):
@@ -133,6 +136,7 @@ def test_review_javascript_saves_confirmed_transitions_and_keeps_player(review):
     context.eval('globalThis.originalPlayer=detail.children.find(x=>x.tagName==="video")')
     run('refresh(false)')
     assert context.eval('detail.children.includes(originalPlayer)')
+    run('document.querySelector("#disclosureChoice").value="yes"')
     run('detail.querySelectorAll("#actions button")[0].onclick()')
     assert snapshot(client)['state'] == 'approved'
     assert context.eval('notice.textContent.includes("Saved: approved")')
@@ -194,3 +198,54 @@ def test_script_and_beats_panel_shows_narration_not_the_raw_content_package(revi
     assert 'A short, reviewable line of narration.' in shown
     assert 'clip_candidates' not in shown and 'scene_plans' not in shown and 'reference_short' not in shown
     assert len(shown) < 2000
+
+
+def test_structured_safety_reports_import_warnings_and_checklist(review):
+    client, runtime, repo, job_id, root = review
+    report = client.get('/api/batch-plans/safety-report?day=2026-11-01')
+    assert report.status_code == 200
+    assert report.json()['repetition']['schema_version'] == 'repetition-v1'
+    assert report.json()['repetition']['entries'][0]['layout_family'] is None
+    csrf(client)
+    markdown = '## Another\n```yaml\nid: another\ntitle: Another\nconcept: Example\nbeats: [{t: 0, point: Hook}]\npublish_at: "2026-11-01T10:30:00+05:30"\n```\n'
+    imported = client.post('/api/batch-plans/import', json={'markdown': markdown, 'commit': False, 'plan_id': 'different-plan'})
+    assert imported.status_code == 200
+    assert any(w['code'] == 'minimum_spacing' for w in imported.json()['cadence']['warnings'])
+    assert len(repo.list()) == 1
+    assert client.get('/docs/channel-safety-checklist').status_code == 200
+    assert 'Before-upload checklist' in client.get('/batch/review').text
+    client.cookies.clear()
+    assert client.get('/api/batch-plans/safety-report').status_code == 401
+
+
+def test_disclosure_checkpoint_is_durable_idempotent_and_lease_fenced(review):
+    from types import SimpleNamespace
+    from tubeforge.pipeline.orchestrator import _ownership_check, PipelineOwnershipLost
+    client, runtime, repo, job_id, root = review
+    package=SimpleNamespace(model_dump=lambda **kwargs:json.loads((root/'content_package').read_text()))
+    job=runtime.jobs.get(job_id)
+    runner=runtime.orchestrator
+    checksum=hashlib.sha256((root/'final').read_bytes()).hexdigest()
+    runner._reference_disclosure(job,JobState.FINAL_RENDERING,package,root/'final',checksum)
+    record=runtime.artifacts.get(job_id,JobState.FINAL_RENDERING,'disclosure_record')
+    assert record and json.loads(Path(record.path).read_text())['eligible']
+    before=Path(record.path).read_bytes()
+    runner._reference_disclosure(job,JobState.FINAL_RENDERING,package,root/'final',checksum)
+    assert Path(record.path).read_bytes()==before
+    token=_ownership_check.set(lambda **kwargs:False)
+    try:
+        with pytest.raises(PipelineOwnershipLost):
+            runner._reference_disclosure(job,JobState.FINAL_RENDERING,package,root/'final','changed')
+    finally:
+        _ownership_check.reset(token)
+    assert Path(record.path).read_bytes()==before
+
+
+def test_safety_panel_keeps_loaded_warnings_on_background_failure(review):
+    from test_batch_ui_runtime import runtime as javascript
+    client,*_=review
+    context,run=javascript(client,client.get('/batch/review').text)
+    context.eval('globalThis.originalWarning=document.querySelector("#safetyWarnings").children[0];globalThis.originalFetch=fetch;fetch=(url,options)=>url.includes("safety-report")?Promise.resolve({ok:false}):originalFetch(url,options)')
+    run('refreshSafety()')
+    assert context.eval('document.querySelector("#safetyWarnings").children[0]===originalWarning')
+    assert context.eval('document.querySelector("#safetyStatus").textContent.includes("last loaded")')

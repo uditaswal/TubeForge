@@ -917,6 +917,12 @@ class PipelineOrchestrator:
                                                plates_sha=str(inputs.get("plates", "none")), options_sha=str(inputs.get("options", "none")),
                                                music_sha=music_sha, renderer=self.reference_config.renderer)
 
+    def _reference_disclosure(self, job, stage, package, output, checksum):
+        from tubeforge.pipeline.channel_safety import disclosure_record, read_audio
+        self._replace_json(job.id, stage, "disclosure_record", disclosure_record(
+            package.model_dump(mode="json"), read_audio(output, self.music_catalog),
+            job_id=job.id, final_checksum=checksum))
+
     def _reference_render_checkpoint(self, job: PipelineJob, stage: JobState, name: str, filename: str, cancellation_requested, *, approval_identity: str | None, approval_id: str | None) -> tuple[Artifact, str]:
         package = self._reference_package(job)
         inputs, input_identity = self._reference_inputs(job, package)
@@ -926,6 +932,8 @@ class PipelineOrchestrator:
         existing = self._valid_artifact(job.id, stage, name)
         manifest = self._load_json_artifact(job.id, stage, f"{name}_manifest")
         if existing and manifest and manifest.get("source_render_identity") == source_identity and manifest.get("input_identity") == input_identity:
+            if name == "final":
+                self._reference_disclosure(job, stage, package, Path(existing.path), existing.checksum_sha256)
             return existing, str(manifest["render_identity"])
         directory = self._reference_dir(job)
         timeline = reference_short.load_timeline(package.reference_short, directory)
@@ -944,6 +952,8 @@ class PipelineOrchestrator:
         qa_path = output.with_suffix(".qa.json")
         if qa_path.is_file():
             self._save_file(job.id, stage, f"{name}_qa", qa_path, {"generator": "rendering.shorts.encode"})
+        if name == "final":
+            self._reference_disclosure(job, stage, package, output, artifact.checksum_sha256)
         self.events.append(job.id, "render_completed", render=name, checksum_sha256=artifact.checksum_sha256)
         return artifact, identity
 
