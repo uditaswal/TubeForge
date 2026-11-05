@@ -123,7 +123,8 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Build and test portrait editor animation primitive (7 focused tests pass).
 - [x] Render vertical MP4 fixtures; inspect encoded contact sheets and full-size hold frame.
 - [x] Add validated per-line reveal windows and multiline syntax colouring.
-- [ ] Integrate the proven primitive with accepted scene timing and render identity.
+- [x] Integrate native card rendering into the existing Pillow code-visual path and invalidate old cache identities.
+- [ ] Bind explicit line windows to accepted speech anchors in production jobs.
 - [ ] Verify full narrated Short and signed-in workflow.
 
 ## First implementation checkpoint
@@ -165,3 +166,27 @@ This is sampled visual evidence, not a full motion/watch or speech review. Phase
 still needs highlights/output events and render-identity integration; phase 3 and
 full narrated QA remain pending. Next: adapt the primitive to the existing visual
 zone and bind opt-in scene timing/render identity through the shared pipeline.
+
+## Shared-compositor integration checkpoint
+
+**IMPLEMENTED**: existing Pillow `CodeVisual` scenes now use the same editor
+primitive at the native 810×670 card size. Existing heading/caption composition
+and source-card behavior remain owned by the shared compositor. The existing
+code-visual selection is the opt-in; no additional dashboard control is needed.
+This replaces the earlier proposed separate visual-treatment selector. Story and
+HyperFrames paths still use their existing implementations and need separate review.
+
+The pipeline renderer identity is now `reference-short-v1/render-4`, preventing reuse
+of old rendered pixels. Render QA reports record the editor version; code-frame
+caching retains at most 12 frames. Existing output approval rules still apply.
+Current job typing remains explicitly proportional to scene duration; per-line
+speech-anchor binding is NOT STARTED and must not be described as measured sync.
+
+Validation: 39 editor/plate/layout/real-encoder tests passed in 67.82 s, plus the
+new cache-identity test passed separately. A four-second synthetic 1080×1920 MP4
+through the real Animator/Plates compositor fully decoded. Evidence:
+`artifacts/review/reference-motion-integrated/composite.mp4`, `composite.png`,
+`encoded.png`. Inspected the integrated hold frame: heading, code, cursor and
+caption have separate readable zones. This fixture is not factual narration or
+production acceptance. Full narrated rendering, signed-in review, speech events,
+highlights/output cues and operator watch/listen remain pending.

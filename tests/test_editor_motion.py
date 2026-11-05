@@ -59,3 +59,15 @@ def test_multiline_string_lexing_preserves_text_and_colour():
 def test_control_characters_cannot_change_layout():
     with pytest.raises(ValueError):
         EditorScene(('abc\rdef',))
+
+
+def test_card_primitive_uses_native_visual_zone_and_cursor_stays_inside():
+    scene = EditorScene(('x' * 30,) * 6)
+    renderer = EditorRenderer(scene, card_only=True)
+    frame = renderer.revealed_frame(len(scene.text))
+    assert frame.size == (810, 670)
+    x = round(renderer.text_x + 30*renderer.advance)
+    y = renderer.text_y + 7 + 5*renderer.row_height
+    assert x+3 < 810 and y+43 < 596  # above evidence label
+    assert frame.getpixel((x, y)) == (101, 234, 212)
+    assert renderer.revealed_frame(len(scene.text), cursor_visible=False).getpixel((x, y)) != (101, 234, 212)

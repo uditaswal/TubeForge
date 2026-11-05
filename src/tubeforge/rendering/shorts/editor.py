@@ -81,8 +81,9 @@ class EditorScene:
 
 class EditorRenderer:
     """Cache static chrome and token layout, drawing only the revealed text per frame."""
-    def __init__(self, scene: EditorScene):
+    def __init__(self, scene: EditorScene, *, card_only: bool = False):
         self.scene = scene
+        self.card_only = card_only
         self.font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 42)
         self.small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 25)
         self.advance = self.font.getlength("M")
@@ -96,6 +97,19 @@ class EditorRenderer:
         d.text((220, 448), scene.filename, font=self.small, fill="#b2c0d3")
         d.line((80, 1100, 910, 1100), fill="#34465d", width=2)
         d.text((90, 1130), "ILLUSTRATIVE CODE", font=self.small, fill="#8799b0")
+        if card_only:
+            self.font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 40)
+            self.advance = self.font.getlength("M")
+            self.base = Image.new("RGB", (810, 670), "#101827")
+            d = ImageDraw.Draw(self.base)
+            d.rounded_rectangle((0, 0, 809, 669), 24, outline="#34465d", width=2)
+            d.rectangle((2, 24, 807, 78), fill="#1c2839")
+            for i, color in enumerate(("#ff625d", "#ffc34f", "#28cd74")):
+                d.ellipse((24+33*i, 28, 39+33*i, 43), fill=color)
+            d.text((150, 24), scene.filename, font=self.small, fill="#b2c0d3")
+            d.line((20, 596, 790, 596), fill="#34465d", width=2)
+            d.text((24, 620), "ILLUSTRATIVE CODE", font=self.small, fill="#8799b0")
+        self.text_x, self.text_y, self.row_height = (76, 110, 66) if card_only else (140, 540, 78)
         self.cells = []
         offset = 0
         lexer = get_lexer_by_name(scene.language, stripnl=False, ensurenl=False)
@@ -107,21 +121,28 @@ class EditorRenderer:
         if "".join(char for char, _ in coloured) != scene.text:
             raise ValueError("lexer changed display text")
         for row, line in enumerate(scene.lines):
-            d.text((85, 550 + 78*row), str(row+1), font=self.small, fill="#8799b0")
+            d.text((22 if card_only else 85, self.text_y + 10 + self.row_height*row), str(row+1), font=self.small, fill="#8799b0")
             for col, (char, color) in enumerate(coloured[offset:offset+len(line)]):
-                self.cells.append((offset+col, char, (140+col*self.advance, 540+78*row), color))
+                self.cells.append((offset+col, char, (self.text_x+col*self.advance, self.text_y+self.row_height*row), color))
             offset += len(line) + 1
 
     def frame(self, seconds: float) -> Image.Image:
         count = self.scene.count(seconds)
+        typing = seconds < self.scene.start + self.scene.typing_seconds
+        cursor_visible = typing or int((seconds - self.scene.start) * 2) % 2 == 0
+        return self.revealed_frame(count, cursor_visible=cursor_visible)
+
+    def revealed_frame(self, count: int, *, cursor_visible: bool = True) -> Image.Image:
+        """Render an exact reveal count supplied by the shared job compositor."""
+        count = max(0, min(len(self.scene.text), count))
         frame = self.base.copy()
         draw = ImageDraw.Draw(frame)
         for index, char, position, color in self.cells:
             if index < count:
                 draw.text(position, char, font=self.font, fill=color)
-        row, col = self.scene.cursor(seconds)
-        typing = seconds < self.scene.start + self.scene.typing_seconds
-        if typing or int((seconds - self.scene.start) * 2) % 2 == 0:
-            x, y = 140 + col*self.advance, 547 + row*78
+        visible = self.scene.text[:count]
+        row, col = visible.count("\n"), len(visible.rsplit("\n", 1)[-1])
+        if cursor_visible:
+            x, y = self.text_x + col*self.advance, self.text_y + 7 + row*self.row_height
             draw.rectangle((x, y, x+3, y+43), fill="#65ead4")
         return frame

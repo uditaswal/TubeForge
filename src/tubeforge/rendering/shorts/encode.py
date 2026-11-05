@@ -15,6 +15,8 @@ from collections.abc import Callable
 import numpy as np
 from PIL import Image
 
+from .editor import VERSION as EDITOR_VERSION
+
 from tubeforge.rendering.loudness import analyze
 from .audio_health import scan_samples
 from .schema import REFERENCE_SHORT_MAX_SECONDS, REFERENCE_SHORT_MIN_SECONDS
@@ -84,6 +86,8 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
               "alignment": [s.alignment for s in timeline.timings], "draft": draft,
               "narration_health": narration_health,
               "budget_realtime_factor": budget_rtf, "motion": motion,
+              "code_animation": EDITOR_VERSION if plates is not None and any(
+                  getattr(scene.visual, "kind", None) == "code" for scene in timeline.topic.scenes) else None,
               "plates": {str(i): (plates.entry(i).get("kind"), (plates.entry(i).get("evidence") or {}).get("asset_id"))
                          for i in range(len(timeline.topic.scenes)) if plates is not None and plates.entry(i)}}
     qa_path = destination.with_suffix(".qa.json")

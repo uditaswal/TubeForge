@@ -110,3 +110,21 @@ def test_stock_library_serves_repeated_queries_without_network(tmp_path):
     manifest = prepare_plates(topic_with({1: {"kind": "stock", "query": "server racks", "media": "video"}}), tmp_path / "job", pixabay=client, capture=None)
     entry = manifest["scenes"]["1"]
     assert entry["kind"] == "stock" and entry["origin"] == "local-library" and client.requests_made == 0
+
+
+def test_editor_code_frame_cache_is_bounded_and_cursor_blinks(tmp_path):
+    topic = topic_with({1: CODE})
+    plates = Plates(topic, tmp_path, {})
+    for frame in range(120):
+        plates.card(1, frame / 30, 4, None)
+    assert len(plates._cards) <= 12
+    assert plates.card(1, 3, 4, None).tobytes() != plates.card(1, 3.6, 4, None).tobytes()
+
+
+def test_editor_renderer_revision_changes_job_cache_identity(monkeypatch):
+    from tubeforge.pipeline import reference_short
+    topic = topic_with({1: CODE})
+    kwargs = dict(draft=False, approval_identity='fixture-review')
+    current = reference_short.render_identity(topic, 'audio', 'timeline', **kwargs)
+    monkeypatch.setattr(reference_short, 'RENDERER_VERSION', 'reference-short-v1/render-3')
+    assert current != reference_short.render_identity(topic, 'audio', 'timeline', **kwargs)

@@ -56,6 +56,8 @@ Services run under Docker Compose: `web`, `worker`, `scheduler`, `piper-tts`, a 
 
 Python 3.12/3.13 · FastAPI · SQLAlchemy 2 + Alembic (SQLite) · Pydantic · Docker Compose · FFmpeg · Pillow/NumPy renderer · Kokoro and Piper TTS · faster-whisper · Playwright/Chromium · pytest · pre-commit + gitleaks · GitHub Actions
 
+Pillow code visuals use syntax-coloured editor cards with a following cursor and a bounded frame cache. Typing currently follows scene duration; it is not measured word-level synchronization. Story/HyperFrames use their own rendering path. New rendered outputs require the existing artifact review.
+
 ## Run Locally
 
 Prerequisites: Docker with Compose, FFmpeg for host-side checks, and operator-supplied voice models in `models/` (they are large and not committed).
