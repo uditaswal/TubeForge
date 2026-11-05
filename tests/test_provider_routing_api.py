@@ -143,3 +143,22 @@ def test_stubbed_fallback_reaches_review_with_durable_package_usage_and_activity
         assert job.state==JobState.SCRIPT_APPROVAL_REQUIRED
         assert job.request.script_routing_mode=='automatic'
         assert calls==['claude','codex']
+
+
+def test_saved_mode_preserves_allowed_per_video_model_and_rejects_disabled_owner(tmp_path):
+    with TestClient(create_app(settings_for(tmp_path))) as client:
+        sign_in(client,True)
+        saved=client.put('/api/script-routing',json={'mode':'claude_only','preferred_model':'sonnet-medium','expected_revision':0}).json()
+        assert saved['actor']=='operator' and saved['saved_at'].endswith('+00:00')
+        response=client.post('/api/videos',json={'title':'Model choice','notes':['Example'],'script_model':'opus'})
+        assert response.status_code==201
+        assert client.app.state.runtime.jobs.get(response.json()['id']).request.script_model=='opus'
+        denied=client.post('/api/videos',json={'title':'Wrong owner','notes':['Example'],'script_model':'gpt-sol'})
+        assert denied.status_code==422
+
+
+def test_raw_job_endpoint_cannot_enable_unconfigured_automatic_mode(tmp_path):
+    with TestClient(create_app(settings_for(tmp_path,False))) as client:
+        sign_in(client,True)
+        response=client.post('/api/jobs',json=request(script_routing_mode='automatic').model_dump(mode='json'))
+        assert response.status_code==422

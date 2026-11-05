@@ -16,7 +16,7 @@ class ScriptRoutingRepository:
             row = self._latest(session)
             return {'revision': row.id if row else 0, 'mode': row.mode if row else None,
                     'preferred_model': row.preferred_model if row else ('sonnet-medium' if self.claude_enabled else 'gpt-sol'),
-                    'actor': row.actor if row else None, 'saved_at': row.created_at.isoformat() if row else None,
+                    'actor': row.actor if row else None, 'saved_at': row.created_at.replace(tzinfo=UTC).isoformat() if row else None,
                     'modes': [{'id': mode, 'enabled': mode == 'codex_only' or self.claude_enabled}
                               for mode in ['claude_only', 'codex_only', 'automatic']]}
 
@@ -43,6 +43,8 @@ class ScriptRoutingRepository:
             raise ValueError('routing mode differs from the saved Studio policy; reload the form')
         # Revision/retry children already carry the immutable original policy.
         if mode is not None:
+            if request.production_mode != 'source_clip' and mode != 'codex_only' and not self.claude_enabled:
+                raise ValueError('this routing mode requires Claude to be enabled')
             return request
         if policy['mode'] is None or request.production_mode == 'source_clip':
             return request

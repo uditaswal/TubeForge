@@ -1029,7 +1029,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.put('/api/script-routing', tags=['videos'])
     def save_script_routing(value: ScriptRoutingPolicyRequest, request: Request):
         auth_session = runtime.auth.session(request.cookies.get('tubeforge_session'))
-        actor = str(auth_session.user_id) if auth_session else 'local-operator'
+        actor = (runtime.auth.username_for(auth_session.user_id) or str(auth_session.user_id)) if auth_session else 'local-operator'
         try:
             return routing_policy.save(**value.model_dump(), actor=actor)
         except ValueError as error:
@@ -1104,10 +1104,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const channelSelect=document.createElement('select');channelSelect.name='channel_identity';channelSelect.disabled=true;
           channelSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading profiles…'}));channelLabel.append(channelSelect);form.insertBefore(channelLabel,presetLabel);
           fetch('/api/content-profiles').then(async response=>{if(!response.ok)throw Error();const data=await response.json();channelSelect.replaceChildren();data.profiles.forEach(profile=>channelSelect.append(Object.assign(document.createElement('option'),{value:profile.identity,textContent:profile.identity+(profile.uses_default?' (default voice)':'')})));channelSelect.value=data.default_identity;channelSelect.disabled=false;}).catch(()=>{channelSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Configured default (profile list unavailable)'}));});
-          const ownerLabel=document.createElement('label');ownerLabel.textContent='Script writer (AI model)';
+          const ownerLabel=document.createElement('label');ownerLabel.textContent='Writer for this video (automatic mode: preferred writer)';
           const ownerSelect=document.createElement('select');ownerSelect.name='script_model';ownerSelect.id='scriptModel';
           ownerSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading models…'}));ownerLabel.append(ownerSelect);form.insertBefore(ownerLabel,presetLabel);
-          fetch('/api/content-profiles').then(r=>r.ok?r.json():null).then(data=>{if(!data||!data.script_models)return;ownerSelect.replaceChildren();data.script_models.forEach(o=>ownerSelect.append(Object.assign(document.createElement('option'),{value:o.id,textContent:o.label,disabled:!o.enabled})));ownerSelect.value=data.default_script_model;}).catch(()=>{ownerSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Server default'}));});
+          /* SCRIPT_ROUTING_CONTROLS */
           const endingLabel=document.createElement('label');endingLabel.textContent='How the video ends';
           const endingSelect=document.createElement('select');endingSelect.name='ending';endingSelect.id='videoEnding';
           [['loop','Loop: the last line flows back into the first (better retention)'],['debate','Debate: close on a question that starts an argument in the comments']].forEach(([value,text])=>endingSelect.append(Object.assign(document.createElement('option'),{value,textContent:text})));
@@ -1382,13 +1382,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         new_brief_submit = r"let d=new FormData(e.currentTarget),sources=(window.collectSources?window.collectSources():[]);if(!sources.length)sources=null;let body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),angle:String(d.get('angle')||'').trim()||null,audience:String(d.get('audience')||'general').trim()||'general',sources,duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null,show_source_credit:d.has('show_source_credit'),show_mascot:d.has('show_mascot'),channel_watermark:String(d.get('channel_watermark')||'').trim()||null};let r=await fetch('/api/videos'"
         assert dashboard.count(old_brief_submit) == 1, dashboard.count(old_brief_submit)
         dashboard = dashboard.replace(old_brief_submit, new_brief_submit)
+        from tubeforge.api.script_routing_ui import GENERATION_SUBMIT_SCRIPT
+        submit_start = dashboard.index("document.querySelector('#createForm').onsubmit=async e=>{")
+        submit_end = dashboard.index(';filter.onchange=refresh;', submit_start)
+        dashboard = dashboard[:submit_start] + GENERATION_SUBMIT_SCRIPT + dashboard[submit_end:]
         dashboard = dashboard.replace(
             "if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')))",
             "if(j.artifacts.includes('final'))actions.append(button('Watch video','',()=>openVideo(j,'final','Final video')));else if(j.artifacts.includes('preview'))actions.append(button('Watch preview','secondary',()=>openVideo(j,'preview','Preview')))",
         )
         dashboard = dashboard.replace(
             "${j.artifacts.length} saved artifacts · ${j.event_count} activity events",
-            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Job ${j.id.slice(0,8)} · Script: ${j.script_model||j.script_owner||'codex'} · Style: ${j.video_style||'classic'} · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
+            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Job ${j.id.slice(0,8)} · Script: ${j.script_routing?.actual_owner||j.script_model||j.script_owner||'codex'}${j.script_routing?.attempts?.length>1?' (fallback from '+j.script_routing.preferred_owner+')':''} · Policy: ${j.script_routing_mode||'original selection'} · Style: ${j.video_style||'classic'} · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
         )
         dashboard = dashboard.replace(
             "card.append(actions)}async function refresh()",
@@ -1415,6 +1419,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           mdPanel.querySelector('#studioMarkdownSubmit').onclick=async()=>{
             const button=mdPanel.querySelector('#studioMarkdownSubmit'),status=mdPanel.querySelector('#studioMarkdownStatus'),markdown=mdPanel.querySelector('#studioMarkdownText').value;
             if(!markdown.trim()){status.textContent='Paste a markdown plan first.';return;}
+            if(window.scriptRoutingCanSubmit&&!window.scriptRoutingCanSubmit()){status.textContent='Save or reload routing defaults before queuing a plan.';return;}
             button.disabled=true;status.textContent='Validating…';
             try{
               const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');
@@ -1434,7 +1439,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           };
         })();
         </script>"""
-        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}</style></head>")
+        from tubeforge.api.script_routing_ui import ROUTING_SCRIPT, ROUTING_CSS
+        source_controls = source_controls.replace('/* SCRIPT_ROUTING_CONTROLS */', ROUTING_SCRIPT)
+        source_controls = source_controls.replace("join('\n\n')", r"join('\n\n')")
+        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}{ROUTING_CSS}</style></head>")
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         username = (runtime.auth.username_for(login_session.user_id) or "") if login_session else ""
         assert dashboard.count('data-username=""') == 1
@@ -1584,8 +1592,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"id": "opus", "label": "Claude Opus 5.5 · high effort" + suffix, "enabled": claude.enabled},
             {"id": "gpt-sol", "label": "Codex · " + config.model, "enabled": True},
         ]
-        default_model = DEFAULT_SCRIPT_MODEL if claude.enabled else "gpt-sol"
-        return {"default_identity": config.default_channel_identity, "script_models": models, "default_script_model": default_model, "profiles": [{"identity": name, "uses_default": name not in config.voice_profiles} for name in identities]}
+        policy = routing_policy.get()
+        all_models = models
+        if policy['mode'] == 'codex_only':
+            models = [model for model in models if model['id'] == 'gpt-sol']
+        elif policy['mode'] == 'claude_only':
+            models = [model for model in models if model['id'] != 'gpt-sol']
+        default_model = policy['preferred_model']
+        return {"default_identity": config.default_channel_identity, "script_models": models, "all_script_models": all_models, "default_script_model": default_model, "profiles": [{"identity": name, "uses_default": name not in config.voice_profiles} for name in identities]}
 
     @app.get("/api/voices", tags=["voices"])
     def list_voices() -> list[dict[str, str]]:

@@ -25,4 +25,6 @@ All checks use stub runners; no live script generation or paid calls.
 No uploads, remote pushes, merges, allowance resets, local production LLMs, or
 changes to Claude's runner/error-code lane.
 
-Current acceptance: **BLOCKED** at checkpoint 3 after two failed inline-script repair attempts. Green backend commits and the preserved candidate/resume command are recorded in `provider-fallback-review.md`.
+Current acceptance: **VERIFIED** for the approved local stub scope. The 121-test
+focused group and signed-in desktop/tablet/mobile browser flow pass after rebasing
+onto Claude's parser fix. Evidence: `provider-fallback-review.md`. Next: M4/design tokens.
