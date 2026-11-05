@@ -51,3 +51,39 @@ The factory test checks the host adapter inside its new router.
 
 Dashboard mode controls and signed-in desktop/mobile browser inspection are the
 next checkpoint. No production video or live provider behavior is claimed verified.
+
+## Dashboard acceptance stopped — BLOCKED
+
+The candidate editor exercised real authenticated policy saves, stale-revision
+conflicts, preserved form values, disabled-writer filtering, inherited job mode,
+and actual fallback-writer display in an isolated Chromium session. Desktop,
+tablet and mobile had no horizontal overflow; desktop/mobile captures were
+inspected. Browser completion was rejected because the page reported inline
+JavaScript syntax errors and an asynchronous form-reset error.
+
+The candidate fixes include a stable form reference, pending/error handling and
+restoration of the confirmed policy after native form reset. Their focused
+behavior tests pass. The final dashboard-script parse gate still fails:
+`tests/test_script_routing_ui.py::test_all_dashboard_inline_scripts_parse` →
+`SyntaxError: unexpected end of string`, generated script line 64. Final editor
+group: five passed, one failed. Two attempted newline-normalization repairs did
+not clear this gate. Per AGENTS.md, work on this root problem stopped; no Track E
+completion or dashboard acceptance is claimed.
+
+Unfinished UI/backend hardening/tests are preserved in local stash
+`96cf3ebef4f3d54cb084cdf7a7cb1d1cd36c6727`. The branch itself remains at the green
+policy/router checkpoints plus this diagnostic handoff. No code was discarded.
+
+Options:
+
+1. Recommended: Claude repairs the Studio inline-script syntax in the existing
+   UI verification lane; then resume this stash and rerun the exact parse gate,
+   focused routing UI/API group and desktop/mobile browser check.
+2. Operator authorizes a bounded additional Codex repair attempt on this gate.
+
+Resume with `git stash apply 96cf3ebef4f3d54cb084cdf7a7cb1d1cd36c6727` on the
+provider branch after integrating the chosen repair. Relevant candidate files:
+`api/app.py`, `api/script_routing_ui.py`, `db/script_routing.py`,
+`tests/test_script_routing_ui.py`, `tests/test_provider_routing_api.py`.
+M4/design tokens and the additional M-S6/M-S7 data-contract audit remain
+**NOT STARTED** in this run because Priority 1 has not passed its dashboard gate.

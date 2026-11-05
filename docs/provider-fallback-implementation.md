@@ -24,3 +24,5 @@ All checks use stub runners; no live script generation or paid calls.
 
 No uploads, remote pushes, merges, allowance resets, local production LLMs, or
 changes to Claude's runner/error-code lane.
+
+Current acceptance: **BLOCKED** at checkpoint 3 after two failed inline-script repair attempts. Green backend commits and the preserved candidate/resume command are recorded in `provider-fallback-review.md`.
