@@ -22,6 +22,7 @@ class BatchProduceRequest(BaseModel):
 
 class BatchReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    disclosure_required: bool | None = None
     action: Literal['approve', 'reject', 'ready', 'regenerate']
     reviewed_identity: str = Field(pattern=r'^[a-f0-9]{64}$')
 
@@ -101,7 +102,7 @@ def register_batch_routes(app, runtime, build_request):
         return {'items': items}
 
     from tubeforge.db.batch_review import BatchReviewRepository
-    reviews = BatchReviewRepository(runtime.database.session_factory, runtime.orchestrator.artifact_root)
+    reviews = BatchReviewRepository(runtime.database.session_factory, runtime.orchestrator.artifact_root, runtime.orchestrator.music_catalog)
 
     @app.get('/api/batch-plans/review', tags=['batch'])
     def day_review(day: date | None = None):
@@ -112,7 +113,7 @@ def register_batch_routes(app, runtime, build_request):
         session = runtime.auth.session(request.cookies.get('tubeforge_session'))
         actor = str(session.user_id) if session else 'local-operator'
         try:
-            return reviews.decide(short_id, value.action, value.reviewed_identity, actor)
+            return reviews.decide(short_id, value.action, value.reviewed_identity, actor, value.disclosure_required)
         except KeyError as error:
             raise HTTPException(404, detail=str(error)) from error
         except (ValueError, OSError) as error:

@@ -83,3 +83,15 @@ current review, QA and file hashes. Changed artifacts or staged bytes invalidate
 the export, remove its active pointer, and require review/staging again. Rejecting,
 regenerating or re-approving also removes the prior active export. No upload or
 platform operation is performed.
+
+## Disclosure and rights review
+
+Before approving a final in Day review, choose whether it requires the platform's
+AI disclosure. The choice has no default. Review the actual imagery and narration;
+AI assistance alone does not settle the platform requirement. TubeForge records
+AI-assisted writing and synthetic narration separately from that decision.
+Sources, the existing originality check, and the audio licence trail accompany
+the staged manifest. Missing evidence blocks approval and staging. Catalog music
+must resolve to its actual licence terms; a file pointer alone is insufficient.
+Changing the source/audio evidence invalidates the previous approval and export.
+Nothing in this workflow publishes a video or sets a platform disclosure control.

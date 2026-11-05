@@ -23,8 +23,9 @@ def file_checksum(path: str) -> str:
 
 
 class BatchReviewRepository:
-    def __init__(self, sessions, artifact_root=None):
+    def __init__(self, sessions, artifact_root=None, music_catalog=None):
         self.sessions = sessions
+        self.music_catalog = music_catalog
         from tubeforge.pipeline.publication_batch_export import BatchExportStore
         self.exports = BatchExportStore(artifact_root or Path('data/artifacts'))
 
@@ -48,6 +49,26 @@ class BatchReviewRepository:
                 except (OSError, ValueError) as failure:
                     available, error = False, str(failure)
         identity = hashlib.sha256(json.dumps({'job_id': topic.generation_job_id, 'artifacts': checksums, 'brief': options['batch_plan']}, sort_keys=True).encode()).hexdigest() if available else None
+        package = None
+        if script and 'script' in checksums:
+            try:
+                if Path(script.path).stat().st_size <= 2_000_000:
+                    package = json.loads(Path(script.path).read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                pass
+        from tubeforge.pipeline.channel_safety import disclosure_record, read_audio
+        audio = read_audio(final.path) if final else {}
+        if self.music_catalog:
+            rights = {r.checksum_sha256: r.model_dump(mode='json', exclude={'path'}) for r in self.music_catalog.list()}
+            for entry in audio.get('audio_licenses', []):
+                if entry.get('mode') == 'track' and entry.get('source_sha256') in rights:
+                    entry.update(rights[entry['source_sha256']])
+        disclosure = disclosure_record(package or {}, audio, job_id=topic.generation_job_id, final_checksum=checksums.get('final'))
+        if identity:
+            identity = hashlib.sha256((identity + disclosure['evidence_identity']).encode()).hexdigest()
+        saved_disclosure = options.get('batch_disclosure', {})
+        if saved_disclosure.get('evidence_identity') == disclosure['evidence_identity'] and saved_disclosure.get('reviewed_identity') == identity:
+            disclosure = saved_disclosure
         review = options.get('batch_review', {})
         current = review.get('identity') == identity and identity is not None
         state = review.get('state', 'needs_review') if current else 'needs_review'
@@ -60,14 +81,7 @@ class BatchReviewRepository:
         if state == 'ready' and not export_ok:
             state = 'needs_review'
             current = False
-        package = None
-        if script and 'script' in checksums:
-            try:
-                if Path(script.path).stat().st_size <= 2_000_000:
-                    package = json.loads(Path(script.path).read_text(encoding='utf-8'))
-            except (OSError, ValueError):
-                pass
-        return {'id': options['batch_plan']['id'], 'short': options['batch_plan'], 'job_id': topic.generation_job_id,
+        return {'disclosure': disclosure, 'id': options['batch_plan']['id'], 'short': options['batch_plan'], 'job_id': topic.generation_job_id,
                 'production_state': job.state if job else 'not_started', 'state': state,
                 'decision': review.get('decision') if current else None, 'reviewed_identity': identity,
                 'checksum': checksums.get('final'), 'reviewed_checksums': checksums, 'export_url': f'/api/batch-plans/{options["batch_plan"]["id"]}/export' if export_ok else None, 'available': available, 'error': error,
@@ -90,7 +104,7 @@ class BatchReviewRepository:
                 items.append(self._snapshot(session, row))
             return items
 
-    def decide(self, short_id, action, identity, actor):
+    def decide(self, short_id, action, identity, actor, disclosure_required=None):
         with self.sessions() as session:
             session.execute(text('BEGIN IMMEDIATE'))
             row = session.get(TopicRecord, 'batch-' + short_id)
@@ -112,8 +126,16 @@ class BatchReviewRepository:
             if action != 'ready':
                 options.pop('batch_export', None)
             if action == 'approve':
+                record = current['disclosure']
+                if not record['eligible']:
+                    raise ValueError('disclosure evidence incomplete or originality check failed: ' + ', '.join(record['missing'] + record['originality']['problems']))
+                if type(disclosure_required) is not bool:
+                    raise ValueError('choose whether platform AI disclosure is required for this exact video')
+                options['batch_disclosure'] = {**record, 'platform_disclosure_required': disclosure_required, 'reviewed_identity': identity, 'actor': actor}
                 state, decision = 'approved', 'approved'
             elif action == 'ready':
+                if not current['disclosure']['eligible'] or type(current['disclosure']['platform_disclosure_required']) is not bool:
+                    raise ValueError('disclosure evidence changed; approve this video again')
                 if not current['thumbnail_url']:
                     raise ValueError('thumbnail unavailable; export cannot be staged')
                 artifacts = list(session.scalars(select(ArtifactRecord).where(ArtifactRecord.job_id == job.id)))
@@ -122,7 +144,7 @@ class BatchReviewRepository:
                 plan = options['batch_plan']
                 copy = (options.get('batch_thumbnail') or {}).get('text') or (plan.get('thumbnail') or {}).get('text') or next(iter((current.get('script') or {}).get('thumbnail_brief', {}).get('text_options', [])), '')
                 options['batch_export'] = self.exports.prepare(plan_id=options.get('batch_plan_id', 'default'), short=plan,
-                    package=current['script'], qa=current['qa'], reviewed_identity=identity, reviewed_checksums=current['reviewed_checksums'],
+                    package=current['script'], qa=current['qa'], disclosure=current['disclosure'], reviewed_identity=identity, reviewed_checksums=current['reviewed_checksums'],
                     final=final.path, thumbnail=thumbnail.path, thumbnail_text=copy, script=next(a.path for a in artifacts if a.name == 'content_package'))
                 state, decision = 'ready', 'approved'
             elif action == 'reject':

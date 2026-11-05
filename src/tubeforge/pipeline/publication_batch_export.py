@@ -31,8 +31,10 @@ class BatchExportStore:
             if path.is_symlink():
                 raise ValueError('export root must not be a symlink')
 
-    def prepare(self, *, plan_id, short, package, qa, reviewed_identity, reviewed_checksums, final, thumbnail, thumbnail_text, script=None):
+    def prepare(self, *, plan_id, short, package, qa, reviewed_identity, reviewed_checksums, final, thumbnail, thumbnail_text, script=None, disclosure=None):
         self._safe_root()
+        if not disclosure or not disclosure.get('eligible') or type(disclosure.get('platform_disclosure_required')) is not bool:
+            raise ValueError('reviewed disclosure evidence is required')
         for value in [plan_id, short['id']]:
             if not re.fullmatch(r'[a-z0-9-]{1,120}', value):
                 raise ValueError('invalid export plan or short id')
@@ -46,6 +48,7 @@ class BatchExportStore:
             'tags': short.get('tags') or metadata.get('tags', []), 'thumbnail_text': thumbnail_text,
             'plan_id': plan_id, 'short_id': short['id'], 'date': date,
             'publish_at': short.get('publish_at'), 'source_urls': short.get('sources', []),
+            'disclosure': disclosure, 'originality_report': disclosure['originality'],
             'qa': qa, 'reviewed_identity': reviewed_identity, 'reviewed_checksums': reviewed_checksums,
             'files': {'final.mp4': reviewed_checksums['final'], 'thumbnail.jpg': reviewed_checksums['thumbnail']},
             'state': 'ready', 'meaning': 'local staged export; no publication authorized',

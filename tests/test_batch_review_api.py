@@ -33,11 +33,14 @@ def review(tmp_path):
         runtime.jobs.update_state(job_id, JobState.FINAL_READY)
         media = tmp_path / 'artifacts'
         media.mkdir()
-        for name, stage, content in [('final', JobState.FINAL_RENDERING, b'stub final bytes'), ('content_package', JobState.CONTENT_GENERATING, b'{"script_sections": []}'), ('thumbnail', JobState.PUBLICATION_PREPARING, b'stub thumbnail')]:
+        for name, stage, content in [('final', JobState.FINAL_RENDERING, b'stub final bytes'), ('content_package', JobState.CONTENT_GENERATING, json.dumps({'script_sections': [], 'request': {'sources': [{'source_id': 'one', 'url': 'https://example.com', 'title': 'Source', 'excerpt': 'An independent explanation of the source.'}]}, 'reference_short': {'scenes': [{'vo': 'An original worked example.', 'source_ids': ['one']}]}}).encode()), ('thumbnail', JobState.PUBLICATION_PREPARING, b'stub thumbnail')]:
             path = media / name
             path.write_bytes(content)
             checksum = hashlib.sha256(content).hexdigest()
             runtime.artifacts.save(Artifact(job_id, stage, name, str(path), checksum, {}))
+        audio = media / 'reference' / 'mix'
+        audio.mkdir(parents=True)
+        (audio / 'audio-provenance.json').write_text(json.dumps({'audio_licenses': [{'asset': 'music', 'mode': 'synthesized', 'note': 'original signals'}]}))
         with runtime.database.session_factory.begin() as session:
             row = session.get(TopicRecord, 'batch-one')
             options = json.loads(row.options_json)
@@ -52,7 +55,7 @@ def snapshot(client):
 
 
 def action(client, name, identity):
-    return client.post('/api/batch-plans/one/review', json={'action': name, 'reviewed_identity': identity})
+    return client.post('/api/batch-plans/one/review', json={'action': name, 'reviewed_identity': identity, 'disclosure_required': True if name == 'approve' else None})
 
 
 def csrf(client):
@@ -133,6 +136,7 @@ def test_review_javascript_saves_confirmed_transitions_and_keeps_player(review):
     context.eval('globalThis.originalPlayer=detail.children.find(x=>x.tagName==="video")')
     run('refresh(false)')
     assert context.eval('detail.children.includes(originalPlayer)')
+    run('document.querySelector("#disclosureChoice").value="yes"')
     run('detail.querySelectorAll("#actions button")[0].onclick()')
     assert snapshot(client)['state'] == 'approved'
     assert context.eval('notice.textContent.includes("Saved: approved")')
