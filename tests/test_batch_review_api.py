@@ -206,6 +206,9 @@ def test_structured_safety_reports_import_warnings_and_checklist(review):
     assert report.status_code == 200
     assert report.json()['repetition']['schema_version'] == 'repetition-v1'
     assert report.json()['repetition']['entries'][0]['layout_family'] is None
+    assert report.json()['cadence']['scope'] == {'day': '2026-11-01', 'filtered': True, 'all_warnings': report.json()['cadence']['scope']['all_warnings']}
+    assert report.json()['cadence']['resolved_limits'] and isinstance(report.json()['similar_and_close'], list)
+    assert 'layout_family' in report.json()['repetition']['entries'][0]['unknown_fields']
     csrf(client)
     markdown = '## Another\n```yaml\nid: another\ntitle: Another\nconcept: Example\nbeats: [{t: 0, point: Hook}]\npublish_at: "2026-11-01T10:30:00+05:30"\n```\n'
     imported = client.post('/api/batch-plans/import', json={'markdown': markdown, 'commit': False, 'plan_id': 'different-plan'})
@@ -249,3 +252,12 @@ def test_safety_panel_keeps_loaded_warnings_on_background_failure(review):
     run('refreshSafety()')
     assert context.eval('document.querySelector("#safetyWarnings").children[0]===originalWarning')
     assert context.eval('document.querySelector("#safetyStatus").textContent.includes("last loaded")')
+
+
+def test_safety_panel_shows_scope_limits_and_unknown_history(review):
+    from test_batch_ui_runtime import runtime as javascript
+    client,*_=review
+    context,run=javascript(client,client.get('/batch/review').text)
+    run('refreshSafety()')
+    text=context.eval('[...document.querySelector("#safetyWarnings").children].map(c=>c.textContent).join(" | ")')
+    assert 'Info: limits for' in text and 'unknown layout family' in text   # the day-scope note needs a selected day; the API test covers it

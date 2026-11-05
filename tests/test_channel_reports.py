@@ -1,4 +1,4 @@
-from tubeforge.pipeline.channel_reports import ChannelSafetyConfig, cadence_report, repetition_report
+from tubeforge.pipeline.channel_reports import ChannelSafetyConfig, cadence_report, repetition_report, scope_cadence, similar_and_close
 
 
 def short(id, at='2026-11-04T10:00:00+05:30', channel='a', hook='If your cache fails, where do requests go?'):
@@ -57,3 +57,35 @@ def test_undated_render_uses_creation_time_for_recent_window():
     assert len(report['warnings'])==1
     assert report['entries'][0]['window_basis']=='created_at'
     assert report['unassessed_ids']==['unknown']
+
+
+def test_cadence_reports_resolved_limits_and_can_be_scoped_to_one_day():
+    config = ChannelSafetyConfig(defaults={'max_per_day': 1, 'min_spacing_minutes': 180}, channels={'a': {'max_per_day': 5, 'min_spacing_minutes': 30, 'timezone': 'UTC'}})
+    items = [short('d1a', '2026-11-04T10:00:00+00:00'), short('d1b', '2026-11-04T10:10:00+00:00'),
+             short('d2a', '2026-11-05T09:00:00+00:00', channel='b'), short('d2b', '2026-11-05T09:30:00+00:00', channel='b')]
+    report = cadence_report([i['short'] for i in items], config)
+    assert report['resolved_limits']['a'] == {'max_per_day': 5, 'min_spacing_minutes': 30, 'timezone': 'UTC'}
+    assert report['resolved_limits']['b']['max_per_day'] == 1                      # falls back to the default limits
+    assert len(report['warnings']) >= 3
+    scoped = scope_cadence(report, '2026-11-05', ['d2a', 'd2b'])
+    assert scoped['scope'] == {'day': '2026-11-05', 'filtered': True, 'all_warnings': len(report['warnings'])}
+    assert scoped['warnings'] and all(set(w['ids']) <= {'d2a', 'd2b'} or w.get('day') == '2026-11-05' for w in scoped['warnings'])
+    assert not any(w['channel'] == 'a' for w in scoped['warnings'])
+
+
+def test_similar_and_close_joins_only_pairs_that_are_both_similar_and_planned_close():
+    config = ChannelSafetyConfig(defaults={'min_spacing_minutes': 180})
+    close = [short('one', '2026-11-04T10:00:00+05:30'), short('two', '2026-11-04T10:30:00+05:30')]
+    far = [short('three', '2026-11-04T10:00:00+05:30'), short('four', '2026-11-04T20:00:00+05:30')]
+    for items in (close, far):
+        report = repetition_report(items, config, '2026-11-04')
+        pairs = similar_and_close(report, [i['short'] for i in items], config)
+        assert bool(pairs) is (items is close)
+    assert pairs == [] and similar_and_close(repetition_report(close, config, '2026-11-04'), [i['short'] for i in close], config)[0]['ids'] == ['one', 'two']
+
+
+def test_entries_name_the_fields_whose_history_is_unknown():
+    item = short('one')
+    item['music'] = None
+    report = repetition_report([item], ChannelSafetyConfig(), '2026-11-04')
+    assert report['entries'][0]['unknown_fields'] == ['music']

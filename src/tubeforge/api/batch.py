@@ -116,11 +116,15 @@ def register_batch_routes(app, runtime, build_request):
 
     @app.get('/api/batch-plans/safety-report', tags=['batch'])
     def safety_report(day: date | None = None):
-        from tubeforge.pipeline.channel_reports import cadence_report, repetition_report
+        from tubeforge.pipeline.channel_reports import cadence_report, repetition_report, scope_cadence, similar_and_close
         items = reviews.list_day()
         config = app.state.settings.channel_safety
-        return {'repetition': repetition_report(items, config, day.isoformat() if day else None),
-                'cadence': cadence_report([item['short'] for item in items], config)}
+        shorts = [item['short'] for item in items]
+        repetition = repetition_report(items, config, day.isoformat() if day else None)
+        cadence = cadence_report(shorts, config)
+        if day:  # cadence is computed over every plan; narrow it to the reviewed day and say so
+            cadence = scope_cadence(cadence, day.isoformat(), [item['short']['id'] for item in reviews.list_day(day.isoformat())])
+        return {'repetition': repetition, 'cadence': cadence, 'similar_and_close': similar_and_close(repetition, shorts, config)}
 
     @app.post('/api/batch-plans/{short_id}/review', tags=['batch'])
     def review_decision(short_id: str, value: BatchReviewRequest, request: Request):
