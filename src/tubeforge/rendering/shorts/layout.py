@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from .design_tokens import VideoDesignTokens
 from .icons import badge
 from .logos import logo_badge
 
@@ -31,6 +32,7 @@ class RenderOptions:
     show_sources: bool = False      # on-screen "Source: ..." credit under each scene
     watermark: str | None = None    # very small channel name in the top margin
     mascot: bool = False            # small static Chip sprite in a free corner of each scene
+    design_tokens: VideoDesignTokens | None = None
 
 
 class LayoutError(ValueError):

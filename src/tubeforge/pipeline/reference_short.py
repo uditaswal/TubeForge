@@ -24,6 +24,7 @@ from tubeforge.rendering.shorts.encode import RenderCancelled, encode, file_hash
 from tubeforge.rendering.shorts import plates as plates_module
 from tubeforge.rendering.hyperframes_proto.cli import HyperFramesError
 from tubeforge.rendering.shorts.layout import LayoutError, RenderOptions
+from tubeforge.rendering.shorts.design_tokens import VideoDesignTokens
 from tubeforge.rendering.shorts.prepare import prepare
 from tubeforge.rendering.shorts.review import write_layout_review
 from tubeforge.rendering.shorts.schema import ShortsTopic
@@ -49,15 +50,17 @@ OPTIONS_FILE = "render_options.json"
 
 
 def write_options(directory: Path, *, show_sources: bool, watermark: str | None, mascot: bool = False,
-                  style: str = "classic") -> None:
+                  style: str = "classic", design_tokens: VideoDesignTokens | dict | None = None) -> None:
     """Persist the operator's display choices beside the timeline; defaults leave no file (older jobs unchanged)."""
     path = directory / OPTIONS_FILE
-    if not show_sources and not watermark and not mascot and style == "classic":
+    tokens = VideoDesignTokens.from_data(design_tokens) if design_tokens is not None else None
+    if not show_sources and not watermark and not mascot and style == "classic" and tokens is None:
         path.unlink(missing_ok=True)
         return
     directory.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"show_sources": bool(show_sources), "watermark": watermark or None, **({"mascot": True} if mascot else {}),
-                                **({"style": style} if style != "classic" else {})}, sort_keys=True))
+                                **({"style": style} if style != "classic" else {}),
+                                **({"design_tokens": tokens.to_data()} if tokens else {})}, sort_keys=True))
 
 
 def load_options(directory: Path) -> RenderOptions:
@@ -65,7 +68,8 @@ def load_options(directory: Path) -> RenderOptions:
         data = json.loads((directory / OPTIONS_FILE).read_text())
     except (OSError, ValueError):
         return RenderOptions()
-    return RenderOptions(show_sources=bool(data.get("show_sources")), watermark=data.get("watermark") or None, mascot=bool(data.get("mascot")))
+    return RenderOptions(show_sources=bool(data.get("show_sources")), watermark=data.get("watermark") or None, mascot=bool(data.get("mascot")),
+                         design_tokens=VideoDesignTokens.from_data(data["design_tokens"]) if "design_tokens" in data else None)
 
 
 def load_style(directory: Path) -> str:
@@ -160,6 +164,9 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
     ``sfx_enabled`` defaults to **True**; see ``audio.master``'s docstring for the 26-27 Oct
     back-and-forth that settled on this.
     """
+    tokens = getattr(getattr(getattr(timeline, "renderer", None), "options", None), "design_tokens", None)
+    if tokens is not None and (load_style(directory) == "story" or config.renderer != "hyperframes"):
+        raise ProviderValidationError("reference design tokens currently require the classic HyperFrames renderer")
     starts = tuple(t.start for t in timeline.timings)
     templates = tuple(scene.template for scene in timeline.topic.scenes)
     reveal_times = tuple(t.words[s.reveal_words[0]].start

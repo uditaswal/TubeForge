@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from tubeforge.rendering.hyperframes_proto import cli, compose
 
+from .design_tokens import decorate_project
 from .encode import RenderCancelled, checked, swap_used_kib
 from .plates import load_manifest
 from .schema import SourceVisual
@@ -104,6 +105,7 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
                   plates_directory: Path | None = None) -> dict:
     """Produce one silent MP4, or raise before promoting an incomplete film."""
     parts = scene_plan(timeline)
+    tokens = getattr(getattr(getattr(timeline, "renderer", None), "options", None), "design_tokens", None)
     manifest = load_manifest(plates_directory) if plates_directory is not None else {"scenes": {}}
     binary = hyperframes_bin or os.environ.get("TUBEFORGE_HYPERFRAMES_BIN") or shutil.which("hyperframes")
     if not binary:
@@ -133,7 +135,7 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
                "HYPERFRAMES_EXTRACT_CACHE_DIR": str(root / "cache")}
         clips = []
         checks = []
-        evidence_used, source_fallbacks = [], []
+        evidence_used, source_fallbacks, token_reports = [], [], []
         for index, (scene, timing, (_, end, words)) in enumerate(zip(
                 timeline.topic.scenes, timeline.timings, parts, strict=True)):
             if guarded_cancelled():
@@ -153,6 +155,11 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
                     source_fallbacks.append({"scene_index": index, "scene_id": scene.scene_id,
                                              "template": scene.template, "reason": reason})
                 BUILDERS[scene.template](scene, words, timing.end - timing.start, project)
+            if tokens is not None:
+                ids = scene.source_ids or (timeline.topic.scenes[0].source_ids if scene.template == "loop" else ())
+                names = [source.name for source in timeline.topic.sources if source.source_id in ids]
+                source_label = "Source: " + " · ".join(names) if names else "Source evidence unavailable"
+                token_reports.append(decorate_project(project, scene, words, tokens, source_label=source_label))
             checks.append(cli.check(project, hyperframes_bin=binary, timeout=max(1, deadline-time.monotonic()),
                                     extra_env=env, cancelled=guarded_cancelled))
             clip = root / f"scene-{index:02d}.mp4"
@@ -177,4 +184,5 @@ def render_silent(timeline: Timeline, destination: Path, *, draft: bool,
     return {"scene_count": len(parts), "frames": round(timeline.duration * FPS),
             "duration": timeline.duration, "checks": checks,
             "evidence_quote": evidence_used, "source_fallbacks": source_fallbacks,
+            **({"design_tokens": token_reports} if tokens is not None else {}),
             "render_seconds": time.monotonic() - started}
