@@ -37,6 +37,6 @@ existing renderer and exact-artifact approval gates still apply.
   stat bars clear of the right rail. The encoded final stat frame reaches 2×;
   a browser seek with callbacks suppressed is not evidence of count-up output.
 - CLI advisory warnings include its 28px reading-text preference for the 26px
-  source footnote and existing badge subcomposition guidance. No runtime/layout/
+  source footnote and existing badge subcomposition guidance. The saved YouTube phone screenshot (`doc-internal/video-quality/reference/cloudflare-pingora/phone-screenshot-flow-scene.jpg`) was also inspected: the conservative bounds keep the caption/footnote above its channel/title overlays and clear of its right-side controls. This is a screenshot comparison, not a real-device test. No runtime/layout/
   contrast failures remain. A full narrated video and operator phone/watch review
   are still required before **VERIFIED** or default rollout.
