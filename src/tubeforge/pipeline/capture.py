@@ -29,6 +29,7 @@ HIDE_OVERLAYS = """
 [class*="chatbot" i],[id*="intercom" i],[class*="intercom" i],[id*="drift-" i],[class*="crisp-client" i]
 {display:none !important}
 html,body{overflow:visible !important;position:static !important}
+body{box-sizing:border-box !important;padding-left:22px !important;padding-right:22px !important}  /* a gutter, so a card zoom never clips the first letters */
 """
 # Small floating assistants ("Ask AI", "Chat with us") that styles cannot name: hide fixed or sticky elements whose own text says so.
 HIDE_FLOATING_ASSISTANTS = r"""

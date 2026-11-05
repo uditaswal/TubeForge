@@ -52,3 +52,8 @@ def test_floating_assistant_widgets_are_hidden_from_source_screenshots():
         assert selector in HIDE_OVERLAYS
     assert HIDE_OVERLAYS.count("{display:none !important}") == 1          # one rule list: every selector shares the hide
     assert r"\w" in HIDE_FLOATING_ASSISTANTS and "position" in HIDE_FLOATING_ASSISTANTS   # raw string: the JS regex escapes survive
+
+
+def test_capture_adds_a_side_gutter_so_card_zoom_never_clips_the_first_letters():
+    from tubeforge.pipeline.capture import HIDE_OVERLAYS
+    assert "padding-left:22px" in HIDE_OVERLAYS and "padding-right:22px" in HIDE_OVERLAYS
