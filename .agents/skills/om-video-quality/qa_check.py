@@ -78,7 +78,9 @@ def check(job: Path) -> list[tuple[str, str, str]]:
     add("FAIL" if long_headings else "PASS", "card-headings", f"{len(long_headings)} animated-card heading(s) over {CARD_HEADING_LIMIT} characters")
     qa = load(job / "final.qa.json") or load(job / "preview.qa.json") or {}
     report = load(job / "quality_report.json") or {}
-    loud = ((report.get("reference_qa") or {}).get("loudness")) or None
+    native = load(job / "final_manifest.json") or load(job / "preview_manifest.json") or {}
+    measured = native.get("metadata") or native.get("probe") or native.get("validation") or {}
+    loud = ((report.get("reference_qa") or {}).get("loudness")) or ((measured.get("audio_loudness") or {}).get("encoded")) or None
     if loud:
         low, high, peak = LOUDNESS["reference" if reference else "legacy"]
         ok = low <= loud["input_i"] <= high and loud["input_tp"] <= peak

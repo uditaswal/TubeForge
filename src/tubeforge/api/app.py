@@ -1869,7 +1869,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     checks = {"status": "review_needed", "reason": str(failure)}
                 except Exception as failure:
                     checks = {"status": "unavailable", "reason": str(failure)}
-            return {"package": package.model_dump(mode="json"), "reviewed_identity": artifact.checksum_sha256, "skill_checks": checks}
+            from tubeforge.pipeline.direction import direction_report
+            context = None
+            saved = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "direction_context")
+            if saved is not None:
+                payload = Path(saved.path).read_bytes() if Path(saved.path).is_file() else b""
+                if hashlib.sha256(payload).hexdigest() != saved.checksum_sha256:
+                    raise HTTPException(status_code=409, detail="direction context is unavailable or changed")
+                context = json.loads(payload)
+                if context.get("job_id") != job_id or context.get("channel_identity") != package.request.channel_identity:
+                    raise HTTPException(status_code=409, detail="direction context does not match this video")
+            return {"package": package.model_dump(mode="json"), "reviewed_identity": artifact.checksum_sha256,
+                    "skill_checks": checks, "direction": direction_report(package, context)}
         except KeyError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
 

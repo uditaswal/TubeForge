@@ -246,6 +246,20 @@ class JobRepository:
             rows = session.scalars(select(PipelineJobRecord).order_by(PipelineJobRecord.updated_at.desc(), PipelineJobRecord.id.desc()).limit(limit))
             return [_job_from_record(row) for row in rows]
 
+    def recent_channel_angles(self, job: PipelineJob, *, limit: int = 12) -> list[dict[str, object]]:
+        """Bounded local brief memory, isolated by channel and creation boundary."""
+        if not 1 <= limit <= 50 or job.created_at is None:
+            raise ValueError("angle history requires a creation boundary and limit 1–50")
+        with self._session_factory() as session:
+            rows = session.scalars(select(PipelineJobRecord).where(
+                PipelineJobRecord.id != job.id,
+                PipelineJobRecord.created_at < job.created_at,
+                func.coalesce(func.json_extract(PipelineJobRecord.request_json, "$.channel_identity"), "default") == job.request.channel_identity,
+            ).order_by(PipelineJobRecord.created_at.desc(), PipelineJobRecord.id.desc()).limit(limit))
+            return [{"job_id": row.id, "created_at": row.created_at.isoformat(),
+                     "topic": request.topic, "angle": request.angle}
+                    for row in rows for request in [ContentRequest.model_validate_json(row.request_json)]]
+
     def delete_completed_or_paused(self, job_id: str) -> list[Artifact]:
         """Remove a non-running local generation and return its registered files.
 
