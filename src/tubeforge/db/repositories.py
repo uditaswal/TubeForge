@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import secrets
 
-from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import and_, delete, exists, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -1230,11 +1230,47 @@ class GenerationCacheRepository:
             )
             return result.rowcount == 1
 
+    @staticmethod
+    def _allowance_packet(material: str) -> dict:
+        packet = dict(json.loads(material)["normalized_request"])
+        for key in ("script_owner", "script_model", "script_routing_mode"):
+            packet.pop(key, None)
+        return packet
+
+    def accepted(self, request, provider, model, prompt_version):
+        key = self.cache_key(request, provider, model, prompt_version)
+        with self._session_factory() as session:
+            record = session.scalar(select(GenerationCacheRecord).where(GenerationCacheRecord.cache_key == key, GenerationCacheRecord.state == "accepted"))
+            if record and record.package_json and record.provenance_json and record.usage_json:
+                return CachedGeneration(json.loads(record.package_json), json.loads(record.provenance_json), json.loads(record.usage_json))
+        return None
+
+    def failure(self, key):
+        with self._session_factory() as session:
+            record = session.scalar(select(GenerationCacheRecord).where(GenerationCacheRecord.cache_key == key))
+            return json.loads(record.failure_json) if record and record.failure_json else {}
+
     def consume_invocation(self, reservation: GenerationCacheReservation, *, maximum: int, now: datetime) -> bool:
-        """Atomically consume one external-call allowance for this immutable draft."""
-        with self._session_factory.begin() as session:
-            result = session.execute(update(GenerationCacheRecord).where(GenerationCacheRecord.cache_key == reservation.cache_key, GenerationCacheRecord.state == "reserved", GenerationCacheRecord.reservation_token == reservation.token, GenerationCacheRecord.invocation_count < maximum).values(invocation_count=GenerationCacheRecord.invocation_count + 1, updated_at=_as_utc(now)).execution_options(synchronize_session=False))
-            return result.rowcount == 1
+        """Serialize the shared source-packet budget, including legacy owner/model rows.
+
+        Counts are never moved or reset. Routing receipts consume no invocation.
+        SQLite is the supported local database; BEGIN IMMEDIATE fences competing
+        owners before either can consume the last remaining allowance.
+        """
+        with self._session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            record = session.scalar(select(GenerationCacheRecord).where(GenerationCacheRecord.cache_key == reservation.cache_key, GenerationCacheRecord.state == "reserved", GenerationCacheRecord.reservation_token == reservation.token))
+            if record is None:
+                return False
+            packet = self._allowance_packet(record.normalized_request_json)
+            candidates = session.scalars(select(GenerationCacheRecord).where(GenerationCacheRecord.prompt_version == record.prompt_version, GenerationCacheRecord.provider != "script-owner-router", func.json_extract(GenerationCacheRecord.normalized_request_json, "$.normalized_request.topic") == packet.get("topic"), func.json_extract(GenerationCacheRecord.normalized_request_json, "$.normalized_request.angle") == packet.get("angle")))
+            matching = [row for row in candidates if self._allowance_packet(row.normalized_request_json) == packet]
+            if any(row.state == "exhausted" for row in matching) or sum(row.invocation_count for row in matching) >= maximum:
+                return False
+            record.invocation_count += 1
+            record.updated_at = _as_utc(now)
+            session.commit()
+            return True
 
     def release_after_invocation_failure(self, reservation: GenerationCacheReservation, *, maximum: int, failure: dict[str, object], now: datetime) -> bool:
         """Preserve the count across retryable worker/job restarts; never reset it."""

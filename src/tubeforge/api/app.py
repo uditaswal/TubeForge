@@ -1059,7 +1059,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         available_music = runtime.orchestrator.music_catalog.names() if runtime.orchestrator.music_catalog else set()
         try:
             video_request = _video_request(brief, application_settings, available_music=available_music)
-            video_request = routing_policy.apply(video_request, enforce_current=True)
+            video_request = routing_policy.apply(video_request, enforce_current=True, preferred_model=brief.script_model)
             _reject_retired_format(video_request, application_settings)
             job = runtime.jobs.create(uuid4().hex, video_request, destination_account_ids=brief.destination_account_ids, video_description=brief.description)
         except ValueError as error:
@@ -1455,6 +1455,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payloads.append({
                 **_job_payload(job), "topic": job.request.topic, "script_owner": job.request.script_owner, "script_model": job.request.script_model, "script_routing_mode": job.request.script_routing_mode, "video_style": job.request.video_style,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
+                "script_routing": next((event.details for event in reversed(events) if event.event_type == "script_routing_completed"), None),
                 "event_count": len(events),
                 "latest_event": {"event_type": events[-1].event_type, "stage": events[-1].details.get("stage") if isinstance(events[-1].details.get("stage"), str) else None, "created_at": _as_ist(events[-1].created_at)} if events else None,
                 "destinations": runtime.jobs.destination_intents(job.id),

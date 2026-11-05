@@ -36,7 +36,7 @@ class ScriptRoutingRepository:
             session.commit()
         return self.get()
 
-    def apply(self, request, *, enforce_current=False):
+    def apply(self, request, *, enforce_current=False, preferred_model=None):
         policy = self.get()
         mode = request.script_routing_mode
         if enforce_current and mode and policy['mode'] and mode != policy['mode']:
@@ -48,7 +48,9 @@ class ScriptRoutingRepository:
             return request
         if policy['mode'] != 'codex_only' and not self.claude_enabled:
             raise ValueError('saved routing policy requires Claude; choose Codex only in Studio')
-        model = policy['preferred_model']
+        model = preferred_model or policy['preferred_model']
+        if policy['mode'] == 'codex_only' and model != 'gpt-sol' or policy['mode'] == 'claude_only' and model == 'gpt-sol':
+            raise ValueError('selected writer is disabled by the saved routing policy; reload the form')
         owner = 'codex' if model == 'gpt-sol' else 'claude'
         return request.model_copy(update={'script_routing_mode': policy['mode'], 'script_owner': owner,
                                           'script_model': None if owner == 'codex' else model})

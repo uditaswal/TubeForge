@@ -22,6 +22,9 @@ stores its selected policy, so a later policy change does not retarget it.
 Before cancelling a membership, review existing queued jobs as well as the saved
 default. Source-clip jobs do not require a script writer.
 
-Implementation checkpoint: durable API/job policy is tested. Automatic router
-behavior and dashboard controls are still being implemented; this document does
-not authorize live generation, publication, or changes to script allowances.
+Implementation checkpoint: durable API/job policy and stubbed automatic routing
+are tested; dashboard controls are the next checkpoint. Fallback is one-shot on
+confirmed quota/availability signals only. Authentication, validation, timeouts,
+cancellation and exhausted allowances never trigger fallback. Existing counters
+remain shared across provider/model choices. This document does not authorize
+live generation or publication.

@@ -105,3 +105,41 @@ def test_saved_policy_is_audited_inherited_and_does_not_retarget_old_jobs(tmp_pa
         sign_in(client)
         assert client.get('/api/script-routing').json()['mode']=='claude_only'
         assert client.app.state.runtime.jobs.get(first).request.script_routing_mode=='codex_only'
+
+
+def test_stubbed_fallback_reaches_review_with_durable_package_usage_and_activity(tmp_path):
+    import json
+    from pathlib import Path
+    from tubeforge.providers.content.factory import ScriptOwnerRouter
+    from tubeforge.db.repositories import GenerationCacheRepository
+    from tubeforge.domain.states import JobState
+    from test_provider_fallback import adapter,request as routing_request
+    settings=settings_for(tmp_path)
+    settings.pipeline.voice.artifact_root=tmp_path/'artifacts'
+    calls=[]
+    with TestClient(create_app(settings)) as client:
+        sign_in(client,True)
+        runtime=client.app.state.runtime
+        runner=runtime.orchestrator
+        runner.retired_prompt_versions=frozenset()  # Local legacy fixture; no production format is enabled.
+        runner.source_ingestor=None
+        runner.research_enabled=False
+        cache=GenerationCacheRepository(runtime.database.session_factory)
+        runner.content=ScriptOwnerRouter({'claude':adapter('claude',cache,['quota_exhausted'],calls),'codex':adapter('codex',cache,['ok'],calls)},cache)
+        runtime.jobs.create('routed-job',routing_request())
+        job=runner.run('routed-job')
+        assert job.state==JobState.SCRIPT_APPROVAL_REQUIRED
+        artifact=runtime.artifacts.get(job.id,JobState.CONTENT_GENERATING,'content_package')
+        package=json.loads(Path(artifact.path).read_text())
+        assert package['script_routing']['actual_owner']=='codex'
+        evidence=runtime.artifacts.get(job.id,JobState.CONTENT_GENERATING,'content_generation_evidence')
+        assert json.loads(Path(evidence.path).read_text())['usage']['input_tokens']==12
+        row=next(row for row in client.get('/api/jobs').json() if row['id']==job.id)
+        assert row['script_routing']['actual_owner']=='codex'
+        assert row['script_routing']['attempts'][0]['code']=='quota_exhausted'
+    with TestClient(create_app(settings)) as client:
+        sign_in(client)
+        job=client.app.state.runtime.orchestrator.run('routed-job')
+        assert job.state==JobState.SCRIPT_APPROVAL_REQUIRED
+        assert job.request.script_routing_mode=='automatic'
+        assert calls==['claude','codex']
