@@ -85,8 +85,12 @@ def test_reference_schema_and_prompt_preserve_legacy_boundary():
         scene.pop("vo")
         scene["visual"] = None  # strict model output states every field explicitly
         scene["logo"] = None
+        if scene['template'] == 'flow':
+            scene['diagram'] = 'stack'
+            scene['danger'] = []
     raw = {"status": "ready", "package": package, "reason": None}
     jsonschema.validate(raw, schema)
+    assert "line_reveal_words" not in schema["$defs"]["CodeVisual"]["properties"]
     legacy = codex_output_schema(envelope=True)
     assert "reference_short" not in legacy["$defs"]["ContentPackage"]["properties"]
     assert "engagement_comment" not in legacy["$defs"]["VideoMetadata"]["properties"]

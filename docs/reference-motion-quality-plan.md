@@ -1,7 +1,7 @@
 # Reference motion quality plan
 
 Date: 6 November 2026. Branch: `feature/reference-motion-quality`, based on
-`dev` at `ea14e5e`. Implementation is NOT STARTED. This change plans the work only.
+`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch; local technical/render evidence is recorded below. Full creative acceptance and Story parity remain pending.
 
 ## Outcome and evidence
 
@@ -43,7 +43,7 @@ Report each phase's acceptance before beginning the next. Every phase starts NOT
 STARTED; use IMPLEMENTED until its tests and required artifact review pass. Use
 VERIFIED only for the demonstrated scope, and BLOCKED for external decisions.
 
-### 1. Reproduce the reference craft — NOT STARTED
+### 1. Reproduce the reference craft — IMPLEMENTED
 
 Outcome: a local editor scene with stable chrome, syntax colouring, timed typing,
 a cursor that follows the text, and deliberate completed-code/output holds.
@@ -58,7 +58,7 @@ Tests cover multiline/token reveal and deterministic frame selection.
 Evidence: MP4s, contact sheets, timing manifest, hashes, measurements and a concrete
 visual pass/fail review. Out of scope: narration, dashboard and new scene families.
 
-### 2. Make it a reusable scene — NOT STARTED
+### 2. Make it a reusable scene — IMPLEMENTED
 
 Outcome: a versioned editor/terminal scene usable by existing jobs, with shared
 palette, typography, spacing, semantic colours and timing events. Include type,
@@ -73,7 +73,7 @@ Tests verify validation, renderer identity/cache invalidation and deterministic
 rerender. Evidence: fixtures, encoded clips, review and test results.
 Out of scope: wholesale renderer replacement and changes to narration generation.
 
-### 3. Integrate with speech and operator review — NOT STARTED
+### 3. Integrate with speech and operator review — IMPLEMENTED
 
 Outcome: an opt-in versioned visual treatment through the existing CLI and Studio
 flow, with typed commands/reveals anchored to actual accepted speech alignment.
@@ -87,7 +87,7 @@ No silent fallback that claims the requested treatment rendered successfully.
 Evidence: browser captures, job/render hashes, activity record and passing tests.
 Out of scope: new script providers, publishing and automatic production approval.
 
-### 4. Prove full-video quality — NOT STARTED
+### 4. Prove full-video quality — IMPLEMENTED
 
 Outcome: one real 30–90-second 1080×1920/30fps narrated Short within the applicable
 accepted profile, combining the improved scene with purposeful existing visuals.
@@ -127,7 +127,8 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Add reviewed code-line word indices and bind them to saved timeline timestamps in the encoder.
 - [x] Render an offline comparison with accepted narration and saved Whisper timing; inspect encoded frames.
 - [x] Verify signed-in desktop/mobile Chromium review and anchor visibility.
-- [ ] Obtain full watch/listen acceptance and a current-profile 30–90-second loop artifact.
+- [x] Render a current-profile 49.7-second loop artifact; pass blocking delivery QA checks.
+- [ ] Complete full watch/listen acceptance and repair remaining visual review findings.
 - [ ] Verify full narrated Short and signed-in workflow.
 
 ## First implementation checkpoint
@@ -268,3 +269,51 @@ proof, or present the exact comparison and request a narration/profile decision.
 Do not rewrite accepted narration or silently invoke a live provider. Highlight/
 output cues and Story-renderer parity remain pending scope; do not mark the overall
 goal complete from this Pillow-only comparison.
+
+## Current-profile render and loop checkpoint — 6 November
+
+**IMPLEMENTED**, with local technical scope proven. Read-only database inspection
+located job `batch-caaacb77d5659ea27ce1292d20f45c6f6b6f857c30d4ad97` and verified its
+stored script approval, artifact checksum and actual package SHA-256 all equal
+`9ac7023134536f9d3a29e860cdb85379499b604d46fde9fdacc4f1f082ba7811` (actor
+local-dashboard). This authorizes reuse of the exact captured inputs; the visual
+overlay/output is distinct and has no inherited production approval.
+
+Reproduce with `scripts/benchmark_reference_motion_speech.py --profile rate-limit`
+and the named source folder, supplying a fresh `--output`. Code lines retain the
+accepted identifiers/values and now reveal rate before burst, at reviewed local
+word indices [3,6]. Original narration, scene timing and accepted audio mix are
+reused. Source audio provenance is copied only after verifying its narration hash,
+and is explicitly annotated as original mix metadata reused through source AAC.
+No live provider calls, original artifact edits, approval writes or publication.
+
+Output: `artifacts/review/reference-motion-current-profile/final.mp4`, SHA-256
+`2a9890e93b4d03d8bb7f00a5a9d9933a8710da2ca5d626a0ba49f5b1664af614`.
+49.659 s, 1080×1920/30 fps, H.264/AAC, full decode passed; −14.17 LUFS/−2.39 dBTP.
+Measured render RTF 7.18 (inside the default configured 12× budget; benchmark
+permits 30× for diagnostics). qa_check.py reports no FAILs: duration, loop ending,
+loudness, narration clipping/silence/level jumps, effects and licence trail pass.
+Warnings retained: 3.3-second terminal dead stretch, 87 music-under-speech stretches
+in reused mix metadata, and absent thumbnail. No claim of listening acceptance.
+
+Found and repaired two Pillow motion defects: the opening hook began transparent;
+and loop endpoints used current background/zoom instead of the opening frame.
+Frame one now shows the hook immediately; the encoder supplies its exact opening
+state for final-frame reuse in the closing speech tail. Renderer identity is
+render-6. Canonical frames match byte-for-byte in tests; decoded H.264 endpoint
+mean absolute RGB difference is 0.513/255 (compression). Opening, ending, editor
+frame and the complete 25-panel encoded sheet were inspected.
+
+Regression evidence: 47 editor/plate/content/endpoint checks passed, 11 encoder/
+layout checks passed, and 5 strict-schema/illegal-layout checks passed. The old
+strict-schema fixture needed explicit Flow defaults (diagram/danger); production
+validation was not weakened. Local code-line anchors are excluded from the shared
+Codex/Claude writer output schema until cross-renderer support is available, so
+this optional local contract does not break Story jobs or require writer retries.
+
+Remaining quality findings are real: inherited source captures show an Ask AI chip
+and other page UI; terminal output holds static for 3.3 seconds; mix balance needs
+listening. Story still truncates checklist code to three lines and uses its own
+reveal implementation. Next: repair source-capture UI pollution, then complete
+meaningful terminal/highlight/output motion and Story parity, with encoded review
+and renewed full watch/listen before declaring the overall goal achieved.

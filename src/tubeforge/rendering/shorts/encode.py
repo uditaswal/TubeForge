@@ -83,7 +83,7 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
         plates.bind_timeline(timeline)
     if motion:
         from .motion import Animator
-        animator = Animator(timeline.renderer, plates=plates)
+        animator = Animator(timeline.renderer, plates=plates, first_state=timeline.state(0))
     report = {"schema_version": "reference-video-qa-v1", "passed": False,
               "topic_sha256": hashlib.sha256(timeline.topic.model_dump_json().encode()).hexdigest(),
               "audio_sha256": file_hash(audio), "layout": timeline.renderer.validate(),

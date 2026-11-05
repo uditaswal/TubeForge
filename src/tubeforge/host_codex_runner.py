@@ -121,6 +121,13 @@ def codex_output_schema(*, envelope: bool = False, reference: bool = False, keep
     from tubeforge.providers.content.output import ContentGenerationResult
     schema = (ContentGenerationResult if envelope else ContentPackage).model_json_schema()
     package_schema = schema["$defs"]["ContentPackage"] if envelope else schema
+    # Reviewed local visual directions are not a writer requirement. In
+    # particular, Story/HyperFrames do not yet support code-line anchors.
+    # Preserve the production writer envelope while local scene revisions use
+    # the richer domain contract and receive a fresh artifact review.
+    code_visual = schema.get("$defs", {}).get("CodeVisual")
+    if code_visual is not None:
+        code_visual["properties"].pop("line_reveal_words", None)
     if not reference:
         package_schema["properties"].pop("reference_short", None)
         # The pinned debate comment belongs to the reference-short profile only.
