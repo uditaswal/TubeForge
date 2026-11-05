@@ -47,8 +47,8 @@ VERIFIED only for the demonstrated scope, and BLOCKED for external decisions.
 
 Outcome: a local editor scene with stable chrome, syntax colouring, timed typing,
 a cursor that follows the text, and deliberate completed-code/output holds.
-Create an approximately 8.4-second landscape comparison and a native portrait
-adaptation. Record explicit timing events instead of tying typing speed to encode FPS.
+Create a native portrait MP4 comparison. Landscape is deferred by the operator
+on 6 November; use animation within Shorts, without exporting whole videos as GIFs. Record explicit timing events instead of tying typing speed to encode FPS.
 
 Acceptance: full decode; inspect opening, partial typing, completed lines, cursor,
 output and ending at full size and phone scale. No clipping, jumping line positions,
@@ -115,3 +115,30 @@ Stop after two failed repairs of the same root issue or 45 minutes of active
 debugging, per AGENTS.md; report evidence, two options and a recommendation.
 Update the canonical internal plan and append local progress evidence per phase.
 Update operator docs when the opt-in workflow exists; planning changes no setup.
+
+## Working checklist — 6 November
+
+- [x] Prioritize native vertical Shorts; defer landscape comparison.
+- [x] Inspect existing Pillow code-card reveal and geometry.
+- [x] Build and test portrait editor animation primitive (7 focused tests pass).
+- [ ] Render and inspect a vertical MP4 comparison.
+- [ ] Integrate the proven primitive with accepted scene timing and render identity.
+- [ ] Verify full narrated Short and signed-in workflow.
+
+## First implementation checkpoint
+
+Phase 1 **IMPLEMENTED** for a synthetic vertical editor primitive, pending full
+motion review and speech integration. `editor.py` provides stable syntax-coloured
+layout, multiline cursor positioning, deterministic timing and a minimum result
+hold. Production job paths are not yet connected. Reproduce with:
+`PYTHONPATH=src python scripts/benchmark_portrait_editor.py`.
+
+Evidence: `artifacts/review/reference-motion/editor-portrait.mp4`, `benchmark.json`,
+opening/typing/hold PNGs and an encoded contact sheet. Silent 6.4 s H.264 scene,
+1080×1920/30 fps, full FFmpeg decode passed; render measured 9.64 s on this host.
+SHA-256: `9ee9fc090d582b44c2d99d5baadcb6ad887c7772d6c3d974dd73229779ac9875`.
+Seven focused tests pass under Pillow 12.3.0. Full-size hold frame inspected:
+code and label fit the safe area, with room for future headline/caption overlays.
+No full narrated-video or operator creative acceptance is claimed. The job QA
+script requires a real content package and will run at the integrated-job phase;
+this labelled synthetic scene is not a production video job.
