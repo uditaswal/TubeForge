@@ -125,7 +125,9 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Add validated per-line reveal windows and multiline syntax colouring.
 - [x] Integrate native card rendering into the existing Pillow code-visual path and invalidate old cache identities.
 - [x] Add reviewed code-line word indices and bind them to saved timeline timestamps in the encoder.
-- [ ] Verify the binding with actual accepted speech and a narrated artifact.
+- [x] Render an offline comparison with accepted narration and saved Whisper timing; inspect encoded frames.
+- [x] Verify signed-in desktop/mobile Chromium review and anchor visibility.
+- [ ] Obtain full watch/listen acceptance and a current-profile 30–90-second loop artifact.
 - [ ] Verify full narrated Short and signed-in workflow.
 
 ## First implementation checkpoint
@@ -227,3 +229,42 @@ portal startup before the test admin existed; a diagnostic run captured that
 thread stack and was explicitly interrupted before the successful escalated run.
 No application workaround was added. Total focused checks this checkpoint: 49
 (37 editor/plate + 11 renderer + 1 signed-in API). Browser review is still pending.
+
+## Actual-speech and browser checkpoint — 6 November
+
+**IMPLEMENTED**, with narrow technical and browser evidence. Reproduction:
+`PYTHONPATH=src python scripts/benchmark_reference_motion_speech.py --source
+<accepted-M3-folder> --output <fresh-comparison-folder>`. The script validates the
+original topic/audio/timeline identities, preserves narration and scene timing,
+and records a distinct unapproved illustrative Rust overlay. No provider calls.
+
+Artifact: `artifacts/review/reference-motion-speech/final.mp4`, SHA-256
+`14c102c9382e05ba6b9bab6a406a23bb2ad7b6f2579faed6f6510b74e118444c`.
+1080×1920/30 fps H.264/AAC, 29.629 s, full decode passed; encoded audio −14.31 LUFS,
+−2.45 dBTP. Source alignment is whisper-base-en-dtw-v1. Code-line windows resolved
+to 0.25–1.11 s and 1.11–3.51 s within scene 2. Runtime was about 340 s on this host.
+The encoded overview and full-size editor frame were inspected: stable syntax,
+cursor position, readable code and separate heading/caption zones. The full mix
+has not been listened to for this revision; no complete creative acceptance claim.
+
+Delivery QA was run and remains **BLOCKED for full-profile acceptance**: duration
+29.6 s fails the 30–90 s gate; legacy CTA is warned rather than a current loop.
+Other warnings: two pre-existing dead stretches, missing historical narration-health
+provenance and no thumbnail. Loudness passes. The duration/ending were not changed
+or hidden to pass QA. This is a comparison, not an approved production output.
+
+Opt-in real-browser test:
+`TUBEFORGE_MOTION_BROWSER=1 PYTHONPATH=src python -m pytest -q
+tests/test_reference_motion_browser.py` (requires this comparison package).
+One test passed in 63.23 s using isolated SQLite and transient loopback hosting;
+1440×1000 and 390×844 Chromium both signed in, selected Generations → Needs review,
+opened script review, found line anchors [0,3], and reported no JS errors or page
+overflow. Screenshots and review.json: `artifacts/review/reference-motion-browser/`.
+The harness first missed a required app name and then targeted hidden Studio
+controls; both setup errors were corrected. No production app changes were needed.
+
+Next: locate an already reviewed current-profile local package for full 30–90 s
+proof, or present the exact comparison and request a narration/profile decision.
+Do not rewrite accepted narration or silently invoke a live provider. Highlight/
+output cues and Story-renderer parity remain pending scope; do not mark the overall
+goal complete from this Pillow-only comparison.
