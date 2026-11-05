@@ -81,7 +81,7 @@ def test_the_writer_prompt_and_the_editor_both_carry_the_story_shape_rules():
     source = open(prompts.__file__).read()
     for needle in ("STORY SHAPE", "at most one number per scene", "NUMBERS:", "JARGON:", "SOURCES:"):
         assert needle in source
-    assert "listener test" in EDITOR_INSTRUCTIONS and "one number per scene" in EDITOR_INSTRUCTIONS
+    assert "listener test" in EDITOR_INSTRUCTIONS and "two numbers per scene" in EDITOR_INSTRUCTIONS
 
 
 def test_scorecard_separates_the_pilot_from_a_plain_script():
