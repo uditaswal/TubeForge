@@ -58,6 +58,10 @@ SYSTEM_PROMPT = (
 )
 
 
+class RunnerUnavailableError(RuntimeError):
+    """The Claude CLI cannot be located or started; reported as the structured code 'runner_unavailable'."""
+
+
 def claude_binary() -> str:
     """Resolve the CLI: explicit env var, PATH, then the VS Code extension's binary."""
     explicit = os.environ.get("TUBEFORGE_CLAUDE_BIN")
@@ -69,7 +73,7 @@ def claude_binary() -> str:
     candidates = sorted(glob.glob(str(Path.home() / ".vscode-server/extensions/anthropic.claude-code-*-linux-x64/resources/native-binary/claude")))
     if candidates:
         return candidates[-1]
-    raise RuntimeError("Claude CLI not found; set TUBEFORGE_CLAUDE_BIN")
+    raise RunnerUnavailableError("Claude CLI not found; set TUBEFORGE_CLAUDE_BIN")
 
 
 def peer_uid(connection: socket.socket) -> int:
@@ -119,6 +123,8 @@ def call_claude(prompt: str, schema: dict, *, model: str, effort: str | None = N
                                        timeout=TIMEOUT_SECONDS, check=False)
         except subprocess.TimeoutExpired as error:
             raise TimeoutError("Claude invocation exceeded the nine-minute limit") from error
+        except OSError as error:  # the binary vanished or is not executable: nothing was launched
+            raise RunnerUnavailableError(f"Claude CLI could not be started: {type(error).__name__}") from error
     if len(completed.stdout) > 10 * MAX_OUTPUT_BYTES:
         raise ValueError("Claude output exceeded the runner limit")
     try:
@@ -453,8 +459,12 @@ def serve_connection(connection: socket.socket, model: str | None) -> None:
                 connection.sendall(payload if len(payload) <= MAX_RESPONSE_BYTES else encode_failure("invalid_output", "rejected draft exceeds socket limit"))
             except InsufficientSourcesError as error:
                 connection.sendall(encode_failure("insufficient_sources", str(error).removeprefix("insufficient_sources: ")))
-            except PermissionError as error:
-                connection.sendall(encode_failure("unavailable", str(error)))
+            except BudgetExceededError as error:  # the configured call/spend cap: refused before any launch
+                connection.sendall(encode_failure("quota_exhausted", str(error), invocation_started=False))
+            except RunnerUnavailableError as error:  # the CLI cannot be found or started: no draft was produced
+                connection.sendall(encode_failure("runner_unavailable", str(error), invocation_started=False))
+            except PermissionError as error:  # e.g. a peer that is not the operator's UID; never fallback-eligible
+                connection.sendall(encode_failure("authentication_failed", str(error), invocation_started=False))
             except TimeoutError as error:
                 connection.sendall(encode_failure("timeout", str(error)))
             except AllowanceExhaustedError as error:

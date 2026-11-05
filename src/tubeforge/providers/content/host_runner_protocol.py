@@ -21,7 +21,7 @@ class GenerateShortsScriptRequest(BaseModel):
 class HostRunnerFailure(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    code: str = Field(pattern=r"^(timeout|unavailable|allowance_exhausted|invalid_output|quality_rejected|source_mismatch|insufficient_sources)$")
+    code: str = Field(pattern=r"^(timeout|unavailable|quota_exhausted|runner_unavailable|authentication_failed|allowance_exhausted|invalid_output|quality_rejected|source_mismatch|insufficient_sources)$")
     message: str = Field(max_length=1_000)
     invocation_started: bool = True
 

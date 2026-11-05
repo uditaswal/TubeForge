@@ -102,7 +102,8 @@ class HostRunnerContentProvider:
                     raise InsufficientSourcesError(message)
                 if code == "timeout":
                     raise RetryableProviderError(message)
-                if code == "unavailable":
+                # The structured codes keep the legacy behaviour until the Track E router distinguishes them.
+                if code in {"unavailable", "quota_exhausted", "runner_unavailable", "authentication_failed"}:
                     raise ProviderAuthenticationError(message)
                 raise ProviderValidationError(message)
             if response.result is None:
