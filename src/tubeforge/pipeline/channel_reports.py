@@ -57,7 +57,8 @@ def fingerprint(item):
             'hook_formula': formula, 'opening': opening, 'title_pattern': ' '.join('#' if w.isdigit() else w for w in words(short['title'])),
             'templates': dict(Counter(s.get('template', 'unknown') for s in scenes)),
             'layout_family': item.get('layout_family'), 'music': item.get('music'), 'voice': item.get('voice'),
-            'narration': narration, 'window_basis': 'publish_at' if stamp(short) else 'created_at', 'evidence': 'rendered' if item.get('checksum') else 'plan'}
+            'narration': narration, 'window_basis': 'publish_at' if stamp(short) else 'created_at', 'evidence': 'rendered' if item.get('checksum') else 'plan',
+            'unknown_fields': [name for name in ('layout_family', 'music', 'voice') if not item.get(name)]}
 
 
 def observed_time(item):
@@ -133,5 +134,32 @@ def cadence_report(shorts, config):
             if minutes < limits.min_spacing_minutes:
                 warnings.append({'code': 'minimum_spacing', 'severity': 'warn', 'ids': [a, b], 'channel': channel,
                                  'minutes': minutes, 'minimum_minutes': limits.min_spacing_minutes})
-    return {'schema_version': 'cadence-v1', 'mode': 'warn', 'warnings': warnings,
+    resolved = {(channel or 'default'): config.channels.get(channel, config.defaults).model_dump() for channel in sorted(channels, key=lambda value: value or '')}
+    return {'schema_version': 'cadence-v1', 'mode': 'warn', 'warnings': warnings, 'resolved_limits': resolved,
             'meaning': 'operator-entered publish metadata only; nothing scheduled or published'}
+
+
+def scope_cadence(report, day, day_ids):
+    """Keep only the warnings that concern the reviewed day: a daily-limit warning for that local day, or any warning naming a short of that day."""
+    ids = set(day_ids)
+    kept = [w for w in report['warnings'] if w.get('day') == day or ids & set(w['ids'])]
+    return {**report, 'warnings': kept, 'scope': {'day': day, 'filtered': True, 'all_warnings': len(report['warnings'])}}
+
+
+def similar_and_close(repetition, shorts, config):
+    """Pairs flagged as similar that are also planned closer together than the channel's minimum spacing.
+
+    Both signals stay warnings: this only joins them so the reviewer sees the pairs that matter most; nothing is blocked or scheduled.
+    """
+    by_id = {short['id']: short for short in shorts}
+    pairs = []
+    for warning in repetition['warnings']:
+        a, b = (by_id.get(i) for i in warning['ids'])
+        if not a or not b or stamp(a) is None or stamp(b) is None:
+            continue
+        limits = config.channels.get(warning['channel'], config.defaults)
+        minutes = abs((stamp(a).astimezone(UTC) - stamp(b).astimezone(UTC)).total_seconds()) / 60
+        if minutes < limits.min_spacing_minutes:
+            pairs.append({'ids': warning['ids'], 'channel': warning['channel'], 'minutes': minutes, 'minimum_minutes': limits.min_spacing_minutes,
+                          'reasons': [r['code'] for r in warning['reasons']]})
+    return pairs

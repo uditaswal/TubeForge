@@ -44,3 +44,11 @@ def test_private_and_unresolvable_hosts_are_rejected():
     cache = {}
     assert not _public("localhost", cache) and not _public("127.0.0.1", cache) and not _public("10.0.0.5", cache)
     assert not _public("does-not-exist.invalid", cache)
+
+
+def test_floating_assistant_widgets_are_hidden_from_source_screenshots():
+    from tubeforge.pipeline.capture import HIDE_FLOATING_ASSISTANTS, HIDE_OVERLAYS
+    for selector in ('[class*="ask-ai" i]', '[aria-label*="ask ai" i]', '[class*="chat-widget" i]', '[id*="intercom" i]'):
+        assert selector in HIDE_OVERLAYS
+    assert HIDE_OVERLAYS.count("{display:none !important}") == 1          # one rule list: every selector shares the hide
+    assert r"\w" in HIDE_FLOATING_ASSISTANTS and "position" in HIDE_FLOATING_ASSISTANTS   # raw string: the JS regex escapes survive

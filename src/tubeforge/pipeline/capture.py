@@ -24,9 +24,29 @@ USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like G
 BLOCKED_TITLES = ("just a moment", "access denied", "attention required", "are you a robot", "captcha", "403 forbidden", "verify you are human")
 HIDE_OVERLAYS = """
 [id*="cookie" i],[class*="cookie" i],[id*="consent" i],[class*="consent" i],[id*="gdpr" i],[class*="gdpr" i],
-[aria-label*="cookie" i],[role="dialog"],[class*="newsletter" i],[class*="subscribe-modal" i],[class*="paywall" i]
+[aria-label*="cookie" i],[role="dialog"],[class*="newsletter" i],[class*="subscribe-modal" i],[class*="paywall" i],
+[id*="ask-ai" i],[class*="ask-ai" i],[class*="askai" i],[aria-label*="ask ai" i],[class*="ai-assistant" i],[class*="chat-widget" i],
+[class*="chatbot" i],[id*="intercom" i],[class*="intercom" i],[id*="drift-" i],[class*="crisp-client" i]
 {display:none !important}
 html,body{overflow:visible !important;position:static !important}
+"""
+# Small floating assistants ("Ask AI", "Chat with us") that styles cannot name: hide fixed or sticky elements whose own text says so.
+HIDE_FLOATING_ASSISTANTS = r"""
+() => {
+  const pattern = /^(ask( the)?( ai| assistant| docs)?|ai assistant|chat( with us| with ai)?|ask ai [\w ]{0,12})$/i;
+  let hidden = 0;
+  for (const el of document.querySelectorAll('button, a, div, span, aside, section')) {
+    const text = (el.innerText || '').trim().replace(/\s+/g, ' ');
+    if (!text || text.length > 30 || !pattern.test(text)) continue;
+    const box = el.getBoundingClientRect();
+    if (box.width * box.height > 40000) continue;
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      const position = getComputedStyle(node).position;
+      if (position === 'fixed' || position === 'sticky') { node.style.setProperty('display', 'none', 'important'); hidden += 1; break; }
+    }
+  }
+  return hidden;
+}
 """
 FIND = """
 (quote) => {
@@ -144,6 +164,7 @@ def make_capture(config: SourceCaptureConfig):
                     # Not add_style_tag: newer Playwright injects via a data: fetch that strict connect-src CSPs reject.
                     page.evaluate("css => { const s = document.createElement('style'); s.textContent = css;"
                                   " (document.head || document.documentElement).appendChild(s); }", HIDE_OVERLAYS)
+                    page.evaluate("(" + HIDE_FLOATING_ASSISTANTS.strip() + ")()")  # called explicitly: never rely on function-string detection
                     page.evaluate(f"document.documentElement.style.zoom = '{config.page_zoom}'")  # bigger text on the 810 px card
                     page.wait_for_timeout(400)
                     found = page.evaluate(FIND, quote)

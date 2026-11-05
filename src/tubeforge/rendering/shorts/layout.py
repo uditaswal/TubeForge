@@ -6,6 +6,7 @@ before any frame is eligible for encoding.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -137,18 +138,55 @@ def background():
     return Image.fromarray(rgb).resize((WIDTH, HEIGHT), Image.Resampling.BILINEAR)
 
 
+# Words a caption group should not end on: the thought is unfinished and the next group must complete it.
+_WEAK_END = frozenset("a an the of to in on for with by at from into onto than as and or but so if nor yet is are was were be "
+                      "been am do does did can could will would should may might must not no my your its their our his her this "
+                      "that these those which who whom whose about over under per via".split())
+_SENTENCE_END = re.compile(r"[.!?…][\"')\]]*$")
+_BREAK_PUNCT = re.compile(r"[,;:][\"')\]]*$")
+
+
+def _group_cost(words: tuple[str, ...]) -> float:
+    """Lower is a better caption group: 2-3 words, ends a phrase, never straddles a sentence end."""
+    cost = {3: 0.0, 2: 0.3, 1: 1.2}[len(words)]
+    last = words[-1]
+    if any(_SENTENCE_END.search(word) for word in words[:-1]):
+        cost += 10.0          # "...YOURSELF. EVEN": the next sentence starts inside this group
+    if _SENTENCE_END.search(last) or _BREAK_PUNCT.search(last):
+        cost -= 0.4 if len(words) > 1 else 0.9
+    elif re.sub(r"[^\w']", "", last).lower() in _WEAK_END:
+        cost += 6.0           # "NOT A / WALL": the group ends on an article, preposition or auxiliary
+    return cost
+
+
 def caption_groups(caption: str) -> tuple[tuple[str, ...], ...]:
-    result, current = [], []
-    for word in caption.upper().split():
-        if font(CAPTION_SIZE, display=True).getlength(word) + 12 > 850:
+    """Split a caption into display groups of at most three words that fit the caption width.
+
+    Groups break at phrase boundaries: never on an article, preposition, conjunction or auxiliary,
+    and never across the end of a sentence. Word order and count are unchanged, so alignment timings still map one to one.
+    """
+    words = caption.upper().split()
+    measure = font(CAPTION_SIZE, display=True).getlength
+    for word in words:
+        if measure(word) + 12 > 850:
             raise LayoutError("caption_token_overflow", "caption", word)
-        if current and (len(current) == 3 or font(CAPTION_SIZE, display=True).getlength(" ".join([*current, word])) + 12 > 850):
-            result.append(tuple(current))
-            current = []
-        current.append(word)
-    if current:
-        result.append(tuple(current))
-    return tuple(result)
+    best: list[float] = [0.0] + [float("inf")] * len(words)
+    take = [0] * (len(words) + 1)
+    for end in range(1, len(words) + 1):
+        for size in (3, 2, 1):                 # on a tie the larger group wins
+            if size > end:
+                continue
+            group = tuple(words[end - size:end])
+            if size > 1 and measure(" ".join(group)) + 12 > 850:
+                continue
+            total = best[end - size] + _group_cost(group)
+            if total < best[end]:
+                best[end], take[end] = total, size
+    result, end = [], len(words)
+    while end > 0:
+        result.append(tuple(words[end - take[end]:end]))
+        end -= take[end]
+    return tuple(reversed(result))
 
 
 class SceneRenderer:
