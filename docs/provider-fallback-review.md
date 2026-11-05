@@ -89,7 +89,39 @@ keep their original routing choices. The historical caption-timing fixture is
 unchanged, and its existing README mismatch is addressed by snapshot-hash
 verification rather than changing the immutable source packet.
 
+## Requested recheck — VERIFIED (5 November 2026, local stub scope)
+
+Tested branch head `7f90f80`. `dev` remains at `04ab27b`, containing the inline
+script escape fix `ab12d63`. The working tree was clean and `git rebase dev`
+returned `Current branch codex/provider-fallback is up to date.` No commits
+needed replaying and no stash was reapplied.
+
+```sh
+PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q \
+ tests/test_api_workflow.py::test_every_inline_dashboard_script_parses \
+ tests/test_provider_routing_api.py tests/test_script_routing_ui.py
+```
+
+Result: **14 passed**, one existing Starlette 422-name deprecation warning.
+The inline-script parse test passes; Chromium reported no SyntaxError or other
+page exceptions, so there is no failing script index/Node syntax output to report.
+
+Fresh signed-in Chromium check used an isolated temporary database and stub
+runners. It passed desktop 1280×900, tablet 768×1024 and mobile 390×844 checks,
+with no horizontal overflow. Actual API actions covered Codex only, Claude only
+and automatic fallback; save/conflict/reload, form preservation, filtered writer
+choices, inherited routing and actual fallback writer display. Additional mobile
+actions saved Claude only, submitted a job, changed defaults to Codex only,
+reloaded, and confirmed the existing mobile job still retained Claude only.
+Desktop/mobile and actual-writer screenshots were inspected.
+
+Fresh captures, replay harnesses and tested-head evidence are saved locally in
+`artifacts/review/provider-fallback-recheck-20261105/`. This verifies the current
+branch's local stub workflow; it does not claim deployment or live-provider
+acceptance. No production data, runner code, approvals or allowances changed.
+
 ## Next scope
 
-M4 and the design-token milestone are the next phase. No Day review UI was
-changed in this lane. No merge or remote push is authorized.
+Operator review of Track E; migration `20261105_0032` is required when deploying
+updated web/worker/scheduler processes. M4 and design-token acceptance are tracked
+separately and retain their existing status. No merge or remote push is authorized.
