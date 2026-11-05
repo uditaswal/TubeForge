@@ -125,8 +125,11 @@ def test_caption_timing_packet_is_distinct_and_source_grounded() -> None:
     excerpt = request.request.sources[0].excerpt or ""
     assert "local waveform aligner" in excerpt
     assert "The currently spoken word is yellow" in excerpt
-    readme = (Path(__file__).resolve().parents[1] / "readme.md").read_text(encoding="utf-8")
-    assert re.sub(r"\s+", " ", excerpt) in re.sub(r"\s+", " ", readme)
+    # This is a captured historical source packet, not a live README scrape.
+    # Keep its bytes immutable when operator docs change; rewriting it would
+    # create a different source packet and undermine allowance-replay coverage.
+    import hashlib
+    assert hashlib.sha256(excerpt.encode()).hexdigest() == "c2fa20ec2004b1cd4a60a4dd086e7891b38427133f84fd6ab43a6b1d868dabca"
     prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
     assert "Copy ContentPackage.request exactly from REQUEST" in prompt
     assert "next bug" not in prompt
@@ -247,9 +250,11 @@ def test_production_content_selection_uses_the_typed_host_runner(tmp_path: Path)
             }
         )
         provider = create_content_provider(settings, database.session_factory)
-        assert isinstance(provider, HostRunnerContentProvider)
-        assert provider.config.model == "gpt-5.6-sol"
-        assert provider.config.socket_path == Path("/run/tubeforge-codex/codex.sock")
+        from tubeforge.providers.content.factory import ScriptOwnerRouter
+        assert isinstance(provider, ScriptOwnerRouter)
+        assert isinstance(provider.providers['codex'], HostRunnerContentProvider)
+        assert provider.providers["codex"].config.model == "gpt-5.6-sol"
+        assert provider.providers["codex"].config.socket_path == Path("/run/tubeforge-codex/codex.sock")
     finally:
         database.dispose()
 

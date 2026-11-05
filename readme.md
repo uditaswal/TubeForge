@@ -90,6 +90,9 @@ Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment
 | Reviewing jobs through the API | [docs/operations/api-workflow.md](docs/operations/api-workflow.md) |
 | Platform integrations (YouTube, Meta) | [docs/operations/platform-integrations.md](docs/operations/platform-integrations.md) |
 | Running the script runners as services | [docs/deploy](docs/deploy) |
+| Script routing and membership selection | [docs/script-routing.md](docs/script-routing.md) |
+| Opt-in classic video design tokens (local benchmark option) | [docs/video-design-tokens.md](docs/video-design-tokens.md) |
+| Scene direction review and local benchmark evidence | [docs/video-direction-review.md](docs/video-direction-review.md) |
 | Batch plans: import, queue, disclosure/rights review, staged export | [docs/batch-plans.md](docs/batch-plans.md) |
 | Video quality standard | [docs/SHORT_FORM_VIDEO_RULEBOOK.md](docs/SHORT_FORM_VIDEO_RULEBOOK.md) |
 | Security policy | [SECURITY.md](SECURITY.md) |
@@ -112,5 +115,7 @@ docs/                       Public documentation
 ```
 
 ## Status
+
+In **Generations → Revise one scene**, direction warnings show the selected scene’s teaching purpose/reveal gaps and similar recent channel angles. These are advisory; saving an edit creates a separate draft that needs fresh exact-script and preview approval. Older videos without saved channel context say so.
 
 Local rendering, review and approval workflows are working. Live YouTube upload is gated behind operator OAuth credentials and dry-run by default; Instagram publishing is not implemented. Operator-facing setup details beyond this page are in the `docs/` guides above.

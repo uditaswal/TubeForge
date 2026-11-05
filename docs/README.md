@@ -13,3 +13,5 @@ Public documentation. Start with the [project README](../readme.md).
 - [../SECURITY.md](../SECURITY.md) — secrets handling, scanning, reporting
 
 - [Before-upload channel safety checklist](channel-safety-checklist.md)
+
+- [Video direction review](video-direction-review.md) — advisory scene/channel context and local benchmark evidence

@@ -112,3 +112,13 @@ def test_sfx_peak_fails_above_threshold_and_missing_licence_trail_warns():
         results = qa_check.check(_reference_job(Path(tmp), provenance))
     assert _result(results, "sfx-peak")[0] == "FAIL"
     assert _result(results, "audio-licence-trail")[0] == "WARN"
+
+
+def test_native_landscape_uses_measured_encoded_loudness_not_raw_narration(tmp_path):
+    job=_reference_job(tmp_path,None)
+    (job/'content_package.json').write_text(json.dumps({'metadata':{},'script_sections':[]}))
+    path=job/'final_manifest.json'
+    path.write_text(json.dumps({'metadata':{'audio_loudness':{'before':{'input_i':-21,'input_tp':0},'encoded':{'input_i':-15.76,'input_tp':-2.18}}}}))
+    assert _result(qa_check.check(job),'loudness')[0]=='PASS'
+    path.write_text(json.dumps({'probe':{'audio_loudness':{'encoded':{'input_i':-15,'input_tp':-.5}}}}))
+    assert _result(qa_check.check(job),'loudness')[0]=='FAIL'

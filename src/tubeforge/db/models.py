@@ -636,3 +636,13 @@ class BatchProductionControlRecord(Base):
     __tablename__ = 'batch_production_control'
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     hold: Mapped[bool] = mapped_column(nullable=False, default=False)
+
+
+class ScriptRoutingPolicyRecord(Base):
+    """Append-only operator policy history; newest row applies to future jobs."""
+    __tablename__ = 'script_routing_policies'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mode: Mapped[str] = mapped_column(String(24), nullable=False)
+    preferred_model: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

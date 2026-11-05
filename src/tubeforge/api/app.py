@@ -105,6 +105,13 @@ class RetryJobRequest(BaseModel):
     request: dict[str, object] | None = None
 
 
+class ScriptRoutingPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    mode: str = Field(pattern=r'^(claude_only|codex_only|automatic)$')
+    preferred_model: str = Field(pattern=r'^(sonnet-medium|opus|gpt-sol)$')
+    expected_revision: int = Field(ge=0)
+
+
 class VideoBriefRequest(BaseModel):
     """User-facing shorthand expanded into the durable provider-neutral request."""
     model_config = ConfigDict(extra="forbid")
@@ -135,6 +142,7 @@ class VideoBriefRequest(BaseModel):
     ending: str = Field(default="loop", pattern=r"^(loop|debate)$")
     # Video style: "classic" cards or "story" (a purpose-built picture per scene).
     video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
+    script_routing_mode: str | None = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus|gpt-sol)$")
@@ -312,6 +320,12 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source title and excerpt require a source URL")
     from tubeforge.providers.content.youtube_skills import channel_voice_character_for, voice_for
     choice = value.script_model or ("gpt-sol" if value.script_owner == "codex" else DEFAULT_SCRIPT_MODEL)
+    if value.script_routing_mode == "codex_only":
+        choice = "gpt-sol"
+    elif value.script_routing_mode == "claude_only" and choice == "gpt-sol":
+        choice = DEFAULT_SCRIPT_MODEL
+    if value.script_routing_mode in {"claude_only", "automatic"} and not settings.pipeline.claude.enabled:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="This routing mode requires the Claude runner to be enabled")
     if choice != "gpt-sol" and not settings.pipeline.claude.enabled:
         if value.script_model is None and value.script_owner is None:
             choice = "gpt-sol"  # Claude not configured: fall back to the Codex default
@@ -321,7 +335,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
     return ContentRequest(
-        script_owner=owner, script_model=claude_model, ending=value.ending, video_style=value.video_style,
+        script_owner=owner, script_model=claude_model, script_routing_mode=value.script_routing_mode, ending=value.ending, video_style=value.video_style,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
@@ -1005,10 +1019,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if schedule is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found")
         return runtime.scheduler.run(schedule, run_key=f"manual-{uuid4().hex}")
 
+    from tubeforge.db.script_routing import ScriptRoutingRepository
+    routing_policy = ScriptRoutingRepository(runtime.database.session_factory, claude_enabled=application_settings.pipeline.claude.enabled)
+
+    @app.get('/api/script-routing', tags=['videos'])
+    def get_script_routing():
+        return routing_policy.get()
+
+    @app.put('/api/script-routing', tags=['videos'])
+    def save_script_routing(value: ScriptRoutingPolicyRequest, request: Request):
+        auth_session = runtime.auth.session(request.cookies.get('tubeforge_session'))
+        actor = (runtime.auth.username_for(auth_session.user_id) or str(auth_session.user_id)) if auth_session else 'local-operator'
+        try:
+            return routing_policy.save(**value.model_dump(), actor=actor)
+        except ValueError as error:
+            raise HTTPException(409, detail=str(error)) from error
+
     from tubeforge.api.batch import register_batch_routes
     def batch_request(short):
         from tubeforge.scheduling.batch_requests import build_batch_request
-        return build_batch_request(short, application_settings)
+        return routing_policy.apply(build_batch_request(short, application_settings))
     runtime.scheduler.batch_request_factory = batch_request
     register_batch_routes(app, runtime, batch_request)
 
@@ -1016,6 +1046,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def create_job(request: ContentRequest) -> dict[str, object]:
         """Create a durable job; a separate worker advances it."""
         _reject_retired_format(request, application_settings)
+        try:
+            request = routing_policy.apply(request, enforce_current=True)
+        except ValueError as error:
+            raise HTTPException(422, detail=str(error)) from error
         job = runtime.jobs.create(uuid4().hex, request)
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
         return _job_payload(job)
@@ -1025,6 +1059,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         available_music = runtime.orchestrator.music_catalog.names() if runtime.orchestrator.music_catalog else set()
         try:
             video_request = _video_request(brief, application_settings, available_music=available_music)
+            video_request = routing_policy.apply(video_request, enforce_current=True, preferred_model=brief.script_model)
             _reject_retired_format(video_request, application_settings)
             job = runtime.jobs.create(uuid4().hex, video_request, destination_account_ids=brief.destination_account_ids, video_description=brief.description)
         except ValueError as error:
@@ -1069,10 +1104,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const channelSelect=document.createElement('select');channelSelect.name='channel_identity';channelSelect.disabled=true;
           channelSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading profiles…'}));channelLabel.append(channelSelect);form.insertBefore(channelLabel,presetLabel);
           fetch('/api/content-profiles').then(async response=>{if(!response.ok)throw Error();const data=await response.json();channelSelect.replaceChildren();data.profiles.forEach(profile=>channelSelect.append(Object.assign(document.createElement('option'),{value:profile.identity,textContent:profile.identity+(profile.uses_default?' (default voice)':'')})));channelSelect.value=data.default_identity;channelSelect.disabled=false;}).catch(()=>{channelSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Configured default (profile list unavailable)'}));});
-          const ownerLabel=document.createElement('label');ownerLabel.textContent='Script writer (AI model)';
+          const ownerLabel=document.createElement('label');ownerLabel.textContent='Writer for this video (automatic mode: preferred writer)';
           const ownerSelect=document.createElement('select');ownerSelect.name='script_model';ownerSelect.id='scriptModel';
           ownerSelect.append(Object.assign(document.createElement('option'),{value:'',textContent:'Loading models…'}));ownerLabel.append(ownerSelect);form.insertBefore(ownerLabel,presetLabel);
-          fetch('/api/content-profiles').then(r=>r.ok?r.json():null).then(data=>{if(!data||!data.script_models)return;ownerSelect.replaceChildren();data.script_models.forEach(o=>ownerSelect.append(Object.assign(document.createElement('option'),{value:o.id,textContent:o.label,disabled:!o.enabled})));ownerSelect.value=data.default_script_model;}).catch(()=>{ownerSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'',textContent:'Server default'}));});
+          /* SCRIPT_ROUTING_CONTROLS */
           const endingLabel=document.createElement('label');endingLabel.textContent='How the video ends';
           const endingSelect=document.createElement('select');endingSelect.name='ending';endingSelect.id='videoEnding';
           [['loop','Loop: the last line flows back into the first (better retention)'],['debate','Debate: close on a question that starts an argument in the comments']].forEach(([value,text])=>endingSelect.append(Object.assign(document.createElement('option'),{value,textContent:text})));
@@ -1347,13 +1382,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         new_brief_submit = r"let d=new FormData(e.currentTarget),sources=(window.collectSources?window.collectSources():[]);if(!sources.length)sources=null;let body={title:d.get('title'),notes:d.get('notes').split('\n').map(x=>x.trim()).filter(Boolean),angle:String(d.get('angle')||'').trim()||null,audience:String(d.get('audience')||'general').trim()||'general',sources,duration_seconds:Number(d.get('duration_seconds')),review_mode:d.get('review_mode'),captions_enabled:d.has('captions_enabled'),voice_id:d.get('voice_id')||null,show_source_credit:d.has('show_source_credit'),show_mascot:d.has('show_mascot'),channel_watermark:String(d.get('channel_watermark')||'').trim()||null};let r=await fetch('/api/videos'"
         assert dashboard.count(old_brief_submit) == 1, dashboard.count(old_brief_submit)
         dashboard = dashboard.replace(old_brief_submit, new_brief_submit)
+        from tubeforge.api.script_routing_ui import GENERATION_SUBMIT_SCRIPT
+        submit_start = dashboard.index("document.querySelector('#createForm').onsubmit=async e=>{")
+        submit_end = dashboard.index(';filter.onchange=refresh;', submit_start)
+        dashboard = dashboard[:submit_start] + GENERATION_SUBMIT_SCRIPT + dashboard[submit_end:]
         dashboard = dashboard.replace(
             "if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')))",
             "if(j.artifacts.includes('final'))actions.append(button('Watch video','',()=>openVideo(j,'final','Final video')));else if(j.artifacts.includes('preview'))actions.append(button('Watch preview','secondary',()=>openVideo(j,'preview','Preview')))",
         )
         dashboard = dashboard.replace(
             "${j.artifacts.length} saved artifacts · ${j.event_count} activity events",
-            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Job ${j.id.slice(0,8)} · Script: ${j.script_model||j.script_owner||'codex'} · Style: ${j.video_style||'classic'} · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
+            "${j.artifacts.length} saved artifacts · ${j.event_count} activity events · Job ${j.id.slice(0,8)} · Script: ${j.script_routing?.actual_owner||j.script_model||j.script_owner||'codex'}${j.script_routing?.attempts?.length>1?' (fallback from '+j.script_routing.preferred_owner+')':''} · Policy: ${j.script_routing_mode||'original selection'} · Style: ${j.video_style||'classic'} · Created ${j.created_at?new Date(j.created_at).toLocaleString():'unknown'}",
         )
         dashboard = dashboard.replace(
             "card.append(actions)}async function refresh()",
@@ -1380,6 +1419,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           mdPanel.querySelector('#studioMarkdownSubmit').onclick=async()=>{
             const button=mdPanel.querySelector('#studioMarkdownSubmit'),status=mdPanel.querySelector('#studioMarkdownStatus'),markdown=mdPanel.querySelector('#studioMarkdownText').value;
             if(!markdown.trim()){status.textContent='Paste a markdown plan first.';return;}
+            if(window.scriptRoutingCanSubmit&&!window.scriptRoutingCanSubmit()){status.textContent='Save or reload routing defaults before queuing a plan.';return;}
             button.disabled=true;status.textContent='Validating…';
             try{
               const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');
@@ -1399,7 +1439,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           };
         })();
         </script>"""
-        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}</style></head>")
+        from tubeforge.api.script_routing_ui import ROUTING_SCRIPT, ROUTING_CSS
+        source_controls = source_controls.replace('/* SCRIPT_ROUTING_CONTROLS */', ROUTING_SCRIPT)
+        source_controls = source_controls.replace("join('\n\n')", r"join('\n\n')")
+        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}{ROUTING_CSS}</style></head>")
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         username = (runtime.auth.username_for(login_session.user_id) or "") if login_session else ""
         assert dashboard.count('data-username=""') == 1
@@ -1418,8 +1461,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             can_retry_validation, retry_identity = _can_retry_approved_asset_validation(runtime, job)
             events = runtime.events.list_for_job(job.id)
             payloads.append({
-                **_job_payload(job), "topic": job.request.topic, "script_owner": job.request.script_owner, "script_model": job.request.script_model, "video_style": job.request.video_style,
+                **_job_payload(job), "topic": job.request.topic, "script_owner": job.request.script_owner, "script_model": job.request.script_model, "script_routing_mode": job.request.script_routing_mode, "video_style": job.request.video_style,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
+                "script_routing": next((event.details for event in reversed(events) if event.event_type == "script_routing_completed"), None),
                 "event_count": len(events),
                 "latest_event": {"event_type": events[-1].event_type, "stage": events[-1].details.get("stage") if isinstance(events[-1].details.get("stage"), str) else None, "created_at": _as_ist(events[-1].created_at)} if events else None,
                 "destinations": runtime.jobs.destination_intents(job.id),
@@ -1548,8 +1592,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"id": "opus", "label": "Claude Opus 5.5 · high effort" + suffix, "enabled": claude.enabled},
             {"id": "gpt-sol", "label": "Codex · " + config.model, "enabled": True},
         ]
-        default_model = DEFAULT_SCRIPT_MODEL if claude.enabled else "gpt-sol"
-        return {"default_identity": config.default_channel_identity, "script_models": models, "default_script_model": default_model, "profiles": [{"identity": name, "uses_default": name not in config.voice_profiles} for name in identities]}
+        policy = routing_policy.get()
+        all_models = models
+        if policy['mode'] == 'codex_only':
+            models = [model for model in models if model['id'] == 'gpt-sol']
+        elif policy['mode'] == 'claude_only':
+            models = [model for model in models if model['id'] != 'gpt-sol']
+        default_model = policy['preferred_model']
+        return {"default_identity": config.default_channel_identity, "script_models": models, "all_script_models": all_models, "default_script_model": default_model, "profiles": [{"identity": name, "uses_default": name not in config.voice_profiles} for name in identities]}
 
     @app.get("/api/voices", tags=["voices"])
     def list_voices() -> list[dict[str, str]]:
@@ -1819,7 +1869,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     checks = {"status": "review_needed", "reason": str(failure)}
                 except Exception as failure:
                     checks = {"status": "unavailable", "reason": str(failure)}
-            return {"package": package.model_dump(mode="json"), "reviewed_identity": artifact.checksum_sha256, "skill_checks": checks}
+            from tubeforge.pipeline.direction import direction_report
+            context = None
+            saved = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "direction_context")
+            if saved is not None:
+                payload = Path(saved.path).read_bytes() if Path(saved.path).is_file() else b""
+                if hashlib.sha256(payload).hexdigest() != saved.checksum_sha256:
+                    raise HTTPException(status_code=409, detail="direction context is unavailable or changed")
+                context = json.loads(payload)
+                if context.get("job_id") != job_id or context.get("channel_identity") != package.request.channel_identity:
+                    raise HTTPException(status_code=409, detail="direction context does not match this video")
+            return {"package": package.model_dump(mode="json"), "reviewed_identity": artifact.checksum_sha256,
+                    "skill_checks": checks, "direction": direction_report(package, context)}
         except KeyError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
 

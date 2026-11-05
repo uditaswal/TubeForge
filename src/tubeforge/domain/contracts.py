@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from enum import StrEnum
 
+from pydantic.json_schema import SkipJsonSchema
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator, model_serializer
 
 from tubeforge.rendering.shorts.schema import REFERENCE_SHORT_MAX_SECONDS, ShortsTopic
@@ -78,6 +79,7 @@ class ContentRequest(DomainModel):
     # serialized form so existing jobs, cache keys and host requests stay
     # byte-identical; only a non-default owner changes them.
     script_owner: str = Field(default="codex", pattern=r"^(codex|claude)$")
+    script_routing_mode: SkipJsonSchema[str | None] = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     # Which model the owner runs (Claude only): "sonnet-medium" | "opus". None = owner default.
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus)$")
     # Render-only options (reference Shorts): never part of generation identity, omitted while default.
@@ -96,6 +98,8 @@ class ContentRequest(DomainModel):
     @model_serializer(mode="wrap")
     def omit_default_script_fields(self, handler):
         value = handler(self)
+        if self.script_routing_mode is None:
+            value.pop("script_routing_mode", None)
         if not self.show_source_credit:
             value.pop("show_source_credit", None)
         if not self.show_mascot:
@@ -114,6 +118,10 @@ class ContentRequest(DomainModel):
 
     @model_validator(mode="after")
     def require_unique_source_ids(self) -> ContentRequest:
+        if self.script_routing_mode == "claude_only" and self.script_owner != "claude":
+            raise ValueError("Claude-only jobs require the Claude script owner")
+        if self.script_routing_mode == "codex_only" and (self.script_owner != "codex" or self.script_model is not None):
+            raise ValueError("Codex-only jobs require the Codex script owner and model")
         if self.prompt_version == "m6-content-v8":
             if self.aspect_ratio != "9:16" or not 25 <= self.target_duration_seconds <= REFERENCE_SHORT_MAX_SECONDS:
                 raise ValueError(f"reference Shorts require 9:16 and a 25–{REFERENCE_SHORT_MAX_SECONDS} second target")
@@ -133,7 +141,7 @@ class ContentRequest(DomainModel):
 
 def generation_request_content(request: ContentRequest) -> ContentRequest:
     """Send only script inputs to a writer, excluding local render options."""
-    updates = {"show_source_credit": False, "show_mascot": False,
+    updates = {"script_routing_mode": None, "show_source_credit": False, "show_mascot": False,
                "channel_watermark": None, "video_style": "classic"}
     if request.prompt_version in {"m6-content-v7", "m6-content-v8"}:
         updates["sources"] = tuple(source.model_copy(update={"retrieved_at": None, "content_sha256": None})
@@ -338,6 +346,15 @@ class ClipCandidate(DomainModel):
     target_duration_seconds: int = Field(ge=15, le=180)
 
 
+class ScriptRoutingEvidence(DomainModel):
+    mode: str = Field(pattern=r"^(claude_only|codex_only|automatic)$")
+    preferred_owner: str = Field(pattern=r"^(codex|claude)$")
+    actual_owner: str = Field(pattern=r"^(codex|claude)$")
+    provider: str
+    attempts: tuple[dict[str, object], ...] = Field(max_length=2)
+    usage: dict[str, object] = Field(default_factory=dict)
+
+
 class ContentPackage(DomainModel):
     """Validated single-call creative plan consumed by deterministic stages."""
 
@@ -351,12 +368,15 @@ class ContentPackage(DomainModel):
     hook_options: tuple[str, ...] = Field(default=(), max_length=5)
     clip_candidates: tuple[ClipCandidate, ...] = Field(default=(), max_length=8)
     reference_short: ShortsTopic | None = None
+    script_routing: SkipJsonSchema[ScriptRoutingEvidence | None] = None
 
     @model_serializer(mode="wrap")
     def preserve_legacy_serialization(self, handler):
         value = handler(self)
         if self.reference_short is None:
             value.pop("reference_short", None)
+        if self.script_routing is None:
+            value.pop("script_routing", None)
         return value
 
     @model_validator(mode="after")

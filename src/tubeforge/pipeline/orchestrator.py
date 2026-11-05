@@ -26,6 +26,7 @@ from tubeforge.domain.providers import ContentProvider, MediaProvider, Publisher
 from tubeforge.domain.states import ApprovalGate, JobState
 from tubeforge.pipeline.assets import ASSET_VALIDATION_VERSION, AssetAcquisitionCancelled, AssetAcquisitionService, AssetDownloader, AssetLimits, asset_policy_valid, attribution_manifest, inspect_media, scene_request, select_candidate, validate_shorts_visual_manifest
 from tubeforge.domain.video_duration import SHORTS_MAX_DURATION_SECONDS, SHORTS_MIN_DURATION_SECONDS, shorts_duration_allowed
+from tubeforge.pipeline.direction import direction_report
 from tubeforge.pipeline.alignment import LocalWhisperDTWAligner, LocalWordAligner, WordTiming, verify_word_alignment
 from tubeforge.pipeline.captions import render_highlighted_ass, render_srt, render_vtt, timed_phrases
 from tubeforge.pipeline.narration import NarrationPhrase, segment_content_package
@@ -293,14 +294,20 @@ class PipelineOrchestrator:
         if job.state is JobState.CONTENT_GENERATING:
             package = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "content_package")
             if package is None:
+                self._direction_context(job)
                 package = self.content.generate_package(self._effective_content_request(job)).model_dump(mode="json")
                 provenance = getattr(self.content, "last_provenance", None)
                 if provenance:
                     self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "content_generation_evidence", {"provenance": provenance, "usage": getattr(self.content, "last_usage", None) or {}})
                 self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "content_package", package)
+                if package.get("script_routing"):
+                    self.events.append(job.id, "script_routing_completed", **package["script_routing"])
             if self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "video_plan") is None:
                 value = ContentPackage.model_validate(package)
                 self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "video_plan", video_plan_from_package(value, aspect_ratio=value.request.aspect_ratio).model_dump(mode="json"))
+            value = ContentPackage.model_validate(package)
+            context = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "direction_context")
+            self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "video_direction_report", direction_report(value, context))
             self._transition(job, JobState.CONTENT_READY); return
         if job.state is JobState.CONTENT_READY:
             self._transition(job, JobState.SCRIPT_APPROVAL_REQUIRED); return
@@ -386,6 +393,7 @@ class PipelineOrchestrator:
             visual_plan = video_plan_from_package(package, aspect_ratio=job.request.aspect_ratio)
             self._replace_json(job.id, JobState.CONTENT_GENERATING, "video_plan", visual_plan.model_dump(mode="json"))
             visual_review = storyboard_manifest(package, visual_plan, accepted, scene_contract_sha256=scene_contract_checksum)
+            visual_review["direction"] = direction_report(package, self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "direction_context"))
             pages = render_contact_sheets(visual_review, self._artifact_path(job.id, "storyboard"))
             if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled after contact sheet")
             for index, page in enumerate(pages, 1):
@@ -1355,6 +1363,21 @@ class PipelineOrchestrator:
         request = job.request.model_copy(update=updates)
         self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "effective_content_request", request.model_dump(mode="json"))
         return request
+
+    def _direction_context(self, job: PipelineJob) -> dict[str, object]:
+        # A retry must never resample history or modify the writer's cache key.
+        saved = self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "direction_context")
+        if saved is not None:
+            value = self._required_json(job.id, JobState.CONTENT_GENERATING, "direction_context")
+            if value.get("version") != "channel-angle-context-v1" or value.get("job_id") != job.id or value.get("channel_identity") != job.request.channel_identity:
+                raise ProviderValidationError("saved direction context does not match this job")
+            return value
+        value = {"version": "channel-angle-context-v1", "job_id": job.id,
+                 "channel_identity": job.request.channel_identity,
+                 "recent_angles": self.jobs.recent_channel_angles(job),
+                 "scope": "local briefs; editorial review only; not sources or analytics"}
+        self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "direction_context", value)
+        return value
 
     def _load_json_artifact(self, job_id: str, stage: JobState, name: str) -> dict[str, object] | None:
         artifact = self._valid_artifact(job_id, stage, name)

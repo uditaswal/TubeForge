@@ -1,0 +1,76 @@
+{
+  "base_content_package_sha256": "c7c7a4437b1c358a8515f9a83499273c95b0c499fd5369a7ef63c16d8ebfbbf0",
+  "changes": {
+    "sec2": "Qualifies the scope as NCSC exposure-check advice instead of claiming fixed PHP releases remain vulnerable.",
+    "sec6": "Removes the unsupported Black October nickname; uses source-backed prioritization instead."
+  },
+  "narrations": [
+    "Watch this if you run a PHP website, because a critical security flaw could let attackers run commands on your server.",
+    "The UK's National Cyber Security Centre identifies two flaws, CVE-2026-109618 and CVE-2026-109619. It urges organisations using any PHP version to check their exposure.",
+    "Here is how it works. An attacker can trigger an out-of-memory condition, which corrupts memory. Under certain conditions, that can lead to unauthenticated remote code execution, meaning no login is needed.",
+    "The good news is that PHP has released a fix. First, find every system running PHP, starting with the ones facing the internet. Then update to the latest version.",
+    "If you cannot update yet, the PHP Foundation has published temporary mitigations. If those are not possible either, the NCSC says to consider taking the system offline, and check it for backdoors.",
+    "Start with your internet-facing systems, then update the PHP installations behind them."
+  ],
+  "parent_job_id": "2c9db459cc68455f9691fcfc70584a7e",
+  "scope": "Editorial proposal only; no job, approval, attempt counter, audio or artifact was changed.",
+  "script_sections": [
+    {
+      "claim_ids": [
+        "c1"
+      ],
+      "contains_factual_claims": true,
+      "narration": "Watch this if you run a PHP website, because a critical security flaw could let attackers run commands on your server.",
+      "scene_id": "scene1",
+      "section_id": "sec1"
+    },
+    {
+      "claim_ids": [
+        "c2"
+      ],
+      "contains_factual_claims": true,
+      "narration": "The UK's National Cyber Security Centre identifies two flaws, CVE-2026-109618 and CVE-2026-109619. It urges organisations using any PHP version to check their exposure.",
+      "scene_id": "scene2",
+      "section_id": "sec2"
+    },
+    {
+      "claim_ids": [
+        "c3"
+      ],
+      "contains_factual_claims": true,
+      "narration": "Here is how it works. An attacker can trigger an out-of-memory condition, which corrupts memory. Under certain conditions, that can lead to unauthenticated remote code execution, meaning no login is needed.",
+      "scene_id": "scene3",
+      "section_id": "sec3"
+    },
+    {
+      "claim_ids": [
+        "c4"
+      ],
+      "contains_factual_claims": true,
+      "narration": "The good news is that PHP has released a fix. First, find every system running PHP, starting with the ones facing the internet. Then update to the latest version.",
+      "scene_id": "scene4",
+      "section_id": "sec4"
+    },
+    {
+      "claim_ids": [
+        "c5"
+      ],
+      "contains_factual_claims": true,
+      "narration": "If you cannot update yet, the PHP Foundation has published temporary mitigations. If those are not possible either, the NCSC says to consider taking the system offline, and check it for backdoors.",
+      "scene_id": "scene5",
+      "section_id": "sec5"
+    },
+    {
+      "claim_ids": [
+        "c4"
+      ],
+      "contains_factual_claims": true,
+      "narration": "Start with your internet-facing systems, then update the PHP installations behind them.",
+      "scene_id": "scene6",
+      "section_id": "sec6"
+    }
+  ],
+  "source_checked_on": "2026-11-05",
+  "source_url": "https://www.ncsc.gov.uk/news/critical-security-issue-affecting-php",
+  "status": "requires_exact_operator_approval"
+}
