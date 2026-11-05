@@ -35,6 +35,8 @@ class BatchExportStore:
         self._safe_root()
         if not disclosure or not disclosure.get('eligible') or type(disclosure.get('platform_disclosure_required')) is not bool:
             raise ValueError('reviewed disclosure evidence is required')
+        if disclosure.get('reviewed_identity') != reviewed_identity or disclosure.get('final_checksum') != reviewed_checksums['final']:
+            raise ValueError('disclosure does not match the reviewed artifact')
         for value in [plan_id, short['id']]:
             if not re.fullmatch(r'[a-z0-9-]{1,120}', value):
                 raise ValueError('invalid export plan or short id')
@@ -47,7 +49,7 @@ class BatchExportStore:
             'title': short['title'], 'description': metadata.get('description') or short['concept'],
             'tags': short.get('tags') or metadata.get('tags', []), 'thumbnail_text': thumbnail_text,
             'plan_id': plan_id, 'short_id': short['id'], 'date': date,
-            'publish_at': short.get('publish_at'), 'source_urls': short.get('sources', []),
+            'publish_at': short.get('publish_at'), 'source_urls': sorted({s['url'] for s in disclosure['sources']}),
             'disclosure': disclosure, 'originality_report': disclosure['originality'],
             'qa': qa, 'reviewed_identity': reviewed_identity, 'reviewed_checksums': reviewed_checksums,
             'files': {'final.mp4': reviewed_checksums['final'], 'thumbnail.jpg': reviewed_checksums['thumbnail']},

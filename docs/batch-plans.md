@@ -95,3 +95,34 @@ the staged manifest. Missing evidence blocks approval and staging. Catalog music
 must resolve to its actual licence terms; a file pointer alone is insufficient.
 Changing the source/audio evidence invalidates the previous approval and export.
 Nothing in this workflow publishes a video or sets a platform disclosure control.
+
+## Channel repetition and cadence
+
+Use the [before-upload checklist](channel-safety-checklist.md) when reviewing.
+Day review shows advisory repetition and cadence warnings from the structured
+`GET /api/batch-plans/safety-report` response. Repetition covers the selected day
+and preceding six days, grouped by channel. Missing render evidence stays unknown.
+Hook formulas are simple question/conditional/statement heuristics. Phrase and
+word-overlap matches need human judgment; they do not predict platform enforcement.
+Cadence covers stored plans across plan IDs, including adjacent days for spacing.
+Import preview and commit responses include `cadence`; Batch plans displays those
+warnings. Missing or timezone-free publish times cannot be assessed and warn.
+
+Configure `channel_safety` in the application YAML. Defaults are three Shorts per
+channel per day, 180 minutes apart, using Asia/Kolkata for day boundaries. These
+are local review preferences, not platform limits. Override them per channel:
+
+```yaml
+channel_safety:
+  defaults: {max_per_day: 3, min_spacing_minutes: 180, timezone: Asia/Kolkata}
+  channels:
+    engineering: {max_per_day: 2, min_spacing_minutes: 240, timezone: Asia/Kolkata}
+  similarity_threshold: 0.7
+  repeated_phrase_words: 5
+```
+
+The guard warns; it does not block production, move dates, or schedule uploads.
+
+For undated Shorts, the repetition window uses the stored job/topic creation time;
+`window_basis` identifies that fallback. Entries without either usable timestamp
+are listed in `unassessed_ids`. Cadence still warns that a publish time is missing.

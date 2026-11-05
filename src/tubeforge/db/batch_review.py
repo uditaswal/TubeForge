@@ -57,12 +57,7 @@ class BatchReviewRepository:
             except (OSError, ValueError):
                 pass
         from tubeforge.pipeline.channel_safety import disclosure_record, read_audio
-        audio = read_audio(final.path) if final else {}
-        if self.music_catalog:
-            rights = {r.checksum_sha256: r.model_dump(mode='json', exclude={'path'}) for r in self.music_catalog.list()}
-            for entry in audio.get('audio_licenses', []):
-                if entry.get('mode') == 'track' and entry.get('source_sha256') in rights:
-                    entry.update(rights[entry['source_sha256']])
+        audio = read_audio(final.path, self.music_catalog) if final else {}
         disclosure = disclosure_record(package or {}, audio, job_id=topic.generation_job_id, final_checksum=checksums.get('final'))
         if identity:
             identity = hashlib.sha256((identity + disclosure['evidence_identity']).encode()).hexdigest()
@@ -81,7 +76,16 @@ class BatchReviewRepository:
         if state == 'ready' and not export_ok:
             state = 'needs_review'
             current = False
-        return {'disclosure': disclosure, 'id': options['batch_plan']['id'], 'short': options['batch_plan'], 'job_id': topic.generation_job_id,
+        layout_family = None
+        render_qa = next((a for a in artifacts if a.name == 'final_qa'), None)
+        if render_qa:
+            try:
+                if Path(render_qa.path).stat().st_size <= 2_000_000 and file_checksum(render_qa.path) == render_qa.checksum_sha256:
+                    layout_family = json.loads(Path(render_qa.path).read_text()).get('layout_family')
+            except (OSError, ValueError):
+                pass
+        request = json.loads(job.request_json) if job else {}
+        return {'created_at': topic.created_at.replace(tzinfo=UTC).isoformat(), 'layout_family': layout_family, 'music': next((entry.get('source_sha256') or entry.get('mode') for entry in audio.get('audio_licenses', []) if entry.get('asset') == 'music'), None), 'voice': request.get('voice_id'), 'disclosure': disclosure, 'id': options['batch_plan']['id'], 'short': options['batch_plan'], 'job_id': topic.generation_job_id,
                 'production_state': job.state if job else 'not_started', 'state': state,
                 'decision': review.get('decision') if current else None, 'reviewed_identity': identity,
                 'checksum': checksums.get('final'), 'reviewed_checksums': checksums, 'export_url': f'/api/batch-plans/{options["batch_plan"]["id"]}/export' if export_ok else None, 'available': available, 'error': error,

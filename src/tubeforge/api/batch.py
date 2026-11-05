@@ -48,7 +48,13 @@ def register_batch_routes(app, runtime, build_request):
         plan = parse_batch(value.markdown)
         if plan.errors:
             raise HTTPException(422, detail=[error.model_dump() for error in plan.errors])
-        return {'committed': value.commit, 'items': repository.import_shorts(plan.shorts, commit=value.commit, plan_id=value.plan_id)}
+        from tubeforge.pipeline.channel_reports import cadence_report
+        results = repository.import_shorts(plan.shorts, commit=value.commit, plan_id=value.plan_id)
+        incoming = {r['id']: r['short'] for r in results if r['action'] in {'created', 'updated'}}
+        combined = {item['short']['id']: item['short'] for item in repository.list()}
+        combined.update(incoming)
+        cadence = cadence_report(list(combined.values()), app.state.settings.channel_safety)
+        return {'committed': value.commit, 'items': results, 'cadence': cadence}
 
     @app.get('/api/batch-plans', tags=['batch'])
     def list_plans(day: date | None = None, plan_id: str | None = None):
@@ -108,6 +114,14 @@ def register_batch_routes(app, runtime, build_request):
     def day_review(day: date | None = None):
         return reviews.list_day(day.isoformat() if day else None)
 
+    @app.get('/api/batch-plans/safety-report', tags=['batch'])
+    def safety_report(day: date | None = None):
+        from tubeforge.pipeline.channel_reports import cadence_report, repetition_report
+        items = reviews.list_day()
+        config = app.state.settings.channel_safety
+        return {'repetition': repetition_report(items, config, day.isoformat() if day else None),
+                'cadence': cadence_report([item['short'] for item in items], config)}
+
     @app.post('/api/batch-plans/{short_id}/review', tags=['batch'])
     def review_decision(short_id: str, value: BatchReviewRequest, request: Request):
         session = runtime.auth.session(request.cookies.get('tubeforge_session'))
@@ -118,6 +132,13 @@ def register_batch_routes(app, runtime, build_request):
             raise HTTPException(404, detail=str(error)) from error
         except (ValueError, OSError) as error:
             raise HTTPException(409, detail=str(error)) from error
+
+    @app.get('/docs/channel-safety-checklist', response_class=HTMLResponse, include_in_schema=False)
+    def channel_safety_checklist():
+        import html
+        from pathlib import Path
+        content = Path('docs/channel-safety-checklist.md').read_text(encoding='utf-8')
+        return '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Before-upload checklist</title><main><pre style="white-space:pre-wrap;max-width:70ch;margin:2rem auto">' + html.escape(content) + '</pre><a href="/batch/review">Return to Day review</a></main></html>'
 
     @app.get('/batch/review', response_class=HTMLResponse, include_in_schema=False)
     def day_review_page(request: Request):

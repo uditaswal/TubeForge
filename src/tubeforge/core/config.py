@@ -812,6 +812,9 @@ class AuthConfig(BaseModel):
     login_window_seconds: int = Field(default=300, ge=30, le=3600)
 
 
+from tubeforge.pipeline.channel_reports import ChannelSafetyConfig
+
+
 class Settings(BaseModel):
     """Complete non-secret TubeForge configuration."""
 
@@ -822,6 +825,7 @@ class Settings(BaseModel):
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    channel_safety: ChannelSafetyConfig = Field(default_factory=ChannelSafetyConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
 
 

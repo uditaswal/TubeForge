@@ -22,13 +22,17 @@ def disclosure_record(package, audio, *, job_id, final_checksum):
     if not scenes or any(not s.get('vo') or (not s.get('source_ids') and s.get('template') not in {'loop', 'cta'}) for s in scenes):
         missing.append('source-grounded scenes')
     licenses = audio.get('audio_licenses') or []
+    if not isinstance(licenses, list) or any(not isinstance(entry, dict) for entry in licenses):
+        licenses = []
+    if not any(entry.get('asset') == 'music' and entry.get('mode') in {'synthesized', 'silence', 'track'} for entry in licenses):
+        missing.append('music mode or licence')
     if not licenses:
         missing.append('audio licence trail')
     # A catalog pointer alone is not the full licence. Do not invent its terms.
     for entry in licenses:
         if entry.get('mode') == 'track' and not (entry.get('license_name') and entry.get('license_url')):
             missing.append('catalog music licence terms')
-        if str(entry.get('asset', '')).startswith('sfx:') and not entry.get('license'):
+        if str(entry.get('asset', '')).startswith('sfx:') and not (entry.get('license') and entry.get('source')):
             missing.append('SFX licence terms')
     ns = SimpleNamespace
     problems = originality_problems(ns(request=ns(sources=[ns(source_id=s.get('source_id'), excerpt=s.get('excerpt', '')) for s in sources]),
@@ -49,11 +53,19 @@ def disclosure_record(package, audio, *, job_id, final_checksum):
             'missing': sorted(set(missing)), 'eligible': not missing and not problems}
 
 
-def read_audio(final_path):
+def read_audio(final_path, music_catalog=None):
     path = Path(final_path).parent / 'reference' / 'mix' / 'audio-provenance.json'
     try:
         if path.stat().st_size > 2_000_000 or path.is_symlink():
             return {}
-        return json.loads(path.read_text(encoding='utf-8'))
+        audio = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(audio, dict) or not isinstance(audio.get('audio_licenses', []), list) or any(not isinstance(entry, dict) for entry in audio.get('audio_licenses', [])):
+            return {}
+        if music_catalog:
+            rights = {r.checksum_sha256: r.model_dump(mode='json', exclude={'path'}) for r in music_catalog.list()}
+            for entry in audio.get('audio_licenses', []):
+                if entry.get('mode') == 'track' and entry.get('source_sha256') in rights:
+                    entry.update(rights[entry['source_sha256']])
+        return audio
     except (OSError, ValueError):
         return {}

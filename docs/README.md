@@ -10,3 +10,5 @@ Public documentation. Start with the [project README](../readme.md).
 - [deploy/](deploy) — systemd units and runtime notes for the Codex and Claude script runners; `scripts/restart_stack.sh` restarts the whole stack
 - [SHORT_FORM_VIDEO_RULEBOOK.md](SHORT_FORM_VIDEO_RULEBOOK.md) — the video quality standard every render is judged against
 - [../SECURITY.md](../SECURITY.md) — secrets handling, scanning, reporting
+
+- [Before-upload channel safety checklist](channel-safety-checklist.md)
