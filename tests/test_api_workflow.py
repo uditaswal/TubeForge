@@ -712,12 +712,13 @@ def test_every_inline_dashboard_script_parses(tmp_path: Path) -> None:
     with TestClient(create_app(settings)) as client:
         client.app.state.runtime.auth.create_admin("script-operator", "correct-horse-battery-staple")
         assert client.post("/login", json={"username": "script-operator", "password": "correct-horse-battery-staple"}).status_code == 200
-        html = client.get("/").text
-    scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.S)
-    assert len(scripts) >= 8
+        pages = {path: client.get(path).text for path in ("/", "/batch", "/batch/review")}
     context = quickjs.Context()
-    for index, source in enumerate(scripts):
-        try:
-            context.eval("(function(){new Function(" + __import__("json").dumps(source) + ");return 1})()")
-        except quickjs.JSException as error:
-            raise AssertionError(f"inline dashboard script {index} does not parse: {error}") from error
+    for path, html in pages.items():
+        scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.S)
+        assert len(scripts) >= (8 if path == "/" else 1), path
+        for index, source in enumerate(scripts):
+            try:
+                context.eval("(function(){new Function(" + __import__("json").dumps(source) + ");return 1})()")
+            except quickjs.JSException as error:
+                raise AssertionError(f"inline script {index} on {path} does not parse: {error}") from error
