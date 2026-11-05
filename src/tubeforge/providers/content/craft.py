@@ -315,6 +315,112 @@ def fact_dump_problems(package, *, hard_only: bool = False) -> list[str]:
     return problems
 
 
+# --- Naturalness advisories (scorecard and editor only; never a hard gate) -----------------------------------------
+# These name what makes narration feel written by a template: a hook with nothing concrete in it, a hook that says its
+# own idea twice, figures on screen the voice never explains, unnamed "other factors", and filler. They are heuristics:
+# promote one to a repairable gate only after the reference set shows it never fires on an accepted script.
+_ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen "
+         "eighteen nineteen").split()
+_TENS = {2: "twenty", 3: "thirty", 4: "forty", 5: "fifty", 6: "sixty", 7: "seventy", 8: "eighty", 9: "ninety"}
+ON_SCREEN_NUMBER = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\w])")
+VAGUE_OTHER = re.compile(r"\bother (?:factors|things|reasons|issues|conditions|variables|circumstances|causes|elements)\b|\band more\b|\betc\b", re.I)
+FILLER_PHRASES = ("slow and steady", "here is the catch", "here's the catch", "that is not it", "that's not it", "think of it as",
+                  "long story short", "in other words", "simply put", "think soft", "thing is")
+CONTRACTION = re.compile(r"\b\w+'(?:s|t|re|ve|ll|d|m)\b", re.I)
+
+
+def _int_words(n: int) -> str:
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        return _TENS[n // 10] + (" " + _ONES[n % 10] if n % 10 else "")
+    if n < 1000:
+        return _ONES[n // 100] + " hundred" + (" " + _int_words(n % 100) if n % 100 else "")
+    if n < 1_000_000:
+        return _int_words(n // 1000) + " thousand" + (" " + _int_words(n % 1000) if n % 1000 else "")
+    return str(n)
+
+
+def _spoken_forms(token: str) -> set[str]:
+    """How a figure on screen may be said aloud: the digits, or the words ('200' -> 'two hundred', '100' also 'a hundred')."""
+    clean = token.replace(",", "")
+    forms = {clean}
+    whole, _, fraction = clean.partition(".")
+    if whole.isdigit():
+        words = _int_words(int(whole))
+        if fraction.isdigit():
+            words += " point " + " ".join(_ONES[int(d)] for d in fraction)
+        forms.add(words)
+        if not fraction and int(whole) in (100, 1000):
+            forms.add("a " + words.split(" ", 1)[1])
+    return forms
+
+
+def _display_texts(scene) -> list[str]:
+    """Every string the viewer reads in a scene (not the caption, which repeats the narration)."""
+    texts: list[str] = []
+    for name in ("heading", "headline", "subline", "before", "after", "before_label", "after_label"):
+        value = getattr(scene, name, None)
+        if isinstance(value, str):
+            texts.append(value)
+        elif isinstance(value, (tuple, list)):
+            texts += [item for item in value if isinstance(item, str)]
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            texts.append(f"{value:g}")
+    for name in ("chips", "nodes", "items"):
+        texts += [item for item in (getattr(scene, name, ()) or ()) if isinstance(item, str)]
+    texts += [line.text for line in (getattr(scene, "lines", ()) or ()) if hasattr(line, "text")]
+    visual = getattr(scene, "visual", None)
+    if visual is not None and getattr(visual, "kind", "") == "code":
+        texts += list(visual.lines)
+    return texts
+
+
+def naturalness_problems(package) -> list[str]:
+    """Advisory notes on narration that reads as machine-written. Empty means nothing to flag."""
+    scenes = package.reference_short.scenes
+    notes: list[str] = []
+    opening = scenes[0].vo.strip()
+    first_sentences = [s for s in re.split(r"(?<=[.!?…])\s+", opening) if s]
+    named = [w for sentence in first_sentences for w in sentence.split()[1:]
+             if JARGON.fullmatch(w.strip(".,;:!?\"'()")) or w[:1].isupper()]  # a capital after the first word of a sentence names something
+    scale = re.search(r"\b(one|millions?|billions?|thousands?|hundreds?|zero|never|every|\d+)\b", opening, re.I)
+    if not _numbers(opening) and not named and not scale:
+        notes.append("the opening has no number and no named thing; lead with a specific figure or a named product, not an abstraction")
+    if len(first_sentences) >= 2:
+        a, b = ({word.strip(".'") for word in _content(sentence)} for sentence in first_sentences[:2])
+        if len(a) >= 3 and len(b) >= 3 and len(a & b) / min(len(a), len(b)) >= .6:
+            notes.append(f"the opening says the same idea twice ({first_sentences[0]!r} then {first_sentences[1]!r}); keep one and spend the other on a new fact")
+    said_so_far = ""
+    for index, scene in enumerate(scenes, 1):
+        # A figure counts as explained when this scene or an earlier one says it: the running example is introduced once.
+        said_so_far += " " + re.sub(r"(?<!\d)\.|\.(?!\d)|[^\w.' ]", " ", scene.vo.lower().replace(",", "")) + " "
+        spoken = said_so_far
+        shown: list[str] = []
+        for text in _display_texts(scene):
+            shown += ON_SCREEN_NUMBER.findall(VERSION_NUMBER.sub(" ", text))
+        missing = sorted({token for token in shown if not any(f" {form} " in spoken for form in _spoken_forms(token))})
+        if missing:
+            notes.append(f"scene {index} shows {', '.join(missing)} on screen but the narration never says it; say the figure or use the example the narration already explains")
+        lowered = " " + re.sub(r"[^\w' ]", " ", scene.vo.casefold()) + " "
+        vague = VAGUE_OTHER.search(scene.vo)
+        if vague:
+            notes.append(f"scene {index} says {vague.group(0)!r} without naming them; name the factors or cut the line")
+        hits = [phrase for phrase in FILLER_PHRASES if f" {phrase} " in lowered]
+        if hits:
+            notes.append(f"scene {index} has filler {hits}; replace it with a concrete fact or cut it")
+    return notes
+
+
+def _rhythm(spoken: list[str]) -> dict:
+    sentences = [len(s.split()) for text in spoken for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s]
+    words = sum(len(text.split()) for text in spoken) or 1
+    mean = sum(sentences) / len(sentences) if sentences else 0
+    spread = (sum((n - mean) ** 2 for n in sentences) / len(sentences)) ** .5 if sentences else 0
+    return {"sentence_length_variation": round(spread / mean, 2) if mean else 0.0,
+            "contractions_per_100_words": round(100 * sum(len(CONTRACTION.findall(text)) for text in spoken) / words, 1)}
+
+
 def script_scorecard(package) -> dict:
     """Heuristic review signals for comparing versions of the writer. Not a prediction of views or retention."""
     spoken = [scene.vo for scene in package.reference_short.scenes]
@@ -333,6 +439,7 @@ def script_scorecard(package) -> dict:
         "distinct_openings_share": round(len(set(firsts)) / len(firsts), 2) if firsts else 1.0,
         "avg_words_per_sentence": round(words / max(1, len(sentences)), 1),
         "fact_dump_problems": len(fact_dump_problems(package)),
+        "naturalness_notes": naturalness_problems(package), **_rhythm(spoken),
         # M-AU2: scorecard-only (not a hard gate — a forced minimum risks an awkward, tacked-on
         # cue just to satisfy a rule). The prompt's DELIVERY CUES section sets its own ceiling
         # (at most 4 tags/scene, 2 stress words/scene, 2 whispers total); this just counts what
