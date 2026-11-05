@@ -698,3 +698,26 @@ def test_dashboard_shows_signed_in_user_copy_script_and_markdown_mode_controls(t
         assert "toggleMarkdownMode" in dashboard and 'id="studioMarkdownSubmit"' in dashboard
         assert client.post("/logout").status_code == 200
         assert client.get("/", follow_redirects=False).status_code == 303
+
+
+def test_every_inline_dashboard_script_parses(tmp_path: Path) -> None:
+    """A Python-string escape once turned '\\n' into a real newline inside a JS string and silently disabled a whole script block."""
+    import re
+
+    import pytest
+    quickjs = pytest.importorskip("quickjs")
+    database_path = tmp_path / "scripts.db"
+    _migrate(database_path)
+    settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"), auth=AuthConfig(enabled=True))
+    with TestClient(create_app(settings)) as client:
+        client.app.state.runtime.auth.create_admin("script-operator", "correct-horse-battery-staple")
+        assert client.post("/login", json={"username": "script-operator", "password": "correct-horse-battery-staple"}).status_code == 200
+        html = client.get("/").text
+    scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.S)
+    assert len(scripts) >= 8
+    context = quickjs.Context()
+    for index, source in enumerate(scripts):
+        try:
+            context.eval("(function(){new Function(" + __import__("json").dumps(source) + ");return 1})()")
+        except quickjs.JSException as error:
+            raise AssertionError(f"inline dashboard script {index} does not parse: {error}") from error
