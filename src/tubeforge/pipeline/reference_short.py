@@ -29,8 +29,8 @@ from tubeforge.rendering.shorts.review import write_layout_review
 from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
-RENDERER_VERSION = "reference-short-v1/render-6"  # shared portrait editor/cursor changes pixels
-HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-4"
+RENDERER_VERSION = "reference-short-v1/render-7"  # shared portrait editor/cursor changes pixels
+HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-5"
 
 
 def renderer_version(config: ReferenceShortConfig) -> str:
@@ -160,9 +160,12 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
     ``sfx_enabled`` defaults to **True**; see ``audio.master``'s docstring for the 26-27 Oct
     back-and-forth that settled on this.
     """
-    if (load_style(directory) == "story" or config.renderer == "hyperframes") and any(
-            getattr(scene.visual, "line_reveal_words", ()) for scene in timeline.topic.scenes):
-        raise ProviderValidationError("word-anchored code visuals currently require the Pillow renderer")
+    story_style = load_style(directory) == "story"
+    anchored = [scene for scene in timeline.topic.scenes if getattr(getattr(scene, "visual", None), "line_reveal_words", ())]
+    if anchored and config.renderer == "hyperframes" and not story_style:
+        raise ProviderValidationError("word-anchored code visuals require Pillow or Story checklist rendering")
+    if story_style and any(scene.template != "checklist" for scene in anchored):
+        raise ProviderValidationError("Story code-line anchors currently require a checklist code scene")
     starts = tuple(t.start for t in timeline.timings)
     templates = tuple(scene.template for scene in timeline.topic.scenes)
     reveal_times = tuple(t.words[s.reveal_words[0]].start

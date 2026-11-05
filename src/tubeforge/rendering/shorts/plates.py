@@ -145,7 +145,7 @@ class Plates:
 
     def bind_timeline(self, timeline) -> None:
         """Compile only explicitly reviewed code anchors against this exact timeline."""
-        from .editor import EditorRenderer, EditorScene
+        from .editor import EditorRenderer, compile_code_scene
         if timeline.topic != self.topic:
             raise ValueError("code animation timeline belongs to a different topic")
         self._anchored_editors.clear()
@@ -159,15 +159,8 @@ class Plates:
             if not visual.line_reveal_words:
                 report[str(index)] = {"mode": "proportional", "alignment": timing.alignment}
                 continue
-            duration = timing.end - timing.start
-            starts = tuple(timing.words[w].start - timing.start for w in visual.line_reveal_words)
-            finish = duration - 1.0
-            windows = tuple((begin, min(begin + 2.4, starts[i+1] if i+1 < len(starts) else finish))
-                            for i, begin in enumerate(starts))
-            if any(end <= begin for begin, end in windows):
-                raise ValueError(f"code scene {index} has no room for typing and a one-second reading hold")
-            editor = EditorScene(tuple(visual.lines), language=visual.language, filename=visual.language.upper(),
-                                 start=0, typing_seconds=finish, hold_seconds=1, line_windows=windows)
+            editor = compile_code_scene(visual.lines, visual.language, timing, visual.line_reveal_words)
+            windows = editor.line_windows
             editors[index] = EditorRenderer(editor, card_only=True)
             report[str(index)] = {"mode": "word_anchored", "alignment": timing.alignment,
                                   "word_indices": list(visual.line_reveal_words), "line_windows": windows}

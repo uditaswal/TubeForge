@@ -79,6 +79,36 @@ class EditorScene:
         return visible.count("\n"), len(visible.rsplit("\n", 1)[-1])
 
 
+def compile_code_scene(lines, language, timing, anchors=()):
+    """Resolve reviewed word anchors, or explicitly proportional timing, once."""
+    duration = timing.end - timing.start
+    finish = duration - 1.0
+    if anchors:
+        if any(index < 0 or index >= len(timing.words) for index in anchors):
+            raise ValueError("code anchor exceeds exact word timing")
+        starts = tuple(timing.words[w].start - timing.start for w in anchors)
+        windows = tuple((begin, min(begin + 2.4, starts[i+1] if i+1 < len(starts) else finish))
+                        for i, begin in enumerate(starts))
+        if any(end <= begin for begin, end in windows):
+            raise ValueError("code has no room for typing and a one-second reading hold")
+        return EditorScene(tuple(lines), language=language, filename=language.upper(),
+                           start=0, typing_seconds=finish, hold_seconds=1, line_windows=windows)
+    typing = min(2.4, duration - 1.2)
+    return EditorScene(tuple(lines), language=language, filename=language.upper(),
+                       start=.2, typing_seconds=typing, hold_seconds=duration-.2-typing)
+
+
+def coloured_characters(text, language):
+    lexer = get_lexer_by_name(language, stripnl=False, ensurenl=False)
+    cells = []
+    for kind, token in lex(text, lexer):
+        color = next((c for group, c in PALETTE if kind in group), "#d2dbe7")
+        cells.extend((char, color) for char in token)
+    if "".join(char for char, _ in cells) != text:
+        raise ValueError("lexer changed display text")
+    return cells
+
+
 class EditorRenderer:
     """Cache static chrome and token layout, drawing only the revealed text per frame."""
     def __init__(self, scene: EditorScene, *, card_only: bool = False):
@@ -112,14 +142,7 @@ class EditorRenderer:
         self.text_x, self.text_y, self.row_height = (76, 110, 66) if card_only else (140, 540, 78)
         self.cells = []
         offset = 0
-        lexer = get_lexer_by_name(scene.language, stripnl=False, ensurenl=False)
-        # Lex the complete snippet so multiline strings/comments keep their state.
-        coloured = []
-        for kind, token in lex(scene.text, lexer):
-            color = next((c for group, c in PALETTE if kind in group), "#d2dbe7")
-            coloured.extend((char, color) for char in token)
-        if "".join(char for char, _ in coloured) != scene.text:
-            raise ValueError("lexer changed display text")
+        coloured = coloured_characters(scene.text, scene.language)
         for row, line in enumerate(scene.lines):
             d.text((22 if card_only else 85, self.text_y + 10 + self.row_height*row), str(row+1), font=self.small, fill="#8799b0")
             for col, (char, color) in enumerate(coloured[offset:offset+len(line)]):

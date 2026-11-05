@@ -69,10 +69,27 @@ def test_hyperframes_flag_routes_silent_film_and_same_mix(tmp_path, monkeypatch)
 def test_renderer_identity_changes_only_for_opt_in():
     topic = _timeline().topic
     base = reference_short.render_identity(topic, "n", "t", draft=True, approval_identity=None)
-    assert base == "66958763f355450be4a5671a0294eed5c8b7461491373a2112f9e84fe7bda6ab"
+    assert base == "6b834b3eda9574d159c24b0d54ee641af957dcda28c7a36fe0cff759bf4fe591"
     assert base == reference_short.render_identity(topic, "n", "t", draft=True,
                                                    approval_identity=None, renderer="pil")
     assert base != reference_short.render_identity(topic, "n", "t", draft=True,
                                                    approval_identity=None, renderer="hyperframes")
     with pytest.raises(ValueError):
         ReferenceShortConfig(renderer="unknown")
+
+
+def test_story_style_routes_code_report_to_final_qa(tmp_path,monkeypatch):
+    from tubeforge.rendering.shorts import story
+    _master(monkeypatch)
+    reference_short.write_options(tmp_path,show_sources=False,watermark=None,style='story')
+    report={'checks':[{'ok':True}],'code_animation':[{'mode':'word_anchored','version':'story-code-v1'}]}
+    def silent(timeline,destination,**kwargs):
+        destination.write_bytes(b'silent')
+        return report
+    captured=[]
+    monkeypatch.setattr(story,'render_silent',silent)
+    monkeypatch.setattr(hyperframes_encode,'encode',lambda *args,**kwargs:captured.append(kwargs) or {'passed':True})
+    result=reference_short.render(_timeline(),tmp_path,tmp_path/'out.mp4',ReferenceShortConfig(),
+        draft=True,cancelled=lambda:False)
+    assert result['passed']
+    assert captured[0]['scene_report']['code_animation'] == report['code_animation']

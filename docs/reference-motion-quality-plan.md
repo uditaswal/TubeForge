@@ -106,7 +106,7 @@ claims of improved retention and broad rollout before acceptance.
 ## Next five actions
 
 1. Regenerate the current-profile source plates using the verified clean-capture policy.
-2. Implement Story code-animation parity without silently truncating accepted lines.
+2. Complete remaining Story layout support; checklist code animation now exists with no silent truncation.
 3. Add purposeful terminal/highlight/output motion tied to reviewed cues.
 4. Inspect a complete updated vertical render and obtain full watch/listen review.
 5. Audit the checklist and submit the feature branch for review; merge requires approval.
@@ -129,7 +129,9 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Verify signed-in desktop/mobile Chromium review and anchor visibility.
 - [x] Render a current-profile 49.7-second loop artifact; pass blocking delivery QA checks.
 - [x] Repair source-capture Ask AI controls and partial neighbouring-line fragments; inspect real recapture.
-- [ ] Regenerate the full Short with new captures, complete motion parity and full watch/listen acceptance.
+- [x] Add Story checklist typing, syntax colours, active-row highlights and following cursor; preserve all supported lines/items.
+- [x] Check exact Unicode text and forward/backward seeking in Chromium.
+- [ ] Regenerate the full Short with new captures, complete remaining motion work and full watch/listen acceptance.
 - [ ] Verify full narrated Short and signed-in workflow.
 
 ## First implementation checkpoint
@@ -352,3 +354,51 @@ plates; a new full render/review is required to show this improvement in that fi
 No provider calls, script/source-packet edits or production approvals occurred.
 Next: Story parity and purposeful terminal/output motion, then fresh source plates
 and an updated full Short for creative review.
+
+## Story checklist code-animation checkpoint — 6 November
+
+**IMPLEMENTED**. Story checklist code now shares Pillow's timing compiler and
+syntax palette. It types each line, highlights its active row and follows it with
+a cursor; checklist items remain visible and their ticks appear after the green
+reveal completes. All six supported code lines are retained when they fit; if the
+code and checklist cannot fit above captions, rendering fails with a revision
+message instead of taking the first three lines. Explicit anchors on other Story
+templates or classic HyperFrames remain unsupported and fail clearly. Production
+writer schemas continue to omit local code-line anchors.
+
+Timing/character handling is deterministic: tokens are inserted as text, script
+closing sequences are escaped as data, and Unicode code points are preserved.
+Forward → backward → forward Chromium seeking restores the correct text without
+stale future lines. Code animation metadata reaches final HyperFrames QA reports.
+Cache identities advance to render-7 / hyperframes-5; older pixels are not reused.
+
+Validation: 71 focused routing/content/editor/plate/Story checks passed (one opt-in
+browser check skipped in that group); the real Chromium seek/Unicode check passed
+separately in 19.02 s. The prior seek attempt was interrupted; it is not a pass.
+The actual pinned HyperFrames CLI 0.8.192 checked and rendered the captured rate/
+burst scene at 1080×1920/30 fps. Lint, runtime, layout, contrast and craft checks
+all report ok. The first real check exposed low-contrast premature ticks, cursor
+occlusion and small labels; those were repaired before the successful render.
+
+Encoded scene evidence is on the project artifact disk, outside the /tmp worktree:
+`/home/uditaswal/docker/tubeforge/Youtube_Video_Producer/artifacts/review/reference-motion-story-code-feature/`.
+Files: silent.mp4, contact.png, hold.png, scene-report.json, render-report.json and
+project/index.html. MP4 SHA-256:
+`a7afd4304b0f56ebe7d2fc5ee180799a25f54b105551f194290f8a8906a6fe54`.
+The encoded sheet and full-size hold were inspected: ordered typing, cursor spacing,
+readable labels, meaningful checklist changes and caption separation pass sampled
+visual review. This is a silent scene comparison, not a completed narrated job.
+
+Environment evidence: /tmp had only about 0.9 GB free, so the first encode hit the
+CLI disk guard. Scratch/output moved to the project artifact disk (766 GB free);
+the guard stayed enabled. The scene run took 131.5 s including checks/startup and
+used a diagnostic 60× budget. Full-video production budget (20× in production.yaml)
+acceptance is still unverified and must be tested on the next full render. The
+latest Unicode normalization is additionally covered by the real-browser test.
+
+Next: regenerate the current-profile source plates with the verified v4 capture
+policy, then render the complete Story Short through its actual CLI/QA path under
+the production budget. Review terminal/output motion, full playback and mix balance;
+no operator creative approval, deployment, merge or publication has occurred.
+
+Additional traceability check passed: scene-local code windows and absolute timeline windows are reported separately, with the scene start and original alignment method retained. One nonzero-origin metadata test passed after the 71-check group; no extra render claim is made for this metadata-only addition.
