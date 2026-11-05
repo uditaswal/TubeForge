@@ -90,6 +90,7 @@ Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment
 | Reviewing jobs through the API | [docs/operations/api-workflow.md](docs/operations/api-workflow.md) |
 | Platform integrations (YouTube, Meta) | [docs/operations/platform-integrations.md](docs/operations/platform-integrations.md) |
 | Running the script runners as services | [docs/deploy](docs/deploy) |
+| Script routing and membership selection | [docs/script-routing.md](docs/script-routing.md) |
 | Batch plans: import, queue, disclosure/rights review, staged export | [docs/batch-plans.md](docs/batch-plans.md) |
 | Video quality standard | [docs/SHORT_FORM_VIDEO_RULEBOOK.md](docs/SHORT_FORM_VIDEO_RULEBOOK.md) |
 | Security policy | [SECURITY.md](SECURITY.md) |

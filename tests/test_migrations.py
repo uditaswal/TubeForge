@@ -25,7 +25,8 @@ def test_fresh_sqlite_database_upgrades_to_head(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261022_0030"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261105_0032"
+            assert connection.execute(text("SELECT mode, preferred_model, actor FROM script_routing_policies LIMIT 0")).keys() == ["mode", "preferred_model", "actor"]
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_connections'")).scalar_one() == "oauth_connections"
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publishing_assets'")).scalar_one() == "publishing_assets"
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publish_jobs'")).scalar_one() == "publish_jobs"

@@ -100,4 +100,10 @@ def create_runtime(settings: Settings) -> Runtime:
             max_chars=source_policy.max_chars,
             timeout_seconds=source_policy.timeout_seconds,
         )
-    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, SchedulerService(schedules, topics, scheduler_id="api-scheduler", reservation_seconds=settings.scheduler.topic_reservation_seconds, codex_config=settings.pipeline.codex), AuthService(database.session_factory), accounts, token_cipher, orchestrator)
+    from tubeforge.db.script_routing import ScriptRoutingRepository
+    from tubeforge.scheduling.batch_requests import build_batch_request
+    policy = ScriptRoutingRepository(database.session_factory, claude_enabled=settings.pipeline.claude.enabled)
+    scheduler = SchedulerService(schedules, topics, scheduler_id="api-scheduler", reservation_seconds=settings.scheduler.topic_reservation_seconds, codex_config=settings.pipeline.codex)
+    scheduler.request_transform = policy.apply
+    scheduler.batch_request_factory = lambda short: policy.apply(build_batch_request(short, settings))
+    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, scheduler, AuthService(database.session_factory), accounts, token_cipher, orchestrator)

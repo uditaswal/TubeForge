@@ -105,6 +105,13 @@ class RetryJobRequest(BaseModel):
     request: dict[str, object] | None = None
 
 
+class ScriptRoutingPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    mode: str = Field(pattern=r'^(claude_only|codex_only|automatic)$')
+    preferred_model: str = Field(pattern=r'^(sonnet-medium|opus|gpt-sol)$')
+    expected_revision: int = Field(ge=0)
+
+
 class VideoBriefRequest(BaseModel):
     """User-facing shorthand expanded into the durable provider-neutral request."""
     model_config = ConfigDict(extra="forbid")
@@ -135,6 +142,7 @@ class VideoBriefRequest(BaseModel):
     ending: str = Field(default="loop", pattern=r"^(loop|debate)$")
     # Video style: "classic" cards or "story" (a purpose-built picture per scene).
     video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
+    script_routing_mode: str | None = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus|gpt-sol)$")
@@ -312,6 +320,12 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source title and excerpt require a source URL")
     from tubeforge.providers.content.youtube_skills import channel_voice_character_for, voice_for
     choice = value.script_model or ("gpt-sol" if value.script_owner == "codex" else DEFAULT_SCRIPT_MODEL)
+    if value.script_routing_mode == "codex_only":
+        choice = "gpt-sol"
+    elif value.script_routing_mode == "claude_only" and choice == "gpt-sol":
+        choice = DEFAULT_SCRIPT_MODEL
+    if value.script_routing_mode in {"claude_only", "automatic"} and not settings.pipeline.claude.enabled:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="This routing mode requires the Claude runner to be enabled")
     if choice != "gpt-sol" and not settings.pipeline.claude.enabled:
         if value.script_model is None and value.script_owner is None:
             choice = "gpt-sol"  # Claude not configured: fall back to the Codex default
@@ -321,7 +335,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
     return ContentRequest(
-        script_owner=owner, script_model=claude_model, ending=value.ending, video_style=value.video_style,
+        script_owner=owner, script_model=claude_model, script_routing_mode=value.script_routing_mode, ending=value.ending, video_style=value.video_style,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
@@ -1005,10 +1019,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if schedule is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found")
         return runtime.scheduler.run(schedule, run_key=f"manual-{uuid4().hex}")
 
+    from tubeforge.db.script_routing import ScriptRoutingRepository
+    routing_policy = ScriptRoutingRepository(runtime.database.session_factory, claude_enabled=application_settings.pipeline.claude.enabled)
+
+    @app.get('/api/script-routing', tags=['videos'])
+    def get_script_routing():
+        return routing_policy.get()
+
+    @app.put('/api/script-routing', tags=['videos'])
+    def save_script_routing(value: ScriptRoutingPolicyRequest, request: Request):
+        auth_session = runtime.auth.session(request.cookies.get('tubeforge_session'))
+        actor = str(auth_session.user_id) if auth_session else 'local-operator'
+        try:
+            return routing_policy.save(**value.model_dump(), actor=actor)
+        except ValueError as error:
+            raise HTTPException(409, detail=str(error)) from error
+
     from tubeforge.api.batch import register_batch_routes
     def batch_request(short):
         from tubeforge.scheduling.batch_requests import build_batch_request
-        return build_batch_request(short, application_settings)
+        return routing_policy.apply(build_batch_request(short, application_settings))
     runtime.scheduler.batch_request_factory = batch_request
     register_batch_routes(app, runtime, batch_request)
 
@@ -1016,6 +1046,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def create_job(request: ContentRequest) -> dict[str, object]:
         """Create a durable job; a separate worker advances it."""
         _reject_retired_format(request, application_settings)
+        try:
+            request = routing_policy.apply(request, enforce_current=True)
+        except ValueError as error:
+            raise HTTPException(422, detail=str(error)) from error
         job = runtime.jobs.create(uuid4().hex, request)
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
         return _job_payload(job)
@@ -1025,6 +1059,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         available_music = runtime.orchestrator.music_catalog.names() if runtime.orchestrator.music_catalog else set()
         try:
             video_request = _video_request(brief, application_settings, available_music=available_music)
+            video_request = routing_policy.apply(video_request, enforce_current=True)
             _reject_retired_format(video_request, application_settings)
             job = runtime.jobs.create(uuid4().hex, video_request, destination_account_ids=brief.destination_account_ids, video_description=brief.description)
         except ValueError as error:
@@ -1418,7 +1453,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             can_retry_validation, retry_identity = _can_retry_approved_asset_validation(runtime, job)
             events = runtime.events.list_for_job(job.id)
             payloads.append({
-                **_job_payload(job), "topic": job.request.topic, "script_owner": job.request.script_owner, "script_model": job.request.script_model, "video_style": job.request.video_style,
+                **_job_payload(job), "topic": job.request.topic, "script_owner": job.request.script_owner, "script_model": job.request.script_model, "script_routing_mode": job.request.script_routing_mode, "video_style": job.request.video_style,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
                 "event_count": len(events),
                 "latest_event": {"event_type": events[-1].event_type, "stage": events[-1].details.get("stage") if isinstance(events[-1].details.get("stage"), str) else None, "created_at": _as_ist(events[-1].created_at)} if events else None,

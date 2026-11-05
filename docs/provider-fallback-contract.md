@@ -1,8 +1,8 @@
-# Provider fallback contract — proposal awaiting operator approval
+# Provider fallback contract
 
-Status: **BLOCKED** pending approval of the dashboard/router change. No runtime
-behavior changes in this checkpoint. Tests for future implementation must use
-stub runners; no live generation is authorized.
+Operator approved this contract on 5 November 2026. Implementation checkpoints
+are tracked in `provider-fallback-implementation.md`. Tests use stub runners;
+no live generation is authorized.
 
 ## Runner interface expected from Claude's lane
 

@@ -78,6 +78,7 @@ class ContentRequest(DomainModel):
     # serialized form so existing jobs, cache keys and host requests stay
     # byte-identical; only a non-default owner changes them.
     script_owner: str = Field(default="codex", pattern=r"^(codex|claude)$")
+    script_routing_mode: str | None = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     # Which model the owner runs (Claude only): "sonnet-medium" | "opus". None = owner default.
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus)$")
     # Render-only options (reference Shorts): never part of generation identity, omitted while default.
@@ -96,6 +97,8 @@ class ContentRequest(DomainModel):
     @model_serializer(mode="wrap")
     def omit_default_script_fields(self, handler):
         value = handler(self)
+        if self.script_routing_mode is None:
+            value.pop("script_routing_mode", None)
         if not self.show_source_credit:
             value.pop("show_source_credit", None)
         if not self.show_mascot:
@@ -133,7 +136,7 @@ class ContentRequest(DomainModel):
 
 def generation_request_content(request: ContentRequest) -> ContentRequest:
     """Send only script inputs to a writer, excluding local render options."""
-    updates = {"show_source_credit": False, "show_mascot": False,
+    updates = {"script_routing_mode": None, "show_source_credit": False, "show_mascot": False,
                "channel_watermark": None, "video_style": "classic"}
     if request.prompt_version in {"m6-content-v7", "m6-content-v8"}:
         updates["sources"] = tuple(source.model_copy(update={"retrieved_at": None, "content_sha256": None})

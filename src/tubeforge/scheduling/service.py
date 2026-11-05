@@ -87,6 +87,8 @@ class SchedulerService:
         from tubeforge.core.errors import ProviderValidationError
         try:
             request = request_from_topic(topic, schedule, self.codex_config)
+            if getattr(self, "request_transform", None):
+                request = self.request_transform(request)
             destination_ids, description = schedule_destination_options(schedule.options)
             if schedule.account_id is not None:
                 if destination_ids and destination_ids != (schedule.account_id,):
