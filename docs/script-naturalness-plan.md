@@ -1,6 +1,15 @@
 # Plan: less robotic scripts, without reworking the pipeline
 
-Status: **NOT STARTED** (plan only, 5 Nov 2026). Owner of phases: Claude unless marked Codex.
+Status (6 Nov 2026): **P0 IMPLEMENTED** (advisory checks, `craft.py::naturalness_problems`, scorecard rhythm signals), **P1 IMPLEMENTED**
+(`layout.py::caption_groups`; unit/frame-test evidence only, no real-render inspection yet), **P2 IMPLEMENTED on branch
+`claude/script-prompt-rules` only** (prompt text, size-tested; NOT merged and NOT validated with a live generation, so the live writer is unchanged),
+**P3, P4 NOT STARTED**. Owner of phases: Claude unless marked Codex.
+
+Finding while implementing P2: the editor pass told the model to keep at most one number per scene and to drop other figures from the voice-over,
+which works against the review's "specific figure in the hook, one running example". The P2 branch changes that to two numbers per scene (matching the
+existing hard gate `MAX_NUMBERS_PER_SCENE = 2`) and keeps the four-per-video cap.
+Known limits of P0: it cannot judge hook strength (a hook with a strong consequence but no figure is accepted via scale words like "one"/"millions"),
+and it does not flag a fact-dump script (other gates do); promote nothing to a gate until the reference set shows zero false positives.
 Inputs: a review of the `ms1-pilot-rate-limit-v2` Short, a prompt suggested by another Claude session,
 and a safety review of three public repositories. Nothing here changes the JSON envelope, the render
 pipeline, the two-attempt allowance or `yt-script` (the sole production narration skill, hash-bound).
