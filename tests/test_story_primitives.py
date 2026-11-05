@@ -226,3 +226,12 @@ def test_build_story_records_and_visibly_applies_the_chosen_layout_family(tmp_pa
     assert report["layout_family"] == "walkthrough_statement"
     plain_page = (tmp_path / "plain" / "index.html").read_text()
     assert "back.out(1.6)" in plain_page and story._FAMILY_STYLE["walkthrough_statement"]["mark"] in plain_page
+
+
+def test_pill_font_shrinks_long_labels_to_the_available_width_and_never_enlarges_or_collapses():
+    from tubeforge.rendering.shorts.story import _pill_font
+    assert _pill_font("SOURCE · AWS", 36, .6) == 36                               # short: unchanged
+    long_label = "SOURCE · " + "Amazon API Gateway developer guide throttling"   # would overflow at 36 px
+    assert 28 <= _pill_font(long_label, 36, .6) < 36
+    assert len(long_label) * .6 * _pill_font(long_label, 36, .6) <= 900 or _pill_font(long_label, 36, .6) == 28
+    assert _pill_font("x" * 200, 36, .6) == 28                                    # floor: readability beats fitting, the QA gate then catches it

@@ -135,6 +135,12 @@ def _caption_groups(scene, words: list[tuple[float, float]]) -> list[dict]:
     return groups
 
 
+def _pill_font(text: str, base: int, factor: float, width: int = 900, minimum: int = 28) -> int:
+    """Largest font size (<= base) at which a one-line pill of ``text`` fits ``width`` px; ``factor`` is the font's average glyph width in em."""
+    needed = len(text) * factor * base
+    return base if needed <= width else max(minimum, int(width / (len(text) * factor)))
+
+
 def _node_fit(text: str, width: int) -> int:
     """Largest Anton size (<=52px) at which the node text wraps to at most two lines."""
     for size in range(52, 31, -2):
@@ -356,7 +362,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                     f'<div id="{sid}zoom" style="position:absolute;inset:0"><div style="position:absolute;inset:0;background:url(assets/hero-{i}.png) 0 0/100% 100%"></div>'
                     + (f'<div id="{sid}hl" style="position:absolute;inset:0;background:url(assets/hero-{i}-hl.png) 0 0/100% 100%;clip-path:inset(0 100% 0 0)"></div>' if hl else "")
                     + '</div></div>'
-                    f'<div class="pill" id="{sid}pill" style="left:60px;top:{top + height + 40}px;background:rgba(83,224,239,.14);border:2px solid rgba(83,224,239,.6);color:{INK}">SOURCE · {html.escape(treatment["source_label"])}</div>')
+                    f'<div class="pill" id="{sid}pill" style="left:60px;top:{top + height + 40}px;background:rgba(83,224,239,.14);border:2px solid rgba(83,224,239,.6);color:{INK};font-size:{_pill_font("SOURCE · " + treatment["source_label"], 36, .6)}px">SOURCE · {html.escape(treatment["source_label"])}</div>')
             anim += (f'tl.fromTo("#{sid}card",{{opacity:0,y:80,scale:.94}},{{opacity:1,y:0,scale:1,duration:.5,ease:"power3.out"}},{a + .15:.3f});'
                     f'tl.fromTo("#{sid}zoom",{{scale:1}},{{scale:{style["zoom_scale"]},transformOrigin:"50% 40%",duration:{b - a:.2f},ease:"power1.inOut"}},{a:.3f});'
                     + ("".join(f'tl.set("#{sid}hl",{{clipPath:"inset(0 100% 0 0)"}},{r:.3f});tl.to("#{sid}hl",{{clipPath:"inset(0 0% 0 0)",duration:.5,ease:"none"}},{r:.3f});'
@@ -383,7 +389,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             anim = backdrop_anim + f'tl.fromTo("#{sid} .h1",{{opacity:0,y:60}},{{opacity:1,y:0,duration:.5,ease:"power3.out"}},{a:.3f});'
             for k, chip in enumerate(chips):
                 body += (f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{chips_top + k * 100}px;background:{RED if k == 0 else "#1b2036"};'
-                         f'border:2px solid {RED if k == 0 else "#333a58"};color:#fff;font:400 60px/1 Anton;height:84px;border-radius:14px;text-transform:uppercase">{html.escape(chip)}</div>')
+                         f'border:2px solid {RED if k == 0 else "#333a58"};color:#fff;font:400 {_pill_font(chip, 60, .45)}px/1 Anton;height:84px;border-radius:14px;text-transform:uppercase">{html.escape(chip)}</div>')
                 anim += f'pop("#{sid}c{k}",{reveal[min(k, len(reveal) - 1)]:.3f},{{x:-60,y:0}});'
         elif template == "flow" and scene.diagram != "stack":
             body, anim = _diagram(sid, scene, reveal, a, b, accent)
@@ -441,7 +447,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             heading = getattr(scene, "heading", None) or " ".join(getattr(scene, "headline", ())) or scene.caption
             body = _heading(heading, accent)
             for k, chip in enumerate(getattr(scene, "chips", ())):
-                body += f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{600 + k * 100}px;background:#1b2036;border:2px solid #333a58;color:{INK}">{html.escape(chip)}</div>'
+                body += f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{600 + k * 100}px;background:#1b2036;border:2px solid #333a58;color:{INK};font-size:{_pill_font(chip, 36, .6)}px">{html.escape(chip)}</div>'
                 anim += f'pop("#{sid}c{k}",{reveal[min(k, len(reveal) - 1)]:.3f});'
         # A source quote with no captured plate is shown as a labelled quote, never as a screenshot.
         if treatment is None and isinstance(visual, SourceVisual) and template in ("flow", "checklist", "big_stat", "hook", "loop", "terminal"):
