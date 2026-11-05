@@ -53,6 +53,15 @@ def test_one_repair_message_carries_the_original_error_and_every_extra_problem_o
     assert _with_preflight(original, {}, "loop") is original                         # nothing extra: unchanged
 
 
+def test_a_cta_close_under_a_loop_ending_names_the_template_as_root_cause_not_the_headline():
+    cta_error = ProviderValidationError("- package.reference_short.scenes.3: Value error, CTA headline must be the follow request or comment prompt present in narration")
+    text = str(_with_preflight(cta_error, draft(), "loop"))
+    assert text.startswith("ROOT CAUSE: the final scene must use template loop")
+    assert "do not reword its headline" in text and "CTA headline must be" not in text
+    debate = str(_with_preflight(cta_error, draft(), "debate"))                       # a debate ending keeps the headline rule
+    assert "ROOT CAUSE" not in debate and "CTA headline must be" in debate
+
+
 def test_the_last_attempt_shortens_a_heading_that_repeats_its_narration_and_records_it():
     value = draft()
     value["reference_short"]["scenes"][1].update(heading="The early quick fix", vo="The early quick fix was not enough.")

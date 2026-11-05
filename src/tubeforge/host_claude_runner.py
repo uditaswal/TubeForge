@@ -257,7 +257,15 @@ def _with_preflight(error: Exception, draft: dict, ending: str) -> Exception:
     """Add every display-text problem found in the same pass, so one repair attempt can fix them all."""
     from tubeforge.providers.content.craft import display_preflight
     said = _concise(error)
-    extra = [problem for problem in display_preflight(draft, ending) if problem[:48] not in said]
+    problems = display_preflight(draft, ending)
+    wrong_close = next((p for p in problems if p.startswith("the final scene must use template")), None)
+    if wrong_close and "CTA headline must be" in said:
+        # A cta scene under a loop ending fails the CTA headline rule, which tempts a repair to reword the headline.
+        # The real fault is the template: name it first and drop the misleading CTA-headline lines.
+        kept = [line for line in said.splitlines() if "CTA headline must be" not in line]
+        said = f"ROOT CAUSE: {wrong_close}. Change that scene's template; do not reword its headline.\n" + "\n".join(kept)
+        problems = [p for p in problems if p != wrong_close]
+    extra = [problem for problem in problems if problem[:48] not in said]
     if not extra:
         return error
     return ProviderValidationError(said + "\nALSO FIX (found in the same pass, so one repair can handle everything):\n- " + "\n- ".join(extra))
