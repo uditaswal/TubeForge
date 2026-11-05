@@ -29,7 +29,7 @@ from tubeforge.rendering.shorts.review import write_layout_review
 from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
-RENDERER_VERSION = "reference-short-v1/render-4"  # shared portrait editor/cursor changes pixels
+RENDERER_VERSION = "reference-short-v1/render-5"  # shared portrait editor/cursor changes pixels
 HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-4"
 
 
@@ -160,6 +160,9 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
     ``sfx_enabled`` defaults to **True**; see ``audio.master``'s docstring for the 26-27 Oct
     back-and-forth that settled on this.
     """
+    if (load_style(directory) == "story" or config.renderer == "hyperframes") and any(
+            getattr(scene.visual, "line_reveal_words", ()) for scene in timeline.topic.scenes):
+        raise ProviderValidationError("word-anchored code visuals currently require the Pillow renderer")
     starts = tuple(t.start for t in timeline.timings)
     templates = tuple(scene.template for scene in timeline.topic.scenes)
     reveal_times = tuple(t.words[s.reveal_words[0]].start

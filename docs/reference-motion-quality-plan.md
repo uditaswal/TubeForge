@@ -124,7 +124,8 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Render vertical MP4 fixtures; inspect encoded contact sheets and full-size hold frame.
 - [x] Add validated per-line reveal windows and multiline syntax colouring.
 - [x] Integrate native card rendering into the existing Pillow code-visual path and invalidate old cache identities.
-- [ ] Bind explicit line windows to accepted speech anchors in production jobs.
+- [x] Add reviewed code-line word indices and bind them to saved timeline timestamps in the encoder.
+- [ ] Verify the binding with actual accepted speech and a narrated artifact.
 - [ ] Verify full narrated Short and signed-in workflow.
 
 ## First implementation checkpoint
@@ -190,3 +191,39 @@ through the real Animator/Plates compositor fully decoded. Evidence:
 caption have separate readable zones. This fixture is not factual narration or
 production acceptance. Full narrated rendering, signed-in review, speech events,
 highlights/output cues and operator watch/listen remain pending.
+
+## Word-anchor integration checkpoint
+
+**IMPLEMENTED**: optional `CodeVisual.line_reveal_words` supplies an exact reviewed
+word index per line. Old serialization omits empty anchors. Scene validation checks
+coverage/order/range; the encoder compiles windows from its saved timeline before
+animation. A one-second completed-code hold is required. QA records resolved
+windows and the original alignment method, including estimated/test provenance.
+Story/HyperFrames and motion-disabled encodes reject explicit anchors. The pipeline
+identity is now render-5 and changed anchor data also changes the topic/render hash.
+
+Tests cover old serialization, invalid anchors, timeline binding, missing reading
+hold, unsupported renderer rejection and changed cache identity. The actual-speech
+benchmark is still pending: the accepted M3 package has a 29.6-second legacy ending,
+so it cannot establish current 30–90-second loop-profile acceptance unchanged.
+Next: use its exact narration/alignment for an explicitly labelled offline visual
+comparison, then obtain compliant full-video/signed-in evidence without rewriting
+accepted copy or claiming automatic production approval.
+
+Word-anchor evidence: 37 editor/plate tests and 11 renderer tests pass. The
+four-second synthetic anchored clip and encoded contact sheet are under
+`artifacts/review/reference-motion-anchors/`; `timing.json` records windows,
+synthetic alignment provenance and SHA-256
+`70b8fc2d1ae21dc9c635f149fc10eb21494db79739c65ad0cd347a0ae7a329c6`.
+Contact-sheet inspection confirms ordered line reveal and final hold without
+heading/caption collision. The script review details now include reference
+scenes and their explicit anchors, so these directions are visible before
+approval. Signed-in API verification is recorded separately when it finishes;
+real-browser interaction and actual narration remain unverified.
+
+Signed-in API verification: the focused authenticated dashboard test passed (1 in
+3.31 s) outside the sandbox. The sandbox run stalled in TestClient's blocking
+portal startup before the test admin existed; a diagnostic run captured that
+thread stack and was explicitly interrupted before the successful escalated run.
+No application workaround was added. Total focused checks this checkpoint: 49
+(37 editor/plate + 11 renderer + 1 signed-in API). Browser review is still pending.

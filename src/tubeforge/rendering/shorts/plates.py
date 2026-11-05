@@ -140,6 +140,42 @@ class Plates:
         self.stream: StockStream | None = None
         self.stream_index: int | None = None
         self._cards: dict[tuple, Image.Image] = {}
+        self._anchored_editors: dict[int, object] = {}
+        self._code_timing: dict[str, dict] = {}
+
+    def bind_timeline(self, timeline) -> None:
+        """Compile only explicitly reviewed code anchors against this exact timeline."""
+        from .editor import EditorRenderer, EditorScene
+        if timeline.topic != self.topic:
+            raise ValueError("code animation timeline belongs to a different topic")
+        self._anchored_editors.clear()
+        self._code_timing.clear()
+        self._cards.clear()
+        editors, report = {}, {}
+        for index, (scene, timing) in enumerate(zip(self.topic.scenes, timeline.timings, strict=True)):
+            visual = scene.visual
+            if not isinstance(visual, CodeVisual):
+                continue
+            if not visual.line_reveal_words:
+                report[str(index)] = {"mode": "proportional", "alignment": timing.alignment}
+                continue
+            duration = timing.end - timing.start
+            starts = tuple(timing.words[w].start - timing.start for w in visual.line_reveal_words)
+            finish = duration - 1.0
+            windows = tuple((begin, min(begin + 2.4, starts[i+1] if i+1 < len(starts) else finish))
+                            for i, begin in enumerate(starts))
+            if any(end <= begin for begin, end in windows):
+                raise ValueError(f"code scene {index} has no room for typing and a one-second reading hold")
+            editor = EditorScene(tuple(visual.lines), language=visual.language, filename=visual.language.upper(),
+                                 start=0, typing_seconds=finish, hold_seconds=1, line_windows=windows)
+            editors[index] = EditorRenderer(editor, card_only=True)
+            report[str(index)] = {"mode": "word_anchored", "alignment": timing.alignment,
+                                  "word_indices": list(visual.line_reveal_words), "line_windows": windows}
+        self._anchored_editors, self._code_timing = editors, report
+        self._cards.clear()
+
+    def code_timing_report(self) -> dict:
+        return self._code_timing
 
     def entry(self, index: int) -> dict:
         return self.manifest.get("scenes", {}).get(str(index), {})
@@ -164,12 +200,19 @@ class Plates:
             total = code_length(visual)
             typed = min(total, round(total * min(1.0, scene_t / min(2.4, max(.8, scene_dur * .55)))))
             cursor_visible = typed < total or int(scene_t * 2) % 2 == 0
+            anchored = self._anchored_editors.get(index)
+            if visual.line_reveal_words and anchored is None:
+                raise ValueError("explicit code anchors require a bound timeline")
+            if anchored is not None:
+                typed = anchored.scene.count(scene_t)
+                cursor_visible = scene_t < anchored.scene.typing_seconds or int(scene_t * 2) % 2 == 0
             key = ("code", index, typed, cursor_visible)
             if key not in self._cards:
                 self._cards = {k: v for k, v in self._cards.items() if k[1] == index}
                 if len(self._cards) >= 12:
                     self._cards.pop(next(iter(self._cards)))
-                self._cards[key] = code_card(visual, typed, cursor_visible=cursor_visible)
+                self._cards[key] = (with_shadow(rounded(anchored.revealed_frame(typed, cursor_visible=cursor_visible)))
+                                    if anchored is not None else code_card(visual, typed, cursor_visible=cursor_visible))
             return self._cards[key]
         if isinstance(visual, SourceVisual):
             entry = self.entry(index)

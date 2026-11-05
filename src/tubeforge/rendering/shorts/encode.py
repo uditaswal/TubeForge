@@ -77,6 +77,10 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
     deadline = started + max(60, timeline.duration * budget_rtf)
     initial_swap = swap_used_kib()
     animator = None
+    if (not motion or plates is None) and any(getattr(scene.visual, "line_reveal_words", ()) for scene in timeline.topic.scenes):
+        raise ValueError("word-anchored code requires motion rendering with code plates")
+    if plates is not None:
+        plates.bind_timeline(timeline)
     if motion:
         from .motion import Animator
         animator = Animator(timeline.renderer, plates=plates)
@@ -86,8 +90,9 @@ def encode(timeline: Timeline, audio: Path, destination: Path, *, draft=False,
               "alignment": [s.alignment for s in timeline.timings], "draft": draft,
               "narration_health": narration_health,
               "budget_realtime_factor": budget_rtf, "motion": motion,
-              "code_animation": EDITOR_VERSION if plates is not None and any(
+              "code_animation": EDITOR_VERSION if motion and plates is not None and any(
                   getattr(scene.visual, "kind", None) == "code" for scene in timeline.topic.scenes) else None,
+              "code_timing": plates.code_timing_report() if motion and plates is not None else {},
               "plates": {str(i): (plates.entry(i).get("kind"), (plates.entry(i).get("evidence") or {}).get("asset_id"))
                          for i in range(len(timeline.topic.scenes)) if plates is not None and plates.entry(i)}}
     qa_path = destination.with_suffix(".qa.json")

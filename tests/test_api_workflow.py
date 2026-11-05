@@ -695,6 +695,7 @@ def test_dashboard_shows_signed_in_user_copy_script_and_markdown_mode_controls(t
         assert 'id="authInfo" data-username="chrome-operator"' in dashboard
         assert 'id="signOutButton"' not in dashboard  # built client-side by STUDIO_SCRIPT from #authInfo, not server-rendered
         assert 'id="copyFullScript"' in dashboard and 'id="copyScriptStatus"' in dashboard
+        assert "reference_scenes:currentPackage.reference_short?.scenes||[]" in dashboard
         assert "toggleMarkdownMode" in dashboard and 'id="studioMarkdownSubmit"' in dashboard
         assert client.post("/logout").status_code == 200
         assert client.get("/", follow_redirects=False).status_code == 303

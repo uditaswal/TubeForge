@@ -46,11 +46,25 @@ class CodeVisual(StrictModel):
     kind: Literal["code"]
     language: Literal[CODE_LANGUAGES]  # type: ignore[valid-type]
     lines: tuple[str, ...] = Field(min_length=1, max_length=6)
+    # Optional exact narration word index for the start of each code line.
+    # These are reviewed visual directions, never inferred from generic scene cues.
+    line_reveal_words: tuple[int, ...] = Field(default=(), max_length=6)
+
+    @model_serializer(mode="wrap")
+    def omit_default_anchors(self, handler):
+        value = handler(self)
+        if not self.line_reveal_words:
+            value.pop("line_reveal_words", None)
+        return value
 
     @model_validator(mode="after")
     def short_lines(self):
         if any(not line.strip() or len(line) > 30 or "\t" in line for line in self.lines):
             raise ValueError("code lines must be nonempty, tab-free and at most 30 characters")
+        if self.line_reveal_words and (len(self.line_reveal_words) != len(self.lines) or
+                tuple(sorted(set(self.line_reveal_words))) != self.line_reveal_words or
+                self.line_reveal_words[0] < 0):
+            raise ValueError("line_reveal_words must give one ordered distinct word index per code line")
         return self
 
 
@@ -95,6 +109,9 @@ class Scene(StrictModel):
             raise ValueError("each scene must contain 8–15 spoken words")
         if tuple(sorted(set(self.reveal_words))) != self.reveal_words or not all(0 <= x < len(words) for x in self.reveal_words):
             raise ValueError("reveal_words must be ordered, distinct narration word indices")
+        if isinstance(self.visual, CodeVisual) and self.visual.line_reveal_words:
+            if any(index >= len(words) for index in self.visual.line_reveal_words):
+                raise ValueError("code line reveal exceeds narration word indices")
         if "\n" in self.caption:
             raise ValueError("caption input is continuous display text, not a multiline layout")
         if self.cues:

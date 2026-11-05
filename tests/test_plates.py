@@ -128,3 +128,52 @@ def test_editor_renderer_revision_changes_job_cache_identity(monkeypatch):
     current = reference_short.render_identity(topic, 'audio', 'timeline', **kwargs)
     monkeypatch.setattr(reference_short, 'RENDERER_VERSION', 'reference-short-v1/render-3')
     assert current != reference_short.render_identity(topic, 'audio', 'timeline', **kwargs)
+
+
+@pytest.mark.parametrize('anchors', [(0,), (0, 0, 3), (-1, 2, 3), (0, 2, 99)])
+def test_code_line_anchors_must_cover_lines_and_exact_narration(anchors):
+    with pytest.raises(ValidationError):
+        topic_with({1: {**CODE, 'line_reveal_words': anchors}})
+
+
+def test_old_code_visual_serialization_is_unchanged():
+    assert VISUAL.validate_python(CODE).model_dump(mode='json') == CODE
+
+
+def test_code_line_windows_bind_exact_word_times_and_fail_without_reading_hold(tmp_path):
+    from types import SimpleNamespace
+    from tubeforge.rendering.shorts.timeline import SceneTiming, Word
+    topic = topic_with({1: {**CODE, 'line_reveal_words': [0, 3, 6]}})
+    def timeline(end=6):
+        words = tuple(Word(i*.5, i*.5+.3) for i in range(10))
+        return SimpleNamespace(topic=topic, timings=tuple(SceneTiming(0, end, words, 'fixture-alignment') for _ in topic.scenes))
+    plates = Plates(topic, tmp_path, {})
+    with pytest.raises(ValueError, match='bound timeline'):
+        plates.card(1, 2, 6, None)
+    plates.bind_timeline(timeline())
+    row = plates.code_timing_report()['1']
+    assert row['mode'] == 'word_anchored'
+    assert row['alignment'] == 'fixture-alignment'
+    assert row['line_windows'] == ((0, 1.5), (1.5, 3), (3, 5))
+    assert plates._anchored_editors[1].scene.cursor(1.6)[0] == 1
+    assert plates._anchored_editors[1].scene.count(5) == len('\n'.join(CODE['lines']))
+    with pytest.raises(ValueError, match='reading hold'):
+        plates.bind_timeline(timeline(end=3.5))
+
+
+def test_other_renderers_reject_anchors_before_audio_mastering(tmp_path):
+    from types import SimpleNamespace
+    from tubeforge.pipeline.reference_short import render
+    from tubeforge.core.errors import ProviderValidationError
+    topic = topic_with({1: {**CODE, 'line_reveal_words': [0, 3, 6]}})
+    with pytest.raises(ProviderValidationError, match='Pillow'):
+        render(SimpleNamespace(topic=topic), tmp_path, tmp_path/'final.mp4',
+               SimpleNamespace(renderer='hyperframes'), draft=False, cancelled=lambda: False)
+
+
+def test_code_word_anchors_change_render_identity():
+    from tubeforge.pipeline.reference_short import render_identity
+    kwargs = dict(draft=False, approval_identity='fixture')
+    ordinary = topic_with({1: CODE})
+    anchored = topic_with({1: {**CODE, 'line_reveal_words': [0, 3, 6]}})
+    assert render_identity(ordinary, 'a', 't', **kwargs) != render_identity(anchored, 'a', 't', **kwargs)
