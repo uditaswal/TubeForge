@@ -327,6 +327,40 @@ VAGUE_OTHER = re.compile(r"\bother (?:factors|things|reasons|issues|conditions|v
 FILLER_PHRASES = ("slow and steady", "here is the catch", "here's the catch", "that is not it", "that's not it", "think of it as",
                   "long story short", "in other words", "simply put", "think soft", "thing is")
 CONTRACTION = re.compile(r"\b\w+'(?:s|t|re|ve|ll|d|m)\b", re.I)
+META_LABEL = re.compile(r"(?:^|(?<=[.!?]\s))(?:my verdict|the verdict|verdict|the takeaway|takeaway|bottom line|pro tip|fun fact|key point)\s*[:\u2014-]", re.I)
+# A source named in the voice-over ("AWS says so", "Stripe's blog calls that bad"): the citation belongs on screen, in the scene's source chip.
+ATTRIBUTION = re.compile(r"\b(?:blog|docs|documentation|doc|paper|spec)(?:'s)?\s+(?:says?|calls?|warns?|states?|notes?|recommends?)\b"
+                         r"|\b[A-Z][A-Za-z0-9]+(?:\s[A-Z][A-Za-z0-9]+)?\s+(?:says|warns|states|recommends)\b|\b(?:says|said) so\b|\baccording to\b")
+UNCONTRACTED = re.compile(r"\b(?:do|does|did|is|are|was|were|has|have|had|will|would|could|should) not\b|\bcannot\b", re.I)
+VAGUE_QUALITY = re.compile(r"\b(?:real|proper|actual|right)\s+(?:\w+\s+)?(?:work|tools?|checks?|way|solution|fix|protection|security|answer)\b", re.I)
+
+
+def _hook_bigrams(text: str) -> set[tuple[str, str]]:
+    """Adjacent content-word pairs (stemmed, within a sentence), leaving out names (two capitalised words) and numbers."""
+    found: set[tuple[str, str]] = set()
+    for sentence in re.split(r"(?<=[.!?\u2026])\s+", text):
+        tokens = re.findall(r"[A-Za-z0-9']+", sentence)
+        content = [(token.casefold().strip("'"), index > 0 and token[:1].isupper() or token.isupper() and len(token) > 1)
+                   for index, token in enumerate(tokens) if token.casefold() not in STOPWORDS]
+        stems = [(w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w, cap) for w, cap in content if w and not w.isdigit()]
+        for (a, cap_a), (b, cap_b) in zip(stems, stems[1:]):
+            if not (cap_a and cap_b):
+                found.add((a, b))
+    return found
+
+
+def loop_reads_as(package) -> str:
+    """The last line followed by the first line, as the loop will sound. Read it: an open last line must join line 1 into one sentence."""
+    scenes = package.reference_short.scenes
+    last, first = scenes[-1].vo.strip(), scenes[0].vo.strip()
+    if not last or not first:
+        return ""
+    word = first.split()[0].strip(".,;:!?\"'()")
+    # A name keeps its capital: it is capitalised in other lines and never written in lower case.
+    capitalised_elsewhere = any(re.search(rf"\b{re.escape(word)}\b", scene.vo) for scene in scenes[1:])
+    seen_lower = any(re.search(rf"\b{re.escape(word.lower())}\b", scene.vo) for scene in scenes)
+    joined_first = first if (word.isupper() or word == "I" or (capitalised_elsewhere and not seen_lower)) else first[0].lower() + first[1:]
+    return f"{last} {joined_first}"
 
 
 def _int_words(n: int) -> str:
@@ -398,7 +432,7 @@ def naturalness_problems(package) -> list[str]:
         spoken = said_so_far
         shown: list[str] = []
         for text in _display_texts(scene):
-            shown += ON_SCREEN_NUMBER.findall(VERSION_NUMBER.sub(" ", text))
+            shown += [token.rstrip(",") for token in ON_SCREEN_NUMBER.findall(VERSION_NUMBER.sub(" ", text)) if token.rstrip(",") not in {"0", ""}]  # a counter that starts at 0 is not a spoken figure
         missing = sorted({token for token in shown if not any(f" {form} " in spoken for form in _spoken_forms(token))})
         if missing:
             notes.append(f"scene {index} shows {', '.join(missing)} on screen but the narration never says it; say the figure or use the example the narration already explains")
@@ -409,6 +443,25 @@ def naturalness_problems(package) -> list[str]:
         hits = [phrase for phrase in FILLER_PHRASES if f" {phrase} " in lowered]
         if hits:
             notes.append(f"scene {index} has filler {hits}; replace it with a concrete fact or cut it")
+        label = META_LABEL.search(scene.vo)
+        if label:
+            notes.append(f"scene {index} opens with a reviewer's label ({label.group(0).strip()!r}); a narrator just says the line")
+        cited = ATTRIBUTION.search(scene.vo)
+        if cited:
+            notes.append(f"scene {index} names its source in the voice-over ({cited.group(0)!r}); put the citation in the source chip and keep the voice for the fact, unless the citation is the surprise")
+        vague_quality = VAGUE_QUALITY.search(scene.vo)
+        if vague_quality:
+            notes.append(f"scene {index} says {vague_quality.group(0)!r}; name the actual tool, setting or step instead of calling it real or proper")
+    stiff = [str(i) for i, scene in enumerate(scenes, 1) if UNCONTRACTED.search(scene.vo)]
+    if stiff:
+        notes.append(f"scenes {', '.join(stiff)} use stiff uncontracted forms ('will not', 'is not'); write how it is spoken ('won't', 'isn't')")
+    hook = _hook_bigrams(scenes[0].vo)
+    for index, scene in enumerate(scenes[1:-1], 2):
+        shared = sorted(hook & _hook_bigrams(scene.vo))
+        if shared:
+            notes.append(f"scene {index} restates the hook's idea ('{' '.join(shared[0])}'); say the thesis once in the hook and once in the loop line, and spend this scene on a new fact or figure")
+    if not any(_numbers(scene.vo) for scene in scenes):
+        notes.append("the narration has no figure at all; introduce the running example with concrete values early (for example 'set 100 a second, burst 200')")
     return notes
 
 
@@ -439,7 +492,7 @@ def script_scorecard(package) -> dict:
         "distinct_openings_share": round(len(set(firsts)) / len(firsts), 2) if firsts else 1.0,
         "avg_words_per_sentence": round(words / max(1, len(sentences)), 1),
         "fact_dump_problems": len(fact_dump_problems(package)),
-        "naturalness_notes": naturalness_problems(package), **_rhythm(spoken),
+        "naturalness_notes": naturalness_problems(package), "loop_reads_as": loop_reads_as(package), **_rhythm(spoken),
         # M-AU2: scorecard-only (not a hard gate — a forced minimum risks an awkward, tacked-on
         # cue just to satisfy a rule). The prompt's DELIVERY CUES section sets its own ceiling
         # (at most 4 tags/scene, 2 stress words/scene, 2 whispers total); this just counts what

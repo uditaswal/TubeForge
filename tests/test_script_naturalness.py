@@ -72,3 +72,76 @@ def test_rhythm_signals_separate_flat_robotic_prose_from_varied_spoken_prose():
     spoken = _rhythm(["It leaks. And that's the part nobody tells you, because the docs bury it. Don't trust it."])
     assert flat["contractions_per_100_words"] == 0 and spoken["contractions_per_100_words"] > 0
     assert spoken["sentence_length_variation"] > flat["sentence_length_variation"]
+
+
+RATE_LIMIT_P2 = [
+    "Your AWS API Gateway limit is a target, not a wall.",
+    "Throttling protects your API from being flooded with requests. It feels like a wall.",
+    "Both throttles and quotas are best-effort targets, not guaranteed request ceilings. AWS says so.",
+    "Requests drain a token bucket in your gateway. Each one spends a token.",
+    "Worse, the bucket allows a planned overrun. Traffic can pass your limit by design.",
+    "Quotas leak too. Even without a burst, AWS says clients can exceed your quotas.",
+    "AWS warns against relying on either one to control costs. Same for blocking access.",
+    "Use these instead. AWS Budgets monitors your costs, and AWS WAF manages your API requests.",
+    "To keep people out, use real login checks. Usage plan quotas will not do it.",
+    "A limit is a target. Let AWS Budgets and AWS WAF do the real work.",
+    "Go ahead and set your limits if you like, but never forget that",
+]
+IDEMPOTENCY_P2 = [
+    "Stripe remembers your first answer, even when it was a 500 error.",
+    "You tap pay. The charge goes through, but the reply never reaches you.",
+    "Retry blindly and your customer is charged twice. Stripe's blog calls that very bad.",
+    "Your client makes up a unique ID and sends it along. The server spots repeats.",
+    "The older Stripe API saves the status and full reply of your first request.",
+    "Then your retry returns that saved reply. Failures included.",
+    "But if your request fails its basic checks, Stripe saves nothing. Retrying is fine.",
+    "Change the request details but reuse the key. Stripe returns an error.",
+    "After 24 hours, Stripe can delete a key. Reusing it makes a new request.",
+    "Make your key long and random. Never use an email address.",
+    "My verdict: a key is memory, not magic. Your retry replays the first answer.",
+    "and that is the one rule behind every safe retry, because",
+]
+
+
+def lines(texts):
+    return package(*[scene(text) for text in texts])
+
+
+def test_the_reviewed_rate_limit_script_is_flagged_where_the_reviewer_pointed():
+    notes = naturalness_problems(lines(RATE_LIMIT_P2))
+    joined = " | ".join(notes)
+    assert "scene 3 restates the hook's idea" in joined and "scene 10 restates the hook's idea" in joined     # target, not a wall: lines 1, 3 and 10
+    assert "scene 9 says 'real login checks'" in joined and "scene 10 says 'real work'" in joined or "do the real work" in joined
+    assert "scene 3 names its source in the voice-over" in joined and "scene 7 names its source in the voice-over" in joined
+    assert "scenes 9 use stiff uncontracted forms" in joined                                                    # "will not do it"
+    assert "no figure at all" in joined                                                                         # no running example
+    assert "scene 4 " not in joined and "scene 5 " not in joined                                               # the mechanism scenes are not flagged
+
+
+def test_the_reviewed_idempotency_script_flags_the_label_and_the_cited_blog():
+    notes = " | ".join(naturalness_problems(lines(IDEMPOTENCY_P2)))
+    assert "scene 11 opens with a reviewer's label ('My verdict:')" in notes
+    assert "scene 3 names its source in the voice-over" in notes and "blog calls" in notes
+    assert "scene 11 restates the hook's idea ('first answer')" in notes
+    assert "no figure at all" not in notes                                                                       # it has 500 and 24
+
+
+def test_names_are_not_mistaken_for_a_repeated_thesis():
+    texts = ["Your AWS API Gateway limit can be passed.", "The AWS API Gateway keeps a token bucket.", "A bucket holds tokens until a burst spends them.",
+             "Set 100 a second and a burst of 200.", "Then the limit leaks.", "Use a budget.", "and that is the limit, because"]
+    assert not any("restates the hook" in note for note in naturalness_problems(lines(texts)))
+
+
+def test_loop_reads_as_joins_the_last_line_to_the_first_and_keeps_names_capitalised():
+    from tubeforge.providers.content.craft import loop_reads_as
+    joined = loop_reads_as(lines(["Stripe remembers your first answer.", "Stripe saves it.", "and that is the rule, because"]))
+    assert joined == "and that is the rule, because Stripe remembers your first answer."
+    plain = loop_reads_as(lines(["Retries are dangerous.", "They repeat.", "and that is why, because"]))
+    assert plain == "and that is why, because retries are dangerous."
+    assert "loop_reads_as" in script_scorecard(lines(RATE_LIMIT_P2))
+
+
+def test_a_counter_starting_at_zero_and_a_trailing_comma_are_not_unspoken_figures():
+    shown = package(scene("After 24 hours, a key can be deleted.", before="0", after="24 hours"),
+                    scene("Set the burst to 200 and the rate to 100.", before="burst 100,", after="rate 200"))
+    assert not any("on screen" in note for note in naturalness_problems(shown))
