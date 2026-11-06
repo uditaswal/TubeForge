@@ -459,3 +459,11 @@ have no runtime/layout/contrast errors; its silent-project warning refers to the
 intermediate visual-only HTML, before accepted audio mux. The complete mix has
 not been listened to here. Full-video playback and operator acceptance remain open;
 no phase is promoted to overall VERIFIED from a contact sheet or tests alone.
+
+Lifecycle regression audit: 15 selected existing orchestrator/worker/approval tests
+passed in 190.05 s. Coverage includes interruption resume, version-invalidated
+preview identity, six stale-input cases, changed word timing requiring fresh
+approval, cancellation lease cleanup, ownership fencing and conflicting approvals.
+These are local automated safeguards, not proof of the complete signed-in
+preview → final workflow for the new comparison. That live workflow evidence
+and full watch/listen remain open.
