@@ -1,7 +1,10 @@
 # Reference motion quality plan
 
 Date: 6 November 2026. Branch: `feature/reference-motion-quality`, based on
-`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch, and the local saved-media workflow is VERIFIED. Overall acceptance is BLOCKED on full watch/listen feedback for the completed dark article-card revision; its local technical/appearance checks are VERIFIED. Story checklist parity is demonstrated locally; unsupported layouts fail explicitly.
+`dev` at `ea14e5e`. **VERIFIED** for the agreed vertical Shorts feature scope.
+The operator watched the exact final dark article-card revision with sound and
+accepted it on6November: “Watched: looks and sounds good.” All checklist items
+below are closed. The feature remains on its isolated branch/worktree.
 
 ## Outcome and evidence
 
@@ -43,7 +46,7 @@ Report each phase's acceptance before beginning the next. Every phase starts NOT
 STARTED; use IMPLEMENTED until its tests and required artifact review pass. Use
 VERIFIED only for the demonstrated scope, and BLOCKED for external decisions.
 
-### 1. Reproduce the reference craft — IMPLEMENTED
+### 1. Reproduce the reference craft — VERIFIED
 
 Outcome: a local editor scene with stable chrome, syntax colouring, timed typing,
 a cursor that follows the text, and deliberate completed-code/output holds.
@@ -58,7 +61,7 @@ Tests cover multiline/token reveal and deterministic frame selection.
 Evidence: MP4s, contact sheets, timing manifest, hashes, measurements and a concrete
 visual pass/fail review. Out of scope: narration, dashboard and new scene families.
 
-### 2. Make it a reusable scene — IMPLEMENTED
+### 2. Make it a reusable scene — VERIFIED
 
 Outcome: a versioned editor/terminal scene usable by existing jobs, with shared
 palette, typography, spacing, semantic colours and timing events. Include type,
@@ -87,7 +90,7 @@ No silent fallback that claims the requested treatment rendered successfully.
 Evidence: browser captures, job/render hashes, activity record and passing tests.
 Out of scope: new script providers, publishing and automatic production approval.
 
-### 4. Prove full-video quality — IMPLEMENTED
+### 4. Prove full-video quality — VERIFIED
 
 Outcome: one real 30–90-second 1080×1920/30fps narrated Short within the applicable
 accepted profile, combining the improved scene with purposeful existing visuals.
@@ -103,13 +106,17 @@ unverified. Evidence: exact final hash, contact sheet, QA report, full-video rev
 measured runtime and signed-in dashboard evidence. Out of scope: publishing,
 claims of improved retention and broad rollout before acceptance.
 
-## Next five actions
+## Delivery state
 
-1. Watch/listen to the dark-reader revision below (replaces the prior native final as the current candidate); record timestamped feedback.
-2. Resolve playback findings, including terminal reading hold, small terminal labels and music balance.
-3. Review the completed native workflow evidence alongside the exact final; production script generation and publishing remain outside this run.
-4. Rerun only checks affected by repairs and inspect the exact revised artifact.
-5. Submit the feature branch and evidence for review; merge requires explicit approval.
+The requested vertical feature and operator review are complete. No further work
+is required for this goal. Branch review: native Pillow editor/code animation,
+shared speech timing and Story checklist typing; clean, consistently dark source
+cards with reading highlights; immediate hook/loop fixes; versioned inputs and
+truthful unsupported-layout failures. Existing source/audio content is preserved.
+Validation and the exact accepted artifact are summarized in the final audit below.
+
+Merge, deployment, publication and landscape remain outside this completed scope.
+The operator's audiovisual acceptance is not authorization for those actions.
 
 Stop after two failed repairs of the same root issue or 45 minutes of active
 debugging, per AGENTS.md; report evidence, two options and a recommendation.
@@ -135,9 +142,9 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Inspect actual source cards, terminal/output hold, code reveal frames and every scene entrance.
 - [x] Fix Story frame-zero headline, canonical loop endpoint and source-image zoom clipping; invalidate render identities.
 - [x] Verify signed-in desktop/mobile review for the exact revised package.
-- [ ] Complete full watch/listen acceptance of the exact revised Short.
+- [x] Complete full watch/listen acceptance of the exact revised Short.
 - [x] Prove native worker preview → exact dashboard approval → final with a fresh worker, and audit restart/ownership/stale-approval safeguards.
-- [ ] Close creative acceptance and the full phase audit before calling the overall goal VERIFIED.
+- [x] Close creative acceptance and the full phase audit before calling the overall goal VERIFIED.
 
 ## First implementation checkpoint
 
@@ -588,7 +595,7 @@ of the previous candidate is superseded by this requested visual revision.
 - [x] Implement and test shared dark-reader capture theme; retain provenance.
 - [x] Inspect all five actual dark source captures and highlight variants.
 - [x] Render and inspect revised Short with other scenes and saved audio preserved.
-- [ ] Obtain full review of the exact revised artifact.
+- [x] Obtain full review of the exact revised artifact.
 
 Dark-capture phase **VERIFIED** locally:34 focused tests pass (one browser check
 skipped in that default run); separate Chromium light/dark/shadow-root geometry
@@ -633,3 +640,37 @@ render is required before feedback. Goal acceptance is **BLOCKED** on that
 external review, not VERIFIED overall. The existing exact-version review question
 remains pending; silence is not approval. Next: acceptance or timestamped findings
 for SHAa1f7d279578fd502aff81c09fde2a1cd8ba178a3b478384295796b9a76724a67.
+
+## Final acceptance and completion audit — 6 November
+
+**VERIFIED** for the agreed vertical Shorts scope. The operator answered the
+exact-version full watch/listen question: **“Watched: looks and sounds good.”**
+Acceptance binds the unchanged dark-reader final, SHA
+`a1f7d279578fd502aff81c09fde2a1cd8ba178a3b478384295796b9a76724a67`.
+Local evidence: main-project
+`artifacts/review/reference-motion-dark-reader-v1/operator-review.json`.
+This supersedes prior pending/BLOCKED checkpoints; those describe earlier states.
+
+| Phase / invariant | Evidence inspected for completion | Final result |
+|---|---|---|
+|1 Reference craft, portrait composition, costs | Preserved GIF/hash/96 frame durations; current multiline/command/width MP4s and inspected frames; measured23.273s fixture batch/567020KiB max waited-child RSS; same fixture hashes on rerender | VERIFIED for demonstrated fixtures and integrated portrait output |
+|2 Reusable scene and explicit limits | Shared editor/timing compiler/Pygments tokens; native card cache; typing/pauses/cursor/hold; existing terminal output and source-highlight reveals; validation/cache/Unicode/seek tests; no silent truncation | VERIFIED for supported Pillow cards and Story checklist code; other explicit-anchor layouts reject visibly |
+|3 Speech integration and review workflow | Saved Whisper word indices/timestamps and minimum hold; signed-in desktop/mobile script review; real leased preview→exact approval→fresh worker final; stale409/current200;15 lifecycle regressions; exact-file identities | VERIFIED for saved reviewed-media workflow; no live script provider needed |
+|4 Real full Short |49.659s,1490frames,1080×1920/30,H.264/AAC,full decode;−14.16LUFS/−2.47dBTP;330.05s encoder/RTF6.65<20; full overview/source/code/endpoints inspected; explicit operator full watch/listen acceptance | VERIFIED for exact accepted file |
+| Dark article-card revision / preserve other content |34 focused tests+real Chromium geometry/text test; all5 full source matches and dark plain/highlight/exported frames; source dimensions retained;7 non-source comparisons<=0.315/255; AAC packets identical | VERIFIED; operator accepted the revised style/mix |
+| Exact artifact and review binding | Recomputed final SHA matches final.qa.json and revision-comparison.json; operator-review.json records the exact question/answer/hash | VERIFIED; no artifact change after review |
+| Records and repository hygiene | Current plan/HANDOFF/readme consistent; local progress appended; source/evidence committed with hooks; generated media/DBs/logs ignored | VERIFIED for feature delivery |
+
+Terminal reading-hold, music-under-speech and small-label advisories were shown
+before the complete viewing/listening request; no timestamped defects remain after
+the operator's full acceptance. QA's no-thumbnail warning concerns a publishing
+package, which is out of scope. Technical warnings remain in raw reports; they
+were not removed to manufacture a pass. This proves the accepted local quality
+scope, not measured retention or universal readability for arbitrary new content.
+
+Accepted output uses the existing stack and keeps animation within a vertical
+MP4. Narration/source wording and existing semantic scene variety are preserved.
+Landscapes, new script generation, broad rollout, merge/push and publication are
+excluded. Optional explicit code anchors remain supported in Pillow and Story
+checklists; other Story/classic layouts fail explicitly. Old approved artifacts
+keep their original bytes. No required work remains in the agreed goal scope.
