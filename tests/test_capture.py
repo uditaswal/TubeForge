@@ -53,8 +53,8 @@ def test_capture_cleanup_preserves_quote_and_records_controls_in_chromium():
     if os.environ.get('TUBEFORGE_CAPTURE_BROWSER') != '1':
         pytest.skip('opt-in real Chromium source capture check')
     from playwright.sync_api import sync_playwright
-    from tubeforge.pipeline.capture import CLEAN_CONTROLS, FIND
-    out = Path('artifacts/review/reference-motion-capture')
+    from tubeforge.pipeline.capture import CLEAN_CONTROLS, DARK_READER, FIND
+    out = Path(os.environ.get('TUBEFORGE_CAPTURE_EVIDENCE', 'artifacts/review/reference-motion-capture-dark-reader'))
     out.mkdir(parents=True, exist_ok=True)
     quote = 'The bucket refills at a constant rate over time.'
     with sync_playwright() as p:
@@ -87,6 +87,21 @@ def test_capture_cleanup_preserves_quote_and_records_controls_in_chromium():
             assert page.locator('#prose').is_visible()
             assert page.get_by_role('link',name='Ask AI',exact=True).is_visible()
             assert page.get_by_role('button',name='Run example',exact=True).is_visible()
+            page.evaluate('getSelection().removeAllRanges()')
+            # Light and pre-existing dark page styles, including inline !important,
+            # get the same reader paint without changing text or range geometry.
+            page.locator('#claim').evaluate("el=>{el.style.setProperty('color','black','important');el.style.setProperty('background-color','white','important')}")
+            page.locator('#prose').evaluate("el=>{el.style.backgroundColor='#222';el.style.color='#eee'}")
+            before_theme = page.evaluate(FIND, quote)
+            themed = page.evaluate(DARK_READER)
+            after_theme = page.evaluate(FIND, quote)
+            assert themed == {'appearance':'dark-reader-v1','themed_roots':2}
+            assert before_theme == after_theme
+            assert page.locator('#claim').inner_text() == quote
+            assert page.locator('#claim').evaluate("el=>getComputedStyle(el).color") == 'rgb(229, 237, 248)'
+            assert page.locator('#prose').evaluate("el=>getComputedStyle(el).color") == 'rgb(229, 237, 248)'
+            assert page.locator('body').evaluate("el=>getComputedStyle(el).backgroundColor") == 'rgb(16, 24, 39)'
+            assert page.locator('#shadow-ui').get_by_role('button',name='Ask AI',include_hidden=True).evaluate("el=>getComputedStyle(el).color") == 'rgb(229, 237, 248)'
             page.evaluate('getSelection().removeAllRanges()')
             page.screenshot(path=str(out/'fixture-after.png'))
         finally:

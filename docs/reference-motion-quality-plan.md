@@ -1,7 +1,7 @@
 # Reference motion quality plan
 
 Date: 6 November 2026. Branch: `feature/reference-motion-quality`, based on
-`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch, and the local saved-media workflow is VERIFIED. Overall acceptance is BLOCKED on full watch/listen review of the exact native final. Story checklist parity is demonstrated locally; unsupported layouts fail explicitly.
+`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch, and the local saved-media workflow is VERIFIED. Overall acceptance is IMPLEMENTED while applying the operator’s dark article-card revision; full watch/listen will follow the revised artifact. Story checklist parity is demonstrated locally; unsupported layouts fail explicitly.
 
 ## Outcome and evidence
 
@@ -564,3 +564,38 @@ remained open across the direct comparison, native workflow and current audit
 turns. More rerenders or unrelated features would not supply that evidence.
 The quality skill explicitly requires “watch the full final video” and “Listen to
 the complete mix.” No operator approval is inferred from silence or test passes.
+
+## Operator revision — consistent dark article cards (6 November)
+
+Operator selected “Dark article cards; keep other scenes.” Overall implementation
+is **IMPLEMENTED** and this revision is **IMPLEMENTED**. Full-video acceptance
+of the previous candidate is superseded by this requested visual revision.
+
+1. Shared dark capture treatment: outcome is a consistent navy/white source-card
+   theme with the existing animated reading highlight. Acceptance: actual Chromium
+   proves exact quoted text and line geometry unchanged for light/dark/shadow-root
+   content; all five real saved quotes fully match and look dark/readable. Evidence:
+   focused tests, capture provenance, plain/highlight PNGs. Out of scope: narration,
+   article rewriting, code/diagram/terminal/hook layout changes.
+2. Revised vertical Short: reuse the latest native narration, mix, timing, topic
+   and non-source assets in a separate comparison; regenerate only source plates.
+   Acceptance: native1080×1920/30 MP4, exact-file decode/loudness QA, full contact
+   sheet and source frames inspected; compare non-source frames with prior native
+   output and verify audio reuse. Full watch/listen remains an exact-artifact gate.
+   Record hash/runtime and check tasks as evidence passes; no production approval,
+   paid provider call, merge, push or publication.
+
+- [x] Implement and test shared dark-reader capture theme; retain provenance.
+- [x] Inspect all five actual dark source captures and highlight variants.
+- [ ] Render and inspect revised Short with other scenes and saved audio preserved.
+- [ ] Obtain full review of the exact revised artifact.
+
+Dark-capture phase **VERIFIED** locally:34 focused tests pass (one browser check
+skipped in that default run); separate Chromium light/dark/shadow-root geometry
+and exact-text test passes2.81s. Five actual cited quotes fully recaptured under
+v5 dark-reader, all `matched=true`; plain/highlight contact sheet inspected at
+`artifacts/review/reference-motion-dark-reader-v1/dark-source-review.png` in the
+main project. Capture evidence retains appearance/theme-root count and targeted
+Ask AI cleanup. Topic/narration/mix are hash-identical to latest native inputs;
+only source plates were regenerated. Full revised render is running from those
+verified prepared files under production20× budget. Existing outputs remain separate.

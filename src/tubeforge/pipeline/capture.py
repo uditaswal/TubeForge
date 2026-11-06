@@ -28,7 +28,7 @@ HIDE_OVERLAYS = """
 {display:none !important}
 html,body{overflow:visible !important;position:static !important}
 """
-CAPTURE_POLICY = "source-capture-v4-clean-lines"
+CAPTURE_POLICY = "source-capture-v5-dark-reader"
 CLEAN_CONTROLS = """
 () => {
   const hidden = [];
@@ -50,6 +50,31 @@ CLEAN_CONTROLS = """
     hidden.push(label.slice(0, 100));
   }
   return hidden;
+}
+"""
+
+
+DARK_READER = """
+() => {
+  // Change paint only: retain exact page text, fonts, line breaks and geometry.
+  const roots = [document];
+  for (let i = 0; i < roots.length; i++) {
+    for (const el of roots[i].querySelectorAll('*')) {
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+    }
+  }
+  for (const root of roots) {
+    for (const el of root.querySelectorAll('*')) {
+      el.style.setProperty('color', '#e5edf8', 'important');
+      el.style.setProperty('background-color', 'transparent', 'important');
+      el.style.setProperty('background-image', 'none', 'important');
+      el.style.setProperty('text-shadow', 'none', 'important');
+      el.style.setProperty('box-shadow', 'none', 'important');
+    }
+  }
+  document.documentElement.style.setProperty('background-color', '#101827', 'important');
+  document.body.style.setProperty('background-color', '#101827', 'important');
+  return {appearance: 'dark-reader-v1', themed_roots: roots.length};
 }
 """
 
@@ -174,6 +199,7 @@ def make_capture(config: SourceCaptureConfig):
                     page.evaluate("css => { const s = document.createElement('style'); s.textContent = css;"
                                   " (document.head || document.documentElement).appendChild(s); }", HIDE_OVERLAYS)
                     page.evaluate(f"document.documentElement.style.zoom = '{config.page_zoom}'")  # bigger text on the 810 px card
+                    appearance = page.evaluate(DARK_READER)
                     page.wait_for_timeout(400)
                     found = page.evaluate(FIND, quote)
                     if not found:
@@ -200,5 +226,5 @@ def make_capture(config: SourceCaptureConfig):
         full.save(plain2)
         draw_highlight(full, found["rects"], clip).save(marked2)
         return {"file": f"plates/{plain.name}", "highlight": f"plates/{marked.name}", "matched": bool(found["complete"]),
-                "matched_words": found["words"], "capture_policy": CAPTURE_POLICY, "hidden_controls": hidden_controls, "file_2x": f"plates/{plain2.name}", "highlight_2x": f"plates/{marked2.name}"}
+                "matched_words": found["words"], "capture_policy": CAPTURE_POLICY, **appearance, "hidden_controls": hidden_controls, "file_2x": f"plates/{plain2.name}", "highlight_2x": f"plates/{marked2.name}"}
     return capture

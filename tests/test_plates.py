@@ -184,8 +184,10 @@ def test_source_capture_cleanup_policy_is_retained_in_manifest(tmp_path):
     topic = topic_with({1: {'kind':'source','quote':'A sufficiently long source quote'}})
     def capture(url, quote, base):
         return {'file':'plates/source-1.png','matched':True,
-                'capture_policy':CAPTURE_POLICY,'hidden_controls':['Ask AI']}
+                'capture_policy':CAPTURE_POLICY,'appearance':'dark-reader-v1','themed_roots':2,'hidden_controls':['Ask AI']}
     manifest = prepare_plates(topic,tmp_path,pixabay=None,capture=capture)
     evidence = manifest['scenes']['1']['evidence']
     assert evidence['capture_policy'] == CAPTURE_POLICY
     assert evidence['hidden_controls'] == ['Ask AI']
+    assert evidence['appearance'] == 'dark-reader-v1'
+    assert evidence['themed_roots'] == 2
