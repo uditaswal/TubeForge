@@ -27,8 +27,33 @@ HIDE_OVERLAYS = """
 [aria-label*="cookie" i],[role="dialog"],[class*="newsletter" i],[class*="subscribe-modal" i],[class*="paywall" i]
 {display:none !important}
 html,body{overflow:visible !important;position:static !important}
+body *{overflow-wrap:anywhere !important}  /* a long unbreakable URL must not widen a text block past the capture window (it cut off Hacker News comments) */
 """
-CAPTURE_POLICY = "source-capture-v5-dark-reader"
+CAPTURE_POLICY = "source-capture-v6-dark-reader-overlays"
+HIDE_FIXED_OVERLAYS = r"""
+(quote) => {
+  // Sticky headers, promo banners and floating panels are drawn on top of the quote in a full-page clip.
+  // visibility keeps the geometry the clip was planned on; an element that holds the quote is never hidden.
+  const probe = quote.replace(/\s+/g, ' ').trim().slice(0, 40).toLowerCase();
+  const hidden = [];
+  const roots = [document];
+  for (let i = 0; i < roots.length; i++) {
+    for (const el of roots[i].querySelectorAll('*')) {
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+    }
+  }
+  for (const root of roots) for (const el of root.querySelectorAll('*')) {
+    if (el === document.body || el === document.documentElement) continue;
+    const position = getComputedStyle(el).position;
+    if (position !== 'fixed' && position !== 'sticky') continue;
+    const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+    if (probe && text.toLowerCase().includes(probe)) continue;
+    el.style.setProperty('visibility', 'hidden', 'important');
+    hidden.push(('overlay: ' + (el.getAttribute('aria-label') || text || el.tagName)).slice(0, 100));
+  }
+  return hidden;
+}
+"""
 CLEAN_CONTROLS = """
 () => {
   const hidden = [];
@@ -98,8 +123,12 @@ FIND = """
       const holder = anchor.closest('p,li,blockquote,h1,h2,h3,h4,td,figcaption,dd') || anchor;
       const hb = holder.getBoundingClientRect();
       const block = {y: hb.y + dy, h: hb.height};
+      // Under the page zoom some layouts (a plain table page such as Hacker News) report their size in zoomed
+      // units while the rects are in visual pixels; scale by viewport / document width (exactly 1 when they agree).
+      const scale = Math.max(1, window.innerWidth / Math.max(1, document.documentElement.clientWidth));
       return {rects, block, complete: n === words.length, words: n,
-              docHeight: document.documentElement.scrollHeight, docWidth: document.documentElement.clientWidth};
+              docHeight: Math.round(document.documentElement.scrollHeight * scale),
+              docWidth: Math.round(document.documentElement.clientWidth * scale)};
     }
   }
   return null;
@@ -208,7 +237,7 @@ def make_capture(config: SourceCaptureConfig):
                     # Selection-driven controls can appear after FIND. Settle their
                     # update before hiding them; visibility preserves quote geometry.
                     page.wait_for_timeout(250)
-                    hidden_controls = page.evaluate(CLEAN_CONTROLS)
+                    hidden_controls = page.evaluate(CLEAN_CONTROLS) + page.evaluate(HIDE_FIXED_OVERLAYS, quote)
                     clip = plan_clip(found["rects"], found["docWidth"], found["docHeight"], found.get("block"))
                     shot = page.screenshot(clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]}, full_page=True, animations="disabled", caret="hide")
                 finally:
