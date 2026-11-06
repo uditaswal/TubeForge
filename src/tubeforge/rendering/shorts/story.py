@@ -402,7 +402,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             if hl is not None:
                 shutil.copy(hl, assets / f"hero-{i}-hl.png")
             heroes.append({"scene_index": i, "scene_id": scene.scene_id, "plate": treatment["manifest_file"],
-                           "highlight_status": treatment["highlight_status"], "source_label": treatment["source_label"]})
+                           "highlight_status": treatment["highlight_status"], "source_label": treatment["source_label"], "image_motion": "fixed"})
             head = getattr(scene, "heading", None) or " ".join(getattr(scene, "headline", ()))
             top = 560
             extra = ""
@@ -418,7 +418,6 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                     + '</div></div>'
                     f'<div class="pill" id="{sid}pill" style="left:60px;top:{top + height + 40}px;background:rgba(83,224,239,.14);border:2px solid rgba(83,224,239,.6);color:{INK}">SOURCE · {html.escape(treatment["source_label"])}</div>')
             anim += (f'tl.fromTo("#{sid}card",{{opacity:0,y:80,scale:.94}},{{opacity:1,y:0,scale:1,duration:.5,ease:"power3.out"}},{a + .15:.3f});'
-                    f'tl.fromTo("#{sid}zoom",{{scale:1}},{{scale:{style["zoom_scale"]},transformOrigin:"50% 40%",duration:{b - a:.2f},ease:"power1.inOut"}},{a:.3f});'
                     + ("".join(f'tl.set("#{sid}hl",{{clipPath:"inset(0 100% 0 0)"}},{r:.3f});tl.to("#{sid}hl",{{clipPath:"inset(0 0% 0 0)",duration:.5,ease:"none"}},{r:.3f});'
                                for r in reveal) if hl else "")
                     + f'pop("#{sid}pill",{a + .8:.3f});')
@@ -440,7 +439,9 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             else:
                 backdrop_anim = ""
             chips = list(scene.chips)
-            anim = backdrop_anim + f'tl.fromTo("#{sid} .h1",{{opacity:0,y:60}},{{opacity:1,y:0,duration:.5,ease:"power3.out"}},{a:.3f});'
+            anim = backdrop_anim
+            if template != "hook":
+                anim += f'tl.fromTo("#{sid} .h1",{{opacity:0,y:60}},{{opacity:1,y:0,duration:.5,ease:"power3.out"}},{a:.3f});'
             for k, chip in enumerate(chips):
                 body += (f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{chips_top + k * 100}px;background:{RED if k == 0 else "#1b2036"};'
                          f'border:2px solid {RED if k == 0 else "#333a58"};color:#fff;font:400 60px/1 Anton;height:84px;border-radius:14px;text-transform:uppercase">{html.escape(chip)}</div>')
@@ -549,6 +550,18 @@ window.__timelines=window.__timelines||{{}}; window.__timelines["story"]=tl; tl.
     return {"evidence_quote": heroes, "stock_backdrops": backdrops, "layout_family": family, "code_animation": code_animation}
 
 
+def story_video_filter(width, height, frames, loop):
+    base=f"fps={FPS},scale={width}:{height}:flags=lanczos,format=yuv420p"
+    if not loop:
+        return f"[0:v]{base}[v]"
+    if frames < 2:
+        raise ValueError("a loop needs at least two frames")
+    return (f"[0:v]{base},split=2[main][first];"
+            f"[main]trim=end_frame={frames-1},setpts=PTS-STARTPTS[body];"
+            "[first]trim=end_frame=1,setpts=PTS-STARTPTS[head];"
+            "[body][head]concat=n=2:v=1:a=0[v]")
+
+
 def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callable[[], bool] = lambda: False,
                   budget_rtf: float = 20, ffmpeg: str = "ffmpeg", hyperframes_bin: str | None = None,
                   plates_directory: Path | None = None) -> dict:
@@ -577,8 +590,10 @@ def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callab
         # Match the PIL path's output sizes: 720x1280 draft, 1080x1920 final.
         scaled = root / "story-scaled.mp4"
         width, height = (720, 1280) if draft else (1080, 1920)
-        checked([ffmpeg, "-y", "-v", "error", "-i", str(clip), "-an", "-vf",
-                 f"fps={FPS},scale={width}:{height}:flags=lanczos,format=yuv420p", "-c:v", "libx264",
+        loop=timeline.topic.scenes[-1].template == "loop"
+        video_filter=story_video_filter(width,height,round(timeline.duration*FPS),loop)
+        checked([ffmpeg, "-y", "-v", "error", "-i", str(clip), "-an", "-filter_complex",
+                 video_filter, "-map", "[v]", "-c:v", "libx264",
                  "-threads", "2", "-preset", "veryfast", "-crf", "20", "-r", str(FPS),
                  "-movflags", "+faststart", str(scaled)], deadline=deadline, cancelled=cancelled)
         checked([ffmpeg, "-v", "error", "-xerror", "-i", str(scaled), "-f", "null", "-"],
@@ -586,4 +601,4 @@ def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callab
         scaled.replace(destination)
     return {"scene_count": len(timeline.topic.scenes), "frames": round(timeline.duration * FPS),
             "duration": timeline.duration, "checks": [check], "evidence_quote": report["evidence_quote"], "stock_backdrops": report.get("stock_backdrops", []),
-            "source_fallbacks": [], "style": "story", "layout_family": report["layout_family"], "code_animation": report["code_animation"], "render_seconds": time.monotonic() - started}
+            "source_fallbacks": [], "style": "story", "loop_endpoint": "opening-frame-replay" if loop else None, "layout_family": report["layout_family"], "code_animation": report["code_animation"], "render_seconds": time.monotonic() - started}

@@ -23,8 +23,11 @@ def test_signed_in_reference_scene_review_desktop_and_mobile(tmp_path):
     from tubeforge.domain.states import JobState
 
     root = Path(__file__).resolve().parents[1]
-    package_path = root / 'artifacts/review/reference-motion-speech/content_package.json'
+    package_path = Path(os.environ.get('TUBEFORGE_MOTION_REVIEW_PACKAGE', str(root / 'artifacts/review/reference-motion-speech/content_package.json')))
     package = ContentPackage.model_validate_json(package_path.read_bytes())
+    expected_anchors={scene.scene_id:list(scene.visual.line_reveal_words) for scene in package.reference_short.scenes
+                      if getattr(scene.visual,'line_reveal_words',())}
+    assert expected_anchors
     database = tmp_path/'browser.db'
     _migrate(database)
     app = create_app(Settings(app=AppConfig(name='Motion browser test', environment='test'),
@@ -45,7 +48,7 @@ def test_signed_in_reference_scene_review_desktop_and_mobile(tmp_path):
     while not server.started and worker.is_alive() and time.monotonic() < deadline:
         time.sleep(.05)
     assert server.started
-    evidence = root/'artifacts/review/reference-motion-browser'
+    evidence = Path(os.environ.get('TUBEFORGE_MOTION_BROWSER_EVIDENCE', str(root/'artifacts/review/reference-motion-browser')))
     evidence.mkdir(parents=True, exist_ok=True)
     results = []
     try:
@@ -69,13 +72,16 @@ def test_signed_in_reference_scene_review_desktop_and_mobile(tmp_path):
                     page.locator('dialog[open]').wait_for()
                     page.wait_for_function("document.querySelector('#skillReview').textContent.includes('line_reveal_words')")
                     details = json.loads(page.locator('#skillReview').text_content())
-                    assert details['reference_scenes'][1]['visual']['line_reveal_words'] == [0,3]
+                    observed={scene['scene_id']:scene['visual']['line_reveal_words'] for scene in details['reference_scenes']
+                              if scene.get('visual',{}).get('line_reveal_words')}
+                    assert observed == expected_anchors
                     assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
                     assert not errors
                     page.locator('#skillReview').evaluate("el => { const details=el.closest('details'); if(details)details.open=true; }")
                     page.locator('#skillReview').scroll_into_view_if_needed()
+                    assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
                     page.screenshot(path=str(evidence/f'{name}.png'), full_page=True)
-                    results.append(dict(viewport=name, anchor_words=[0,3], js_errors=errors, overflow=False))
+                    results.append(dict(viewport=name, anchors=expected_anchors, js_errors=errors, overflow=False))
                     context.close()
             finally:
                 browser.close()

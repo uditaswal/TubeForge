@@ -39,6 +39,7 @@ def encode(timeline: Timeline, silent: Path, audio: Path, destination: Path, *, 
               "evidence_quote": (scene_report or {}).get("evidence_quote", []),
               "code_animation": (scene_report or {}).get("code_animation", []),
               "layout_family": (scene_report or {}).get("layout_family"),
+              "loop_endpoint": (scene_report or {}).get("loop_endpoint"),
               "source_fallbacks": (scene_report or {}).get("source_fallbacks", []),
               "scene_count": len(timeline.topic.scenes),
               "scene_checks": [{"ok": row.get("ok", False), "errors": sum((row.get(group) or {}).get("errorCount", 0)

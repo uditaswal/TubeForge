@@ -1,7 +1,7 @@
 # Reference motion quality plan
 
 Date: 6 November 2026. Branch: `feature/reference-motion-quality`, based on
-`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch; local technical/render evidence is recorded below. Full creative acceptance and Story parity remain pending.
+`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch; local technical/render evidence is recorded below. Full creative acceptance remains pending; Story checklist parity is demonstrated locally, and unsupported layouts fail explicitly.
 
 ## Outcome and evidence
 
@@ -105,11 +105,11 @@ claims of improved retention and broad rollout before acceptance.
 
 ## Next five actions
 
-1. Regenerate the current-profile source plates using the verified clean-capture policy.
-2. Complete remaining Story layout support; checklist code animation now exists with no silent truncation.
-3. Add purposeful terminal/highlight/output motion tied to reviewed cues.
-4. Inspect a complete updated vertical render and obtain full watch/listen review.
-5. Audit the checklist and submit the feature branch for review; merge requires approval.
+1. Watch/listen to the exact full-v3 comparison below; record timestamped feedback.
+2. Resolve playback findings, including terminal reading hold, small terminal labels and music balance.
+3. Audit phase-3 workflow coverage: signed-in review is proven; preview → final durable job flow and recovery checks must be accounted for before full-workflow acceptance.
+4. Rerun only checks affected by repairs and inspect the exact revised artifact.
+5. Submit the feature branch and evidence for review; merge requires explicit approval.
 
 Stop after two failed repairs of the same root issue or 45 minutes of active
 debugging, per AGENTS.md; report evidence, two options and a recommendation.
@@ -131,8 +131,12 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Repair source-capture Ask AI controls and partial neighbouring-line fragments; inspect real recapture.
 - [x] Add Story checklist typing, syntax colours, active-row highlights and following cursor; preserve all supported lines/items.
 - [x] Check exact Unicode text and forward/backward seeking in Chromium.
-- [ ] Regenerate the full Short with new captures, complete remaining motion work and full watch/listen acceptance.
-- [ ] Verify full narrated Short and signed-in workflow.
+- [x] Regenerate all five source captures and render the full Story Short within the production 20× budget.
+- [x] Inspect actual source cards, terminal/output hold, code reveal frames and every scene entrance.
+- [x] Fix Story frame-zero headline, canonical loop endpoint and source-image zoom clipping; invalidate render identities.
+- [x] Verify signed-in desktop/mobile review for the exact revised package.
+- [ ] Complete full watch/listen acceptance of the exact revised Short.
+- [ ] Close the full durable preview/final workflow and recovery evidence audit before calling all phases VERIFIED.
 
 ## First implementation checkpoint
 
@@ -402,3 +406,56 @@ the production budget. Review terminal/output motion, full playback and mix bala
 no operator creative approval, deployment, merge or publication has occurred.
 
 Additional traceability check passed: scene-local code windows and absolute timeline windows are reported separately, with the scene start and original alignment method retained. One nonzero-origin metadata test passed after the 71-check group; no extra render claim is made for this metadata-only addition.
+
+## Full Story comparison checkpoint — 6 November
+
+Overall **IMPLEMENTED**; local technical render and source-framing checks are
+**VERIFIED** for the scope below. This is a separate, unapproved comparison,
+not a production approval or a publishing job.
+
+- Artifact: main-project `artifacts/review/reference-motion-story-full-v3/final.mp4`.
+  SHA-256 `ba17462cde4307c1657a46abcaa7eaa0b670cf7e0d4722e2c959015563902155`.
+- Native portrait H.264/AAC, 1080×1920/30fps, 1,490 video frames, 49.659 s
+  narration; full decode passed. Encoded loudness −14.17 LUFS, true peak
+  −2.39 dBTP. Whole benchmark 448.83 s; encoder QA 443.93 s / RTF 8.94,
+  below the production 20× budget. These are measured host results, not a speed promise.
+- All five source quotes recaptured with full matches under v4 clean-lines.
+  Shadow-root Ask AI controls removed where present. A bounded visual-only
+  sc08 quote revision takes an exact substring of both the old quote and saved
+  cited-source excerpt; the original approved package/narration remain untouched.
+  The new comparison package requires its own review. Fixture:
+  `tests/fixtures/reference_motion_quote_revision.json`.
+- Saved narration, mix and Whisper timing reused. Code sc10 reveals rate then
+  burst at global 39.741–40.321 s and 40.321–41.934 s, with a one-second
+  completed-code hold. No provider call or allowance reset.
+- Story hooks now show their headline at frame zero. Canonical last frame replays
+  the first, preserving frame count; decoded H.264 endpoint MAE 0.787/255
+  (compression means encoded pixels are not byte-identical). Source images stay
+  fixed inside cards while their highlights animate, avoiding clipped quote edges.
+  Identities are render-9 / hyperframes-7.
+- Reproducible local benchmark: `scripts/benchmark_story_short.py`. Fresh outputs
+  recapture only cited sources; `--resume` verifies every prepared file hash and
+  reuses captures/audio. Inputs, renderer hashes, exact package and reports are
+  retained next to the MP4. Failed/intermediate v2 remains separate.
+- Regression: 77 passed, four opt-in browser checks skipped in the default run.
+  Separate actual Chromium tests passed for source bounds (early/middle/late)
+  and signed-in desktop/mobile anchor review (no JS exceptions/overflow).
+  The tested v2 and rendered v3 content-package hashes are identical:
+  `1e5593e236905d4d15b55a5e0f09e48939eef44635e0760ef1e5405f37a59b86`.
+
+| Time/scene | Evidence and expected behavior | Observed / remaining review | Severity / action |
+|---|---|---|---|
+| 0 / 49.63 s | Full-size decoded endpoints; visible hook and matching loop | Hook/caption readable; canonical opening replay confirmed | Pass for sampled endpoints |
+| All 12 entrances | `boundaries.png`, 0.15 s after each scene start | Headings visible; deliberate card/diagram entrances follow | Sample pass; full playback pending |
+| 11.39–16.79 s, sc04 | Full-size source frame at 14 s, native Chromium bounds | Complete line edges, source label and highlight visible; no inner zoom | Pass for framing |
+| 25.46–29.99 s, sc07 | Full-size terminal at 29 s plus overview | Command/result visible and labelled illustrative; 3.3 s reading-hold warning | Advisory: judge pace in playback |
+| 39.06–42.93 s, sc10 | Four reveal samples + full-size 42 s | Correct syntax, following cursor, checklist progresses, full code fits | Pass for samples/timing; playback pending |
+| Complete audio | Encoded loudness/health checks, inherited mix provenance | Blocking checks pass; 87 music-within-12-dB stretches flagged | Listening required; no claim of audible acceptance |
+| Craft advisories | Pinned HyperFrames report | Terminal badge/language below 28 px during entrance; short late diagram/chip holds | Review at phone scale before acceptance |
+
+`qa_check.py` has no FAILs. It warns about terminal hold, inherited music balance
+and missing publishing thumbnail (publishing is out of scope). HyperFrames checks
+have no runtime/layout/contrast errors; its silent-project warning refers to the
+intermediate visual-only HTML, before accepted audio mux. The complete mix has
+not been listened to here. Full-video playback and operator acceptance remain open;
+no phase is promoted to overall VERIFIED from a contact sheet or tests alone.

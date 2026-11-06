@@ -318,3 +318,26 @@ def test_story_code_report_distinguishes_local_and_global_times():
     assert report['scene_start'] == 10
     for local,global_window in zip(report['line_windows'],report['timeline_windows'],strict=True):
         assert global_window == pytest.approx(tuple(t+10 for t in local))
+
+
+def test_story_opening_headline_has_no_transparent_entrance(tmp_path):
+    from tubeforge.rendering.shorts.schema import Hook
+    scene=Hook.model_validate(topic_data()['scenes'][0] | {'vo':VO,'caption':VO})
+    page=build([scene],tmp_path)
+    assert 'tl.fromTo("#s0 .h1",{opacity:0' not in page
+
+
+def test_story_loop_filter_replays_first_frame_without_changing_frame_count():
+    import shutil
+    import subprocess
+    if not shutil.which('ffmpeg'):
+        pytest.skip('FFmpeg required')
+    width,height,frames=108,192,6
+    command=['ffmpeg','-v','error','-f','lavfi','-i',f'testsrc2=size={width}x{height}:rate=30:duration=0.2',
+             '-filter_complex',story.story_video_filter(width,height,frames,True),'-map','[v]',
+             '-r','30','-pix_fmt','rgb24','-f','rawvideo','pipe:1']
+    raw=subprocess.run(command,check=True,capture_output=True).stdout
+    size=width*height*3
+    assert len(raw)==frames*size
+    assert raw[:size]==raw[-size:]
+    assert raw[size:2*size]!=raw[:size]

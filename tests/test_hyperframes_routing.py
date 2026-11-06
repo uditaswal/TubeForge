@@ -69,7 +69,7 @@ def test_hyperframes_flag_routes_silent_film_and_same_mix(tmp_path, monkeypatch)
 def test_renderer_identity_changes_only_for_opt_in():
     topic = _timeline().topic
     base = reference_short.render_identity(topic, "n", "t", draft=True, approval_identity=None)
-    assert base == "6b834b3eda9574d159c24b0d54ee641af957dcda28c7a36fe0cff759bf4fe591"
+    assert base == "63aff94352ecc41b26824b96ef2d769a030f812930cf5742b41f22678d26c2d5"
     assert base == reference_short.render_identity(topic, "n", "t", draft=True,
                                                    approval_identity=None, renderer="pil")
     assert base != reference_short.render_identity(topic, "n", "t", draft=True,
