@@ -1,0 +1,53 @@
+{
+  "schema_version": "long-form-planning-v1",
+  "request": {
+    "topic": "Synthetic long-form interface test",
+    "angle": "Explain a fixture only",
+    "target_duration_seconds": 600,
+    "language": "en",
+    "audience": "test reviewers",
+    "aspect_ratio": "16:9",
+    "prompt_version": "m6-content-long-v1",
+    "sources": [
+      {
+        "source_id": "fixture",
+        "url": "https://example.com/fixture",
+        "title": "Synthetic evidence",
+        "excerpt": "Synthetic fixture only; not production evidence."
+      }
+    ]
+  },
+  "source_packet_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "reference_snapshot_sha256": null,
+  "section_ids": [
+    "opening",
+    "mechanism",
+    "payoff"
+  ],
+  "cited_source_ids": [
+    "fixture"
+  ],
+  "chapters": [
+    {
+      "chapter_id": "chapter-1",
+      "title": "Promise",
+      "section_ids": [
+        "opening"
+      ]
+    },
+    {
+      "chapter_id": "chapter-2",
+      "title": "Mechanism",
+      "section_ids": [
+        "mechanism"
+      ]
+    },
+    {
+      "chapter_id": "chapter-3",
+      "title": "Result",
+      "section_ids": [
+        "payoff"
+      ]
+    }
+  ]
+}

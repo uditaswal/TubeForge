@@ -1,0 +1,433 @@
+{
+  "$defs": {
+    "ContentRequest": {
+      "additionalProperties": false,
+      "description": "Bounded, provider-neutral request for one structured content package.",
+      "properties": {
+        "channel_identity": {
+          "default": "default",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Channel Identity",
+          "type": "string"
+        },
+        "channel_voice_profile": {
+          "default": "Clear, practical and conversational. Address the viewer directly; use complete sentences, explain unfamiliar terms, avoid hype, unsupported claims and invented personal experience.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Channel Voice Profile",
+          "type": "string"
+        },
+        "topic": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        },
+        "angle": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Angle",
+          "type": "string"
+        },
+        "target_duration_seconds": {
+          "maximum": 7200,
+          "minimum": 25,
+          "title": "Target Duration Seconds",
+          "type": "integer"
+        },
+        "language": {
+          "maxLength": 35,
+          "minLength": 2,
+          "title": "Language",
+          "type": "string"
+        },
+        "audience": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Audience",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceReference"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "prompt_version": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "notes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Notes",
+          "type": "array"
+        },
+        "review_mode": {
+          "default": "manual",
+          "pattern": "^(manual|auto)$",
+          "title": "Review Mode",
+          "type": "string"
+        },
+        "captions_enabled": {
+          "default": true,
+          "title": "Captions Enabled",
+          "type": "boolean"
+        },
+        "music_track": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Music Track"
+        },
+        "visual_style": {
+          "default": "cinematic-tech",
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Visual Style",
+          "type": "string"
+        },
+        "visual_source": {
+          "default": "generated",
+          "pattern": "^(generated|stock)$",
+          "title": "Visual Source",
+          "type": "string"
+        },
+        "voice_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voice Id"
+        },
+        "voice_speed_scale": {
+          "default": 1.0,
+          "maximum": 1.3,
+          "minimum": 0.7,
+          "title": "Voice Speed Scale",
+          "type": "number"
+        },
+        "mcp_servers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Mcp Servers",
+          "type": "array"
+        },
+        "production_mode": {
+          "default": "generated",
+          "pattern": "^(generated|source_clip)$",
+          "title": "Production Mode",
+          "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        },
+        "clip_count": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Clip Count",
+          "type": "integer"
+        },
+        "preset_name": {
+          "default": "default",
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Preset Name",
+          "type": "string"
+        },
+        "aspect_ratio": {
+          "default": "16:9",
+          "pattern": "^(16:9|9:16)$",
+          "title": "Aspect Ratio",
+          "type": "string"
+        },
+        "script_owner": {
+          "default": "codex",
+          "pattern": "^(codex|claude)$",
+          "title": "Script Owner",
+          "type": "string"
+        },
+        "script_model": {
+          "anyOf": [
+            {
+              "pattern": "^(sonnet-medium|opus)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Script Model"
+        },
+        "show_source_credit": {
+          "default": false,
+          "title": "Show Source Credit",
+          "type": "boolean"
+        },
+        "show_mascot": {
+          "default": false,
+          "title": "Show Mascot",
+          "type": "boolean"
+        },
+        "channel_watermark": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "minLength": 1,
+              "pattern": "^[^\\x00-\\x1f<>]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel Watermark"
+        },
+        "ending": {
+          "default": "loop",
+          "pattern": "^(loop|debate)$",
+          "title": "Ending",
+          "type": "string"
+        },
+        "video_style": {
+          "default": "classic",
+          "pattern": "^(classic|story)$",
+          "title": "Video Style",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "angle",
+        "target_duration_seconds",
+        "language",
+        "audience",
+        "sources",
+        "prompt_version"
+      ],
+      "title": "ContentRequest",
+      "type": "object"
+    },
+    "LongFormChapter": {
+      "additionalProperties": false,
+      "properties": {
+        "chapter_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Chapter Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "section_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Section Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "chapter_id",
+        "title",
+        "section_ids"
+      ],
+      "title": "LongFormChapter",
+      "type": "object"
+    },
+    "SourceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "retrieved_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retrieved At"
+        },
+        "content_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Sha256"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 24000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        }
+      },
+      "required": [
+        "source_id",
+        "url",
+        "title"
+      ],
+      "title": "SourceReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Pre-render interface; hashes are bindings, never approval assertions.\n\nSource IDs must resolve to the canonical request. Chapter section IDs cover\nthe exact ordered section inventory once. Actual audio timestamps are added\nby later media stages, not invented by this planning contract.",
+  "properties": {
+    "schema_version": {
+      "const": "long-form-planning-v1",
+      "default": "long-form-planning-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request": {
+      "$ref": "#/$defs/ContentRequest"
+    },
+    "source_packet_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Source Packet Sha256",
+      "type": "string"
+    },
+    "reference_snapshot_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reference Snapshot Sha256"
+    },
+    "section_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 3,
+      "title": "Section Ids",
+      "type": "array"
+    },
+    "cited_source_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Cited Source Ids",
+      "type": "array"
+    },
+    "chapters": {
+      "items": {
+        "$ref": "#/$defs/LongFormChapter"
+      },
+      "maxItems": 12,
+      "minItems": 3,
+      "title": "Chapters",
+      "type": "array"
+    }
+  },
+  "required": [
+    "request",
+    "source_packet_sha256",
+    "section_ids",
+    "cited_source_ids",
+    "chapters"
+  ],
+  "title": "LongFormPlanningContract",
+  "type": "object"
+}
