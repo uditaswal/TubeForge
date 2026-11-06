@@ -1,0 +1,88 @@
+{
+  "$defs": {
+    "MeasuredSectionTiming": {
+      "additionalProperties": false,
+      "properties": {
+        "section_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Section Id",
+          "type": "string"
+        },
+        "start_seconds": {
+          "minimum": 0,
+          "title": "Start Seconds",
+          "type": "number"
+        },
+        "end_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "End Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "section_id",
+        "start_seconds",
+        "end_seconds"
+      ],
+      "title": "MeasuredSectionTiming",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "long-form-timing-v1",
+      "default": "long-form-timing-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "package_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Package Sha256",
+      "type": "string"
+    },
+    "audio_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Audio Sha256",
+      "type": "string"
+    },
+    "artifact_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Artifact Sha256",
+      "type": "string"
+    },
+    "timing_method": {
+      "enum": [
+        "forced_alignment",
+        "measured_scene_audio"
+      ],
+      "title": "Timing Method",
+      "type": "string"
+    },
+    "duration_seconds": {
+      "maximum": 900,
+      "minimum": 600,
+      "title": "Duration Seconds",
+      "type": "number"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/MeasuredSectionTiming"
+      },
+      "maxItems": 100,
+      "minItems": 3,
+      "title": "Sections",
+      "type": "array"
+    }
+  },
+  "required": [
+    "package_sha256",
+    "audio_sha256",
+    "artifact_sha256",
+    "timing_method",
+    "duration_seconds",
+    "sections"
+  ],
+  "title": "LongFormTimingManifest",
+  "type": "object"
+}

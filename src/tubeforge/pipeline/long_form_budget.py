@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from tubeforge.domain.long_form import LongFormPlanningContract
+from tubeforge.domain.reference_video import ReferenceSnapshot
 from tubeforge.domain.long_form_budget import LongFormCallLedger, ObservedUsage, StageCall, Stage
 
 
@@ -55,3 +57,26 @@ def summarize_usage(ledger: LongFormCallLedger) -> dict:
     summary['narration_attempts'] = sum(c.stage in {'draft','repair'} for c in ledger.calls)
     summary['subscription_fraction'] = None
     return summary
+
+
+def long_form_brief_identity(planning: LongFormPlanningContract, *, reference: ReferenceSnapshot | None = None) -> str:
+    """Semantic allowance key; render/provider changes cannot reset attempts.
+
+    Exact source/reference byte integrity is checked separately. Capture times,
+    derived hashes and provider routing must not create a fresh writer allowance.
+    """
+    import hashlib
+    import json
+    from tubeforge.domain.contracts import generation_request_key_payload
+    from tubeforge.pipeline.long_form_reference import reference_content_identity
+
+    if (reference is None) != (planning.reference_snapshot_sha256 is None):
+        raise ValueError('brief identity requires its bound reference content')
+    request = generation_request_key_payload(planning.request)
+    for field in ('script_owner','script_model','script_routing_mode'):
+        request.pop(field,None)
+    for source in request['sources']:
+        source.pop('retrieved_at',None)
+        source.pop('content_sha256',None)
+    material = dict(request=request,reference_content_sha256=reference_content_identity(reference) if reference is not None else None)
+    return hashlib.sha256(json.dumps(material,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()

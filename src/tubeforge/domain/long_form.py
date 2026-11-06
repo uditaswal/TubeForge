@@ -104,3 +104,36 @@ class LongFormTechnicalProbe(DomainModel):
             raise ValueError("long-form duration differs from target by more than five percent")
         if len(self.chapter_starts_seconds) != len(planning.chapters):
             raise ValueError("measured chapter count differs from accepted plan")
+
+
+class MeasuredSectionTiming(DomainModel):
+    section_id: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+    start_seconds: float = Field(ge=0, allow_inf_nan=False)
+    end_seconds: float = Field(gt=0, allow_inf_nan=False)
+
+    @model_validator(mode='after')
+    def positive_span(self):
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError('measured section must have positive duration')
+        return self
+
+
+class LongFormTimingManifest(DomainModel):
+    schema_version: Literal['long-form-timing-v1'] = 'long-form-timing-v1'
+    package_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    audio_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    artifact_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    timing_method: Literal['forced_alignment', 'measured_scene_audio']
+    duration_seconds: float = Field(ge=600, le=900, allow_inf_nan=False)
+    sections: tuple[MeasuredSectionTiming, ...] = Field(min_length=3, max_length=100)
+
+    @model_validator(mode='after')
+    def ordered_measured_spans(self):
+        if len({s.section_id for s in self.sections}) != len(self.sections):
+            raise ValueError('measured section IDs must be unique')
+        previous_end = 0.0
+        for section in self.sections:
+            if section.start_seconds < previous_end or section.end_seconds > self.duration_seconds:
+                raise ValueError('measured sections must be ordered, non-overlapping and inside final duration')
+            previous_end = section.end_seconds
+        return self

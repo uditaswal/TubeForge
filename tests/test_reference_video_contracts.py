@@ -45,6 +45,9 @@ def test_unsafe_or_ambiguous_reference_links_fail(url):
     ('cues',[]), ('cues',[dict(start_seconds=4,end_seconds=3,text='Backwards')]),
     ('cues',[dict(start_seconds=0,end_seconds=601,text='Outside')]),
     ('cues',[dict(start_seconds=0,end_seconds=1,text=' ')]),
+    ('cues',[dict(start_seconds=float('nan'),end_seconds=1,text='Invalid')]),
+    ('cues',[dict(start_seconds=0,end_seconds=float('inf'),text='Invalid')]),
+    ('cues',[dict(start_seconds=-1,end_seconds=1,text='Invalid')]),
     ('cues',[dict(start_seconds=4,end_seconds=6,text='Later'), dict(start_seconds=1,end_seconds=3,text='Earlier')]),
 ])
 def test_invalid_snapshot_evidence_fails(field,value):

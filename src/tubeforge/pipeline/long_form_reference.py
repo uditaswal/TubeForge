@@ -5,6 +5,7 @@ import hashlib
 import json
 
 from tubeforge.domain.reference_video import ReferenceIntakeRequest, ReferenceSnapshot
+from tubeforge.domain.long_form import LongFormPlanningContract
 
 
 def reference_content_identity(snapshot: ReferenceSnapshot) -> str:
@@ -20,7 +21,7 @@ def reference_cache_key(request: ReferenceIntakeRequest, snapshot: ReferenceSnap
     return hashlib.sha256(json.dumps(material, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
 
 
-def validate_planned_reference(planning, snapshot_bytes: bytes, *, intake_request: ReferenceIntakeRequest | None = None) -> ReferenceSnapshot:
+def validate_planned_reference(planning: LongFormPlanningContract, snapshot_bytes: bytes, *, intake_request: ReferenceIntakeRequest | None = None) -> ReferenceSnapshot:
     """Validate captured reference data against a server-held planning binding.
 
     Does not establish factual support, originality, reuse rights or approval.
