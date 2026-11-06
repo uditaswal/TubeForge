@@ -1,7 +1,7 @@
 # Reference motion quality plan
 
 Date: 6 November 2026. Branch: `feature/reference-motion-quality`, based on
-`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch; local technical/render evidence is recorded below. Full creative acceptance remains pending; Story checklist parity is demonstrated locally, and unsupported layouts fail explicitly.
+`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch, and the local saved-media workflow is VERIFIED. Overall acceptance is BLOCKED on full watch/listen review of the exact native final. Story checklist parity is demonstrated locally; unsupported layouts fail explicitly.
 
 ## Outcome and evidence
 
@@ -529,3 +529,38 @@ and `TUBEFORGE_HYPERFRAMES_BIN` to pinned CLI0.8.192; put Node24 on PATH.
 checkpoint. To recheck playback of an existing completed native run, select only
 `::test_saved_native_final_plays_on_desktop_and_mobile` and set OUTPUT plus the
 opt-in flag. Do not point this harness at the production database or job folder.
+
+## Completion audit — 6 November, after native workflow proof
+
+The previous goal turn made concrete progress (native worker/UI acceptance and
+commit23a6066). This audit checks current state rather than inferring completion
+from that commit. Current renderer sources are unchanged; native final SHA matches
+both workflow-review and exact-file QA. Overall completion is **not proven**.
+
+| Requirement | Current authoritative evidence | Audit result |
+|---|---|---|
+| Isolated feature branch/worktree and checked plan | `feature/reference-motion-quality`, `/tmp/tubeforge-reference-motion-quality`, tracked checklist; commits through23a6066 | VERIFIED for branch/plan scope |
+| Native vertical video, purposeful animation within scenes | Native1080×1920/30 final,49.659s,1490frames; code sc10 typing/cursor/checklist, existing diagram/terminal/highlight scenes | Technical delivery VERIFIED; creative judgement pending |
+| Preserve and measure supplied reference | `artifacts/review/reference-motion-audit/reference/{original.gif,reference.json,first.png,middle.png,last.png}` in main project | VERIFIED:840×540,96frames,8400ms; SHA4935bdc88227e264e1b7d4e73e9aa6874ccb3848b19bc2251c0cbdfecf107be1; generating stack/time unknown |
+| Stable editor chrome, token colours, multiline/width handling, explicit holds | Current-code command,width,multiline fixtures re-rendered/decoded; contact sheets inspected against reference middle; editor/timing/overflow tests | VERIFIED for fixtures and sampled native frames; full motion review pending |
+| Determinism and measured host cost | Fresh fixture MP4 hashes byte-identical to retained clips; `fixture-resources.json` records23.273s and567020KiB maximum waited-child RSS (not simultaneous aggregate). Native QA records463776KiB parent/609024KiB child peaks and RTF6.29 | VERIFIED for these measured runs; no seconds-per-full-video promise |
+| Existing renderer integration, code timing/hold, explicit unsupported layouts | Shared compiler/colours used by Pillow cards and Story checklist; saved Whisper anchors in native manifests;77 focused regressions previously pass | VERIFIED for demonstrated supported paths; no claim of all-layout support |
+| Exact source/narration/timing preservation | Prepared-file hash proof, native import record, source quote bounded-excerpt fixture, timeline validation; providers forbidden in actual workflow | VERIFIED for saved inputs; normal mixer creates a distinct mix requiring listening |
+| Review visibility and durable media workflow | Actual signed-in script review plus native720×1280 preview→HTTP409 stale identity→HTTP200 exact approval→fresh worker final; final manifest binds approval; settled desktop/mobile playback samples | VERIFIED for imported local-media workflow; all approvals test-only |
+| Ownership, restart, invalidation and cancellation safety |15 selected existing lifecycle tests passed; native worker claims released at both gates; no rerender while waiting; versioned identities and exact-file QA | VERIFIED for tested local scope; worker lease/promotion code unchanged |
+| Technical final gates | Exact final4ae2df5ec4a128fcf527d3b438e36c902b21cd0f2bb5219365036fc626bc6ee3; full decode,H.264/AAC,−14.16LUFS/−2.47dBTP; qa_check no FAILs | VERIFIED for this file |
+| Complete creative/audio acceptance | Full overview, entrances, source/code/endpoint frames and short muted browser sample inspected. No full watch/listen feedback exists | Missing: whole-video pacing/continuity, pronunciation and phone-speaker mix judgement; terminal3.3s/music87-stretch/small-label advisories remain |
+| Repo/document hygiene and delivery scope | Source checkpoints committed with hooks; generated artifacts/local DBs remain ignored; readme/plan/handoff updated; no push/merge/publish/provider call | VERIFIED for checkpoint scope; branch review awaits creative findings |
+
+Fresh fixture evidence: main-project
+`artifacts/review/reference-motion-audit/current-fixtures/{command,width,multiline}/`.
+Command4s SHA20f625c96b9256498cea43605c2016f266422ba1552dbd67017dbffd4c889648;
+width5s SHA61f199d0876240642976480f1131dfb9591dfb118498c2ea576b8bfa4e4ae105;
+multiline6.4s SHA9ee9fc090d582b44c2d99d5baadcb6ad887c7772d6c3d974dd73229779ac9875.
+No fixture review promotes the complete narrated video to creative acceptance.
+
+Remaining dependency is exact-native-final full watch/listen feedback. It has
+remained open across the direct comparison, native workflow and current audit
+turns. More rerenders or unrelated features would not supply that evidence.
+The quality skill explicitly requires “watch the full final video” and “Listen to
+the complete mix.” No operator approval is inferred from silence or test passes.
