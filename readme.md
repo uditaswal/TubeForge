@@ -56,6 +56,12 @@ Services run under Docker Compose: `web`, `worker`, `scheduler`, `piper-tts`, a 
 
 Python 3.12/3.13 · FastAPI · SQLAlchemy 2 + Alembic (SQLite) · Pydantic · Docker Compose · FFmpeg · Pillow/NumPy renderer · Kokoro and Piper TTS · faster-whisper · Playwright/Chromium · pytest · pre-commit + gitleaks · GitHub Actions
 
+Pillow code visuals use syntax-coloured editor cards with a following cursor and a bounded frame cache. Code visuals may supply reviewed `line_reveal_words` (one narration word index per line) for the Pillow motion renderer or Story checklist code scenes; these resolve against the saved alignment, retain its provenance and require a one-second finished-code hold. Unanchored code keeps proportional scene timing. Story checklist code scenes type syntax-coloured lines, follow them with a cursor and retain their checklist. Oversized layouts fail rather than truncating code. Other Story layouts and classic HyperFrames reject explicit code-line anchors. Story/HyperFrames use their own rendering path. Pillow and Story hooks show their headline on frame one. Loop endpoints reuse the opening frame; Story preserves its output frame count. Story source cards keep captured text fixed inside their bounds while the word-timed highlight animates. Local code-line anchors are not yet requested from production writers. New rendered outputs require the existing artifact review.
+
+New source captures use a consistent dark reader appearance (navy background, light text and animated yellow highlights), including pages that originally use a light theme. Capture changes paint only: exact quote text, fonts, line breaks and geometry stay intact. The manifest records `appearance: dark-reader-v1` and capture policy `source-capture-v5-dark-reader`. Captures also remove matching interactive Ask AI/Copy controls, including controls in open shadow roots, and record hidden controls. Article text stays intact. Older captures and approved
+outputs retain their existing identity; regenerated assets need a new render and
+artifact review.
+
 ## Run Locally
 
 Prerequisites: Docker with Compose, FFmpeg for host-side checks, and operator-supplied voice models in `models/` (they are large and not committed).

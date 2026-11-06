@@ -1,0 +1,10 @@
+{
+  "expected_topic_sha256": "a930d5e1b50b7600a57596549a228e607ec7935cf6432cff37f1babf75765c80",
+  "source_quotes": [
+    {
+      "scene_id": "sc08",
+      "expected_quote": "Throttles are applied on a best-effort basis and should be thought of as targets rather than guaranteed request ceilings",
+      "quote": "on a best-effort basis and should be thought of as targets rather than guaranteed request ceilings"
+    }
+  ]
+}

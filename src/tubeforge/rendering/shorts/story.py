@@ -230,6 +230,63 @@ def _diagram(sid: str, scene, reveal: list[float], a: float, b: float, accent: s
     return body, setters + anim
 
 
+def _js_data(value) -> str:
+    """JSON data inside a script element must never terminate that element."""
+    return json.dumps(value).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+
+
+def _code_editor(sid, visual, timing):
+    from .editor import compile_code_scene, coloured_characters
+    editor = compile_code_scene(visual.lines, visual.language, timing, visual.line_reveal_words)
+    height = 120 + 68 * len(visual.lines)
+    body = (f'<div class="card" id="{sid}term" style="left:60px;top:520px;width:870px;height:{height}px">'
+            f'<div class="mono" style="position:absolute;left:28px;top:20px;font-size:28px;color:{MUTED}">{html.escape(visual.language.upper())}</div>')
+    anim = f'pop("#{sid}term",{timing.start:.3f},{{x:0,y:0,s:1,d:.1}});'
+    chars = coloured_characters(editor.text, visual.language)
+    windows, offset = [], 0
+    for k, line in enumerate(visual.lines):
+        if editor.line_windows:
+            begin, end = editor.line_windows[k]
+        else:
+            begin = editor.start + offset / len(editor.text) * editor.typing_seconds
+            end = begin + len(line) / len(editor.text) * editor.typing_seconds
+        windows.append((timing.start + begin, timing.start + end))
+        offset += len(line) + 1
+    offset = 0
+    for k, (line, (begin, end)) in enumerate(zip(visual.lines, windows, strict=True)):
+        runs = []
+        for char, color in chars[offset:offset+len(line)]:
+            if runs and runs[-1][0] == color:
+                runs[-1][1] += char
+            else:
+                runs.append([color, char])
+        offset += len(line)+1
+        prefix = f'{sid}code{k}'
+        tokens = ''.join(f'<span id="{prefix}t{j}" style="color:{color}"></span>' for j,(color,_) in enumerate(runs))
+        body += (f'<div class="mono" id="{prefix}" style="position:absolute;left:24px;right:24px;top:{70+k*68}px;'
+                 f'height:68px;font-size:42px;line-height:68px;white-space:pre">'
+                 f'<span style="display:inline-block;width:36px;margin-right:14px;color:{MUTED};font-size:28px">{k+1}</span>'
+                 f'{tokens}<span id="{prefix}cursor" style="display:inline-block;width:3px;height:44px;margin-left:5px;vertical-align:middle;background:#65ead4;opacity:0"></span></div>')
+        anim += (f'var {prefix}={{n:0}};var {prefix}runs={_js_data(runs)}.map(function(run){{return [run[0],Array.from(run[1])]}});'
+                 f'tl.to({prefix},{{n:{len(line)},duration:{end-begin:.6f},ease:"none",onUpdate:function(){{'
+                 f'var left=Math.floor({prefix}.n);{prefix}runs.forEach(function(run,j){{'
+                 f'document.getElementById("{prefix}t"+j).textContent=run[1].slice(0,Math.max(0,left)).join("");left-=run[1].length;}});}}}},{begin:.6f});'
+                 f'tl.set("#{prefix}cursor",{{opacity:1}},{begin:.6f});'
+                 f'tl.set("#{prefix}",{{backgroundColor:"rgba(83,224,239,.08)"}},{begin:.6f});'
+                 f'tl.to("#{prefix}",{{backgroundColor:"rgba(83,224,239,0)",duration:.2}},{end:.6f});')
+        limit = windows[k+1][0] if k+1 < len(windows) else timing.end
+        at, visible = end+.4, False
+        while at < limit:
+            anim += f'tl.set("#{prefix}cursor",{{opacity:{1 if visible else 0}}},{at:.6f});'
+            at, visible = at+.4, not visible
+        anim += f'tl.set("#{prefix}cursor",{{opacity:0}},{limit:.6f});'
+    body += f'<div class="mono" style="position:absolute;left:28px;bottom:14px;font-size:28px;color:{MUTED}">ILLUSTRATIVE CODE</div></div>'
+    report = dict(scene_id=sid, mode='word_anchored' if visual.line_reveal_words else 'proportional',
+                  alignment=timing.alignment, line_windows=[(a-timing.start,b-timing.start) for a,b in windows],
+                  timeline_windows=windows, scene_start=timing.start, version='story-code-v1')
+    return body, anim, 520 + height + 24, report
+
+
 def _terminal(sid: str, scene, reveal: list[float], a: float, b: float, accent: str) -> tuple[str, str]:
     """A terminal window: commands type out when the narration reaches them, output lines appear whole."""
     size, per_row, row_h = 44, 30, 64
@@ -317,6 +374,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
     captions: list[dict] = []
     heroes: list[dict] = []
     backdrops: list[dict] = []
+    code_animation = []
 
     for i, scene in enumerate(topic.scenes):
         timing = timeline.timings[i]
@@ -327,6 +385,8 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
         sid, accent = f"s{i}", style["accents"][i % 3]
         visual = getattr(scene, "visual", None)
         template = scene.template
+        if isinstance(visual, CodeVisual) and visual.line_reveal_words and template != 'checklist':
+            raise ValueError('Story code-line anchors currently require a checklist code scene')
         label = next((_domain(source_urls.get(s)) for s in scene.source_ids if source_urls.get(s)), None)
         treatment, _ = source_treatment(scene, i, topic, plates_directory, manifest)
         if template == "terminal" or (template == "flow" and scene.diagram != "stack"):
@@ -348,7 +408,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             if hl is not None:
                 shutil.copy(hl, assets / f"hero-{i}-hl.png")
             heroes.append({"scene_index": i, "scene_id": scene.scene_id, "plate": treatment["manifest_file"],
-                           "highlight_status": treatment["highlight_status"], "source_label": treatment["source_label"]})
+                           "highlight_status": treatment["highlight_status"], "source_label": treatment["source_label"], "image_motion": "fixed"})
             head = getattr(scene, "heading", None) or " ".join(getattr(scene, "headline", ()))
             top = 560
             extra = ""
@@ -364,7 +424,6 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                     + '</div></div>'
                     f'<div class="pill" id="{sid}pill" style="left:60px;top:{top + height + 40}px;background:rgba(83,224,239,.14);border:2px solid rgba(83,224,239,.6);color:{INK};font-size:{_pill_font("SOURCE · " + treatment["source_label"], 36, .6)}px">SOURCE · {html.escape(treatment["source_label"])}</div>')
             anim += (f'tl.fromTo("#{sid}card",{{opacity:0,y:80,scale:.94}},{{opacity:1,y:0,scale:1,duration:.5,ease:"power3.out"}},{a + .15:.3f});'
-                    f'tl.fromTo("#{sid}zoom",{{scale:1}},{{scale:{style["zoom_scale"]},transformOrigin:"50% 40%",duration:{b - a:.2f},ease:"power1.inOut"}},{a:.3f});'
                     + ("".join(f'tl.set("#{sid}hl",{{clipPath:"inset(0 100% 0 0)"}},{r:.3f});tl.to("#{sid}hl",{{clipPath:"inset(0 0% 0 0)",duration:.5,ease:"none"}},{r:.3f});'
                                for r in reveal) if hl else "")
                     + f'pop("#{sid}pill",{a + .8:.3f});')
@@ -386,7 +445,9 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             else:
                 backdrop_anim = ""
             chips = list(scene.chips)
-            anim = backdrop_anim + f'tl.fromTo("#{sid} .h1",{{opacity:0,y:60}},{{opacity:1,y:0,duration:.5,ease:"power3.out"}},{a:.3f});'
+            anim = backdrop_anim
+            if template != "hook":
+                anim += f'tl.fromTo("#{sid} .h1",{{opacity:0,y:60}},{{opacity:1,y:0,duration:.5,ease:"power3.out"}},{a:.3f});'
             for k, chip in enumerate(chips):
                 body += (f'<div class="pill" id="{sid}c{k}" style="left:60px;top:{chips_top + k * 100}px;background:{RED if k == 0 else "#1b2036"};'
                          f'border:2px solid {RED if k == 0 else "#333a58"};color:#fff;font:400 {_pill_font(chip, 60, .45)}px/1 Anton;height:84px;border-radius:14px;text-transform:uppercase">{html.escape(chip)}</div>')
@@ -411,21 +472,24 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             body = _heading(scene.heading, accent)
             top = 540
             if isinstance(visual, CodeVisual):
-                lines = list(visual.lines)[:3]
-                term = "".join(f'<div class="mono" id="{sid}l{k}" style="font-size:42px;line-height:1.6;color:{GREEN if k == 0 else AMBER};white-space:nowrap">$ {html.escape(l)}</div>' for k, l in enumerate(lines))
-                body += (f'<div class="card" id="{sid}term" style="left:50px;top:520px;width:900px;padding:28px 40px;height:{110 + 68 * len(lines)}px">'
-                         f'<div class="mono" style="font-size:26px;color:{MUTED};margin-bottom:6px">{html.escape(visual.language)} · example</div>{term}</div>')
-                anim += f'pop("#{sid}term",{a + .1:.3f});' + "".join(f'pop("#{sid}l{k}",{a + .4 + k * .5:.3f},{{y:14}});' for k in range(len(lines)))
-                top = 520 + 110 + 68 * len(lines) + 40
+                editor_body, editor_anim, top, code_report = _code_editor(sid, visual, timing)
+                body += editor_body
+                anim += editor_anim
+                code_report.update(scene_id=scene.scene_id, scene_index=i)
+                code_animation.append(code_report)
             items = list(scene.items)
             step = 150 if top < 700 else 110
+            if isinstance(visual, CodeVisual):
+                if top + len(items) * step > 1260:
+                    raise ValueError('Story code and checklist exceed the caption-safe visual zone; revise the scene')
             for k, item in enumerate(items):
                 body += (f'<div class="card" id="{sid}r{k}" style="left:50px;top:{top + k * step}px;width:900px;height:{step - 24}px;display:flex;align-items:center;padding:0 44px;gap:34px">'
-                         f'<div id="{sid}t{k}" style="width:70px;height:70px;border-radius:18px;border:4px solid #3a4163;display:flex;align-items:center;justify-content:center;font:900 48px/1 Inter;color:#0a0b10">✓</div>'
+                         f'<div id="{sid}t{k}" style="width:70px;height:70px;border-radius:18px;border:4px solid #3a4163;display:flex;align-items:center;justify-content:center;font:900 48px/1 Inter;color:#0a0b10"><span id="{sid}tick{k}" style="opacity:0">✓</span></div>'
                          f'<span style="font:400 56px/1 Anton;color:{INK};text-transform:uppercase;white-space:nowrap">{html.escape(item)}</span></div>')
                 r = reveal[min(k, len(reveal) - 1)]
                 anim += (f'pop("#{sid}r{k}",{a + .2 + k * .15:.3f},{{x:-50,y:0}});'
-                         f'tl.to("#{sid}t{k}",{{backgroundColor:"{GREEN}",borderColor:"{GREEN}",duration:.2}},{r:.3f});')
+                         f'tl.to("#{sid}t{k}",{{backgroundColor:"{GREEN}",borderColor:"{GREEN}",duration:.2}},{r:.3f});'
+                         f'tl.set("#{sid}tick{k}",{{opacity:1}},{r + .2:.3f});')
         elif template == "before_after":
             body = _heading(scene.heading, accent)
             body += (f'<div class="card" id="{sid}a" style="left:50px;top:540px;width:900px;height:190px;padding:26px 40px;display:flex;align-items:center"><span style="font:400 58px/1.1 Anton;color:{MUTED};text-transform:uppercase">{html.escape(scene.before)}</span></div>'
@@ -489,7 +553,19 @@ window.__timelines=window.__timelines||{{}}; window.__timelines["story"]=tl; tl.
         "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
         "paths": {"blocks": "compositions", "components": "compositions/components", "assets": "assets"},
         "media": {"autoProxy": False}}, indent=2), encoding="utf-8")
-    return {"evidence_quote": heroes, "stock_backdrops": backdrops, "layout_family": family}
+    return {"evidence_quote": heroes, "stock_backdrops": backdrops, "layout_family": family, "code_animation": code_animation}
+
+
+def story_video_filter(width, height, frames, loop):
+    base=f"fps={FPS},scale={width}:{height}:flags=lanczos,format=yuv420p"
+    if not loop:
+        return f"[0:v]{base}[v]"
+    if frames < 2:
+        raise ValueError("a loop needs at least two frames")
+    return (f"[0:v]{base},split=2[main][first];"
+            f"[main]trim=end_frame={frames-1},setpts=PTS-STARTPTS[body];"
+            "[first]trim=end_frame=1,setpts=PTS-STARTPTS[head];"
+            "[body][head]concat=n=2:v=1:a=0[v]")
 
 
 def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callable[[], bool] = lambda: False,
@@ -520,8 +596,10 @@ def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callab
         # Match the PIL path's output sizes: 720x1280 draft, 1080x1920 final.
         scaled = root / "story-scaled.mp4"
         width, height = (720, 1280) if draft else (1080, 1920)
-        checked([ffmpeg, "-y", "-v", "error", "-i", str(clip), "-an", "-vf",
-                 f"fps={FPS},scale={width}:{height}:flags=lanczos,format=yuv420p", "-c:v", "libx264",
+        loop=timeline.topic.scenes[-1].template == "loop"
+        video_filter=story_video_filter(width,height,round(timeline.duration*FPS),loop)
+        checked([ffmpeg, "-y", "-v", "error", "-i", str(clip), "-an", "-filter_complex",
+                 video_filter, "-map", "[v]", "-c:v", "libx264",
                  "-threads", "2", "-preset", "veryfast", "-crf", "20", "-r", str(FPS),
                  "-movflags", "+faststart", str(scaled)], deadline=deadline, cancelled=cancelled)
         checked([ffmpeg, "-v", "error", "-xerror", "-i", str(scaled), "-f", "null", "-"],
@@ -529,4 +607,4 @@ def render_silent(timeline, destination: Path, *, draft: bool, cancelled: Callab
         scaled.replace(destination)
     return {"scene_count": len(timeline.topic.scenes), "frames": round(timeline.duration * FPS),
             "duration": timeline.duration, "checks": [check], "evidence_quote": report["evidence_quote"], "stock_backdrops": report.get("stock_backdrops", []),
-            "source_fallbacks": [], "style": "story", "layout_family": report["layout_family"], "render_seconds": time.monotonic() - started}
+            "source_fallbacks": [], "style": "story", "loop_endpoint": "opening-frame-replay" if loop else None, "layout_family": report["layout_family"], "code_animation": report["code_animation"], "render_seconds": time.monotonic() - started}

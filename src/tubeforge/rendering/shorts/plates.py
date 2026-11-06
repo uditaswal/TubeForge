@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -111,41 +112,17 @@ def _token_colors():
             (Name.Function, "#6bd6ff"), (Name.Class, "#6bd6ff"), (Name.Builtin, "#6bd6ff"), (Operator, "#ffd479")]
 
 
-def code_card(visual: CodeVisual, typed: int | None = None) -> Image.Image:
-    """Syntax-highlighted card; ``typed`` limits the visible characters for the typing animation."""
-    from pygments import lex
-    from pygments.lexers import get_lexer_by_name
-    from pygments.token import Token
-    palette = _token_colors()
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", 40)
-    label_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
-    advance, line_height = font.getlength("M"), 66
-    width = CARD[2] - CARD[0]
-    height = min(CARD[3] - CARD[1], 150 + line_height * len(visual.lines))  # fit the snippet; the card stays centred
-    card = Image.new("RGB", (width, height), "#0a121e")
-    draw = ImageDraw.Draw(card)
-    draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=28, outline="#536b87", width=3)
-    for i, color in enumerate(("#ff5f56", "#ffbd2e", "#27c93f")):
-        draw.ellipse((28 + i * 38, 26, 52 + i * 38, 50), fill=color)
-    draw.text((width - 28, 38), visual.language.upper(), font=label_font, fill="#6b7a90", anchor="rm")
-    lexer = get_lexer_by_name("text" if visual.language == "text" else visual.language, stripnl=False)
-    top = 110
-    remaining = typed if typed is not None else 10 ** 9
-    for row, line in enumerate(visual.lines):
-        x = 36
-        for token_type, text in lex(line, lexer):
-            if text.endswith("\n"):
-                text = text[:-1]
-            if not text:
-                continue
-            shown = text[:max(0, remaining)]
-            color = next((c for kind, c in palette if token_type in kind), "#f4f8ff")
-            if shown:
-                draw.text((x, top + row * line_height), shown, font=font, fill=color)
-            x += advance * len(text)
-            remaining -= len(text)
-        remaining -= 1  # the implied newline
-    return with_shadow(rounded(card))
+def code_card(visual: CodeVisual, typed: int | None = None, *, cursor_visible: bool = True) -> Image.Image:
+    """Use the shared editor primitive in the existing portrait visual zone."""
+    renderer = _editor(visual.language, tuple(visual.lines))
+    count = len(renderer.scene.text) if typed is None else typed
+    return with_shadow(rounded(renderer.revealed_frame(count, cursor_visible=cursor_visible)))
+
+
+@lru_cache(maxsize=12)
+def _editor(language: str, lines: tuple[str, ...]):
+    from .editor import EditorRenderer, EditorScene
+    return EditorRenderer(EditorScene(lines, language=language, filename=language.upper()), card_only=True)
 
 
 def code_length(visual: CodeVisual) -> int:
@@ -163,6 +140,35 @@ class Plates:
         self.stream: StockStream | None = None
         self.stream_index: int | None = None
         self._cards: dict[tuple, Image.Image] = {}
+        self._anchored_editors: dict[int, object] = {}
+        self._code_timing: dict[str, dict] = {}
+
+    def bind_timeline(self, timeline) -> None:
+        """Compile only explicitly reviewed code anchors against this exact timeline."""
+        from .editor import EditorRenderer, compile_code_scene
+        if timeline.topic != self.topic:
+            raise ValueError("code animation timeline belongs to a different topic")
+        self._anchored_editors.clear()
+        self._code_timing.clear()
+        self._cards.clear()
+        editors, report = {}, {}
+        for index, (scene, timing) in enumerate(zip(self.topic.scenes, timeline.timings, strict=True)):
+            visual = scene.visual
+            if not isinstance(visual, CodeVisual):
+                continue
+            if not visual.line_reveal_words:
+                report[str(index)] = {"mode": "proportional", "alignment": timing.alignment}
+                continue
+            editor = compile_code_scene(visual.lines, visual.language, timing, visual.line_reveal_words)
+            windows = editor.line_windows
+            editors[index] = EditorRenderer(editor, card_only=True)
+            report[str(index)] = {"mode": "word_anchored", "alignment": timing.alignment,
+                                  "word_indices": list(visual.line_reveal_words), "line_windows": windows}
+        self._anchored_editors, self._code_timing = editors, report
+        self._cards.clear()
+
+    def code_timing_report(self) -> dict:
+        return self._code_timing
 
     def entry(self, index: int) -> dict:
         return self.manifest.get("scenes", {}).get(str(index), {})
@@ -186,10 +192,20 @@ class Plates:
         if isinstance(visual, CodeVisual):
             total = code_length(visual)
             typed = min(total, round(total * min(1.0, scene_t / min(2.4, max(.8, scene_dur * .55)))))
-            key = ("code", index, typed)
+            cursor_visible = typed < total or int(scene_t * 2) % 2 == 0
+            anchored = self._anchored_editors.get(index)
+            if visual.line_reveal_words and anchored is None:
+                raise ValueError("explicit code anchors require a bound timeline")
+            if anchored is not None:
+                typed = anchored.scene.count(scene_t)
+                cursor_visible = scene_t < anchored.scene.typing_seconds or int(scene_t * 2) % 2 == 0
+            key = ("code", index, typed, cursor_visible)
             if key not in self._cards:
                 self._cards = {k: v for k, v in self._cards.items() if k[1] == index}
-                self._cards[key] = code_card(visual, typed)
+                if len(self._cards) >= 12:
+                    self._cards.pop(next(iter(self._cards)))
+                self._cards[key] = (with_shadow(rounded(anchored.revealed_frame(typed, cursor_visible=cursor_visible)))
+                                    if anchored is not None else code_card(visual, typed, cursor_visible=cursor_visible))
             return self._cards[key]
         if isinstance(visual, SourceVisual):
             entry = self.entry(index)

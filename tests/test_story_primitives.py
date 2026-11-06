@@ -235,3 +235,118 @@ def test_pill_font_shrinks_long_labels_to_the_available_width_and_never_enlarges
     assert 28 <= _pill_font(long_label, 36, .6) < 36
     assert len(long_label) * .6 * _pill_font(long_label, 36, .6) <= 900 or _pill_font(long_label, 36, .6) == 28
     assert _pill_font("x" * 200, 36, .6) == 28                                    # floor: readability beats fitting, the QA gate then catches it
+
+
+def checklist_code(lines=2, items=('Rate', 'Burst'), anchors=()):
+    from tubeforge.rendering.shorts.schema import Checklist
+    return Checklist.model_validate(dict(template='checklist',scene_id='code',vo=VO,caption=VO,
+        source_ids=['fixture'],heading='CONFIGURATION',reveal_words=[0],items=items,
+        visual=dict(kind='code',language='python',lines=[f'value{k} = {k}' for k in range(lines)],
+                    line_reveal_words=anchors)))
+
+
+def test_story_code_preserves_six_lines_and_types_with_source_colours(tmp_path):
+    page = build([checklist_code(lines=6,items=('One check',))],tmp_path)
+    for k in range(6):
+        assert f'id="s0code{k}"' in page
+        assert f'value{k}' in page
+    assert 'ILLUSTRATIVE CODE' in page
+    assert 'Math.floor(s0code0.n)' in page
+    assert 'backgroundColor:"rgba(83,224,239,.08)"' in page
+    assert '#ffc66d' in page
+    assert '$ value' not in page
+
+
+def test_story_code_rejects_overflow_instead_of_truncating(tmp_path):
+    with pytest.raises(ValueError,match='caption-safe'):
+        build([checklist_code(lines=6,items=('One','Two','Three'))],tmp_path)
+
+
+def test_story_code_anchors_share_the_pillow_compiler():
+    from tubeforge.rendering.shorts.editor import compile_code_scene
+    scene=checklist_code(anchors=(0,3))
+    timing=story_timeline([scene]).timings[0]
+    _,_,_,report=story._code_editor('s0',scene.visual,timing)
+    compiled=compile_code_scene(scene.visual.lines,scene.visual.language,timing,scene.visual.line_reveal_words)
+    assert report['line_windows'] == list(compiled.line_windows)
+    assert report['alignment'] == 'synthetic test timing; not measured speech'
+    assert report['mode'] == 'word_anchored'
+
+
+def test_story_code_data_cannot_close_the_script_tag(tmp_path):
+    scene=checklist_code(items=('Check',))
+    data=scene.model_dump(mode='json')
+    data['visual']['lines']=['"</script><script>bad"']
+    from tubeforge.rendering.shorts.schema import Checklist
+    page=build([Checklist.model_validate(data)],tmp_path)
+    assert '</script><script>bad' not in page
+    assert '\\u003c/script\\u003e' in page
+
+
+def test_story_code_seeks_backwards_without_stale_text(tmp_path):
+    import os
+    if os.environ.get('TUBEFORGE_STORY_BROWSER') != '1':
+        pytest.skip('opt-in Chromium timing/seek check')
+    from playwright.sync_api import sync_playwright
+    scene=checklist_code(anchors=(0,3))
+    from tubeforge.rendering.shorts.schema import Checklist
+    data=scene.model_dump(mode='json')
+    data['visual']['lines'][0]='value0 = "🔥"'
+    scene=Checklist.model_validate(data)
+    build([scene],tmp_path)
+    with sync_playwright() as p:
+        browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,
+            args=['--no-sandbox','--disable-dev-shm-usage'])
+        try:
+            page=browser.new_page(viewport={'width':1080,'height':1920})
+            errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto((tmp_path/'p/index.html').as_uri())
+            page.wait_for_function('Boolean(window.__timelines?.story)')
+            def seek(t):
+                page.evaluate('(t)=>{window.__timelines.story.seek(t,false);}',t)
+                return [page.locator(f'#s0code{k} span[id^="s0code{k}t"]').all_text_contents() for k in range(2)]
+            full=seek(3.2)
+            assert [''.join(row) for row in full] == list(scene.visual.lines)
+            early=seek(.1)
+            assert ''.join(early[1]) == ''
+            assert ''.join(early[0]) != scene.visual.lines[0]
+            assert seek(3.2) == full
+            assert not errors
+        finally:
+            browser.close()
+
+
+def test_story_code_report_distinguishes_local_and_global_times():
+    from dataclasses import replace
+    scene=checklist_code(anchors=(0,3))
+    original=story_timeline([scene]).timings[0]
+    shifted=replace(original,start=10,end=original.end+10,voice_end=original.voice_end+10,
+                    words=tuple(Word(w.start+10,w.end+10) for w in original.words))
+    _,_,_,report=story._code_editor('s1',scene.visual,shifted)
+    assert report['scene_start'] == 10
+    for local,global_window in zip(report['line_windows'],report['timeline_windows'],strict=True):
+        assert global_window == pytest.approx(tuple(t+10 for t in local))
+
+
+def test_story_opening_headline_has_no_transparent_entrance(tmp_path):
+    from tubeforge.rendering.shorts.schema import Hook
+    scene=Hook.model_validate(topic_data()['scenes'][0] | {'vo':VO,'caption':VO})
+    page=build([scene],tmp_path)
+    assert 'tl.fromTo("#s0 .h1",{opacity:0' not in page
+
+
+def test_story_loop_filter_replays_first_frame_without_changing_frame_count():
+    import shutil
+    import subprocess
+    if not shutil.which('ffmpeg'):
+        pytest.skip('FFmpeg required')
+    width,height,frames=108,192,6
+    command=['ffmpeg','-v','error','-f','lavfi','-i',f'testsrc2=size={width}x{height}:rate=30:duration=0.2',
+             '-filter_complex',story.story_video_filter(width,height,frames,True),'-map','[v]',
+             '-r','30','-pix_fmt','rgb24','-f','rawvideo','pipe:1']
+    raw=subprocess.run(command,check=True,capture_output=True).stdout
+    size=width*height*3
+    assert len(raw)==frames*size
+    assert raw[:size]==raw[-size:]
+    assert raw[size:2*size]!=raw[:size]

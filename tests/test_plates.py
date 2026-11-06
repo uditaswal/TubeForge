@@ -110,3 +110,84 @@ def test_stock_library_serves_repeated_queries_without_network(tmp_path):
     manifest = prepare_plates(topic_with({1: {"kind": "stock", "query": "server racks", "media": "video"}}), tmp_path / "job", pixabay=client, capture=None)
     entry = manifest["scenes"]["1"]
     assert entry["kind"] == "stock" and entry["origin"] == "local-library" and client.requests_made == 0
+
+
+def test_editor_code_frame_cache_is_bounded_and_cursor_blinks(tmp_path):
+    topic = topic_with({1: CODE})
+    plates = Plates(topic, tmp_path, {})
+    for frame in range(120):
+        plates.card(1, frame / 30, 4, None)
+    assert len(plates._cards) <= 12
+    assert plates.card(1, 3, 4, None).tobytes() != plates.card(1, 3.6, 4, None).tobytes()
+
+
+def test_editor_renderer_revision_changes_job_cache_identity(monkeypatch):
+    from tubeforge.pipeline import reference_short
+    topic = topic_with({1: CODE})
+    kwargs = dict(draft=False, approval_identity='fixture-review')
+    current = reference_short.render_identity(topic, 'audio', 'timeline', **kwargs)
+    monkeypatch.setattr(reference_short, 'RENDERER_VERSION', 'reference-short-v1/render-3')
+    assert current != reference_short.render_identity(topic, 'audio', 'timeline', **kwargs)
+
+
+@pytest.mark.parametrize('anchors', [(0,), (0, 0, 3), (-1, 2, 3), (0, 2, 99)])
+def test_code_line_anchors_must_cover_lines_and_exact_narration(anchors):
+    with pytest.raises(ValidationError):
+        topic_with({1: {**CODE, 'line_reveal_words': anchors}})
+
+
+def test_old_code_visual_serialization_is_unchanged():
+    assert VISUAL.validate_python(CODE).model_dump(mode='json') == CODE
+
+
+def test_code_line_windows_bind_exact_word_times_and_fail_without_reading_hold(tmp_path):
+    from types import SimpleNamespace
+    from tubeforge.rendering.shorts.timeline import SceneTiming, Word
+    topic = topic_with({1: {**CODE, 'line_reveal_words': [0, 3, 6]}})
+    def timeline(end=6):
+        words = tuple(Word(i*.5, i*.5+.3) for i in range(10))
+        return SimpleNamespace(topic=topic, timings=tuple(SceneTiming(0, end, words, 'fixture-alignment') for _ in topic.scenes))
+    plates = Plates(topic, tmp_path, {})
+    with pytest.raises(ValueError, match='bound timeline'):
+        plates.card(1, 2, 6, None)
+    plates.bind_timeline(timeline())
+    row = plates.code_timing_report()['1']
+    assert row['mode'] == 'word_anchored'
+    assert row['alignment'] == 'fixture-alignment'
+    assert row['line_windows'] == ((0, 1.5), (1.5, 3), (3, 5))
+    assert plates._anchored_editors[1].scene.cursor(1.6)[0] == 1
+    assert plates._anchored_editors[1].scene.count(5) == len('\n'.join(CODE['lines']))
+    with pytest.raises(ValueError, match='reading hold'):
+        plates.bind_timeline(timeline(end=3.5))
+
+
+def test_other_renderers_reject_anchors_before_audio_mastering(tmp_path):
+    from types import SimpleNamespace
+    from tubeforge.pipeline.reference_short import render
+    from tubeforge.core.errors import ProviderValidationError
+    topic = topic_with({1: {**CODE, 'line_reveal_words': [0, 3, 6]}})
+    with pytest.raises(ProviderValidationError, match='Pillow'):
+        render(SimpleNamespace(topic=topic), tmp_path, tmp_path/'final.mp4',
+               SimpleNamespace(renderer='hyperframes'), draft=False, cancelled=lambda: False)
+
+
+def test_code_word_anchors_change_render_identity():
+    from tubeforge.pipeline.reference_short import render_identity
+    kwargs = dict(draft=False, approval_identity='fixture')
+    ordinary = topic_with({1: CODE})
+    anchored = topic_with({1: {**CODE, 'line_reveal_words': [0, 3, 6]}})
+    assert render_identity(ordinary, 'a', 't', **kwargs) != render_identity(anchored, 'a', 't', **kwargs)
+
+
+def test_source_capture_cleanup_policy_is_retained_in_manifest(tmp_path):
+    from tubeforge.pipeline.capture import CAPTURE_POLICY
+    topic = topic_with({1: {'kind':'source','quote':'A sufficiently long source quote'}})
+    def capture(url, quote, base):
+        return {'file':'plates/source-1.png','matched':True,
+                'capture_policy':CAPTURE_POLICY,'appearance':'dark-reader-v1','themed_roots':2,'hidden_controls':['Ask AI']}
+    manifest = prepare_plates(topic,tmp_path,pixabay=None,capture=capture)
+    evidence = manifest['scenes']['1']['evidence']
+    assert evidence['capture_policy'] == CAPTURE_POLICY
+    assert evidence['hidden_controls'] == ['Ask AI']
+    assert evidence['appearance'] == 'dark-reader-v1'
+    assert evidence['themed_roots'] == 2

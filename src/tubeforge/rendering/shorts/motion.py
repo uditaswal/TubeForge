@@ -71,8 +71,9 @@ class LRU(OrderedDict):
 
 
 class Animator:
-    def __init__(self, renderer: SceneRenderer, seed: int = 20261022, plates=None):
+    def __init__(self, renderer: SceneRenderer, seed: int = 20261022, plates=None, first_state: FrameState | None = None):
         self.renderer = renderer
+        self.first_state = first_state
         self.plates = plates  # optional real-imagery plates (stock B-roll, source/code cards)
         self.bg = ambient_background()
         rng = random.Random(seed)
@@ -132,7 +133,7 @@ class Animator:
                 base.alpha_composite(piece, (round((box[0] + box[2]) / 2 - size[0] / 2),
                                              round((box[1] + box[3]) / 2 - size[1] / 2)))
         content = base if base is not None else current
-        if st.scene_t < SCENE_IN_SECONDS:
+        if st.index > 0 and st.scene_t < SCENE_IN_SECONDS:
             e = ease_out_cubic(st.scene_t / SCENE_IN_SECONDS)
             if st.index > 0 and e < .5:
                 # Outgoing scene fades first, so two scenes never overlap on screen.
@@ -165,6 +166,12 @@ class Animator:
                                  resample=Image.Resampling.BILINEAR)
 
     def frame(self, st: FrameState, t: float, rails: bool = False) -> Image.Image:
+        # The final frame is in the speech tail. Reuse the exact opening state,
+        # including background time and captions, instead of a near-match zoom.
+        if (self.first_state is not None and self.renderer.topic.scenes[st.index].template == "loop"
+                and st.index == len(self.renderer.topic.scenes) - 1
+                and st.scene_t >= st.scene_dur - 1/30 - 1e-6):
+            return self.frame(self.first_state, 0.0, rails)
         stock = self.plates.background(st.index, st.scene_t, st.scene_dur) if self.plates is not None else None
         image = stock if stock is not None else self.background(t)
         content = self.content(st)

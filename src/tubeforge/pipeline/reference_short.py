@@ -30,8 +30,8 @@ from tubeforge.rendering.shorts.review import write_layout_review
 from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
-RENDERER_VERSION = "reference-short-v1/render-3"  # sparse caused SFX budget
-HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-4"
+RENDERER_VERSION = "reference-short-v1/render-9"  # shared portrait editor/cursor changes pixels
+HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-7"
 
 
 def renderer_version(config: ReferenceShortConfig) -> str:
@@ -167,6 +167,12 @@ def render(timeline: Timeline, directory: Path, destination: Path, config: Refer
     tokens = getattr(getattr(getattr(timeline, "renderer", None), "options", None), "design_tokens", None)
     if tokens is not None and (load_style(directory) == "story" or config.renderer != "hyperframes"):
         raise ProviderValidationError("reference design tokens currently require the classic HyperFrames renderer")
+    story_style = load_style(directory) == "story"
+    anchored = [scene for scene in timeline.topic.scenes if getattr(getattr(scene, "visual", None), "line_reveal_words", ())]
+    if anchored and config.renderer == "hyperframes" and not story_style:
+        raise ProviderValidationError("word-anchored code visuals require Pillow or Story checklist rendering")
+    if story_style and any(scene.template != "checklist" for scene in anchored):
+        raise ProviderValidationError("Story code-line anchors currently require a checklist code scene")
     starts = tuple(t.start for t in timeline.timings)
     templates = tuple(scene.template for scene in timeline.topic.scenes)
     reveal_times = tuple(t.words[s.reveal_words[0]].start
