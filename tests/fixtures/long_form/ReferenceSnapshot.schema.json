@@ -1,0 +1,126 @@
+{
+  "$defs": {
+    "TranscriptCue": {
+      "additionalProperties": false,
+      "properties": {
+        "start_seconds": {
+          "minimum": 0,
+          "title": "Start Seconds",
+          "type": "number"
+        },
+        "end_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "End Seconds",
+          "type": "number"
+        },
+        "text": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start_seconds",
+        "end_seconds",
+        "text"
+      ],
+      "title": "TranscriptCue",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "reference-video-v1",
+      "default": "reference-video-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "extractor_version": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Extractor Version",
+      "type": "string"
+    },
+    "reference_url": {
+      "maxLength": 2000,
+      "title": "Reference Url",
+      "type": "string"
+    },
+    "video_id": {
+      "pattern": "^[A-Za-z0-9_-]{11}$",
+      "title": "Video Id",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "creator": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Creator",
+      "type": "string"
+    },
+    "duration_seconds": {
+      "exclusiveMinimum": 0,
+      "maximum": 21600,
+      "title": "Duration Seconds",
+      "type": "number"
+    },
+    "captured_at": {
+      "format": "date-time",
+      "title": "Captured At",
+      "type": "string"
+    },
+    "language": {
+      "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$",
+      "title": "Language",
+      "type": "string"
+    },
+    "transcript_origin": {
+      "enum": [
+        "captions",
+        "supplied",
+        "local_transcription",
+        "unavailable"
+      ],
+      "title": "Transcript Origin",
+      "type": "string"
+    },
+    "cues": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TranscriptCue"
+      },
+      "maxItems": 10000,
+      "title": "Cues",
+      "type": "array"
+    },
+    "limitations": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Limitations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "extractor_version",
+    "reference_url",
+    "video_id",
+    "title",
+    "creator",
+    "duration_seconds",
+    "captured_at",
+    "language",
+    "transcript_origin"
+  ],
+  "title": "ReferenceSnapshot",
+  "type": "object"
+}

@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "TranscriptCue": {
+      "additionalProperties": false,
+      "properties": {
+        "start_seconds": {
+          "minimum": 0,
+          "title": "Start Seconds",
+          "type": "number"
+        },
+        "end_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "End Seconds",
+          "type": "number"
+        },
+        "text": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start_seconds",
+        "end_seconds",
+        "text"
+      ],
+      "title": "TranscriptCue",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Proposed request shape, not an enabled endpoint or generation request.",
+  "properties": {
+    "reference_url": {
+      "maxLength": 2000,
+      "title": "Reference Url",
+      "type": "string"
+    },
+    "target_duration_seconds": {
+      "maximum": 900,
+      "minimum": 600,
+      "title": "Target Duration Seconds",
+      "type": "integer"
+    },
+    "channel_identity": {
+      "default": "default",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "title": "Channel Identity",
+      "type": "string"
+    },
+    "language": {
+      "default": "en",
+      "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$",
+      "title": "Language",
+      "type": "string"
+    },
+    "supplied_cues": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TranscriptCue"
+      },
+      "maxItems": 10000,
+      "title": "Supplied Cues",
+      "type": "array"
+    }
+  },
+  "required": [
+    "reference_url",
+    "target_duration_seconds"
+  ],
+  "title": "ReferenceIntakeRequest",
+  "type": "object"
+}
