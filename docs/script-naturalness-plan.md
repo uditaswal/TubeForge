@@ -73,3 +73,21 @@ because Kokoro pace and the ≤ 96-word profile already bound length; rule 7 (en
 1. Authorize the P2 reference-set generation (Claude calls, within the existing cap) when P0 and P1 are done.
 2. After P2, say which gates to promote in P3 (default: only zero-false-positive checks).
 3. Confirm the `ms1-pilot-rate-limit-v2` Short should be treated as a regression fixture, not published as is.
+
+## Round 2 (6 Nov): reviewer feedback on the two P2 scripts
+
+Implemented without a live run (advisory checks plus prompt text); validation needs a new generation and therefore the operator's go-ahead.
+
+| Feedback | Where it went |
+| --- | --- |
+| Thesis said three times (hook, line 3, line 10); say it only in the hook and the loop line | Advisory check `craft.py::naturalness_problems` ("restates the hook's idea", by shared content word pairs); writer rule "Say the thesis at most twice"; editor sense check. **Root cause found:** the shared writer prompt (`prompts.py`) told the model the line before the loop must "echo the hook" and "land a verdict", which produced both the repeats and the "My verdict:" label. Both now ask for the action or consequence in new words. |
+| Mechanism first, then how it breaks | Writer rule "Order"; editor check. Not machine-checkable. |
+| Weak line instead of the running example; no figure anywhere | Advisory "no figure at all"; writer rule asks for the example's concrete values early. |
+| Vague "real login checks" | Advisory check on "real/proper/actual + work/tools/checks"; writer rule "Name the thing". |
+| "will not" is stiff | Advisory check for uncontracted forms; writer rule "Speak it". |
+| "My verdict:", "AWS says so", "Stripe's blog calls…" | Advisory checks for reviewer labels and sources named in the voice-over; the writer prompt now keeps attributions on screen (source chip) unless the citation is the surprise. |
+| Claim is v1-only | Writer rule "Scope the claim"; not machine-checkable. |
+| Open last line must read into line 1 as one sentence | `craft.py::loop_reads_as` joins the two lines (scorecard key `loop_reads_as`) for the reviewer; grammar itself is not machine-checked. |
+
+Found on the way: `scripts/script_scorecard.py` did not pass display fields, so its on-screen-figure check was silently skipped; fixed. With it fixed, the old rate-limit script is flagged for the 429 and "100, 2000" card the narration never says, which was the review's point 3.
+Status: **IMPLEMENTED**, fixture-tested against both real P2 scripts and both old baselines; **not validated live**. The running Claude runner still has round 1; restart it (`scripts/restart_stack.sh --no-build`) only after the validation run.

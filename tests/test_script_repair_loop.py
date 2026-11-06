@@ -88,3 +88,13 @@ def test_the_writing_check_carries_the_review_rules_and_the_final_check_stays_la
         assert phrase.lower() in RULES.lower()
     assert "(8) sense check" in EDITOR_INSTRUCTIONS and "scene before the loop line" in EDITOR_INSTRUCTIONS
     assert len(RULES) < 4_000 and len(EDITOR_INSTRUCTIONS) < 6_500     # the 75k prompt ceiling keeps its headroom
+
+
+def test_the_writing_check_adds_the_second_round_of_review_rules_within_the_size_budget():
+    from tubeforge.host_claude_runner import EDITOR_INSTRUCTIONS
+    for phrase in ("Say the thesis at most twice", "Order: explain how it works first", "Name the thing", "Scope the claim", "Speak it", "never leave the whole script without a figure"):
+        assert phrase in RULES
+    for phrase in ("only in the hook and the loop line", "before how it breaks", "read straight into line 1"):
+        assert phrase in EDITOR_INSTRUCTIONS
+    assert RULES.index("WRITING CHECK") < RULES.index("FINAL CHECK") and RULES.rstrip().splitlines()[-1].startswith("- Every terminal line")
+    assert len(RULES) < 4_500 and len(EDITOR_INSTRUCTIONS) < 7_000
