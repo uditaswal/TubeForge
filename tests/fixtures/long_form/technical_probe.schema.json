@@ -1,0 +1,88 @@
+{
+  "additionalProperties": false,
+  "description": "Final-master measurement contract, not an approval or creative verdict.\n\nThe media adapter must supply real encoded-file measurements. This model\ncannot establish that a probe/decode/listening operation actually ran.",
+  "properties": {
+    "artifact_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Artifact Sha256",
+      "type": "string"
+    },
+    "width": {
+      "const": 1920,
+      "title": "Width",
+      "type": "integer"
+    },
+    "height": {
+      "const": 1080,
+      "title": "Height",
+      "type": "integer"
+    },
+    "fps": {
+      "const": 30,
+      "title": "Fps",
+      "type": "integer"
+    },
+    "video_codec": {
+      "const": "h264",
+      "title": "Video Codec",
+      "type": "string"
+    },
+    "audio_codec": {
+      "const": "aac",
+      "title": "Audio Codec",
+      "type": "string"
+    },
+    "sample_rate": {
+      "const": 48000,
+      "title": "Sample Rate",
+      "type": "integer"
+    },
+    "duration_seconds": {
+      "maximum": 900,
+      "minimum": 600,
+      "title": "Duration Seconds",
+      "type": "number"
+    },
+    "integrated_lufs": {
+      "maximum": -13,
+      "minimum": -15,
+      "title": "Integrated Lufs",
+      "type": "number"
+    },
+    "true_peak_dbtp": {
+      "maximum": -1.5,
+      "title": "True Peak Dbtp",
+      "type": "number"
+    },
+    "full_decode_passed": {
+      "const": true,
+      "title": "Full Decode Passed",
+      "type": "boolean"
+    },
+    "chapter_starts_seconds": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 12,
+      "minItems": 3,
+      "title": "Chapter Starts Seconds",
+      "type": "array"
+    }
+  },
+  "required": [
+    "artifact_sha256",
+    "width",
+    "height",
+    "fps",
+    "video_codec",
+    "audio_codec",
+    "sample_rate",
+    "duration_seconds",
+    "integrated_lufs",
+    "true_peak_dbtp",
+    "full_decode_passed",
+    "chapter_starts_seconds"
+  ],
+  "title": "LongFormTechnicalProbe",
+  "type": "object"
+}

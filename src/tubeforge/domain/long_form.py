@@ -63,3 +63,44 @@ class LongFormPlanningContract(DomainModel):
         if not set(self.cited_source_ids) <= {s.source_id for s in request.sources}:
             raise ValueError("cited source IDs must resolve to the canonical request")
         return self
+
+
+class LongFormTechnicalProbe(DomainModel):
+    """Final-master measurement contract, not an approval or creative verdict.
+
+    The media adapter must supply real encoded-file measurements. This model
+    cannot establish that a probe/decode/listening operation actually ran.
+    """
+
+    artifact_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    width: Literal[1920]
+    height: Literal[1080]
+    fps: Literal[30]
+    video_codec: Literal["h264"]
+    audio_codec: Literal["aac"]
+    sample_rate: Literal[48000]
+    duration_seconds: float = Field(ge=600, le=900, allow_inf_nan=False)
+    integrated_lufs: float = Field(ge=-15, le=-13, allow_inf_nan=False)
+    true_peak_dbtp: float = Field(le=-1.5, allow_inf_nan=False)
+    full_decode_passed: Literal[True]
+    chapter_starts_seconds: tuple[float, ...] = Field(min_length=3, max_length=12)
+
+    @model_validator(mode="after")
+    def chapter_intervals(self) -> LongFormTechnicalProbe:
+        import math
+
+        starts = self.chapter_starts_seconds
+        if starts[0] != 0 or any(not math.isfinite(s) for s in starts):
+            raise ValueError("chapters must start at zero with finite timestamps")
+        ends = (*starts[1:], self.duration_seconds)
+        if any(end - start < 10 for start, end in zip(starts, ends, strict=True)):
+            raise ValueError("every chapter must last at least ten seconds")
+        return self
+
+    def validate_target(self, planning: LongFormPlanningContract, *, artifact_sha256: str) -> None:
+        if artifact_sha256 != self.artifact_sha256:
+            raise ValueError("long-form technical probe belongs to a different artifact")
+        if abs(self.duration_seconds - planning.request.target_duration_seconds) > planning.request.target_duration_seconds * 0.05:
+            raise ValueError("long-form duration differs from target by more than five percent")
+        if len(self.chapter_starts_seconds) != len(planning.chapters):
+            raise ValueError("measured chapter count differs from accepted plan")
