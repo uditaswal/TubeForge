@@ -79,3 +79,12 @@ def test_validate_once_has_a_final_flag_and_the_prompt_ends_with_the_checklist()
     import inspect
     assert "final" in inspect.signature(_validate_once).parameters
     assert RULES.rstrip().splitlines()[-1].startswith("- Every terminal line") and "FINAL CHECK" in RULES
+
+
+def test_the_writing_check_carries_the_review_rules_and_the_final_check_stays_last():
+    from tubeforge.host_claude_runner import EDITOR_INSTRUCTIONS
+    assert RULES.index("WRITING CHECK") < RULES.index("FINAL CHECK")
+    for phrase in ("one running example", "One idea per sentence", "No filler", "payoff follows from the setup", "One term per concept"):
+        assert phrase.lower() in RULES.lower()
+    assert "(8) sense check" in EDITOR_INSTRUCTIONS and "scene before the loop line" in EDITOR_INSTRUCTIONS
+    assert len(RULES) < 4_000 and len(EDITOR_INSTRUCTIONS) < 6_500     # the 75k prompt ceiling keeps its headroom

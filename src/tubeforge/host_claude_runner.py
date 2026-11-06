@@ -158,6 +158,15 @@ Validation rules your output must satisfy (violations are rejected and cost an a
 - Respect every length and count bound in the schema. Shorten text instead of truncating mid-word.
 - Narration and on-screen text are separate fields; keep spoken word counts within the stated per-scene range.
 
+WRITING CHECK (how a person explains it, not rejections; the editor pass reads for these):
+- Hook: scene 1 opens on one specific figure, named product or concrete consequence, and says its idea once. Never a metaphor followed by a restatement
+  ("A speed bump, not a wall. Expect a hard wall? That is not it." says one idea three times). Better: "You set the limit to 100 requests a second. The gateway can still let more through."
+- One running example: pick one or two concrete values from the sources and use only those in the narration and on every card. Never show a figure on screen that the voice has not said.
+- One idea per sentence: when two mechanisms cause the same symptom (a limit that is allowed to burst by design, and enforcement that is only best effort), give each its own sentence and say which is which. One metaphor must not cover both.
+- No filler: cut lines that restate the line before ("Slow and steady.", "Think soft, not hard.", "Here is the catch."). Never write "other factors" or "some things" without naming them; if the sources do not name them, drop the line.
+- The payoff follows from the setup: if the video shows a control is unreliable, the scene before the closing loop line gives the action the sources recommend (a named tool or setting), never more of the same control.
+- One term per concept, matching the product shown (route or method, not both).
+
 FINAL CHECK before you return (the most common rejections):
 - Every heading is a two-to-four-word label in different words than its narration (at most two shared words).
 - The final scene's template matches the ending: loop for a loop ending, cta for a debate ending.
@@ -186,9 +195,11 @@ EDITOR_INSTRUCTIONS = (
     "(6) plain speech: replace insider jargon with everyday words, and write every money amount, size and multiplier in the narration and its caption as spoken words "
     "('120 thousand dollars', '3.4 times', 'megabytes'; no $ symbol, no x multipliers, no MB or ms abbreviations, no thousands commas). "
     "(7) listener test: read the narration aloud as one continuous voice-over. If a scene sounds like a list of facts, versions or figures, or repeats its neighbours' sentence frame, "
-    "rewrite it as one plain explanation of what happened and why it matters to the viewer; keep at most one number per scene and four in the whole narration (drop extra figures "
-    "from the voice-over; the claim, its claim_id and its source stay, and the figures belong in the scene's on-screen text); every score, rating or ranking must say what it measures and its scale ('the top danger rating, ten out of ten', never 'a perfect ten'); introduce at most two technical terms per scene; "
+    "rewrite it as one plain explanation of what happened and why it matters to the viewer; keep at most two numbers per scene (the running example's values) and four in the whole narration (drop extra figures "
+    "from the voice-over; the claim, its claim_id and its source stay, and the figures belong in the scene's on-screen text); the hook keeps its one most specific figure or named thing, and every figure shown on screen is one the narration has said; every score, rating or ranking must say what it measures and its scale ('the top danger rating, ten out of ten', never 'a perfect ten'); introduce at most two technical terms per scene; "
     "make at least a third of the middle scenes speak to the viewer ('you', 'your') or say what it means for them; no three scenes start with the same word. "
+    "(8) sense check: the hook says its idea once and is concrete; one running example is used throughout; no sentence explains two different causes with one image; "
+    "cut filler lines and any 'other factors' that are not named; the scene before the loop line gives the action the sources recommend and never more of a control the video showed is unreliable; one term per concept. "
     "Do not add or change any fact, number, claim_id, source_id, visual quote or reveal_words index meaning; keep every field valid; keep the narration within 78-92 words total. "
     "If the draft is already strong, change little."
 )
