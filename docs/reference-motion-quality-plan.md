@@ -1,7 +1,7 @@
 # Reference motion quality plan
 
 Date: 6 November 2026. Branch: `feature/reference-motion-quality`, based on
-`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch, and the local saved-media workflow is VERIFIED. Overall acceptance is IMPLEMENTED while applying the operator’s dark article-card revision; full watch/listen will follow the revised artifact. Story checklist parity is demonstrated locally; unsupported layouts fail explicitly.
+`dev` at `ea14e5e`. Implementation is IMPLEMENTED on this feature branch, and the local saved-media workflow is VERIFIED. Overall acceptance is BLOCKED on full watch/listen feedback for the completed dark article-card revision; its local technical/appearance checks are VERIFIED. Story checklist parity is demonstrated locally; unsupported layouts fail explicitly.
 
 ## Outcome and evidence
 
@@ -623,3 +623,13 @@ receive new plate/render identities through the existing hash-bound asset path.
 The native workflow and lifecycle evidence remain valid for unchanged workflow
 code. This revision does not change dashboard controls, providers, narration,
 scene contracts, worker leases or publication behavior.
+
+Post-revision blocked audit: the operator reactivated the goal for dark article
+cards, and that revision rendered and passed the requested local checks. The
+complete watch/listen dependency remained open at the end of that turn, the
+following acceptance-check turn and this third resumed goal turn. Current file
+hash again matches exact QA/comparison reports; no further implementation or
+render is required before feedback. Goal acceptance is **BLOCKED** on that
+external review, not VERIFIED overall. The existing exact-version review question
+remains pending; silence is not approval. Next: acceptance or timestamped findings
+for SHAa1f7d279578fd502aff81c09fde2a1cd8ba178a3b478384295796b9a76724a67.
