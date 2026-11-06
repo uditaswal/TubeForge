@@ -597,8 +597,9 @@ v5 dark-reader, all `matched=true`; plain/highlight contact sheet inspected at
 `artifacts/review/reference-motion-dark-reader-v1/dark-source-review.png` in the
 main project. Capture evidence retains appearance/theme-root count and targeted
 Ask AI cleanup. Topic/narration/mix are hash-identical to latest native inputs;
-only source plates were regenerated. Full revised render is running from those
-verified prepared files under production20× budget. Existing outputs remain separate.
+only source plates were regenerated. The revised render subsequently completed
+from those verified prepared files under production20× budget; its evidence is
+recorded below. Existing outputs remain separate.
 
 Dark-card full render: local technical/appearance scope **VERIFIED**; complete
 creative acceptance remains **IMPLEMENTED** pending review. Current candidate:
