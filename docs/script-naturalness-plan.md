@@ -1,8 +1,7 @@
 # Plan: less robotic scripts, without reworking the pipeline
 
 Status (6 Nov 2026): **P0 IMPLEMENTED** (advisory checks, `craft.py::naturalness_problems`, scorecard rhythm signals), **P1 IMPLEMENTED**
-(`layout.py::caption_groups`; unit/frame-test evidence only, no real-render inspection yet), **P2 IMPLEMENTED on branch
-`claude/script-prompt-rules` only** (prompt text, size-tested; NOT merged and NOT validated with a live generation, so the live writer is unchanged),
+(`layout.py::caption_groups`; unit/frame-test evidence only, no real-render inspection yet), **P2 IMPLEMENTED and live on `dev`** (merged `190a4f2` after the operator authorized the reference-set run; trialled on two briefs, 7 Claude calls, $1.78; evidence in `docs/script-naturalness-evidence.md`; not operator-reviewed),
 **P3, P4 NOT STARTED**. Owner of phases: Claude unless marked Codex.
 
 Finding while implementing P2: the editor pass told the model to keep at most one number per scene and to drop other figures from the voice-over,
