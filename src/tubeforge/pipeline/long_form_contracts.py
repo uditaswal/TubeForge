@@ -28,8 +28,10 @@ def validate_long_form_package(
     if hashlib.sha256(source_packet_bytes).hexdigest() != planning.source_packet_sha256:
         raise ValueError("long-form source packet hash is stale")
     if planning.reference_snapshot_sha256 is not None:
-        if reference_snapshot_bytes is None or hashlib.sha256(reference_snapshot_bytes).hexdigest() != planning.reference_snapshot_sha256:
+        if reference_snapshot_bytes is None:
             raise ValueError("long-form reference snapshot hash is stale")
+        from tubeforge.pipeline.long_form_reference import validate_planned_reference
+        validate_planned_reference(planning, reference_snapshot_bytes)
     elif reference_snapshot_bytes is not None:
         raise ValueError("long-form reference snapshot must be bound in the plan")
     package = ContentPackage.model_validate_json(package_bytes)

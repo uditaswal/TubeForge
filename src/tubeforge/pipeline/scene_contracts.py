@@ -9,7 +9,7 @@ from enum import StrEnum
 
 from pydantic import Field, model_validator
 
-from tubeforge.domain.contracts import CardRevealCues, ContentPackage, DomainModel, MediaSearchRequest, SourceReference, TeachingRevealCues, TerminalRevealCues
+from tubeforge.domain.contracts import CardRevealCues, ContentPackage, ContentRequest, DomainModel, MediaSearchRequest, SourceReference, TeachingRevealCues, TerminalRevealCues
 from tubeforge.providers.content.prompts import reject_instruction_spoofing
 
 
@@ -147,6 +147,11 @@ class ScriptBoundSceneContract(DomainModel):
 
 def validate_source_packet(package: ContentPackage, source_packet_bytes: bytes) -> None:
     """Verify the exact approved source captures for either renderer contract."""
+    validate_request_source_packet(package.request, source_packet_bytes)
+
+
+def validate_request_source_packet(request: ContentRequest, source_packet_bytes: bytes) -> None:
+    """Same provenance checks before narration, against a canonical request."""
     packet = json.loads(source_packet_bytes)
     if not isinstance(packet, dict) or packet.get("schema_version") not in SUPPORTED_SOURCE_PACKET_VERSIONS:
         raise ValueError("scene contract requires a versioned source packet")
@@ -165,9 +170,9 @@ def validate_source_packet(package: ContentPackage, source_packet_bytes: bytes) 
             if reference.content_sha256 != excerpt_hash:
                 raise ValueError("scene contract source packet differs from the approved package")
         packet_references.append(reference)
-    if len(packet_references) != len(package.request.sources):
+    if len(packet_references) != len(request.sources):
         raise ValueError("scene contract source packet differs from the approved package")
-    for entry, packet_reference, approved_reference in zip(packet_sources, packet_references, package.request.sources, strict=True):
+    for entry, packet_reference, approved_reference in zip(packet_sources, packet_references, request.sources, strict=True):
         # approved_excerpt_snapshot strips only boundary whitespace.
         # A semantically cached package may retain that whitespace; compare
         # against the documented capture transformation, after verifying

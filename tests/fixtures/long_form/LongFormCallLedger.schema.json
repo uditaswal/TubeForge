@@ -1,0 +1,172 @@
+{
+  "$defs": {
+    "ObservedUsage": {
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "cached_input_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cached Input Tokens"
+        },
+        "reasoning_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Tokens"
+        },
+        "reported_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reported Cost Usd"
+        }
+      },
+      "title": "ObservedUsage",
+      "type": "object"
+    },
+    "StageCall": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "pattern": "^call-[1-5]$",
+          "title": "Call Id",
+          "type": "string"
+        },
+        "stage": {
+          "enum": [
+            "research",
+            "draft",
+            "review",
+            "storyboard",
+            "repair"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "state": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "succeeded",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "invocation_started": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invocation Started"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObservedUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "call_id",
+        "stage"
+      ],
+      "title": "StageCall",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "long-form-budget-v1",
+      "default": "long-form-budget-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "brief_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Brief Sha256",
+      "type": "string"
+    },
+    "research_required": {
+      "default": false,
+      "title": "Research Required",
+      "type": "boolean"
+    },
+    "calls": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/StageCall"
+      },
+      "maxItems": 5,
+      "title": "Calls",
+      "type": "array"
+    }
+  },
+  "required": [
+    "brief_sha256"
+  ],
+  "title": "LongFormCallLedger",
+  "type": "object"
+}

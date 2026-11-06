@@ -113,6 +113,8 @@ class _RejectRedirects(HTTPRedirectHandler):
     max_redirections = 3
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        if req is None or not getattr(req, "full_url", None):
+            raise ProviderValidationError("source redirects require a known origin")
         before, after = urlparse(req.full_url), urlparse(newurl)
         if (after.scheme != "https" or after.username or after.password or after.port not in {None, 443}
                 or (after.hostname or "").casefold() != (before.hostname or "").casefold()):

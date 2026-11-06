@@ -1,5 +1,4 @@
 """Reference contracts are data-only and do not fetch or approve content."""
-import copy
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
@@ -109,3 +108,17 @@ def test_schema_snapshots_stay_in_sync():
     for model in [ReferenceSnapshot,ReferenceIntakeRequest,ReferenceIntakeView]:
         path=Path(__file__).parent/'fixtures/long_form'/f'{model.__name__}.schema.json'
         assert json.loads(path.read_text()) == model.model_json_schema()
+
+
+def test_transcript_changes_invalidate_semantic_cache_identity():
+    raw=snapshot_data()
+    first=ReferenceSnapshot.model_validate(raw)
+    raw['cues'][0]['text']='Changed explanation'
+    assert reference_content_identity(ReferenceSnapshot.model_validate(raw)) != reference_content_identity(first)
+
+
+def test_intake_supplied_transcript_is_bounded_and_does_not_grant_ready_state():
+    request=ReferenceIntakeRequest(reference_url=URL,target_duration_seconds=600,supplied_cues=ReferenceSnapshot.model_validate(snapshot_data()).cues)
+    assert request.supplied_cues[0].text
+    with pytest.raises(ValidationError):
+        ReferenceIntakeRequest(reference_url=URL,target_duration_seconds=600,supplied_cues=[dict(start_seconds=3,end_seconds=4,text='Later'),dict(start_seconds=1,end_seconds=2,text='Earlier')])
