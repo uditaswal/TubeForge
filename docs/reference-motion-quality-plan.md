@@ -105,7 +105,7 @@ claims of improved retention and broad rollout before acceptance.
 
 ## Next five actions
 
-1. Watch/listen to the native-worker final below (replaces full-v3 as the current candidate); record timestamped feedback.
+1. Watch/listen to the dark-reader revision below (replaces the prior native final as the current candidate); record timestamped feedback.
 2. Resolve playback findings, including terminal reading hold, small terminal labels and music balance.
 3. Review the completed native workflow evidence alongside the exact final; production script generation and publishing remain outside this run.
 4. Rerun only checks affected by repairs and inspect the exact revised artifact.
@@ -587,7 +587,7 @@ of the previous candidate is superseded by this requested visual revision.
 
 - [x] Implement and test shared dark-reader capture theme; retain provenance.
 - [x] Inspect all five actual dark source captures and highlight variants.
-- [ ] Render and inspect revised Short with other scenes and saved audio preserved.
+- [x] Render and inspect revised Short with other scenes and saved audio preserved.
 - [ ] Obtain full review of the exact revised artifact.
 
 Dark-capture phase **VERIFIED** locally:34 focused tests pass (one browser check
@@ -599,3 +599,26 @@ main project. Capture evidence retains appearance/theme-root count and targeted
 Ask AI cleanup. Topic/narration/mix are hash-identical to latest native inputs;
 only source plates were regenerated. Full revised render is running from those
 verified prepared files under production20× budget. Existing outputs remain separate.
+
+Dark-card full render: local technical/appearance scope **VERIFIED**; complete
+creative acceptance remains **IMPLEMENTED** pending review. Current candidate:
+main-project `artifacts/review/reference-motion-dark-reader-v1/final.mp4`, SHA
+`a1f7d279578fd502aff81c09fde2a1cd8ba178a3b478384295796b9a76724a67`.
+49.659s,1490frames,1080×1920/30,H.264/AAC,full decode passed. Benchmark334.70s;
+encoder330.05s,RTF6.65<20; encoded−14.16LUFS/−2.47dBTP.
+
+| Revision check | Exact evidence | Result |
+|---|---|---|
+| All five article cards use the same dark reader palette | `dark-source-review.png`, full exported `contact.png`, `source-frames.png` at5.5/14/23/33/45s; full-size23s source frame inspected | VERIFIED: navy/light text/yellow highlight, no white article panels; complete quote matches/source labels retained |
+| Original source geometry retained | New/old plate dimensions match for all five; Chromium fixture exact ranges/holder rectangles unchanged | VERIFIED for measured sources/fixture |
+| Other scenes preserved |7 paired decoded frames at1/9.5/18.5/28.5/37/42/48s; `revision-comparison.json` |4 identical; remaining mean absolute differences0.217,0.265,0.315 out of255 from encoding; layouts/content/timing unchanged |
+| Audio preserved | Exact input mix hash, decoded PCM hash, encoded AAC packet hash compared to native final | Both decoded PCM and encoded AAC packets identical |
+| Existing technical/loop gates | Exact-file final.qa.json and qa_check.py; endpoint MAE0.793/255 | No FAILs; existing terminal hold/music warnings remain, no comparison thumbnail (publishing excluded) |
+| Whole-video creative acceptance | Complete playback/listening feedback has not been supplied for this revision | Pending; do not infer acceptance from tests or the requested colour change |
+
+The shared capture change is committed as71528aa. Existing accepted captures and
+outputs retain their bytes; newly captured assets record v5 policy/appearance and
+receive new plate/render identities through the existing hash-bound asset path.
+The native workflow and lifecycle evidence remain valid for unchanged workflow
+code. This revision does not change dashboard controls, providers, narration,
+scene contracts, worker leases or publication behavior.
