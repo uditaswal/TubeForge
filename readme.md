@@ -91,6 +91,7 @@ Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment
 
 | Topic | Where |
 | --- | --- |
+| Planned long-form/reference-video support (not enabled) | [Implementation plan](docs/long-form-reference-video-plan.md) |
 | Index | [docs/README.md](docs/README.md) |
 | Application logs and fields | [docs/operations/logging.md](docs/operations/logging.md) |
 | Reviewing jobs through the API | [docs/operations/api-workflow.md](docs/operations/api-workflow.md) |
