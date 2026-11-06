@@ -11,7 +11,7 @@ from tubeforge.core.config import CodexProviderConfig
 from tubeforge.core.errors import InsufficientSourcesError, ProviderAuthenticationError, ProviderValidationError, RetryableProviderError, ProviderCancellation
 from tubeforge.db.repositories import CachedGeneration, GenerationCacheRepository, GenerationExhausted
 from tubeforge.domain.contracts import ClaimReviewStatus, ConfidenceLevel, ContentPackage, ContentRequest, generation_request_content
-from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse
+from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, encode_request
 from tubeforge.providers.content.routing_errors import RunnerFallbackFailure
 from tubeforge.providers.content.prompts import build_content_prompt, normalize_content_request, validate_video_package
 
@@ -41,9 +41,10 @@ class HostRunnerContentProvider:
     def research_sources(self, request: ContentRequest) -> dict:
         """Typed research operation; no narration cache or approval mutation."""
         self._require_owner(request)
+        payloads = {operation: encode_request(GenerateShortsScriptRequest(operation=operation, request=generation_request_content(request)))
+                    for operation in ("PreflightContentV1", "ResearchSourcesV1")}
         def call(operation):
-            message = GenerateShortsScriptRequest(operation=operation, request=generation_request_content(request))
-            response = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), message.model_dump_json().encode(), self.config.socket_timeout_seconds))
+            response = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), payloads[operation], self.config.socket_timeout_seconds))
             if not response.ok or response.result is None:
                 self._runner_failure(response)
             return response.result
@@ -90,6 +91,9 @@ class HostRunnerContentProvider:
         accepted = self.cached_package(request)
         if accepted is not None:
             return accepted
+        host_request = generation_request_content(request)
+        generation_payload = encode_request(GenerateShortsScriptRequest(request=host_request))
+        preflight_payload = encode_request(GenerateShortsScriptRequest(operation="PreflightContentV1", request=host_request))
         # Reject an unsupported prompt before reserving or charging a model call.
         try:
             prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
@@ -97,13 +101,12 @@ class HostRunnerContentProvider:
             if "max_prompt_chars" not in str(error):
                 raise
             raise ProviderValidationError(f"the brief and source excerpts are too large for one script prompt: {error}") from error
-        host_request = generation_request_content(request)
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
         from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES
         if request.prompt_version in SKILL_TEMPLATES:
             hashes = preflight(template_version=request.prompt_version)
             try:
-                readiness = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), GenerateShortsScriptRequest(operation="PreflightContentV1", request=host_request).model_dump_json().encode(), self.config.socket_timeout_seconds))
+                readiness = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), preflight_payload, self.config.socket_timeout_seconds))
             except (RetryableProviderError, ProviderCancellation):
                 raise
             except OSError as error:
@@ -139,7 +142,7 @@ class HostRunnerContentProvider:
             raise ProviderValidationError("TubeForge's two-attempt limit for this exact source packet is exhausted; operator review is required")
         response = None
         try:
-            response = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), GenerateShortsScriptRequest(request=host_request).model_dump_json().encode(), self.config.socket_timeout_seconds))
+            response = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), generation_payload, self.config.socket_timeout_seconds))
             if not response.ok or response.failure:
                 self._runner_failure(response)
             if response.result is None:
@@ -184,6 +187,7 @@ def _request(path: str, payload: bytes, timeout: int) -> bytes:
         connection.settimeout(timeout)
         connection.connect(path)
         connection.sendall(payload)
+        connection.shutdown(socket.SHUT_WR)
         chunks: list[bytes] = []
         total = 0
         while chunk := connection.recv(65_536):

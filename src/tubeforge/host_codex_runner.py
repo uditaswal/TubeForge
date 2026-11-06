@@ -23,11 +23,11 @@ from uuid import uuid4
 
 from tubeforge.core.errors import InsufficientSourcesError, ProviderValidationError
 from tubeforge.domain.contracts import ContentPackage
-from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess
+from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess, MAX_REQUEST_BYTES
 from tubeforge.providers.content.prompts import build_content_prompt, normalize_content_request
 
 WORKER_UID = 1000
-MAX_MESSAGE_BYTES = 65_536
+MAX_MESSAGE_BYTES = MAX_REQUEST_BYTES
 MAX_RESPONSE_BYTES = 4_000_000
 MAX_OUTPUT_BYTES = 2_000_000
 TIMEOUT_SECONDS = 480
@@ -63,10 +63,8 @@ def receive_request(connection: socket.socket) -> GenerateShortsScriptRequest:
     """Read exactly one bounded JSON request after caller authorization."""
     if peer_uid(connection) != WORKER_UID:
         raise PermissionError("runner accepts only worker UID 1000")
-    payload = connection.recv(MAX_MESSAGE_BYTES + 1)
-    if not payload or len(payload) > MAX_MESSAGE_BYTES:
-        raise ValueError("request is missing or exceeds the runner limit")
-    return GenerateShortsScriptRequest.model_validate_json(payload)
+    from tubeforge.providers.content.host_runner_protocol import receive_message
+    return receive_message(connection, maximum_bytes=MAX_MESSAGE_BYTES)
 
 
 def fixed_paths(request_id: str, root: Path = Path("/var/lib/tubeforge-codex")) -> tuple[Path, Path]:
@@ -436,6 +434,7 @@ def main() -> None:
     while True:
         connection, _ = listener.accept()
         with connection:
+            request = None
             try:
                 request = receive_request(connection)
                 if request.operation == "PreflightContentV1":
@@ -469,7 +468,7 @@ def main() -> None:
             except AllowanceExhaustedError as error:
                 connection.sendall(encode_failure("allowance_exhausted", str(error)))
             except Exception as error:
-                connection.sendall(encode_failure("invalid_output", str(error), invocation_started=request.operation != "PreflightContentV1" if "request" in locals() else False))
+                connection.sendall(encode_failure("invalid_output", str(error), invocation_started=request is not None and request.operation != "PreflightContentV1"))
 
 
 if __name__ == "__main__":

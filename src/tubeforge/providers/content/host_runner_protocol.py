@@ -44,3 +44,62 @@ class HostRunnerResponse(BaseModel):
     ok: bool
     result: HostRunnerSuccess | None = None
     failure: HostRunnerFailure | None = None
+
+
+# Limits apply to UTF-8 wire bytes, independently of prompt character limits.
+MAX_REQUEST_BYTES = 65_536
+REQUEST_READ_SECONDS = 30.0
+
+
+def encode_request(message: GenerateShortsScriptRequest) -> bytes:
+    """Reject oversized evidence before transport or invocation reservation."""
+    from tubeforge.core.errors import ProviderValidationError
+
+    payload = message.model_dump_json().encode("utf-8")
+    if len(payload) > MAX_REQUEST_BYTES:
+        raise ProviderValidationError(
+            f"Brief and source excerpts exceed the runner request limit "
+            f"({len(payload)} > {MAX_REQUEST_BYTES} UTF-8 bytes); shorten the source packet."
+        )
+    return payload
+
+
+def receive_message(connection, *, maximum_bytes: int = MAX_REQUEST_BYTES,
+                    timeout_seconds: float = REQUEST_READ_SECONDS) -> GenerateShortsScriptRequest:
+    """Read fragmented JSON with bounded bytes/time, including legacy clients.
+
+    New clients half-close their write side; older clients wait for a response
+    without EOF, so a complete JSON value remains sufficient to end a request.
+    Authorization stays with the runner and must happen before this function.
+    """
+    import json
+    import time
+
+    payload = bytearray()
+    previous_timeout = connection.gettimeout()
+    deadline = time.monotonic() + min(timeout_seconds, previous_timeout if previous_timeout is not None else timeout_seconds)
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError("runner request read timed out before a complete message")
+            connection.settimeout(remaining)
+            try:
+                chunk = connection.recv(min(8192, maximum_bytes + 1 - len(payload)))
+            except TimeoutError as error:
+                raise ValueError("runner request read timed out before a complete message") from error
+            if not chunk:
+                if not payload:
+                    raise ValueError("request is missing or exceeds the runner limit")
+                # Preserve strict domain validation and a bounded failure reply.
+                return GenerateShortsScriptRequest.model_validate_json(bytes(payload))
+            payload.extend(chunk)
+            if len(payload) > maximum_bytes:
+                raise ValueError("request is missing or exceeds the runner limit")
+            try:
+                json.loads(payload)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            return GenerateShortsScriptRequest.model_validate_json(bytes(payload))
+    finally:
+        connection.settimeout(previous_timeout)

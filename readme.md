@@ -76,6 +76,8 @@ docker compose exec web python -m tubeforge.cli create-admin --username you
 
 Open <http://127.0.0.1:62065> (bound to loopback only) and sign in. The AI script runner (Codex or Claude) is a separate host process; see [docs/deploy](docs/deploy). Configuration lives in `config/*.yaml`; select one with `TUBEFORGE_CONFIG`.
 
+Script-runner requests are limited to 65,536 UTF-8 bytes, independently of prompt character limits. Oversized briefs/source excerpts are rejected before a provider attempt is reserved; shorten the source packet rather than raising the prompt ceiling. Accepted evidence is never silently truncated.
+
 Development without Docker:
 
 ```bash

@@ -49,6 +49,8 @@ Plan `story-nosql` / `story-cache` / `story-lb` (day 2026-11-04) ran end to end:
 
 ## Next step
 
+- Long-form LF0-A transport checkpoint (7 Nov): UTF-8 request preflight before provider reservations/calls and bounded fragmented reads for both runners; 145 focused tests passed with real local sockets. Evidence: `docs/long-form-contract-interface.md`. No long-form admission/deployment/live writer. Next: Claude LF0-B proposal/API reconciliation; proposal not found in available branches/worktrees.
+
 - LF0-A contract checkpoint: `docs/long-form-contract-interface.md` now includes exact approved-package/source/reference binding, final technical-probe schema, 30/60-scene payload measurements and proposed intake API semantics; 78 focused/regression tests pass. Non-ASCII excerpts can exceed the 65,536-byte runner request cap; enforce encoded preflight and review fragmented reads during integration. Next: reconcile Claude LF0-B editorial proposal and API boundary before full LF0 acceptance. No production admission or QA adapter is enabled.
 
 - Long-form/reference-video planning handoff: see `docs/long-form-reference-video-plan.md` (baseline local `dev` `a330748`, branch `codex/long-form-reference-plan`). Start with LF0-A contract/cap inventory; Claude can take the isolated LF0-B editorial proposal. No production profile or live-generation allowance changed. Keep implementation status in the current design plan, not this relay.

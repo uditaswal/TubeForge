@@ -34,13 +34,13 @@ from tubeforge.host_codex_runner import (
     AllowanceExhaustedError, RejectedContentError, codex_output_schema, consume_invocation,
     encode_failure, normalize_fallback_visuals, MAX_RESPONSE_BYTES,
 )
-from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess
+from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess, MAX_REQUEST_BYTES
 from tubeforge.providers.content.prompts import (
     ANGLE_INSTRUCTIONS, CONTENT_ENVELOPE_TEMPLATES, RECIPES, build_content_prompt, normalize_content_request, prompt_evidence,
     reference_word_budget,
 )
 
-MAX_MESSAGE_BYTES = 65_536
+MAX_MESSAGE_BYTES = MAX_REQUEST_BYTES
 TIMEOUT_SECONDS = 540
 MAX_OUTPUT_BYTES = 2_000_000
 # Script-prompt ceiling. Keep it equal to pipeline.claude.max_prompt_chars in config/production.yaml: a 90 s
@@ -83,10 +83,8 @@ def peer_uid(connection: socket.socket) -> int:
 def receive_request(connection: socket.socket) -> GenerateShortsScriptRequest:
     if peer_uid(connection) != os.getuid():
         raise PermissionError("runner accepts only the operator's own UID")
-    payload = connection.recv(MAX_MESSAGE_BYTES + 1)
-    if not payload or len(payload) > MAX_MESSAGE_BYTES:
-        raise ValueError("request is missing or exceeds the runner limit")
-    return GenerateShortsScriptRequest.model_validate_json(payload)
+    from tubeforge.providers.content.host_runner_protocol import receive_message
+    return receive_message(connection, maximum_bytes=MAX_MESSAGE_BYTES)
 
 
 def resolve_model(request) -> tuple[str, str]:

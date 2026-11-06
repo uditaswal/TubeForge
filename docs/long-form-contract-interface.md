@@ -32,7 +32,7 @@ Measurements use Pydantic compact JSON encoded as UTF-8, not token estimates. Th
 | Claude CLI timeout / socket timeout / reservation | 540 / 900 / 1,800 seconds |
 | QA reference-short duration | 30–90 seconds; non-Short target tolerance currently 40% |
 
-Sources: host_codex_runner.py, host_claude_runner.py, providers/content/host_runner.py, config/production.yaml and .agents/skills/om-video-quality/qa_check.py. Recheck effective runtime overrides before deployment. Output file limits do not establish a model's maximum output tokens. Both runners currently receive using one bounded recv call; fragmented-message handling needs integration review before larger payloads. Long-form must not inherit the generic QA 40% duration tolerance as its acceptance rule.
+Sources: host_codex_runner.py, host_claude_runner.py, providers/content/host_runner.py, config/production.yaml and .agents/skills/om-video-quality/qa_check.py. Recheck effective runtime overrides before deployment. Output file limits do not establish a model's maximum output tokens. The baseline runners used one recv call. The 7 November core checkpoint now reads fragmented requests within a 65,536-byte / 30-second bound, preserving legacy complete-JSON clients and checking peer identity before reading. The worker checks encoded size before provider invocation reservation or transport. Long-form must not inherit the generic QA 40% duration tolerance as its acceptance rule.
 
 ## Package binding and final measurement interface
 
@@ -51,7 +51,7 @@ Sources: host_codex_runner.py, host_claude_runner.py, providers/content/host_run
 
 These fit current measured byte ceilings. Repeated synthetic prose is deliberately not quality evidence. Richer visual contracts, research, schema instructions and model reasoning are not represented; no model output-token capacity or subscription cost is inferred.
 
-A 24,000-character non-ASCII excerpt produces a **72,949-byte request**, exceeding the **65,536-byte socket input** while satisfying SourceReference's character bound. Integration must count the final encoded request before reserving an attempt or launching a writer, and return an explicit actionable oversize error. Do not truncate accepted evidence silently. Socket fragmentation and output-token caps remain admission integration requirements; they are not fixed by increasing prompt characters.
+A 24,000-character non-ASCII excerpt produces a **72,949-byte request**, exceeding the **65,536-byte socket input** while satisfying SourceReference's character bound. The worker now counts the final encoded request before reserving a provider attempt or contacting its runner, and returns an explicit actionable oversize error. Do not truncate accepted evidence silently. Socket fragmentation is addressed by the shared reader; actual model output-token caps still require long-form admission integration. Increasing prompt character limits does not resolve transport byte bounds.
 
 ## Proposed API boundary for LF1 review
 
@@ -67,4 +67,14 @@ No endpoint is enabled by this checkpoint. Freeze these semantics with the intak
 
 Validation group: `PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q tests/test_long_form_contract.py tests/test_long_form_envelopes.py tests/test_reference_content.py tests/test_scene_contracts.py`.
 
-LF0-A's isolated contract, byte measurements and technical-policy fixtures now have automated evidence. LF0 as a whole remains IMPLEMENTED until Claude's editorial/skill precedence proposal is reviewed and the proposed API semantics are reconciled. These API semantics are a design boundary, not implemented HTTP workflows or signed-in browser evidence. Production routing, actual QA extraction, transport preflight enforcement and real source/video validation belong to later integration. No live provider, migration, deployment or render occurred. Do not begin LF1 until the full LF0 acceptance is reported.
+LF0-A's isolated contract, byte measurements and technical-policy fixtures now have automated evidence. LF0 as a whole remains IMPLEMENTED until Claude's editorial/skill precedence proposal is reviewed and the proposed API semantics are reconciled. These API semantics are a design boundary, not implemented HTTP workflows or signed-in browser evidence. Production long-form routing, actual QA extraction and real source/video validation belong to later integration. Transport preflight and fragmented-request handling are now implemented and locally tested for both existing providers. No live provider, migration, deployment or render occurred. Do not begin LF1 until the full LF0 acceptance is reported.
+
+## 7 November transport checkpoint
+
+Final focused group: **145 passed** across runner request transport, Codex runner/client, Claude connections, failure codes, research, provider fallback and long-form contracts/envelopes. New tests use real local Unix sockets, including seven-byte receive fragments splitting UTF-8, byte-limit boundaries, truncated EOF, bounded read timeout, unauthorized peers, and old/new client compatibility. Four provider tests prove oversized generation/research requests call neither transport nor provider reservation/consumption for both Codex and Claude. The first run lacked local-socket access; rerunning with that access passed. No live writer or service deployment was involved.
+
+Validation command: `PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q tests/test_runner_request_transport.py tests/test_host_codex_runner.py tests/test_host_claude_runner_connections.py tests/test_runner_failure_codes.py tests/test_content_research.py tests/test_codex_content.py tests/test_provider_fallback.py tests/test_long_form_contract.py tests/test_long_form_envelopes.py`.
+
+Worker request writes now end with a write-side shutdown; existing runners still receive the same JSON bytes. Updated runners also accept older clients that wait without EOF. The read deadline applies only to request receipt, not generation. Codex clears per-connection request state so a failed read cannot report the preceding client's invocation state. No source excerpts are truncated or included in the oversize error.
+
+LF0-B editorial proposal was not present in available branches/worktrees on inspection. Reconcile that proposal and finalize the API fixtures before declaring the full LF0 phase accepted. This transport work does not enable the proposed long-form profile or change provider fallback eligibility. Deploying the updated worker/host code remains separate from local validation.
