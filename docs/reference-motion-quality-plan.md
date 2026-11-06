@@ -73,7 +73,7 @@ Tests verify validation, renderer identity/cache invalidation and deterministic
 rerender. Evidence: fixtures, encoded clips, review and test results.
 Out of scope: wholesale renderer replacement and changes to narration generation.
 
-### 3. Integrate with speech and operator review — IMPLEMENTED
+### 3. Integrate with speech and operator review — VERIFIED for local saved-media workflow
 
 Outcome: an opt-in versioned visual treatment through the existing CLI and Studio
 flow, with typed commands/reveals anchored to actual accepted speech alignment.
@@ -105,9 +105,9 @@ claims of improved retention and broad rollout before acceptance.
 
 ## Next five actions
 
-1. Watch/listen to the exact full-v3 comparison below; record timestamped feedback.
+1. Watch/listen to the native-worker final below (replaces full-v3 as the current candidate); record timestamped feedback.
 2. Resolve playback findings, including terminal reading hold, small terminal labels and music balance.
-3. Audit phase-3 workflow coverage: signed-in review is proven; preview → final durable job flow and recovery checks must be accounted for before full-workflow acceptance.
+3. Review the completed native workflow evidence alongside the exact final; production script generation and publishing remain outside this run.
 4. Rerun only checks affected by repairs and inspect the exact revised artifact.
 5. Submit the feature branch and evidence for review; merge requires explicit approval.
 
@@ -136,7 +136,8 @@ Update operator docs when the opt-in workflow exists; planning changes no setup.
 - [x] Fix Story frame-zero headline, canonical loop endpoint and source-image zoom clipping; invalidate render identities.
 - [x] Verify signed-in desktop/mobile review for the exact revised package.
 - [ ] Complete full watch/listen acceptance of the exact revised Short.
-- [ ] Close the full durable preview/final workflow and recovery evidence audit before calling all phases VERIFIED.
+- [x] Prove native worker preview → exact dashboard approval → final with a fresh worker, and audit restart/ownership/stale-approval safeguards.
+- [ ] Close creative acceptance and the full phase audit before calling the overall goal VERIFIED.
 
 ## First implementation checkpoint
 
@@ -467,3 +468,64 @@ approval, cancellation lease cleanup, ownership fencing and conflicting approval
 These are local automated safeguards, not proof of the complete signed-in
 preview → final workflow for the new comparison. That live workflow evidence
 and full watch/listen remain open.
+
+## Native dashboard workflow acceptance — local scope VERIFIED
+
+Phase 3's saved-media workflow is **VERIFIED**. Overall video quality remains
+**IMPLEMENTED** pending complete watch/listen review. No production script,
+preview or publication approval was created.
+
+`tests/test_reference_motion_workflow.py` imports the exact hash-verified prepared
+narration/alignment/source files into a fresh database, records a test-only script
+approval and starts at caption generation. The new request explicitly selects
+Story. Content, TTS, media and publishing providers raise if accessed; no provider
+call was used. This deliberately exercises already reviewed media through native
+caption/render/review stages, not production script generation.
+
+Evidence folder in the main project:
+`artifacts/review/reference-motion-native-workflow-v1/`.
+Current candidate: `jobs/motion-native-workflow/final.mp4`.
+SHA-256 `4ae2df5ec4a128fcf527d3b438e36c902b21cd0f2bb5219365036fc626bc6ee3`.
+
+- Native leased worker rendered a 720×1280 preview and released its claim at
+  PREVIEW_READY. No approval existed and another worker tick did no work.
+- Signed-in desktop1440×1000/mobile390×844 Chromium loaded the actual preview.
+  A stale preview identity received HTTP409; the real dashboard button recorded
+  durable approval for the exact current identity (HTTP200).
+- A fresh runtime and worker loaded that approval and rendered the actual
+  1080×1920 final. The final manifest references the exact preview identity and
+  approval ID. Current DB state FINAL_READY, no worker claim, no publication
+  approval. Saved events include both render_started/render_completed pairs.
+- Initial test failed at an outdated button label after preview success. The
+  corrected harness resumed only after checking the saved package/proof hashes
+  and native preview-current predicate; it did not regenerate the preview.
+  Native workflow test then passed in356.82s. A separate actual-playback check
+  passed in15.77s: muted frames advanced from41.5 to42.1s on both screen sizes,
+  97 presented frames reported, no JS exceptions or horizontal overflow.
+  `*-played-final.png` captures are taken after playback settles; the earlier
+  seek-only captures contain Chromium's transient loading spinner.
+- Preview encoder QA314.08s,RTF6.32; final312.35s,RTF6.29 (whole worker final
+  stage324.71s). Both under configured production20×. Full decode passed for
+  both; native final is49.659s,1490frames,H.264/AAC,−14.16LUFS/−2.47dBTP.
+- Actual native rendering remasters the saved narration through the normal
+  mixer. Its mix differs from the earlier direct comparison and needs its own
+  full listener review; no fresh narration was generated.
+- `qa_check.py` on the native job folder has no FAILs. Remaining WARNs:
+  terminal3.3s reading hold and87 music-under-speech stretches. A local thumbnail
+  exists; no publishing action occurred. Earlier small-label/short-hold craft
+  advisories still need full playback judgement.
+- Inspected native final overview/contact sheet, full-size source/code frames
+  and opening/closing frames. Decoded endpoint MAE0.793/255; canonical opening
+  replay and readable headline/caption remain intact. `workflow-review.json`,
+  `playback-review.json`, native manifests, exact-file QA and screenshots retain
+  detailed evidence. A short muted browser sample is not full watch/listen.
+
+Reproduce with `PYTHONPATH=src .venv-motion/bin/python -m pytest -q -s
+ tests/test_reference_motion_workflow.py`, setting
+`TUBEFORGE_MOTION_WORKFLOW=1`, `TUBEFORGE_MOTION_WORKFLOW_INPUT` to the prepared
+full-v3 folder, `TUBEFORGE_MOTION_WORKFLOW_OUTPUT` to a fresh artifact-disk folder,
+and `TUBEFORGE_HYPERFRAMES_BIN` to pinned CLI0.8.192; put Node24 on PATH.
+`TUBEFORGE_MOTION_WORKFLOW_RESUME=1` is limited to an intact PREVIEW_READY test
+checkpoint. To recheck playback of an existing completed native run, select only
+`::test_saved_native_final_plays_on_desktop_and_mobile` and set OUTPUT plus the
+opt-in flag. Do not point this harness at the production database or job folder.
