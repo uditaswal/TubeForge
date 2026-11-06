@@ -83,3 +83,42 @@ Two lines need a source check before approval: "Stripe's blog calls that very ba
 Two topics, one run each, one reader. The scorecard is a heuristic. The rate-limit script still lacks a figure, and nothing was listened to or rendered.
 P3 (promoting any check to a gate) and P4 (voice listening test) are still open, and the operator's own read of these scripts is the real acceptance.
 To undo the prompt rules: run `git revert -m 1 190a4f2` on `dev`, then restart the Claude runner.
+
+
+## Round 2 validation (6 Nov, evening)
+
+After the reviewer's feedback, the prompt rules and advisory checks were extended (see `docs/script-naturalness-plan.md`, Round 2) and the Claude runner was restarted with them (18:11).
+One more run on the rate-limit topic, with a neutral new title so it did not replay the cached script or steer the writer back to the "wall" metaphor.
+Spend: 3 Claude calls, $0.52 (running total for the authorized trial: 10 calls, $2.30). The trial job and the temporary admin were deleted afterwards.
+
+New script:
+
+1. Your API Gateway rate limit isn't a ceiling, and traffic can walk right past it.
+2. Quotas and throttles protect your API from too many requests. Sounds safe.
+3. API Gateway uses a token bucket, and every request spends one token.
+4. The rate is how fast tokens refill. The burst is the bucket's size. That's it.
+5. So a burst can push traffic past the limit, and that's planned.
+6. Throttles and quotas are best-effort, so treat them as targets. Think targets, never guarantees.
+7. Past the limit, clients can get a 429 error: Too Many Requests.
+8. Usage plans work alike, so don't rely on them for your costs. Clients exceed quotas.
+9. Watch your spending with AWS Budgets, and manage requests with AWS WAF.
+10. Never guard access with API keys. One key opens every API in its plan.
+11. Guard access with an IAM role. Then use your limit only to slow traffic.
+12. Before you trust any throttle with your bill or your access, remember that
+
+Read against the reviewer's points:
+
+| Point | Result |
+| --- | --- |
+| Order: mechanism, then how it breaks | Fixed: bucket (3), rate and burst (4), planned overrun (5), best effort (6). |
+| Thesis only in the hook and the loop line | Mostly: no restatement of the hook in a middle scene; but scene 6 says the idea twice in one scene ("treat them as targets. Think targets, never guarantees."). |
+| Contractions, no labels, no sources in the voice-over | Fixed: 3.1 contractions per 100 words, no "My verdict", no "AWS says". |
+| Name the tool | Fixed: "an IAM role", "AWS Budgets", "AWS WAF". |
+| Loop reads into line 1 | Fixed: "...remember that your API Gateway rate limit isn't a ceiling, and traffic can walk right past it." |
+| Running example with concrete values | **Not met.** No rate or burst value anywhere; the only figure is the 429. The two AWS pages given as sources do not state default values in their text, so the writer had nothing concrete to use; the "100 and 200" sample is on another AWS page. Next time put that page in the brief's sources. |
+| Scope the claim (v1 or v2) | **Not met.** "API Gateway" and "usage plans" are stated without saying which API type the claims cover. |
+| Hook with a specific figure | **Not met.** The hook is concrete about the consequence but has no number. |
+
+Check noise: the first version of the checks printed nothing on this script, so two misses were added and tuned against all five real scripts. The echo check now flags "Think targets, never guarantees." (and the old "Slow and steady."),
+and no longer flags a five-word explanation that reuses a noun (it fired on "Each one spends a token." before the threshold was set to four words). The "no figure carried through more than one scene" check fires on every script we have, which is accurate (none carries a running example) but means it is not a candidate for a gate.
+Not detected by any check: the v1/v2 scope, whether the mechanism comes before the failure, and whether a hook is surprising. Those rest on the prompt and the operator's read.

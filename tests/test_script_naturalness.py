@@ -25,7 +25,7 @@ BAD = package(
 GOOD = package(
     scene("You set a limit of 100 requests a second. API Gateway can still let more through.", headline=("100 A SECOND",)),
     scene("The burst is 200, so a full bucket can be spent at once.", heading="Burst", before="burst 200", after="rate 100"),
-    scene("Separately, enforcement is best effort, so some requests above the rate still pass.", heading="Best effort"),
+    scene("Separately, enforcement is best effort, so some requests above that 100 a second still pass.", heading="Best effort"),
     scene("Don't rely on it for cost control. Use AWS Budgets to watch spend and AWS WAF to block requests.", heading="Budgets and WAF"),
 )
 
@@ -145,3 +145,34 @@ def test_a_counter_starting_at_zero_and_a_trailing_comma_are_not_unspoken_figure
     shown = package(scene("After 24 hours, a key can be deleted.", before="0", after="24 hours"),
                     scene("Set the burst to 200 and the rate to 100.", before="burst 100,", after="rate 200"))
     assert not any("on screen" in note for note in naturalness_problems(shown))
+
+
+P2B_RATE_LIMIT = [
+    "Your API Gateway rate limit isn't a ceiling, and traffic can walk right past it.",
+    "Quotas and throttles protect your API from too many requests. Sounds safe.",
+    "API Gateway uses a token bucket, and every request spends one token.",
+    "The rate is how fast tokens refill. The burst is the bucket's size. That's it.",
+    "So a burst can push traffic past the limit, and that's planned.",
+    "Throttles and quotas are best-effort, so treat them as targets. Think targets, never guarantees.",
+    "Past the limit, clients can get a 429 error: Too Many Requests.",
+    "Usage plans work alike, so don't rely on them for your costs. Clients exceed quotas.",
+    "Watch your spending with AWS Budgets, and manage requests with AWS WAF.",
+    "Never guard access with API keys. One key opens every API in its plan.",
+    "Guard access with an IAM role. Then use your limit only to slow traffic.",
+    "Before you trust any throttle with your bill or your access, remember that",
+]
+
+
+def test_round_two_rate_limit_script_is_clean_except_for_the_slogan_and_the_missing_running_example():
+    notes = " | ".join(naturalness_problems(lines(P2B_RATE_LIMIT)))
+    assert "scene 6 echoes itself ('Think targets, never guarantees.'" in notes
+    assert "no figure is carried through more than one scene" in notes
+    for fixed in ("restates the hook", "stiff uncontracted", "reviewer's label", "names its source", "real "):
+        assert fixed not in notes, fixed                       # contractions, no labels, no attributions, no vague wording: nothing to flag
+    assert "Each one spends a token" not in notes              # a five-word explanation that reuses a noun is not a slogan
+    assert not any("scene 4 echoes" in note for note in naturalness_problems(lines(RATE_LIMIT_P2)))
+
+
+def test_a_figure_reused_across_scenes_counts_as_a_running_example():
+    reused = lines(["Set the limit to 100 requests a second.", "Then 100 is the steady rate.", "A burst of 200 can pass.", "Spend 200 tokens at once.", "Use a budget.", "Budgets cap spend.", "and that is the limit, because"])
+    assert not any("carried through" in note or "no figure" in note for note in naturalness_problems(reused))

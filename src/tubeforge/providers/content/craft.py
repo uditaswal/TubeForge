@@ -460,8 +460,19 @@ def naturalness_problems(package) -> list[str]:
         shared = sorted(hook & _hook_bigrams(scene.vo))
         if shared:
             notes.append(f"scene {index} restates the hook's idea ('{' '.join(shared[0])}'); say the thesis once in the hook and once in the loop line, and spend this scene on a new fact or figure")
-    if not any(_numbers(scene.vo) for scene in scenes):
+    per_scene = [{n.replace(",", "") for n in _numbers(scene.vo)} for scene in scenes]
+    if not any(per_scene):
         notes.append("the narration has no figure at all; introduce the running example with concrete values early (for example 'set 100 a second, burst 200')")
+    elif not any(sum(number in figures for figures in per_scene) >= 2 for number in set().union(*per_scene)):
+        notes.append("no figure is carried through more than one scene; pick one example with concrete values and reuse it, instead of one-off figures")
+    for index, scene in enumerate(scenes[1:-1], 2):
+        sentences = [x for x in re.split(r"(?<=[.!?\u2026])\s+", scene.vo.strip()) if x]
+        for earlier, later in zip(sentences, sentences[1:]):
+            shared = {w.strip(".'") for w in _content(earlier) if len(w.strip(".'")) >= 5} & {w.strip(".'") for w in _content(later) if len(w.strip(".'")) >= 5}
+            stems = {w[:-1] if w.endswith("s") else w for w in shared}
+            if len(later.split()) <= 4 and stems:   # a slogan is short; a five-word sentence that reuses a noun is usually an explanation
+                notes.append(f"scene {index} echoes itself ({later.strip()!r} repeats '{sorted(stems)[0]}' from the sentence before); cut the slogan and spend the words on a fact")
+                break
     return notes
 
 
