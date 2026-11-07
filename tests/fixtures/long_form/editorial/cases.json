@@ -1,0 +1,65 @@
+{
+  "synthetic": true,
+  "scope": "LF0 editorial acceptance fixture; no production narration, real analytics or operator approval",
+  "hooks": [
+    "Why does your ExampleQueue show the same fixture message after a worker restart?",
+    "Before you rebuild ExampleQueue, compare the two deliveries in this synthetic trace.",
+    "Here is the duplicate fixture delivery; now follow the message identifier through ExampleQueue.",
+    "Which ExampleQueue delivery is new, and which repeats the same synthetic message?",
+    "If you are debugging ExampleQueue, start with this fixture trace instead of guessing."
+  ],
+  "titles": [
+    "ExampleQueue: Diagnose a Worker Restart",
+    "ExampleQueue: Trace a Repeated Fixture Message",
+    "ExampleQueue Restart: Follow the Message ID",
+    "ExampleQueue Delivery: What the Fixture Shows",
+    "ExampleQueue: Compare Two Fixture Deliveries",
+    "Why ExampleQueue Repeats a Fixture Message",
+    "ExampleQueue: A Trace Before a Rebuild",
+    "ExampleQueue: Separate Delivery from Processing",
+    "ExampleQueue: Read a Synthetic Restart Trace",
+    "ExampleQueue: Investigate Before You Rebuild"
+  ],
+  "thumbnail_text": "SAME MESSAGE",
+  "invalid_thumbnail_text": "SHOW THE FULL TRACE",
+  "editorial_cases": [
+    {
+      "id": "copied-framing",
+      "reference": "Your ExampleQueue breaks after restart. Rebuild everything before checking deliveries.",
+      "candidate": "Your ExampleQueue fails after restart. Rebuild it all before checking deliveries.",
+      "verdict": "reject",
+      "reason": "Distinctive framing and order survive a synonym substitution; no substantive improvement."
+    },
+    {
+      "id": "unsupported-performance",
+      "candidate": "This method cuts debugging time by 100 percent.",
+      "verdict": "reject",
+      "reason": "The synthetic packet contains no performance measurement; a hook score cannot supply evidence."
+    },
+    {
+      "id": "qualified-new-example",
+      "candidate": "In this fictional trace, compare the message identifier on both deliveries before deciding what failed.",
+      "verdict": "acceptable_for_fixture_only",
+      "reason": "A distinct diagnostic example adds a supported observation without claiming a measured outcome or proving a crash cause.",
+      "evidence_source_ids": [
+        "fixture-primary"
+      ]
+    }
+  ],
+  "primary_sources": [
+    {
+      "source_id": "fixture-primary",
+      "title": "Synthetic ExampleQueue delivery trace",
+      "url": "https://example.com/lf0-editorial-fixture",
+      "excerpt": "In this fictional ExampleQueue trace, a worker restarts and two deliveries carry the same message identifier. The trace does not establish the cause of the restart or measure any debugging-time improvement."
+    }
+  ],
+  "reference_observations": [
+    {
+      "start_seconds": 8,
+      "end_seconds": 20,
+      "inspection": "synthetic-caption-only",
+      "text": "Your ExampleQueue breaks after restart. Rebuild everything before checking deliveries."
+    }
+  ]
+}

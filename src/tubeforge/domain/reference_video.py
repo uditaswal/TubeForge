@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import re
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 
 from tubeforge.domain.contracts import DomainModel
 
@@ -145,3 +146,15 @@ class ReferenceIntakeView(DomainModel):
         elif not self.failure_code or not self.message or not self.message.strip():
             raise ValueError('failed or needs-input intake requires an actionable failure')
         return self
+
+    @computed_field
+    @property
+    def reference_snapshot_sha256(self) -> str | None:
+        """Read-only hash of the canonical snapshot serialization.
+
+        Future intake persistence must store these same canonical bytes. This is
+        captured-reference identity, not a factual verdict or an approval.
+        """
+        if self.snapshot is None:
+            return None
+        return hashlib.sha256(self.snapshot.model_dump_json().encode('utf-8')).hexdigest()

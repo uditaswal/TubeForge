@@ -17,7 +17,7 @@ Scope agreed from the active request to perform the next ten Codex tasks. Parent
 
 Allowed implementation paths: new `domain/reference_video.py`, `domain/long_form_budget.py`, `pipeline/long_form_reference.py`, `pipeline/long_form_budget.py`, `pipeline/long_form_chapters.py`, existing `pipeline/long_form_contracts.py`, new context/chapter/preflight modules, and source-provenance helpers as needed, focused tests/fixtures and shared integration records. Forbidden lane paths: production narration skills, content prompts/youtube_skills, Claude editorial proposal and dashboard UI. No API endpoint, migration or preset registration is part of these contract tasks. Proposed HTTP-facing shapes remain explicitly unregistered until LF1 UI/API work can land together.
 
-Each task uses the existing long-form and ContentPackage identities. Test artifacts use temporary directories, never the local production database. Test fixtures are synthetic, never operator approval or creative evidence. Acceptance requires focused tests plus one combined smoke, not a claim that full long-form generation works. Full LF0 still requires editorial/description-policy reconciliation before LF1.
+Each task uses the existing long-form and ContentPackage identities. Test artifacts use temporary directories, never the local production database. Test fixtures are synthetic, never operator approval or creative evidence. Acceptance requires focused tests plus one combined smoke, not a claim that full long-form generation works. The subsequent editorial/description-policy reconciliation is recorded in `docs/long-form-lf0-acceptance.md`; these core tasks alone did not establish full LF0 acceptance.
 
 ## Acceptance evidence for the ten-task checkpoint
 
@@ -57,4 +57,4 @@ PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q \
   tests/test_content_research.py tests/test_codex_content.py tests/test_provider_fallback.py
 ```
 
-Local socket access was enabled for the transport tests. No live provider calls, reference fetching, real-video QA, signed-in workflow change, deployment or publication occurred. Claude's production prompts, skills and UI files were not edited. Full LF0 acceptance still requires the editorial/description-policy proposal and API reconciliation; these ten core tasks do not stand in for the full long-form workflow.
+Local socket access was enabled for the transport tests. No live provider calls, reference fetching, real-video QA, signed-in workflow change, deployment or publication occurred. Claude's production prompts, skills and UI files were not edited. The subsequent editorial/description-policy and API reconciliation is recorded separately in `docs/long-form-lf0-acceptance.md`; these ten core tasks do not stand in for the full long-form workflow.

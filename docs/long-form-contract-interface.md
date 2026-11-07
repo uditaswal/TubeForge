@@ -67,7 +67,7 @@ No endpoint is enabled by this checkpoint. Freeze these semantics with the intak
 
 Validation group: `PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q tests/test_long_form_contract.py tests/test_long_form_envelopes.py tests/test_reference_content.py tests/test_scene_contracts.py`.
 
-LF0-A's isolated contract, byte measurements and technical-policy fixtures now have automated evidence. LF0 as a whole remains IMPLEMENTED until Claude's editorial/skill precedence proposal is reviewed and the proposed API semantics are reconciled. These API semantics are a design boundary, not implemented HTTP workflows or signed-in browser evidence. Production long-form routing, actual QA extraction and real source/video validation belong to later integration. Transport preflight and fragmented-request handling are now implemented and locally tested for both existing providers. No live provider, migration, deployment or render occurred. Do not begin LF1 until the full LF0 acceptance is reported.
+LF0-A's isolated contracts, byte measurements and technical-policy fixtures have automated evidence. The editorial/skill precedence proposal and proposed API semantics are now reconciled; see `docs/long-form-lf0-acceptance.md` for the complete design-gate evidence. These API semantics are a design boundary, not implemented HTTP workflows or signed-in browser evidence. Production long-form routing, actual QA extraction and real source/video validation belong to later integration. Transport preflight and fragmented-request handling are now implemented and locally tested for both existing providers. No live provider, migration, deployment or render occurred. LF1 may follow the recorded local LF0 design acceptance; it must implement the real API/UI and source-acquisition workflow.
 
 ## 7 November transport checkpoint
 
@@ -77,10 +77,16 @@ Validation command: `PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q test
 
 Worker request writes now end with a write-side shutdown; existing runners still receive the same JSON bytes. Updated runners also accept older clients that wait without EOF. The read deadline applies only to request receipt, not generation. Codex clears per-connection request state so a failed read cannot report the preceding client's invocation state. No source excerpts are truncated or included in the oversize error.
 
-LF0-B editorial proposal was not present in available branches/worktrees on inspection. Reconcile that proposal and finalize the API fixtures before declaring the full LF0 phase accepted. This transport work does not enable the proposed long-form profile or change provider fallback eligibility. Deploying the updated worker/host code remains separate from local validation.
+At the transport checkpoint the LF0-B proposal was not present. It has since been completed and reconciled in `docs/long-form-editorial-proposal.md` and `docs/long-form-lf0-acceptance.md`. This transport work does not enable the proposed long-form profile or change provider fallback eligibility. Deploying the updated worker/host code remains separate from local validation.
 
 ## Next ten core-task interfaces (7 November)
 
 The next ten core tasks and their per-task evidence are in `docs/long-form-next-ten-core-tasks.md`; final relevant regression group: 295 passed. Additional exported schemas cover reference snapshots, intake request/state projections, a five-call checkpoint ledger and a measured timing manifest. Core adapters now verify typed references, preserve unknown usage, build exact bounded source context and export chapters from measured absolute section timing. `pipeline/long_form_preflight.py` combines these checks without provider/render calls.
 
 The inspected local smoke report is `artifacts/review/long-form-core-20261107/preflight.json`: synthetic 60-scene/900-second supplied-timing data, 13,769 context bytes, 14,449 request bytes and six chapters. It proves local contract compatibility and rejection behavior; it does not prove a video exists or was approved. Exact source-packet validation is shared before and after narration, with existing provenance semantics retained. API projections remain unregistered, and durable checkpoint reservation must be integrated under the existing worker lease before a future launch.
+
+## Completed editorial/API reconciliation
+
+The editorial proposal was completed on content branch `37f5737` and reviewed against core parent `f39516b`; evidence: `docs/long-form-lf0-acceptance.md`. The proposed response serialization now includes read-only `reference_snapshot_sha256`, derived from canonical snapshot bytes, with four golden state examples. Clients cannot submit this as trusted capture or approval evidence. Use `ReferenceIntakeViewResponse.schema.json` for responses; the create/validation schema remains strict. Future storage must persist the same canonical bytes before binding them in a plan.
+
+Final relevant tests: 318 passed. Production prompts/resources are unchanged. The long-form description design uses the stricter local 5,000-character final QA bound, and the ≤3-word thumbnail application gate overrides the helper's weaker four-word warning. The next implementation phase is LF1 real intake plus its signed-in UI/API acceptance; this design gate enables no production preset or host operation by itself.

@@ -1,0 +1,78 @@
+[
+  {
+    "intake_id": "fixture-pending",
+    "revision": 1,
+    "request": {
+      "reference_url": "https://www.youtube.com/watch?v=AbCdEfGhI_1",
+      "target_duration_seconds": 600
+    },
+    "state": "pending"
+  },
+  {
+    "intake_id": "fixture-ready",
+    "revision": 1,
+    "request": {
+      "reference_url": "https://www.youtube.com/watch?v=AbCdEfGhI_1",
+      "target_duration_seconds": 600
+    },
+    "state": "ready",
+    "snapshot": {
+      "extractor_version": "fixture-v1",
+      "reference_url": "https://www.youtube.com/watch?v=AbCdEfGhI_1",
+      "video_id": "AbCdEfGhI_1",
+      "title": "Synthetic explanation",
+      "creator": "Fixture channel",
+      "duration_seconds": 600,
+      "captured_at": "2026-11-07T10:00:00Z",
+      "language": "en",
+      "transcript_origin": "captions",
+      "cues": [
+        {
+          "start_seconds": 0,
+          "end_seconds": 10,
+          "text": "Synthetic reference text only."
+        }
+      ],
+      "limitations": [
+        "Caption-only extraction; video and audio were not inspected."
+      ]
+    }
+  },
+  {
+    "intake_id": "fixture-needs-input",
+    "revision": 1,
+    "request": {
+      "reference_url": "https://www.youtube.com/watch?v=AbCdEfGhI_1",
+      "target_duration_seconds": 600
+    },
+    "state": "needs_input",
+    "snapshot": {
+      "extractor_version": "fixture-v1",
+      "reference_url": "https://www.youtube.com/watch?v=AbCdEfGhI_1",
+      "video_id": "AbCdEfGhI_1",
+      "title": "Synthetic explanation",
+      "creator": "Fixture channel",
+      "duration_seconds": 600,
+      "captured_at": "2026-11-07T10:00:00Z",
+      "language": "en",
+      "transcript_origin": "unavailable",
+      "cues": [],
+      "limitations": [
+        "Caption-only extraction; video and audio were not inspected."
+      ]
+    },
+    "failure_code": "captions_unavailable",
+    "message": "Supply a timestamped transcript."
+  },
+  {
+    "intake_id": "fixture-failed",
+    "revision": 1,
+    "request": {
+      "reference_url": "https://www.youtube.com/watch?v=AbCdEfGhI_1",
+      "target_duration_seconds": 600
+    },
+    "state": "failed",
+    "failure_code": "retrieval_failed",
+    "message": "Reference retrieval failed; inspect the link before retrying."
+  }
+]

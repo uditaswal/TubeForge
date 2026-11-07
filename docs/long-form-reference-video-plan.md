@@ -5,6 +5,8 @@ Planning branch: `codex/long-form-reference-plan`.
 
 This is an implementation specification, not a claim that long-form production works today. The single current implementation-status tracker remains `doc-internal/design_doc/tubeforge-publishing-design.md`; this versioned document defines tasks and acceptance. No live generation, paid service, upload or deployment is authorized by this plan. No reference URL was supplied for this planning task.
 
+Design references: [editorial/prompt proposal](long-form-editorial-proposal.md), [LF0 local acceptance evidence](long-form-lf0-acceptance.md). These define the new profile without enabling live generation.
+
 ## 1. Intended result
 
 Paste one public YouTube link, select the channel and a 10, 12 or 15 minute target, and receive an original, grounded video for review: a strong opening, coherent explanation, useful examples, native landscape visuals, intelligible narration, captions, chapters, title options and thumbnail candidates. Use channel defaults for audience, language, voice and writer; ask only when a missing input prevents a sound result.
