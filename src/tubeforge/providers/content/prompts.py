@@ -48,7 +48,7 @@ def reject_instruction_spoofing(value: Any, *, field: str) -> None:
 
 
 def validate_untrusted_request(request: ContentRequest) -> None:
-    for field in ("topic", "angle", "notes", "audience", "language", "channel_voice_profile", "visual_style", "music_track", "preset_name", "voice_id", "mcp_servers"):
+    for field in ("topic", "angle", "notes", "audience", "language", "channel_voice_profile", "visual_style", "music_track", "preset_name", "voice_id", "mcp_servers", "operator_script"):
         reject_instruction_spoofing(getattr(request, field), field=field)
     for source in request.sources:
         for field in ("title", "author", "excerpt"):
@@ -130,6 +130,17 @@ def reference_word_budget(target_seconds: int) -> dict[str, int]:
             "scenes_low": scenes_low, "scenes_high": min(20, max(8, scenes_low + 3))}
 
 
+def operator_script_clause(request: ContentRequest) -> str:
+    """Prompt text for an operator-written script (empty when none): keep their words, fit them, add no new facts."""
+    if not request.operator_script:
+        return ""
+    budget = reference_word_budget(request.target_duration_seconds)
+    return (" OPERATOR SCRIPT: the operator wrote the narration in request.operator_script. Use it as the narration: keep its wording, order and meaning, "
+            "split it into scenes of 8-15 words (blank lines mark the operator's scene breaks), and change words only to fix grammar, spoken-form symbols or the length. "
+            f"If it has more than {budget['max']} words, cut the least important sentences; if under {budget['aim_low']}, fill gaps only with short source-supported sentences in the same voice. "
+            "Do not add facts, numbers or claims the sources do not support, and cite a source for every claim the script makes. The hook-scoring rules below still apply to scene 1: tighten it only as much as needed. ")
+
+
 def narration_word_limits(request: ContentRequest) -> tuple[int, int]:
     """Keep the writer's instructions and acceptance bounds in agreement."""
     if request.prompt_version == "m6-content-v8":
@@ -157,7 +168,7 @@ def build_content_prompt(request: ContentRequest, *, template_version: str, max_
             + f"(the local voice speaks about 2.5 words per second, and the whole video must stay under {request.target_duration_seconds} seconds including short scene tails). "
             "Use complete sentences, a specific first-sentence hook matching one of five distinct hook_options, "
             "source-grounded escalation, concrete payoff and a final scene with template " + ending_clause_template(request) + ". "
-            + ending_instructions(request) +
+            + ending_instructions(request) + operator_script_clause(request) +
             "The narrator may state opinions in first person ('I'd bet on Rust', 'I think this is wrong') but never invent personal experience or insider access. "
             "STANCE: take one clear, hard side on the topic's real trade-off and defend it without hedging in the voice-over "
             "(no 'might', 'some say', 'around', 'in one study' in narration; attribution lives in the on-screen source line). "

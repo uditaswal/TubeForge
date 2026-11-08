@@ -142,6 +142,8 @@ class VideoBriefRequest(BaseModel):
     ending: str = Field(default="loop", pattern=r"^(loop|debate)$")
     # Video style: "classic" cards or "story" (a purpose-built picture per scene).
     video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
+    # Optional operator-written narration (see pipeline/script_fit.py); the writer keeps its wording.
+    operator_script: str | None = Field(default=None, max_length=12_000)
     script_routing_mode: str | None = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
@@ -336,6 +338,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
     return ContentRequest(
         script_owner=owner, script_model=claude_model, script_routing_mode=value.script_routing_mode, ending=value.ending, video_style=value.video_style,
+        operator_script=(value.operator_script or "").strip() or None,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
@@ -1318,7 +1321,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if(!response.ok){scriptNotice.textContent='Could not load script: '+await response.text();return;}
             scriptEditable=Boolean(editable); const reviewData=await response.json();currentPackage=reviewData.package;renderCreativeChecks(currentPackage,reviewData.skill_checks);document.querySelector('#skillReview').textContent=JSON.stringify({channel:currentPackage.request.channel_identity,voice:currentPackage.request.channel_voice_profile,scenes:currentPackage.scene_plans,reference_scenes:currentPackage.reference_short?.scenes||[],metadata:currentPackage.metadata,thumbnail:currentPackage.thumbnail_brief,skill_checks:reviewData.skill_checks},null,2); scriptNotice.textContent=scriptEditable?'Review the sources, creative checks and narration, then save or approve it.':'This saved script and its source packet are read-only because this generation has already moved past script review.';
             currentPackage.request.sources.forEach(source=>{const card=document.createElement('div');card.className='event';const title=document.createElement('div');title.className='event-type';title.textContent=source.title;const link=document.createElement('a');link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=source.url;const excerpt=document.createElement('div');excerpt.className='event-detail';excerpt.textContent=source.excerpt||'No excerpt was stored.';card.append(title,link,excerpt);if(source.content_sha256){const checksum=document.createElement('div');checksum.className='sub';checksum.textContent='SHA-256 '+source.content_sha256;card.append(checksum);}sources.append(card);});
-            currentPackage.script_sections.forEach((section,index)=>{const label=document.createElement('label');label.textContent=`Section ${index+1}`;const area=document.createElement('textarea');area.className='script-narration';area.value=section.narration;area.dataset.index=index;area.disabled=!scriptEditable;area.style.minHeight='130px';label.append(area);sections.append(label);});
+            currentPackage.script_sections.forEach((section,index)=>{const label=document.createElement('label');label.textContent=`Section ${index+1}`;const area=document.createElement('textarea');area.className='script-narration';area.value=section.narration;area.dataset.index=index;area.disabled=!scriptEditable;area.style.minHeight='130px';label.append(area);sections.append(label);});window.__scriptTargetSeconds=currentPackage.request.target_duration_seconds;document.dispatchEvent(new Event('tubeforge:script-loaded'));
             document.querySelector('#scriptForm button[type="submit"]').hidden=!scriptEditable;
           }
           async function removeLocalArtifacts(job){
@@ -1440,14 +1443,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         })();
         </script>"""
         from tubeforge.api.script_routing_ui import ROUTING_SCRIPT, ROUTING_CSS
+        from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_CSS, SCRIPT_TOOLS_SCRIPT
         source_controls = source_controls.replace('/* SCRIPT_ROUTING_CONTROLS */', ROUTING_SCRIPT)
         source_controls = source_controls.replace("join('\n\n')", r"join('\n\n')")
-        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}{ROUTING_CSS}</style></head>")
+        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}{ROUTING_CSS}{SCRIPT_TOOLS_CSS}</style></head>")
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         username = (runtime.auth.username_for(login_session.user_id) or "") if login_session else ""
         assert dashboard.count('data-username=""') == 1
         dashboard = dashboard.replace('data-username=""', f'data-username="{html.escape(username)}"')
-        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + markdown_mode_controls + STUDIO_SCRIPT + "</body>")
+        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + markdown_mode_controls + SCRIPT_TOOLS_SCRIPT + STUDIO_SCRIPT + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:

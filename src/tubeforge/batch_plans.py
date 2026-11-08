@@ -51,7 +51,7 @@ class BatchShort(BaseModel):
     sources: list[HttpUrl] = Field(default_factory=list)
     thumbnail: Thumbnail = Field(default_factory=Thumbnail)
     tags: list[str] = Field(default_factory=list)
-    narration: str | None = None
+    narration: str | None = Field(default=None, max_length=12_000)
 
 
 class BatchError(BaseModel):

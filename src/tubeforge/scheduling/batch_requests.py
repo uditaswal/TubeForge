@@ -33,6 +33,7 @@ def build_batch_request(short, settings):
         notes=('Unverified operator batch brief: ' + json.dumps(short.model_dump(mode='json'), ensure_ascii=False),),
         angle=short.concept, duration_seconds=short.length_s, preset=preset,
         review_mode='manual', ending=short.ending, channel_identity=short.channel,
+        operator_script=(short.narration or '').strip() or None,
         video_style='story',  # the approved look; Classic is the legacy renderer
         music_track=rotated_music_track(short, settings))
     request = None
