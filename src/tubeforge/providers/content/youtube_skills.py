@@ -23,6 +23,10 @@ PRODUCTION_RESOURCES = {
     "om-storyboard": ("SKILL.md",),
 }
 RESOURCES = PRODUCTION_RESOURCES
+LONG_FORM_RESOURCES = {
+    **LEGACY_RESOURCES,
+    "yt-script": (*LEGACY_RESOURCES["yt-script"], "long-form-v1.md"),
+}
 
 
 def resource_set_for(template_version: str) -> dict[str, tuple[str, ...]]:
@@ -31,6 +35,8 @@ def resource_set_for(template_version: str) -> dict[str, tuple[str, ...]]:
     v8 (reference Shorts) scenes are fixed templates described in the prompt itself, so the
     om-* storyboard skills (written for v7 scene plans) are not sent; that keeps prompt budget for craft rules.
     """
+    if template_version == "m6-content-long-v1":
+        return LONG_FORM_RESOURCES
     return PRODUCTION_RESOURCES if template_version == SKILL_TEMPLATE else LEGACY_RESOURCES
 
 
@@ -119,7 +125,8 @@ def evaluate(package, root: Path | None = None) -> dict[str, object]:
             raise ValueError("description must be nonblank and tags limited to fifteen")
         if any(not scene.on_screen_text or not scene.on_screen_text.strip() for scene in package.scene_plans):
             raise ValueError("every scene requires on_screen_text")
-        return {"skills": list(RESOURCES), "resource_hashes": hashes, "hooks": hooks, "titles": reports,
+        used_skills = resource_set_for(package.request.prompt_version) if package.request.prompt_version == "m6-content-long-v1" else RESOURCES
+        return {"skills": list(used_skills), "resource_hashes": hashes, "hooks": hooks, "titles": reports,
                 "selected_hook": opening, "channel_identity": package.request.channel_identity,
                 "voice_profile": package.request.channel_voice_profile, "tools_executed": ["hookscore.py", "title.py"],
                 "notice": "Heuristic review signals; not predictions of views. Selected content still requires source and creative review."}

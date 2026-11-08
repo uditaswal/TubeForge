@@ -22,6 +22,7 @@ dependencies = [
   "google-auth-httplib2>=0.2,<1",
   "uvicorn>=0.32,<1",
   "yt-dlp>=2025.1.15,<2027",
+  "tiktoken>=0.12,<1",  # LF2 local text/schema measurement, not subscription accounting
 ]
 
 [project.scripts]
