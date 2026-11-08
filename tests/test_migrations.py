@@ -25,7 +25,7 @@ def test_fresh_sqlite_database_upgrades_to_head(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261105_0032"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261108_0033"
             assert connection.execute(text("SELECT mode, preferred_model, actor FROM script_routing_policies LIMIT 0")).keys() == ["mode", "preferred_model", "actor"]
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_connections'")).scalar_one() == "oauth_connections"
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publishing_assets'")).scalar_one() == "publishing_assets"
@@ -129,3 +129,24 @@ def test_m8_upgrade_keeps_legacy_job_states_readable_and_nonrunnable(tmp_path: P
             assert connection.execute(text("SELECT actor, reviewed_identity, audit_json FROM approvals WHERE id = 'legacy-approval'")).one() == (None, None, None)
     finally:
         database.dispose()
+
+
+def test_reference_intake_upgrade_and_downgrade_preserve_existing_tables(tmp_path):
+    from sqlalchemy import inspect
+    root=Path(__file__).resolve().parents[1]
+    url=f"sqlite:///{tmp_path/'reference-migration.db'}"
+    config=Config(str(root/'alembic.ini'));config.set_main_option('script_location',str(root/'migrations'))
+    config.cmd_opts=Namespace(x=[f'database_url={url}'])
+    command.upgrade(config,'20261105_0032')
+    engine=create_engine(url)
+    before=set(inspect(engine).get_table_names())
+    command.upgrade(config,'head')
+    after=set(inspect(engine).get_table_names())
+    assert after-before=={'reference_intake_revisions','reference_intake_events'}
+    with engine.connect() as connection:
+        assert list(connection.execute(text('SELECT claim_owner, claim_token, lease_expires_at, snapshot_sha256 FROM reference_intake_revisions LIMIT 0')).keys())==['claim_owner','claim_token','lease_expires_at','snapshot_sha256']
+    command.downgrade(config,'20261105_0032')
+    assert set(inspect(engine).get_table_names())==before
+    command.upgrade(config,'head')
+    assert set(inspect(engine).get_table_names())==after
+    engine.dispose()

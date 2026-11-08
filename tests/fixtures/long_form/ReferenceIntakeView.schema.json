@@ -2,7 +2,7 @@
   "$defs": {
     "ReferenceIntakeRequest": {
       "additionalProperties": false,
-      "description": "Proposed request shape, not an enabled endpoint or generation request.",
+      "description": "Validated intake input; never a video-generation request or approval.",
       "properties": {
         "reference_url": {
           "maxLength": 2000,
@@ -170,7 +170,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Truthful read projection for a future durable intake service.",
+  "description": "Durable intake read projection; captured context is not factual approval.",
   "properties": {
     "intake_id": {
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
@@ -214,7 +214,9 @@
             "captions_unavailable",
             "retrieval_failed",
             "oversized",
-            "language_mismatch"
+            "language_mismatch",
+            "unsafe_content",
+            "cancelled"
           ],
           "type": "string"
         },

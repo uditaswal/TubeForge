@@ -93,7 +93,8 @@ Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment
 
 | Topic | Where |
 | --- | --- |
-| Planned long-form/reference-video support (not enabled) | [Implementation plan](docs/long-form-reference-video-plan.md) |
+| Reference-video intake: link, metadata, captions and supplied transcript | [Operator workflow](docs/operations/reference-intake.md) |
+| Planned 10–15-minute video generation (not enabled) | [Implementation plan](docs/long-form-reference-video-plan.md) |
 | Long-form editorial design and local contract evidence | [Editorial proposal](docs/long-form-editorial-proposal.md), [LF0 acceptance](docs/long-form-lf0-acceptance.md) |
 | Index | [docs/README.md](docs/README.md) |
 | Application logs and fields | [docs/operations/logging.md](docs/operations/logging.md) |

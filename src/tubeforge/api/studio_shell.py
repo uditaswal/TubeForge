@@ -108,6 +108,7 @@ dialog::backdrop{background:#030912b8}
 """
 
 STUDIO_NAV_ITEMS = [
+    ("references", "/references", "Reference videos"),
     ("batch", "/batch", "Batch plans"),
     ("studio", "/#studio", "Studio"),
     ("generations", "/#generations", "Generations"),
@@ -126,7 +127,7 @@ def render_studio_sidebar(active: str) -> str:
         for key, href, label in STUDIO_NAV_ITEMS
     )
     return (
-        '<aside class="studio-sidebar" aria-label="Workspace navigation">'
+        '<aside id="studioSidebar" class="studio-sidebar" aria-label="Workspace navigation">'
         '<div class="studio-brand"><span class="studio-brand-mark">TF</span>'
         "<span>TubeForge<small>Creator Studio</small></span></div>"
         '<div class="studio-workspace">Local workspace</div>'
@@ -190,7 +191,7 @@ STUDIO_SCRIPT = r"""<script>
   if(!header||!connection||!publishing||!accounts||!scheduling)return;
   const labels={studio:['Studio','See current work and create a video.'],generations:['Generations','Review saved videos, inputs, scripts and activity.'],scheduling:['Scheduling','Choose an account to manage its topic queue and generation schedules.'],accounts:['Accounts','Manage local account profiles and verified connections.'],media:['Media tools','Clip an existing source or add licensed music.'],publishing:['Publishing','Prepare exact video and destination drafts for review.']};
   const sidebar=document.createElement('aside');sidebar.className='studio-sidebar';sidebar.id='studioSidebar';sidebar.setAttribute('aria-label','Workspace navigation');
-  sidebar.innerHTML='<div class="studio-brand"><span class="studio-brand-mark">TF</span><span>TubeForge<small>Creator Studio</small></span></div><div class="studio-workspace">Local workspace</div><p class="studio-nav-label">Workspace</p><nav class="studio-nav" aria-label="Studio sections"><a href="/batch">Batch plans</a><button type="button" data-studio-nav="studio">Studio</button><button type="button" data-studio-nav="generations">Generations</button><button type="button" data-studio-nav="scheduling">Scheduling</button><button type="button" data-studio-nav="accounts">Accounts</button><button type="button" data-studio-nav="media">Media tools</button><button type="button" data-studio-nav="publishing">Publishing</button></nav><p class="studio-sidebar-foot">Account plans remain local until a destination is verified and a separate draft is reviewed.</p>';
+  sidebar.innerHTML='<div class="studio-brand"><span class="studio-brand-mark">TF</span><span>TubeForge<small>Creator Studio</small></span></div><div class="studio-workspace">Local workspace</div><p class="studio-nav-label">Workspace</p><nav class="studio-nav" aria-label="Studio sections"><a href="/references">Reference videos</a><a href="/batch">Batch plans</a><button type="button" data-studio-nav="studio">Studio</button><button type="button" data-studio-nav="generations">Generations</button><button type="button" data-studio-nav="scheduling">Scheduling</button><button type="button" data-studio-nav="accounts">Accounts</button><button type="button" data-studio-nav="media">Media tools</button><button type="button" data-studio-nav="publishing">Publishing</button></nav><p class="studio-sidebar-foot">Account plans remain local until a destination is verified and a separate draft is reviewed.</p>';
   const backdrop=document.createElement('button');backdrop.type='button';backdrop.className='studio-backdrop';backdrop.setAttribute('aria-label','Close navigation');backdrop.hidden=true;
   const main=document.createElement('div');main.className='studio-main';
   document.body.insertBefore(sidebar,shell);document.body.insertBefore(backdrop,shell);document.body.insertBefore(main,shell);

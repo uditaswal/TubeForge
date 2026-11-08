@@ -99,7 +99,7 @@ class ReferenceSnapshot(DomainModel):
 
 
 class ReferenceIntakeRequest(DomainModel):
-    """Proposed request shape, not an enabled endpoint or generation request."""
+    """Validated intake input; never a video-generation request or approval."""
     reference_url: str = Field(max_length=2000)
     target_duration_seconds: int = Field(ge=600, le=900)
     channel_identity: str = Field(default='default', pattern=r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
@@ -121,13 +121,13 @@ class ReferenceIntakeRequest(DomainModel):
 
 
 class ReferenceIntakeView(DomainModel):
-    """Truthful read projection for a future durable intake service."""
+    """Durable intake read projection; captured context is not factual approval."""
     intake_id: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
     revision: int = Field(ge=1)
     request: ReferenceIntakeRequest
     state: Literal['pending', 'ready', 'needs_input', 'failed']
     snapshot: ReferenceSnapshot | None = None
-    failure_code: Literal['unavailable', 'captions_unavailable', 'retrieval_failed', 'oversized', 'language_mismatch'] | None = None
+    failure_code: Literal['unavailable', 'captions_unavailable', 'retrieval_failed', 'oversized', 'language_mismatch', 'unsafe_content', 'cancelled'] | None = None
     message: str | None = Field(default=None, min_length=1, max_length=500)
 
     @model_validator(mode='after')

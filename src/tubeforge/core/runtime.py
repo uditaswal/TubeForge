@@ -29,6 +29,7 @@ from tubeforge.providers.fake import FakePublisher
 from tubeforge.providers.media.factory import create_media_provider
 from tubeforge.providers.publishing.youtube import YouTubeDataApiPublisher
 from tubeforge.providers.voice.factory import create_voice_provider
+from tubeforge.reference.service import ReferenceIntakeService
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,7 @@ class Runtime:
     accounts: SocialAccountRepository
     token_cipher: TokenCipher | None
     orchestrator: PipelineOrchestrator
+    reference_intakes: ReferenceIntakeService
 
 
 def create_runtime(settings: Settings) -> Runtime:
@@ -106,4 +108,6 @@ def create_runtime(settings: Settings) -> Runtime:
     scheduler = SchedulerService(schedules, topics, scheduler_id="api-scheduler", reservation_seconds=settings.scheduler.topic_reservation_seconds, codex_config=settings.pipeline.codex)
     scheduler.request_transform = policy.apply
     scheduler.batch_request_factory = lambda short: policy.apply(build_batch_request(short, settings))
-    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, scheduler, AuthService(database.session_factory), accounts, token_cipher, orchestrator)
+    from tubeforge.db.reference_intake import ReferenceIntakeRepository
+    reference_intakes = ReferenceIntakeService(ReferenceIntakeRepository(database.session_factory))
+    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, scheduler, AuthService(database.session_factory), accounts, token_cipher, orchestrator, reference_intakes)

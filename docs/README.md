@@ -2,6 +2,7 @@
 
 Public documentation. Start with the [project README](../readme.md).
 
+- [Reference-video intake operator workflow](operations/reference-intake.md) and [LF1 acceptance evidence](long-form-lf1-review.md) — real metadata/caption intake, supplied transcript fallback and immutable review; video generation remains a later phase
 - [Long-form and reference-video implementation plan](long-form-reference-video-plan.md) — 10–15 minute production, original link-based adaptations, usage budgets and Codex/Claude task ownership (planned capability)
 - [Long-form core task interfaces and acceptance](long-form-next-ten-core-tasks.md) — reference/usage/context/chapter contracts and local evidence for the next ten Codex tasks
 - [Long-form editorial proposal](long-form-editorial-proposal.md) and [LF0 local acceptance evidence](long-form-lf0-acceptance.md) — story/packaging/prompt policy, frozen examples and next intake boundary

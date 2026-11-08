@@ -646,3 +646,38 @@ class ScriptRoutingPolicyRecord(Base):
     preferred_model: Mapped[str] = mapped_column(String(32), nullable=False)
     actor: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ReferenceIntakeRecord(Base):
+    """Immutable completed intake revisions; only pending work is leased."""
+    __tablename__ = 'reference_intake_revisions'
+    __table_args__ = (UniqueConstraint('intake_id','revision',name='uq_reference_intake_revision'),)
+    row_id: Mapped[str] = mapped_column(String(64),primary_key=True)
+    intake_id: Mapped[str] = mapped_column(String(64),nullable=False,index=True)
+    revision: Mapped[int] = mapped_column(Integer,nullable=False)
+    request_key: Mapped[str] = mapped_column(String(64),nullable=False,index=True)
+    capture_key: Mapped[str] = mapped_column(String(64),nullable=False,index=True)
+    request_json: Mapped[str] = mapped_column(Text,nullable=False)
+    state: Mapped[str] = mapped_column(String(32),nullable=False)
+    snapshot_json: Mapped[str | None] = mapped_column(Text)
+    snapshot_sha256: Mapped[str | None] = mapped_column(String(64))
+    failure_code: Mapped[str | None] = mapped_column(String(40))
+    message: Mapped[str | None] = mapped_column(Text)
+    force_refresh: Mapped[bool] = mapped_column(nullable=False,default=False)
+    cache_hit: Mapped[bool] = mapped_column(nullable=False,default=False)
+    claim_owner: Mapped[str | None] = mapped_column(String(128))
+    claim_token: Mapped[str | None] = mapped_column(String(64))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReferenceIntakeEventRecord(Base):
+    __tablename__ = 'reference_intake_events'
+    id: Mapped[int] = mapped_column(Integer,primary_key=True,autoincrement=True)
+    intake_id: Mapped[str] = mapped_column(String(64),nullable=False,index=True)
+    revision: Mapped[int] = mapped_column(Integer,nullable=False)
+    event: Mapped[str] = mapped_column(String(64),nullable=False)
+    actor: Mapped[str] = mapped_column(String(128),nullable=False)
+    details_json: Mapped[str] = mapped_column(Text,nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),nullable=False)

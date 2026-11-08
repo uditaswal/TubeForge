@@ -30,7 +30,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Proposed request shape, not an enabled endpoint or generation request.",
+  "description": "Validated intake input; never a video-generation request or approval.",
   "properties": {
     "reference_url": {
       "maxLength": 2000,

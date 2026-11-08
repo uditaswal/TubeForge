@@ -27,8 +27,10 @@ def main() -> None:
     signal.signal(signal.SIGTERM, stop)
     try:
         while not stopping:
+            intake = runtime.reference_intakes.run_once(worker.worker_id, cancelled=lambda: stopping)
+            if stopping: break
             result = worker.run_once()
-            if result is None:
+            if result is None and intake is None:
                 time.sleep(2)
     finally:
         runtime.database.dispose()

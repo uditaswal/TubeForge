@@ -1044,6 +1044,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return routing_policy.apply(build_batch_request(short, application_settings))
     runtime.scheduler.batch_request_factory = batch_request
     register_batch_routes(app, runtime, batch_request)
+    from tubeforge.api.reference_intake import register_reference_routes
+    register_reference_routes(app, runtime, application_settings)
 
     @app.post("/api/jobs", status_code=status.HTTP_201_CREATED, tags=["jobs"])
     def create_job(request: ContentRequest) -> dict[str, object]:

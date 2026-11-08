@@ -9,6 +9,7 @@ import io
 import json
 import math
 import struct
+import sys
 import wave
 from pathlib import Path
 
@@ -403,6 +404,8 @@ def test_voice_preview_is_synthesized_once_then_served_from_persistent_cache(tmp
     _migrate(database_path)
     settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"))
     settings.pipeline.voice_provider = "piper"
+    # This cache test replaces synthesis with FakeVoiceProvider below.
+    settings.pipeline.piper.executable = sys.executable
     model = tmp_path / "piper.onnx"
     model.write_bytes(b"test-model")
     settings.pipeline.piper.model_path = model

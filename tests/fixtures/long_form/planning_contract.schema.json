@@ -234,6 +234,20 @@
           "pattern": "^(classic|story)$",
           "title": "Video Style",
           "type": "string"
+        },
+        "operator_script": {
+          "anyOf": [
+            {
+              "maxLength": 12000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operator Script"
         }
       },
       "required": [
