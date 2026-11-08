@@ -83,13 +83,14 @@ Development without Docker:
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
+python -c "import tiktoken; tiktoken.get_encoding('o200k_base')"
 python -m alembic upgrade head
 python -m pytest
 ```
 
 Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment`, `local-media`).
 
-LF2 local script admission is under implementation ([plan](docs/long-form-lf2-plan.md), [phase A evidence](docs/long-form-lf2-a-review.md)); no long-form production job is enabled yet. The declared `tiktoken` dependency measures local plain text/schema only. During reviewed environment setup, prime its public vocabulary once with `python -c "import tiktoken; tiktoken.get_encoding('o200k_base')"`. Keep the same `TIKTOKEN_CACHE_DIR` available to the worker/host if overriding the default cache. Runtime preflight fails closed when the cache is missing rather than downloading it implicitly. These measurements do not reveal remaining Codex/Claude subscription allowance.
+LF2 local script admission is under implementation ([plan](docs/long-form-lf2-plan.md), [phase A evidence](docs/long-form-lf2-a-review.md)); no long-form production job is enabled yet. The declared `tiktoken` dependency measures local plain text/schema only. The setup command above primes its public vocabulary once. Docker primes a readable `/opt/tubeforge/tokenizer-cache` at build time; host runners need their own explicit cache setup ([deployment instructions](docs/deploy/codex-runner-runtime.md#long-form-preparation)). Runtime preflight checks the vocabulary hash and fails closed when it is missing or corrupt rather than downloading implicitly. These measurements do not reveal remaining Codex/Claude subscription allowance.
 
 ## Documentation
 

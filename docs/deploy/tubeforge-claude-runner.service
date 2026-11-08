@@ -8,6 +8,7 @@ Description=TubeForge Claude script runner (user-level)
 # Runs from the dev worktree; the venv lives in the main checkout (git-ignored, not in worktrees).
 WorkingDirectory=%h/docker/tubeforge/tubeforge-dev
 Environment=TUBEFORGE_PYTHON=%h/docker/tubeforge/Youtube_Video_Producer/.venv-benchmark/bin/python
+Environment=TIKTOKEN_CACHE_DIR=%h/docker/tubeforge/Youtube_Video_Producer/data/tokenizer-cache
 ExecStart=%h/docker/tubeforge/tubeforge-dev/scripts/run_claude_runner.sh
 # Spending limits (rolling 24 h; each defaults to the value shown, and an invalid or zero value falls
 # back to the default, so the runner can never be unlimited by accident). A refused call burns no

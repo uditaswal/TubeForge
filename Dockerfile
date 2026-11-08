@@ -5,7 +5,7 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/src PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 TIKTOKEN_CACHE_DIR=/opt/tubeforge/tokenizer-cache
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core chromium fonts-liberation fonts-noto-color-emoji \
@@ -31,6 +31,9 @@ wanted = ["dev", "local-media", "kokoro", "alignment", "reference-renderer"]
 print("\n".join(project["dependencies"] + [dep for name in wanted for dep in extras[name]]))
 PY
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r /tmp/requirements.txt
+# Public tokenizer data is fetched during setup, never implicitly by a worker.
+RUN python -c "import tiktoken; tiktoken.get_encoding('o200k_base')" \
+    && chmod -R a+rX /opt/tubeforge/tokenizer-cache
 
 # Project source last. Compose bind-mounts ./src over /app/src, so these copies only matter for a
 # bare `docker run`; installing with --no-deps is fast and provides the `tubeforge` CLI.

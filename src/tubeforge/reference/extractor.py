@@ -34,8 +34,10 @@ class PublicHTTPS:
     Never use process proxy/cookie configuration or follow redirects implicitly.
     Every redirect revalidates host, scheme, credentials, port and public DNS.
     """
-    def __init__(self, timeout_seconds=25, resolver=socket.getaddrinfo):
+    def __init__(self, timeout_seconds=25, resolver=socket.getaddrinfo, *, allowed_hosts=None, allowed_content_types=None):
         self.timeout_seconds, self.resolver = timeout_seconds, resolver
+        self.allowed_hosts=HOSTS if allowed_hosts is None else frozenset(h.casefold() for h in allowed_hosts)
+        self.allowed_content_types=allowed_content_types
 
     def _resolve(self, host, deadline):
         remaining=deadline-time.monotonic()
@@ -54,7 +56,7 @@ class PublicHTTPS:
         deadline = time.monotonic() + self.timeout_seconds
         for _ in range(4):
             target = urlsplit(url)
-            if target.scheme != 'https' or target.hostname not in HOSTS or target.username or target.password or target.port not in {None,443}:
+            if target.scheme != 'https' or target.hostname not in self.allowed_hosts or target.username or target.password or target.port not in {None,443}:
                 raise IntakeFailure('retrieval_failed','Reference redirects or caption hosts are not permitted.')
             try:
                 addresses = list(dict.fromkeys(item[4][0] for item in self._resolve(target.hostname,deadline)))
@@ -95,6 +97,9 @@ class PublicHTTPS:
                         raise IntakeFailure('retrieval_failed',f'Reference server returned HTTP {response.status}; retry later or supply a transcript.')
                     if response.getheader('Content-Encoding','identity') != 'identity':
                         raise IntakeFailure('retrieval_failed','Reference response used an unsupported content encoding.')
+                    content_type=response.getheader('Content-Type','').split(';',1)[0].strip().lower()
+                    if self.allowed_content_types is not None and content_type not in self.allowed_content_types:
+                        raise IntakeFailure('retrieval_failed','Source response must be HTML or plain text.')
                     length=response.getheader('Content-Length')
                     if length and int(length)>maximum_bytes: raise IntakeFailure('oversized','Reference response exceeds the byte limit.')
                     chunks=[]; total=0

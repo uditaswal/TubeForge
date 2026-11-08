@@ -99,15 +99,16 @@ class LongFormTokenPolicy(DomainModel):
     maximum_output_tokens:int=Field(default=16000,ge=1000,le=20000)
     total_reserved_tokens:int=Field(default=150000,ge=2000,le=250000)
     maximum_calls:Literal[5]=5
-    maximum_narration_attempts:Literal[2]=2
+    maximum_narration_attempts:int=Field(default=2,ge=1,le=2)
 
 
 class LongFormHostRequest(DomainModel):
     """Path-free one-call operations; no arbitrary prompt, command or credentials."""
-    operation:Literal['PreflightLongFormV1','LongFormStageV1','InspectLongFormCallV1']
+    operation:Literal['PreflightLongFormV1','PrepareLongFormCallV1','LongFormStageV1','InspectLongFormCallV1']
     stage:Literal['research','draft','review','repair']
     call_id:str=Field(pattern=r'^lf2-[a-f0-9]{32}-call-[1-5]$')
     brief_sha256:str=Field(pattern=r'^[a-f0-9]{64}$')
+    resolved_model:str|None=Field(default=None,min_length=1,max_length=100)
     request:ContentRequest
     reference_snapshot_sha256:str=Field(pattern=r'^[a-f0-9]{64}$')
     reference_content_sha256:str=Field(pattern=r'^[a-f0-9]{64}$')
@@ -118,6 +119,7 @@ class LongFormHostRequest(DomainModel):
     rejected_output:str|None=Field(default=None,max_length=60000)
     local_rejection:tuple[str,...]=Field(default=(),max_length=20)
     originality_context:str=Field(default='',max_length=6000)
+    research_assessment:str=Field(default='',max_length=2000)
     token_policy:LongFormTokenPolicy=Field(default_factory=LongFormTokenPolicy)
 
     @model_validator(mode='before')

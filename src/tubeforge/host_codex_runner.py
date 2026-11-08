@@ -437,7 +437,11 @@ def main() -> None:
             request = None
             try:
                 request = receive_request(connection)
-                if request.operation == "PreflightContentV1":
+                from tubeforge.domain.long_form_writing import LongFormHostRequest
+                if isinstance(request,LongFormHostRequest):
+                    from tubeforge.long_form.host import handle_codex
+                    result=handle_codex(request)
+                elif request.operation == "PreflightContentV1":
                     from tubeforge.providers.content.youtube_skills import preflight
                     hashes = preflight(template_version=request.request.prompt_version)
                     prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=60_000)
@@ -468,7 +472,7 @@ def main() -> None:
             except AllowanceExhaustedError as error:
                 connection.sendall(encode_failure("allowance_exhausted", str(error)))
             except Exception as error:
-                connection.sendall(encode_failure("invalid_output", str(error), invocation_started=request is not None and request.operation != "PreflightContentV1"))
+                connection.sendall(encode_failure("invalid_output", str(error), invocation_started=getattr(error,'invocation_started',request is not None and request.operation not in {"PreflightContentV1","PreflightLongFormV1","PrepareLongFormCallV1","InspectLongFormCallV1"})))
 
 
 if __name__ == "__main__":

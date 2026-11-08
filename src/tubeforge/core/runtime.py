@@ -30,6 +30,7 @@ from tubeforge.providers.media.factory import create_media_provider
 from tubeforge.providers.publishing.youtube import YouTubeDataApiPublisher
 from tubeforge.providers.voice.factory import create_voice_provider
 from tubeforge.reference.service import ReferenceIntakeService
+from tubeforge.long_form.service import LongFormWritingService
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,7 @@ class Runtime:
     token_cipher: TokenCipher | None
     orchestrator: PipelineOrchestrator
     reference_intakes: ReferenceIntakeService
+    long_form_writing: LongFormWritingService
 
 
 def create_runtime(settings: Settings) -> Runtime:
@@ -110,4 +112,8 @@ def create_runtime(settings: Settings) -> Runtime:
     scheduler.batch_request_factory = lambda short: policy.apply(build_batch_request(short, settings))
     from tubeforge.db.reference_intake import ReferenceIntakeRepository
     reference_intakes = ReferenceIntakeService(ReferenceIntakeRepository(database.session_factory))
-    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, scheduler, AuthService(database.session_factory), accounts, token_cipher, orchestrator, reference_intakes)
+    from tubeforge.db.long_form_writing import LongFormWritingRepository
+    from tubeforge.long_form.client import LongFormHostClient
+    long_form_writing=LongFormWritingService(LongFormWritingRepository(database.session_factory),reference_intakes.repository,
+        LongFormHostClient(settings.pipeline.codex,settings.pipeline.claude),settings)
+    return Runtime(database, jobs, artifacts, approvals, orchestrator.events, topics, schedules, scheduler, AuthService(database.session_factory), accounts, token_cipher, orchestrator, reference_intakes,long_form_writing)

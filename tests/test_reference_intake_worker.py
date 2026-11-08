@@ -11,7 +11,8 @@ def test_existing_worker_polls_intake_and_disposes_safely(monkeypatch,stop_durin
     handlers={};order=[]
     monkeypatch.setattr(worker_main.signal,'signal',lambda signum,handler:handlers.setdefault(signum,handler))
     settings=SimpleNamespace(worker=object())
-    runtime=SimpleNamespace(database=Mock(),jobs=object(),orchestrator=object(),reference_intakes=Mock())
+    runtime=SimpleNamespace(database=Mock(),jobs=object(),orchestrator=object(),reference_intakes=Mock(),long_form_writing=Mock())
+    runtime.long_form_writing.run_once.return_value=None
     worker=Mock(worker_id='worker-test')
     def intake(owner,*,cancelled):
         assert owner=='worker-test' and not cancelled()

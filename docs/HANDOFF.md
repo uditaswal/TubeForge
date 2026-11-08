@@ -49,7 +49,7 @@ Plan `story-nosql` / `story-cache` / `story-lb` (day 2026-11-04) ran end to end:
 
 ## Next step
 
-- **LF2 in progress (8 Nov):** phase A local profile/context/measurement acceptance is in `docs/long-form-lf2-a-review.md` (157 tests, installed-wheel resource parity, no live writer). Next implement phase B durable stage reservations/host receipts in the existing DB/worker, then matching signed-in review and the authorized real-script gate. Operator selected the available 3Blue1Brown reference. Full plan: `docs/long-form-lf2-plan.md`.
+- **LF2 in progress (8 Nov):** phase B local durable preparation/host acceptance is **VERIFIED** in `docs/long-form-lf2-b-review.md` (265 tests; 8 resource/12 installed-module hashes; synthetic fault-injection artifacts; zero live writer calls). Next phase C: matching authenticated/CSRF review API and navy Studio UI, then phase D bounded authorized real-script acceptance. Operator selected the available 3Blue1Brown reference. Migration `20261108_0034` and explicit tokenizer cache setup are required for reviewed deployment; this branch is not deployed. Full plan: `docs/long-form-lf2-plan.md`.
 
 - **Long-form intake checkpoint (8 Nov):** review `docs/long-form-lf1-review.md` on `codex/long-form-reference-plan`; operator flow `/references` is documented in `docs/operations/reference-intake.md`. Real metadata + supplied transcript/hash/history smoke and signed-in responsive acceptance are recorded there; successful live automatic captions remain unproven. Next phase: LF2 primary-source grounding and bounded production-script admission. Migration `20261108_0033` is required when deploying this reviewed branch; no merge/deployment/writer call is authorized by this checkpoint.
 

@@ -14,16 +14,25 @@ from tubeforge.providers.content.youtube_skills import preflight
 
 VOCAB_URL='https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken'
 ENCODING='o200k_base'
+VOCAB_SHA256='446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d'
 
 
 def local_tokenizer():
     # Explicit setup primes the public vocabulary once. Workers must not download
     # a tokenizer implicitly or hang on external access while checking admission.
     cache=Path(os.environ.get('TIKTOKEN_CACHE_DIR',os.environ.get('DATA_GYM_CACHE_DIR',str(Path(tempfile.gettempdir())/'data-gym-cache'))))
-    if not (cache/hashlib.sha1(VOCAB_URL.encode()).hexdigest()).is_file():
+    vocabulary=cache/hashlib.sha1(VOCAB_URL.encode()).hexdigest()
+    if not vocabulary.is_file():
         raise ValueError('LF2 tokenizer cache is missing; prime o200k_base during reviewed environment setup')
+    if hashlib.sha256(vocabulary.read_bytes()).hexdigest()!=VOCAB_SHA256:
+        raise ValueError('LF2 tokenizer cache integrity failed; repair it during reviewed setup')
     import tiktoken
     return tiktoken.get_encoding(ENCODING)
+
+
+def output_text_tokens(value):
+    text=value if isinstance(value,str) else json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+    return len(local_tokenizer().encode(text,disallowed_special=()))
 
 
 def measure(message,*,tokenizer=None):

@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from tubeforge.domain.contracts import ContentRequest
+from tubeforge.domain.long_form_writing import LongFormHostRequest
 
 
 class GenerateShortsScriptRequest(BaseModel):
@@ -51,10 +52,14 @@ MAX_REQUEST_BYTES = 65_536
 REQUEST_READ_SECONDS = 30.0
 
 
-def encode_request(message: GenerateShortsScriptRequest) -> bytes:
+def encode_request(message: GenerateShortsScriptRequest | LongFormHostRequest) -> bytes:
     """Reject oversized evidence before transport or invocation reservation."""
     from tubeforge.core.errors import ProviderValidationError
 
+    if isinstance(message,LongFormHostRequest):
+        from tubeforge.long_form.wire import encode
+        try:return encode(message)
+        except ValueError as error:raise ProviderValidationError(str(error)) from error
     payload = message.model_dump_json().encode("utf-8")
     if len(payload) > MAX_REQUEST_BYTES:
         raise ProviderValidationError(
@@ -65,7 +70,7 @@ def encode_request(message: GenerateShortsScriptRequest) -> bytes:
 
 
 def receive_message(connection, *, maximum_bytes: int = MAX_REQUEST_BYTES,
-                    timeout_seconds: float = REQUEST_READ_SECONDS) -> GenerateShortsScriptRequest:
+                    timeout_seconds: float = REQUEST_READ_SECONDS) -> GenerateShortsScriptRequest | LongFormHostRequest:
     """Read fragmented JSON with bounded bytes/time, including legacy clients.
 
     New clients half-close their write side; older clients wait for a response
@@ -74,6 +79,12 @@ def receive_message(connection, *, maximum_bytes: int = MAX_REQUEST_BYTES,
     """
     import json
     import time
+
+    def decode(payload):
+        value=json.loads(payload)
+        if isinstance(value,dict) and value.get('operation') in {'PreflightLongFormV1','PrepareLongFormCallV1','LongFormStageV1','InspectLongFormCallV1'}:
+            return LongFormHostRequest.model_validate(value)
+        return GenerateShortsScriptRequest.model_validate(value)
 
     payload = bytearray()
     previous_timeout = connection.gettimeout()
@@ -92,7 +103,7 @@ def receive_message(connection, *, maximum_bytes: int = MAX_REQUEST_BYTES,
                 if not payload:
                     raise ValueError("request is missing or exceeds the runner limit")
                 # Preserve strict domain validation and a bounded failure reply.
-                return GenerateShortsScriptRequest.model_validate_json(bytes(payload))
+                return decode(bytes(payload))
             payload.extend(chunk)
             if len(payload) > maximum_bytes:
                 raise ValueError("request is missing or exceeds the runner limit")
@@ -100,6 +111,6 @@ def receive_message(connection, *, maximum_bytes: int = MAX_REQUEST_BYTES,
                 json.loads(payload)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
-            return GenerateShortsScriptRequest.model_validate_json(bytes(payload))
+            return decode(bytes(payload))
     finally:
         connection.settimeout(previous_timeout)

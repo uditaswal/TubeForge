@@ -681,3 +681,79 @@ class ReferenceIntakeEventRecord(Base):
     actor: Mapped[str] = mapped_column(String(128),nullable=False)
     details_json: Mapped[str] = mapped_column(Text,nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),nullable=False)
+
+
+class LongFormWritingRecord(Base):
+    __tablename__='long_form_writing_runs'
+    id:Mapped[str]=mapped_column(String(32),primary_key=True)
+    brief_sha256:Mapped[str]=mapped_column(String(64),nullable=False,unique=True)
+    intake_id:Mapped[str]=mapped_column(String(64),nullable=False)
+    intake_revision:Mapped[int]=mapped_column(Integer,nullable=False)
+    initial_request_json:Mapped[str]=mapped_column(Text,nullable=False)
+    request_json:Mapped[str]=mapped_column(Text,nullable=False)
+    reference_json:Mapped[str]=mapped_column(Text,nullable=False)
+    reference_sha256:Mapped[str]=mapped_column(String(64),nullable=False)
+    source_packet_json:Mapped[str|None]=mapped_column(Text)
+    ledger_json:Mapped[str]=mapped_column(Text,nullable=False)
+    token_policy_json:Mapped[str]=mapped_column(Text,nullable=False)
+    reserved_tokens:Mapped[int]=mapped_column(Integer,nullable=False,default=0)
+    expected_model:Mapped[str|None]=mapped_column(String(100))
+    state:Mapped[str]=mapped_column(String(32),nullable=False,index=True)
+    next_stage:Mapped[str|None]=mapped_column(String(16))
+    draft_json:Mapped[str|None]=mapped_column(Text)
+    draft_sha256:Mapped[str|None]=mapped_column(String(64))
+    draft_call_id:Mapped[str|None]=mapped_column(String(64))
+    planning_json:Mapped[str|None]=mapped_column(Text)
+    score_report_json:Mapped[str|None]=mapped_column(Text)
+    review_json:Mapped[str|None]=mapped_column(Text)
+    reviewed_draft_sha256:Mapped[str|None]=mapped_column(String(64))
+    message:Mapped[str|None]=mapped_column(Text)
+    claim_owner:Mapped[str|None]=mapped_column(String(128))
+    claim_token:Mapped[str|None]=mapped_column(String(64))
+    lease_expires_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False)
+    updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False)
+
+
+class LongFormStageCallRecord(Base):
+    __tablename__='long_form_stage_calls'
+    __table_args__=(UniqueConstraint('run_id','stage',name='uq_long_form_stage'),UniqueConstraint('run_id','ordinal',name='uq_long_form_call_ordinal'))
+    id:Mapped[str]=mapped_column(String(64),primary_key=True)
+    run_id:Mapped[str]=mapped_column(String(32),nullable=False,index=True)
+    ordinal:Mapped[int]=mapped_column(Integer,nullable=False)
+    stage:Mapped[str]=mapped_column(String(16),nullable=False)
+    state:Mapped[str]=mapped_column(String(24),nullable=False)
+    payload_json:Mapped[str]=mapped_column(Text,nullable=False)
+    payload_sha256:Mapped[str]=mapped_column(String(64),nullable=False)
+    admission_json:Mapped[str]=mapped_column(Text,nullable=False)
+    reservation_tokens:Mapped[int]=mapped_column(Integer,nullable=False)
+    charged_tokens:Mapped[int]=mapped_column(Integer,nullable=False)
+    provider:Mapped[str]=mapped_column(String(32),nullable=False)
+    model:Mapped[str|None]=mapped_column(String(100))
+    response_json:Mapped[str|None]=mapped_column(Text)
+    failure_message:Mapped[str|None]=mapped_column(Text)
+    invocation_started:Mapped[bool|None]=mapped_column()
+    usage_json:Mapped[str|None]=mapped_column(Text)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False)
+    finished_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
+
+
+class LongFormWritingDecisionRecord(Base):
+    __tablename__='long_form_writing_decisions'
+    id:Mapped[str]=mapped_column(String(32),primary_key=True)
+    run_id:Mapped[str]=mapped_column(String(32),nullable=False,index=True)
+    draft_sha256:Mapped[str]=mapped_column(String(64),nullable=False)
+    review_identity:Mapped[str]=mapped_column(String(64),nullable=False)
+    decision:Mapped[str]=mapped_column(String(16),nullable=False)
+    actor:Mapped[str]=mapped_column(String(128),nullable=False)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False)
+
+
+class LongFormWritingEventRecord(Base):
+    __tablename__='long_form_writing_events'
+    id:Mapped[int]=mapped_column(Integer,primary_key=True,autoincrement=True)
+    run_id:Mapped[str]=mapped_column(String(32),nullable=False,index=True)
+    event:Mapped[str]=mapped_column(String(64),nullable=False)
+    actor:Mapped[str]=mapped_column(String(128),nullable=False)
+    details_json:Mapped[str]=mapped_column(Text,nullable=False)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=False)

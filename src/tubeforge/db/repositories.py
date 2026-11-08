@@ -861,7 +861,7 @@ class HeavyWorkLeaseRepository:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
 
-    def acquire(self, owner: str, *, now: datetime, lease_seconds: int) -> bool:
+    def acquire(self, owner: str, *, now: datetime, lease_seconds: int, reclaim_prefix: str | None = None) -> bool:
         """Claim the global lease if it is absent, expired, or already ours."""
         now = _as_utc(now)
         expires_at = now + timedelta(seconds=lease_seconds)
@@ -871,13 +871,22 @@ class HeavyWorkLeaseRepository:
                 if record is None:
                     session.add(HeavyWorkLeaseRecord(name=self.LEASE_NAME, owner=owner, acquired_at=now, heartbeat_at=now, lease_expires_at=expires_at))
                     return True
-                if record.owner != owner and record.lease_expires_at is not None and _as_utc(record.lease_expires_at) > now:
-                    return False
-                record.owner, record.acquired_at, record.heartbeat_at, record.lease_expires_at = owner, now, now, expires_at
-                return True
+                # A stale read must not overwrite another worker's new lease.
+                # SQLite readers can observe the same released row before either
+                # transaction writes; admission therefore needs a conditional CAS.
+                available=or_(HeavyWorkLeaseRecord.owner==owner,HeavyWorkLeaseRecord.lease_expires_at.is_(None),HeavyWorkLeaseRecord.lease_expires_at<=now)
+                # LF2 may transfer an uncertain invocation's admission only after
+                # claiming that exact run with a fresh durable fencing token.
+                if reclaim_prefix:
+                    available=or_(available,HeavyWorkLeaseRecord.owner.startswith(reclaim_prefix,autoescape=True))
+                result=session.execute(update(HeavyWorkLeaseRecord).where(
+                    HeavyWorkLeaseRecord.name==self.LEASE_NAME,
+                    available,
+                ).values(owner=owner,acquired_at=now,heartbeat_at=now,lease_expires_at=expires_at).execution_options(synchronize_session=False))
+                return result.rowcount==1
         except IntegrityError:
             # A simultaneous first insert won. Re-read under a fresh transaction.
-            return self.acquire(owner, now=now, lease_seconds=lease_seconds)
+            return self.acquire(owner, now=now, lease_seconds=lease_seconds, reclaim_prefix=reclaim_prefix)
 
     def heartbeat(self, owner: str, *, now: datetime, lease_seconds: int) -> bool:
         now = _as_utc(now)

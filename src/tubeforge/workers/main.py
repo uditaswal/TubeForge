@@ -29,8 +29,10 @@ def main() -> None:
         while not stopping:
             intake = runtime.reference_intakes.run_once(worker.worker_id, cancelled=lambda: stopping)
             if stopping: break
+            writing = runtime.long_form_writing.run_once(worker.worker_id, cancelled=lambda: stopping)
+            if stopping: break
             result = worker.run_once()
-            if result is None and intake is None:
+            if result is None and intake is None and writing is None:
                 time.sleep(2)
     finally:
         runtime.database.dispose()

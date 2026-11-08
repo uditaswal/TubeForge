@@ -31,8 +31,10 @@ def validate_draft(draft,message,reference,*,source_packet_bytes):
     if len(package.metadata.description)>5000:raise ValueError('long-form description exceeds 5,000 characters')
     if [s.scene_id for s in package.script_sections]!=[s.scene_id for s in package.scene_plans]:
         raise ValueError('every section needs one corresponding ordered teaching scene')
-    if any(not s.contains_factual_claims or not s.claim_ids for s in package.script_sections):
-        raise ValueError('each teaching beat must identify its supporting claims')
+    if not any(s.contains_factual_claims for s in package.script_sections):
+        raise ValueError('a grounded explanation must contain factual teaching beats')
+    if {c for s in package.script_sections for c in s.claim_ids}!={c.claim_id for c in package.claims}:
+        raise ValueError('every supplied claim must support an actual script section')
     if any(not (s.on_screen_text and s.visual_subject and s.visual_purpose and s.composition and s.visual_elements) for s in package.scene_plans):
         raise ValueError('every teaching scene needs concrete display and landscape directions')
     for item in draft.improvements:

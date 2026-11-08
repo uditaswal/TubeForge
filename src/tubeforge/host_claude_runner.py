@@ -97,10 +97,10 @@ from tubeforge.claude_budget import BudgetExceededError, ClaudeBudget  # noqa: E
 BUDGET = ClaudeBudget.from_env()
 
 
-def build_command(schema: dict, *, model: str, effort: str | None = None, web_search: bool = False) -> list[str]:
+def build_command(schema: dict, *, model: str, effort: str | None = None, web_search: bool = False, system_prompt: str | None = None) -> list[str]:
     command = [claude_binary(), "-p", "--model", model, "--output-format", "json",
                "--json-schema", json.dumps(schema, separators=(",", ":")),
-               "--no-session-persistence", "--system-prompt", SYSTEM_PROMPT,
+               "--no-session-persistence", "--system-prompt", system_prompt or SYSTEM_PROMPT,
                "--tools", "WebSearch" if web_search else ""]
     if effort:
         command += ["--effort", effort]
@@ -444,6 +444,10 @@ def codex_output_schema_for_research(model_class) -> dict:
 
 
 def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunnerSuccess:
+    from tubeforge.domain.long_form_writing import LongFormHostRequest
+    if isinstance(request,LongFormHostRequest):
+        from tubeforge.long_form.host import handle_claude
+        return handle_claude(request)
     if request.operation == "PreflightContentV1":
         from tubeforge.providers.content.youtube_skills import preflight
         prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=MAX_PROMPT_CHARS)
@@ -462,7 +466,7 @@ def serve_connection(connection: socket.socket, model: str | None) -> None:
             started_operation = False
             try:
                 request = receive_request(connection)
-                started_operation = request.operation != "PreflightContentV1"
+                started_operation = request.operation not in {"PreflightContentV1","PreflightLongFormV1","PrepareLongFormCallV1","InspectLongFormCallV1"}
                 response = HostRunnerResponse(ok=True, result=handle(request, model)).model_dump_json().encode()
                 if len(response) > MAX_RESPONSE_BYTES:
                     raise ValueError("runner response exceeds its socket limit")
@@ -484,7 +488,7 @@ def serve_connection(connection: socket.socket, model: str | None) -> None:
             except AllowanceExhaustedError as error:
                 connection.sendall(encode_failure("allowance_exhausted", str(error)))
             except Exception as error:  # worker receives a bounded, redacted failure
-                connection.sendall(encode_failure("invalid_output", f"{type(error).__name__}: {error}", invocation_started=started_operation))
+                connection.sendall(encode_failure("invalid_output", f"{type(error).__name__}: {error}", invocation_started=getattr(error,'invocation_started',started_operation)))
 
     except OSError as error:  # BrokenPipeError, ConnectionResetError: the peer is gone, so there is nobody to answer
         print(f"client disconnected before the reply was sent: {type(error).__name__}", file=sys.stderr, flush=True)

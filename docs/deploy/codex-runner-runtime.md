@@ -111,3 +111,44 @@ and its resource hashes. The production model and fallback policy are unchanged.
 After deployment, verify `PreflightContentV1` matches the canonical resource
 hashes before spending an invocation. Historical v5 packages remain reviewable;
 resource changes require a new reviewed brief, never an exhausted-ledger reset.
+
+## Long-form preparation
+
+LF2 adds isolated `PreflightLongFormV1`, `PrepareLongFormCallV1`, `LongFormStageV1`
+and `InspectLongFormCallV1` operations. The normal Short generator is unchanged.
+Preparation binds the fixed runtime model, canonical resource hashes, reference,
+source packet and per-stage token reservation. Inspecting a receipt launches no
+model. Never delete a receipt database to retry an uncertain dispatch or exhausted
+brief: the host keeps `long-form-receipts.sqlite3` in its existing private runtime
+root, and the application keeps its own durable stage ledger. Cancellation fences
+late results; it does not erase a launched call or its usage.
+
+Install the same reviewed wheel on worker and host. Before enabling the updated
+Codex unit, prime its root-owned public tokenizer cache during deployment:
+
+```bash
+sudo env TIKTOKEN_CACHE_DIR=/opt/tubeforge-codex-runner/tokenizer-cache \
+  /opt/tubeforge-codex-runner/venv/bin/python -c "import tiktoken; tiktoken.get_encoding('o200k_base')"
+sudo chmod -R a+rX /opt/tubeforge-codex-runner/tokenizer-cache
+```
+
+The unit sets this path explicitly because `PrivateTmp=yes` isolates its default
+temporary cache. Runtime preflight verifies the vocabulary SHA256 and never
+fetches a missing vocabulary. Docker builds prime a separate readable cache.
+For the user-level Claude unit, run the following from the main checkout before
+restarting the reviewed unit (its environment points to the same directory):
+
+```bash
+TIKTOKEN_CACHE_DIR="$PWD/data/tokenizer-cache" \
+  .venv-benchmark/bin/python -c "import tiktoken; tiktoken.get_encoding('o200k_base')"
+```
+
+Verify LF2 preflight on both sides before a bounded authorized live trial. A
+resolved-model mismatch stops before execution, even if the host changed after
+reservation. There is no LF2 provider fallback, automatic ledger reset or
+per-chapter writer. Maximum five reserved calls and two narration attempts apply
+alongside existing provider limits; stricter configured limits win. Missing input
+or output usage stops further reservations. Local text counts and reservations
+are admission limits, not a provider-side hard output cap or a measurement of
+remaining subscription quota. This document is deployment preparation, not
+evidence that the branch has been deployed or a live script accepted.
