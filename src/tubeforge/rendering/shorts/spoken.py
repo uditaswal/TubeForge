@@ -20,9 +20,20 @@ _LETTER_NAMES = {"A": "eh", "B": "bee", "C": "see", "D": "dee", "E": "ee", "F": 
 _SPOKEN_AS_WORDS = {"NASA", "NATO", "LASER", "SCUBA", "RAM", "ROM", "PIN", "OPEC", "UNESCO", "FIFA", "ASCII", "NOT", "AND",
                     "THE", "FOR", "ALL", "NEW", "NOW", "YES", "BUT", "ARE", "WAS", "ONE", "TWO", "OK"}
 # Technical words the voice gets wrong; lower-case keys, applied beneath any configured lexicon.
-DEFAULT_LEXICON = {"jndi": "jay en dee eye", "ldap": "el dap", "log4j": "log four jay", "nginx": "engine ex",
+DEFAULT_LEXICON = {"readme": "read me", "json": "jason", "yaml": "yammel", "gui": "gooey", "todo": "to do", "fixme": "fix me",
+                   "jndi": "jay en dee eye", "ldap": "el dap", "log4j": "log four jay", "nginx": "engine ex",
                    "kubectl": "cube control", "sudo": "pseudo", "sql": "sequel", "iot": "eye oh tee", "oauth": "oh auth"}
 VERSION = "spoken-v1"
+RULES_REVISION = 2  # bumped when acronym rules change so cached narration is re-synthesised
+_VOWELS = set("AEIOU")
+
+
+def _reads_as_word(core: str) -> bool:
+    """Five- or six-letter capitals with a pronounceable shape (README, STDOUT-like clusters excluded) are words, not initialisms."""
+    letters = core.rstrip("s") if core.endswith("s") and core[:-1].isupper() else core
+    if not 5 <= len(letters) <= 6 or sum(c in _VOWELS for c in letters) < 2:
+        return False
+    return not re.search(r"[^AEIOU]{3}", letters)
 
 
 @dataclass(frozen=True)
@@ -67,7 +78,7 @@ def _replacement(core: str, lexicon: dict[str, str]) -> tuple[str, str | None]:
         return lexicon[core.casefold()], "lexicon"
     if core.casefold() in DEFAULT_LEXICON:
         return DEFAULT_LEXICON[core.casefold()], "lexicon"
-    if re.fullmatch(r"[A-Z]{2,6}s?", core) and core.rstrip("s") not in _SPOKEN_AS_WORDS and core not in _SPOKEN_AS_WORDS:
+    if re.fullmatch(r"[A-Z]{2,6}s?", core) and core.rstrip("s") not in _SPOKEN_AS_WORDS and core not in _SPOKEN_AS_WORDS and not _reads_as_word(core):
         return _spell(core), "acronym"
     if re.fullmatch(r"v?\d{1,3}(?:\.\d{1,3}){1,3}", core):
         parts = core.lstrip("v").split(".")
@@ -99,7 +110,7 @@ def validated_lexicon(lexicon: dict[str, str]) -> dict[str, str]:
 
 def profile_hash(*, profile: str, lexicon: dict[str, str], group_size: int, voice_processing: str,
                  delivery: str = "off") -> str:
-    material = {"version": VERSION, "profile": profile, "lexicon": validated_lexicon(lexicon),
+    material = {"version": VERSION, "rules": RULES_REVISION, "profile": profile, "lexicon": validated_lexicon(lexicon),
                 "group_size": group_size, "voice_processing": voice_processing}
     if delivery != "off":
         material["delivery"] = delivery  # absent when off, so existing profile hashes are unchanged

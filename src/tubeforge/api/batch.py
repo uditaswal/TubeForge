@@ -40,8 +40,31 @@ class BatchHoldRequest(BaseModel):
     hold: bool
 
 
+class ScriptFitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = Field(default=None, max_length=24_000)
+    sections: list[str] | None = Field(default=None, max_length=500)
+    length_s: int = Field(default=60, ge=30, le=90)
+
+
 def register_batch_routes(app, runtime, build_request):
     repository = BatchPlanRepository(runtime.database.session_factory)
+
+    @app.post('/api/script-fit', tags=['batch'])
+    def script_fit(value: ScriptFitRequest):
+        """Word/time fit of an operator-written script against a Short length (no AI call)."""
+        from tubeforge.pipeline.script_fit import analyze_script
+        if value.text is None and value.sections is None:
+            raise HTTPException(422, detail='provide text or sections')
+        return analyze_script(value.sections if value.sections is not None else value.text, value.length_s)
+
+    @app.get('/api/script-guide', tags=['batch'])
+    def script_guide(length_s: int = 60, kind: Literal['guide', 'format'] = 'guide'):
+        """Copyable markdown: the plan format alone, or a full brief for another AI agent, sized for the length."""
+        from tubeforge.pipeline.script_fit import plan_template, script_guide as build_guide
+        if not 30 <= length_s <= 90:
+            raise HTTPException(422, detail='length_s must be 30-90')
+        return {'length_s': length_s, 'kind': kind, 'markdown': plan_template(length_s) if kind == 'format' else build_guide(length_s)}
 
     @app.post('/api/batch-plans/import', tags=['batch'])
     def import_plan(value: BatchImportRequest):
@@ -54,7 +77,10 @@ def register_batch_routes(app, runtime, build_request):
         combined = {item['short']['id']: item['short'] for item in repository.list()}
         combined.update(incoming)
         cadence = cadence_report(list(combined.values()), app.state.settings.channel_safety)
-        return {'committed': value.commit, 'items': results, 'cadence': cadence}
+        from tubeforge.pipeline.script_fit import analyze_script
+        fits = {s.id: {k: v for k, v in analyze_script(s.narration, s.length_s).items() if k != 'sections'}
+                for s in plan.shorts if s.narration and s.narration.strip()}
+        return {'committed': value.commit, 'items': results, 'cadence': cadence, 'script_fit': fits}
 
     @app.get('/api/batch-plans', tags=['batch'])
     def list_plans(day: date | None = None, plan_id: str | None = None):

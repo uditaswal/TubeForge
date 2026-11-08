@@ -12,6 +12,20 @@ Optional fields include `length_s` (30–90; default 60), `ending` (`loop` or
 `debate`), `channel`, `publish_at`, `hook`, `cta`, `claims_to_verify`, `sources`,
 `thumbnail: {text: ..., visual: ...}`, `tags`, and opaque `narration` text.
 Publish dates are metadata; importing never schedules or uploads anything.
+
+**Your own script.** `narration` is now used: the writer keeps your wording and order, splits it
+into 8–15-word scenes (blank lines mark your scene breaks), and only trims, fixes spoken-form
+symbols or fills gaps from the cited sources. It still passes the hook/craft gates and the script
+review, where you can edit every section. Studio's New generation form has the same optional
+"Your own script" box. Import preview and the boxes show a live fit meter (words, estimated
+seconds, aim range, what to cut or add), from `POST /api/script-fit`. **Copy markdown format** and
+**Copy AI script guide** (30/45/60/75/90 s) give the plan template and a brief to paste into
+another AI agent (`GET /api/script-guide?kind=format|guide&length_s=`).
+
+**Pronunciation.** All-caps acronyms are spelled by letter; words said as words must be listed.
+Built in: README, JSON, YAML, GUI, TODO, FIXME, and any 5–6-letter capitals with a pronounceable
+shape. Add your own with `pronunciation_lexicon` in the pacing config (`readme: "read me"`, or
+`nasa: nasa` to keep a word as is). Changing these rules re-synthesises narration (profile hash).
 Re-importing skips identical IDs, updates unused shorts, and reports conflicts
 for changed shorts already reserved or produced. A validation error saves nothing.
 

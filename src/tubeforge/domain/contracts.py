@@ -94,6 +94,9 @@ class ContentRequest(DomainModel):
     # (a purpose-built picture per scene). Render-only, so it never changes script identity and the
     # default is omitted from the serialized form.
     video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
+    # The operator's own narration. The writer keeps its wording and only splits/trims/fills it to fit.
+    # Part of generation identity; omitted while unset so existing jobs and cache keys are unchanged.
+    operator_script: str | None = Field(default=None, min_length=1, max_length=12_000)
 
     @model_serializer(mode="wrap")
     def omit_default_script_fields(self, handler):
@@ -114,6 +117,8 @@ class ContentRequest(DomainModel):
             value.pop("script_owner", None)
         if self.script_model is None:
             value.pop("script_model", None)
+        if self.operator_script is None:
+            value.pop("operator_script", None)
         return value
 
     @model_validator(mode="after")
