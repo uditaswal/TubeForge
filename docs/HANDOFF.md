@@ -49,7 +49,7 @@ Plan `story-nosql` / `story-cache` / `story-lb` (day 2026-11-04) ran end to end:
 
 ## Next step
 
-- **Naturalness Round 3 / P5 (8 Nov, plan only, NOT STARTED):** forensic audit of the `ms1-pilot-rate-limit-v2` script and regression fixtures; spec in `docs/script-naturalness-plan.md` (Round 3). Work on `claude/script-audit` (worktree `../tubeforge-script-audit`). No live writer call without the operator's go-ahead.
+- **Naturalness Round 3 / P5 (9 Nov, IMPLEMENTED on `claude/script-audit`, worktree `../tubeforge-script-audit`, not merged):** `docs/original-script-audit.md` (audit of `ms1-pilot-rate-limit-v2`), advisory checks `craft.py::spoken_craft_problems` + `rewrite_keeps_evidence`, fixtures `tests/fixtures/scripts/`, `tests/test_script_audit.py` (12 cases). NOT MEASURED: any new generation or listen. Open for the operator: authorise one before/after generation (about $0.50-0.60); decide whether to retune `reference_word_budget` (plans 2.5 words/s, voice runs 3.0+); promote nothing to a gate yet. Run tests with `PYTHONPATH=src`.
 
 - **Own script + pronunciation (8 Nov, IMPLEMENTED, browser-checked on a temp stack, no live writer call):** `ContentRequest.operator_script` (plan `narration`, Studio "Your own script"), prompt clause `operator_script_clause`, `pipeline/script_fit.py`, `/api/script-fit`, `/api/script-guide`, shared UI `api/script_tools_ui.py` (Studio form, markdown mode, Batch plans, script-review fit meter). `spoken.py`: README/JSON/YAML/GUI read as words, `RULES_REVISION` in the profile hash. Not yet seen: a real writer honouring an operator script (needs the operator's go-ahead for one Claude call), and job `3b207d32…` must be regenerated to hear the README fix.
 

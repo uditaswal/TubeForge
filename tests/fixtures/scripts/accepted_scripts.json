@@ -1,0 +1,125 @@
+{
+ "note": "Narration only, copied from reviewed scripts the operator did not reject. Used to prove new advisory checks have no false positives. Test data only.",
+ "scripts": {
+  "log4shell-trial5": {
+   "job": "49bfc7eff77a4edfb1152c3c32295673",
+   "scenes": [
+    "Since 2013, one logging feature let strangers run code, and nobody noticed.",
+    "Log4j is how Java programs keep a diary. Whatever your users type? Logged.",
+    "By default, Log4j quietly swaps special codes in a logged line for real values.",
+    "One code is risky. It makes Java fetch from any address the attacker names.",
+    "An attacker sends that text. Your server logs it, then fetches and runs their code.",
+    "Web requests get logged. The string hides in addresses or browser labels. Easy to hide.",
+    "Then in late 2021, Chen Zhaojun at Alibaba Cloud privately reported what nobody had spotted.",
+    "Apache rated the danger ten out of ten, the highest possible. Top of the scale.",
+    "Update your Log4j. The first fix limited lookups, and later versions switched JNDI off.",
+    "No patch? Filter outbound traffic. Your server can't fetch attacker code.",
+    "Verdict: nobody hacked Java. One logging feature obeyed strangers, exactly as designed.",
+    "Patch it, then ask what else your logs quietly obey, because"
+   ]
+  },
+  "claude-code-email": {
+   "job": "3b207d3203594ba09daeb76b6ae8c96c",
+   "scenes": [
+    "Claude Code sometimes put your email in web requests. Did that cause scam emails?",
+    "One user reports dozens of scam emails daily and blames Claude Code. That's his claim.",
+    "Claude kept inventing names for author tags. So the team gave it your email.",
+    "Claude's own curl web request sometimes carried your email. Not every time.",
+    "Some sites ask scripts for a contact. Yours was the only address Claude had.",
+    "Newer builds check web calls for your email. It's on by default.",
+    "Its README says page fetching, web search and plugin tools aren't checked.",
+    "Scripts Claude writes and runs itself slip past the check. That's the big gap.",
+    "The real fix removes your email from Claude's context in the next release.",
+    "Stable's still on an old build, so update to 2.1.317 or later. Check yours first.",
+    "Then open slash plugins and confirm that privacy add-on is switched on.",
+    "Don't wait for the next release, because the check misses scripts. Update your build.",
+    "Nobody's proven the spam link, but remember that"
+   ]
+  },
+  "pilot-nosql": {
+   "job": "batch-e488a1864bc622ea519f36c42b115c245342798c1d8b8f9b",
+   "scenes": [
+    "Pick NoSQL for speed? Then one username change becomes many rewrites.",
+    "People pick NoSQL for simple design and spreading across machines. Fair enough.",
+    "Most NoSQL databases cannot join tables, which is how SQL stitches related data together.",
+    "So you store copies. Each blog comment carries its author's username inside.",
+    "That saves you a lookup every time someone reads the comment. Reads stay quick.",
+    "Now your user renames their account. Many places need fixing. Ouch.",
+    "The rule: copies work best when reading happens far more often than writing.",
+    "Your product catalogue fits NoSQL. Constantly edited data does not. Simple as that.",
+    "Many NoSQL systems favor speed over matching copies. So you can read outdated data.",
+    "Another fix nests comments inside the post. One request returns them all. Neat.",
+    "Copies make renames costly. Choose NoSQL for speed only when your data rarely changes.",
+    "Speed always has a price, so before you choose, ask yourself whether to"
+   ]
+  },
+  "pilot-cache": {
+   "job": "batch-443c49d0dc5c20f4751946dee75f237aab88943988afd504",
+   "scenes": [
+    "AccuWeather halved its server load in 2011 by making its data worse.",
+    "Picture your phone asking for the forecast. Smartphone weather apps were swamping AccuWeather's servers.",
+    "You and a neighbor in the same area each triggered a separate request.",
+    "Then AccuWeather's servers chopped your GPS location down to fewer decimal places.",
+    "Nearby phones now looked identical, so one saved answer served them all.",
+    "That saved copy is a cache, and reading it beats asking the slower original.",
+    "The price was precision, because your exact spot stopped mattering to the server.",
+    "Daily trips to the server dropped by half. Half the work, gone.",
+    "The catch is stale data: when the original changes, your copy goes out of date.",
+    "Caches work because recent requests tend to repeat, and nearby ones tend to follow.",
+    "AccuWeather's result backs my verdict: for nearby users, worse data beats perfect data.",
+    "So before you buy more servers, never forget that"
+   ]
+  },
+  "pilot-lb": {
+   "job": "batch-c68ab78d3f13d4ab25a11d2d8a193a75bff73f18d65ce068",
+   "scenes": [
+    "Your sale goes live and one machine decides everything.",
+    "Traffic floods in. A load balancer shares it, so no server drowns while others idle.",
+    "Round robin gives your servers turns. Each new request goes to the next in line.",
+    "Busy servers get a break. Least connections picks the server with the fewest active connections.",
+    "Another trick picks two servers at random and chooses the better one.",
+    "The hub decides. Fixed rules centre on a router, the master, handing out work.",
+    "Your master acts as a bottleneck, a narrow spot that slows everything down.",
+    "It cannot scale. As your traffic grows, very large servers quickly outgrow this design.",
+    "Dynamic designs check each server's current load. No node is set aside for distribution.",
+    "DNS helps too. The internet's address book can share traffic with no dedicated node.",
+    "Remember this: when your master chokes, your whole sale hangs on one machine.",
+    "Before any rush, ask yourself what breaks first the moment"
+   ]
+  },
+  "pilot-cli-grep": {
+   "job": "batch-ceb8874e7b3044fb6ae6bf8c3a1d70e8f76b214992cf0943",
+   "scenes": [
+    "Deleting your leaked key fixes nothing. GitHub's own docs say rotate it.",
+    "You delete the key and feel safe. But git remembers. It searches removed text.",
+    "A scanner called Gitleaks reads old commits too, hunting passwords, keys and tokens.",
+    "Your first move is simple. Rotate the key. Swap in a fresh one.",
+    "Once you rotate it, the old key opens nothing, whoever copied it.",
+    "Erasing history is different. It takes teamwork. Everyone who cloned your repo must coordinate.",
+    "Worse, rewriting history carries a high risk of the leaked data creeping back.",
+    "Check your exposure. Search history for the key. Git lists commits that touched it.",
+    "Before every commit, your scanner checks the change and blocks any secret it finds.",
+    "Here's the catch. You can skip that check by adding a prefix to the command.",
+    "So rotate first, then decide whether rewriting history is worth the trouble.",
+    "Rotate first, every single time, and never forget that"
+   ]
+  },
+  "pilot-idempotency": {
+   "job": "batch-e1a1eed2a09b35886ca0414343b24089f87b5c6bfbe9ad5c",
+   "scenes": [
+    "Did Stripe charge you twice when your payment timed out?",
+    "That fear is real. The payment can work, but your reply gets lost.",
+    "Your app invents a unique label, called an idempotency key, for each payment.",
+    "Retry with the same label and the server hands back its saved answer.",
+    "Stripe saves the first answer, even when that answer is a server error.",
+    "But some failures never get saved. Bad input and clashing requests run fresh.",
+    "Change a detail and the server says no. Same key, different payment, error.",
+    "Old keys expire, though. Past twenty four hours, they can be deleted.",
+    "The web is writing this down. Draft revision eight of the header is out.",
+    "Keys go on POST requests, which create things. Reading and deleting repeat safely already.",
+    "Replay the first answer and a retry never charges you twice.",
+    "So when your payment times out, the real question is"
+   ]
+  }
+ }
+}

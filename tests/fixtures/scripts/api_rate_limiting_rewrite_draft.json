@@ -1,0 +1,228 @@
+{
+ "fixture": "api-rate-limiting-rewrite-draft",
+ "note": "DRAFT rewrite of the original, same claims and sources, written by hand for the audit. It passes the advisory checks and the evidence check; it has NOT been rendered, listened to or approved, so it is not claimed to be better. Test data only.",
+ "target_seconds": 60,
+ "ending": "loop",
+ "claims": [
+  {
+   "claim_id": "c1",
+   "source_ids": [
+    "aws-apigw-throttle"
+   ],
+   "text": "API Gateway throttles requests using the token bucket algorithm, where a token counts for a request."
+  },
+  {
+   "claim_id": "c2",
+   "source_ids": [
+    "aws-apigw-throttle"
+   ],
+   "text": "In the token bucket algorithm, a burst can allow a pre-defined overrun of the rate limits."
+  },
+  {
+   "claim_id": "c3",
+   "source_ids": [
+    "aws-apigw-throttle"
+   ],
+   "text": "When request submissions exceed the steady-state rate and burst limits, API Gateway begins to throttle, and clients may receive 429 Too Many Requests errors."
+  },
+  {
+   "claim_id": "c4",
+   "source_ids": [
+    "aws-apigw-throttle",
+    "aws-http-throttle"
+   ],
+   "text": "AWS applies throttles on a best-effort basis; they should be thought of as targets rather than guaranteed request ceilings."
+  },
+  {
+   "claim_id": "c5",
+   "source_ids": [
+    "aws-apigw-throttle"
+   ],
+   "text": "Besides bursts, other factors can also cause throttle limits to be overrun in some cases."
+  },
+  {
+   "claim_id": "c6",
+   "source_ids": [
+    "gravitee-token-bucket"
+   ],
+   "text": "Token-bucket rate limiting allows controlled bursts of traffic while maintaining a steady average request rate, unlike fixed-window limits."
+  },
+  {
+   "claim_id": "c7",
+   "source_ids": [
+    "gravitee-token-bucket"
+   ],
+   "text": "In the token bucket model, the bucket refills at a constant rate over time."
+  },
+  {
+   "claim_id": "c9",
+   "source_ids": [
+    "aws-http-throttle"
+   ],
+   "text": "API Gateway lets developers configure rate and burst throttling limits per route, overriding account-level defaults."
+  },
+  {
+   "claim_id": "c10",
+   "source_ids": [
+    "aws-apigw-throttle"
+   ],
+   "text": "API Gateway applies account-level and method-level throttling limits."
+  }
+ ],
+ "sources": [
+  {
+   "source_id": "aws-apigw-throttle",
+   "title": "Throttle requests to your REST APIs for better throughput in API Gateway",
+   "url": "https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-request-throttling.html"
+  },
+  {
+   "source_id": "gravitee-token-bucket",
+   "title": "token bucket rate limiting (Gravitee APIM policy reference)",
+   "url": "https://documentation.gravitee.io/apim/create-and-configure-apis/apply-policies/policy-reference/token-bucket-rate-limiting"
+  },
+  {
+   "source_id": "aws-http-throttle",
+   "title": "Throttle requests to your HTTP APIs for better throughput in API Gateway",
+   "url": "https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-throttling.html"
+  }
+ ],
+ "scenes": [
+  {
+   "scene_id": "sc01",
+   "template": "hook",
+   "narration": "You hit your API Gateway limit. A 429 still isn't guaranteed.",
+   "claim_ids": [
+    "c2",
+    "c4"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle",
+    "aws-http-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc02",
+   "template": "flow",
+   "narration": "Here's why. Every request you send spends one token from a bucket.",
+   "claim_ids": [
+    "c1"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc03",
+   "template": "checklist",
+   "narration": "Tokens drip back in at a constant rate, so your average stays smooth.",
+   "claim_ids": [
+    "c7"
+   ],
+   "source_ids": [
+    "gravitee-token-bucket"
+   ]
+  },
+  {
+   "scene_id": "sc04",
+   "template": "before_after",
+   "narration": "But the bucket holds spare tokens, so a burst can spend them all at once.",
+   "claim_ids": [
+    "c2",
+    "c6"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle",
+    "gravitee-token-bucket"
+   ]
+  },
+  {
+   "scene_id": "sc05",
+   "template": "flow",
+   "narration": "Only when the tokens run out does API Gateway start throttling your clients.",
+   "claim_ids": [
+    "c3"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc06",
+   "template": "terminal",
+   "narration": "That's when the 429 shows up. It just means too many requests.",
+   "claim_ids": [
+    "c3"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc07",
+   "template": "checklist",
+   "narration": "Even then, AWS treats the limit as a target, not a guarantee.",
+   "claim_ids": [
+    "c4"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle",
+    "aws-http-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc08",
+   "template": "flow",
+   "narration": "Bursts aren't the only leak. AWS admits some requests slip past anyway.",
+   "claim_ids": [
+    "c5"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc09",
+   "template": "checklist",
+   "narration": "So set the rate and the burst yourself, even for a single route.",
+   "claim_ids": [
+    "c9"
+   ],
+   "source_ids": [
+    "aws-http-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc10",
+   "template": "flow",
+   "narration": "Remember the account and method limits, because API Gateway applies those too.",
+   "claim_ids": [
+    "c10"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc11",
+   "template": "before_after",
+   "narration": "Treat your limit as a rough guide, and put a second layer behind it.",
+   "claim_ids": [
+    "c4",
+    "c10"
+   ],
+   "source_ids": [
+    "aws-apigw-throttle",
+    "aws-http-throttle"
+   ]
+  },
+  {
+   "scene_id": "sc12",
+   "template": "loop",
+   "narration": "So stack your limits, because one gate is never enough, and",
+   "claim_ids": [],
+   "source_ids": [
+    "aws-apigw-throttle"
+   ]
+  }
+ ]
+}
