@@ -143,6 +143,9 @@ def test_review_javascript_saves_confirmed_transitions_and_keeps_player(review):
     run('detail.querySelectorAll("#actions button")[3].onclick()')
     assert snapshot(client)['state'] == 'ready'
     run('detail.querySelectorAll("#actions button")[1].onclick()')
+    assert snapshot(client)['state'] == 'ready'  # Reject only asks for confirmation first
+    assert context.eval('detail.children.some(x=>x.id==="confirmBar")')
+    run('detail.children.find(x=>x.id==="confirmBar").children[1].children[0].onclick()')
     assert snapshot(client)['decision'] == 'rejected'
 
 
@@ -279,3 +282,47 @@ def test_day_review_lists_each_scene_beside_its_cited_sources(review):
     assert 'hook: You set the limit to 100 requests a second.' in rows and 'flow: A burst of 200 can still pass.' in rows
     assert '[sources: aws]' in rows                     # no title loaded for this fixture, so the id is shown rather than hiding the citation
     assert context.eval('detail.children.some(x=>x.textContent==="Scenes beside their sources")')
+
+
+def test_plans_stage_chip_follows_identity_checked_review_state(review):
+    """The Batch plans chip must show Approved/Ready only while the reviewed artifact identity still matches."""
+    client, runtime, repo, job_id, root = review
+
+    def plan_item():
+        return client.get('/api/batch-plans').json()[0]
+
+    assert plan_item()['stage'] == 'needs_review' and plan_item()['review_state'] is None
+    assert plan_item()['thumbnail_url'] == f'/api/jobs/{job_id}/artifacts/thumbnail'
+    identity = snapshot(client)['reviewed_identity']
+    csrf(client)
+    assert action(client, 'approve', identity).json()['state'] == 'approved'
+    assert plan_item()['stage'] == 'approved' and plan_item()['review_state'] == 'approved'
+    assert action(client, 'ready', identity).json()['state'] == 'ready'
+    assert plan_item()['stage'] == 'ready'
+    # The saved decision still says ready, but the video bytes changed: the chip must not claim it.
+    saved = repo.for_job(job_id)['batch_review']['state']
+    (root / 'final').write_bytes(b'changed bytes')
+    assert saved == 'ready'
+    item = plan_item()
+    assert item['stage'] == 'needs_review' and item['review_state'] == 'needs_review'
+
+
+def test_reject_and_regenerate_need_confirmation_and_cancel_changes_nothing(review):
+    from test_batch_ui_runtime import runtime
+    client, backend, repo, job_id, root = review
+    context, run = runtime(client, client.get('/batch/review').text)
+    assert 'id="confirmBar"' not in client.get('/batch/review').text  # created on demand, not static
+    run('list.children[0].children[0].onclick()')
+    for index, label in [(1, 'Reject'), (2, 'Regenerate')]:
+        run(f'detail.querySelectorAll("#actions button")[{index}].onclick()')
+        bar = 'detail.children.find(x=>x.id==="confirmBar")'
+        assert context.eval(f'{bar}.children[0].textContent.length > 20')
+        assert context.eval(f'{bar}.children[1].children[0].textContent') == f'Confirm {label.lower()}'
+        run(f'{bar}.children[1].children[1].onclick()')  # Cancel
+        assert not context.eval('detail.children.some(x=>x.id==="confirmBar")')
+        assert snapshot(client)['decision'] is None
+    assert repo.for_job(job_id) is not None and backend.jobs.get(job_id).state == JobState.FINAL_READY
+    # Confirming regenerate creates the new generation
+    run('detail.querySelectorAll("#actions button")[2].onclick()')
+    run('detail.children.find(x=>x.id==="confirmBar").children[1].children[0].onclick()')
+    assert context.eval('notice.textContent.includes("New job created")')
