@@ -90,23 +90,32 @@ def register_batch_routes(app, runtime, build_request):
         if day:
             items = [item for item in items if (item['short'].get('publish_at') or '')[:10] == day.isoformat()]
         from tubeforge.api.batch_stage import stage_for
+        saved_review = {}
         for item in items:
             item['qa'] = None
             item['thumbnail_url'] = None
             if item['job_id']:
-                job = runtime.jobs.get(item['job_id'])
+                try:
+                    job = runtime.jobs.get(item['job_id'])
+                except KeyError:  # the generation was deleted; one dangling topic must not blank the whole page
+                    item['status'] = 'job missing'
+                    item['failure_message'] = 'The linked generation no longer exists.'
+                    continue
                 item['status'] = job.state.value
                 item['failure_message'] = job.failure_message
                 if job.failure_message and 'exhaust' in job.failure_message.lower():
                     item['status'] = 'needs operator decision'
                 options = repository.for_job(job.id) or {}
                 item['qa'] = options.get('batch_qa')
-                item['review_state'] = (options.get('batch_review') or {}).get('state')
+                saved_review[item['id']] = (options.get('batch_review') or {}).get('state')
                 if any(a.name == 'thumbnail' for a in runtime.artifacts.list_for_job(job.id)):
                     item['thumbnail_url'] = f'/api/jobs/{job.id}/artifacts/thumbnail'
                 item['activity_url'] = f'/api/jobs/{job.id}/events'
+        # Approved/Ready come from the identity-checked Day review snapshot, never from the raw saved decision.
+        verified = {entry['id']: entry['state'] for entry in reviews.list_day()} if any(state in {'approved', 'ready'} for state in saved_review.values()) else {}
         for item in items:
-            item['stage'] = stage_for(item['status'] if item['job_id'] else None, item.get('review_state'))
+            item['review_state'] = verified.get(item['id'])
+            item['stage'] = stage_for(item['status'] if item['job_id'] else None, item['review_state'])
         finished = [item for item in items if item['status'] == 'final_ready']
         durations = []
         for item in finished:
@@ -114,7 +123,7 @@ def register_batch_routes(app, runtime, build_request):
             seconds = sum(float(e.details.get('elapsed_seconds', 0)) for e in events if e.event_type == 'batch_run_finished')
             if seconds:
                 durations.append(seconds)
-        remaining = sum(bool(item['job_id']) and item['status'] not in {'final_ready', 'failed_validation', 'failed_exhausted', 'cancelled', 'needs operator decision'} for item in items)
+        remaining = sum(bool(item['job_id']) and item['status'] not in {'final_ready', 'failed_validation', 'failed_exhausted', 'cancelled', 'needs operator decision', 'job missing'} for item in items)
         waiting = any(item['status'] in {'script_approval_required', 'preview_ready'} for item in items)
         eta = round(sum(durations) / len(durations) * remaining) if durations and not waiting else None
         # ETA is unknown until completed jobs supply measured timings.

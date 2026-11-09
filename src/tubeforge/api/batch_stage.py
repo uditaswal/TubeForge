@@ -4,7 +4,7 @@ STAGES = ('imported', 'scripting', 'rendering', 'needs_review', 'approved', 'rea
 STAGE_LABELS = {'imported': 'Imported', 'scripting': 'Scripting', 'rendering': 'Rendering', 'needs_review': 'Needs review',
                 'approved': 'Approved', 'ready': 'Ready', 'attention': 'Needs attention'}
 _SCRIPTING = {'topic_created', 'source_inspecting', 'source_acquiring', 'source_analyzing', 'clip_rendering', 'content_generating', 'content_ready'}
-_ATTENTION = {'failed_retryable', 'failed_validation', 'auth_required', 'failed_exhausted', 'cancelled', 'needs operator decision'}
+_ATTENTION = {'failed_retryable', 'failed_validation', 'auth_required', 'failed_exhausted', 'cancelled', 'needs operator decision', 'job missing'}
 # Waiting on a person in Generations (script or preview approval) counts as review work.
 _WAITING = {'script_approval_required', 'preview_ready', 'preview_approval_required'}
 
