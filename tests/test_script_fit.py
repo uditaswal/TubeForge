@@ -54,8 +54,8 @@ def test_script_fit_and_guide_endpoints_and_dashboard_controls(tmp_path):
         assert fit["status"] == "too_short" and fit["max_words"] == 177
         assert client.post("/api/script-fit", json={"length_s": 60}).status_code == 422
         guide = client.get("/api/script-guide?length_s=45").json()["markdown"]
-        assert "45-second" in guide and "narration: |" in guide
-        assert "narration: |" in client.get("/api/script-guide?kind=format&length_s=30").json()["markdown"]
+        assert "45-second" in guide and "script: |" in guide
+        assert "script: |" in client.get("/api/script-guide?kind=format&length_s=30").json()["markdown"]
         assert client.get("/api/script-guide?length_s=200").status_code == 422
         page = client.get("/").text
         assert "operatorScript" in page and "Copy AI script guide" in page
