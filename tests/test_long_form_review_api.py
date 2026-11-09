@@ -152,3 +152,56 @@ def test_rejected_output_remains_visible_after_recent_activity_rolls_off(signed_
     assert draft['draft_outcome']['disposition'] == 'rejected'
     assert draft['draft_outcome']['reason'] == 'writer must return a JSON object'
     assert draft['response']['result']['raw_output'] == '{bad synthetic output'
+
+
+def test_supplied_primary_pages_capture_before_any_model_call(signed_in):
+    from tubeforge.long_form.evidence import capture_primary_packet
+
+    client, runtime, writer, headers = signed_in
+    brief = ready_brief(client, runtime, headers)
+    urls = ['https://example.com/gradient', 'https://example.org/generalization']
+    fetched = []
+
+    class FixturePrimary:
+        def __init__(self, **options):
+            pass
+
+        def fetch(self, url, maximum):
+            fetched.append(url)
+            return ('Primary fixture for ' + url + '. ' + 'Substantive explanation. ' * 15).encode()
+
+    service = runtime.long_form_writing
+    service.source_capture = lambda request, leads, **opts: capture_primary_packet(
+        request, leads, http_factory=FixturePrimary, **opts
+    )
+    assert client.post('/api/long-form', json={**brief, 'primary_urls': urls[:1]}, headers=headers).status_code == 422
+    assert client.post('/api/long-form', json={**brief, 'primary_urls': [urls[0], urls[0]]}, headers=headers).status_code == 422
+    response = client.post('/api/long-form', json={**brief, 'primary_urls': urls}, headers=headers)
+    assert response.status_code == 201
+    run = response.json()
+    assert run['next_stage'] == 'capture_sources'
+    assert not fetched and not writer['launches']
+    duplicate = client.post('/api/long-form', json={**brief, 'primary_urls': list(reversed(urls))}, headers=headers).json()
+    assert duplicate['id'] == run['id']
+    captured = service.run_once('supplied-source-fixture')
+    assert captured['next_stage'] == 'draft'
+    assert captured['source_packet']['retrieval_mode'] == 'lf2_operator_primary_capture'
+    assert set(fetched) == set(urls)
+    assert captured['calls'] == [] and captured['reserved_tokens'] == 0
+    assert not writer['launches']
+    assert all(source['original_content_sha256'] and source['content_sha256']
+               for source in captured['source_packet']['sources'])
+    assert client.post(f"/api/long-form/{run['id']}/cancel", headers=headers).status_code == 200
+
+    class DuplicatePrimary(FixturePrimary):
+        def fetch(self, url, maximum):
+            return b'Identical substantive source text. ' * 15
+
+    service.source_capture = lambda request, leads, **opts: capture_primary_packet(
+        request, leads, http_factory=DuplicatePrimary, **opts
+    )
+    response = client.post('/api/long-form', json={**brief, 'topic': 'Duplicate capture fixture', 'primary_urls': urls}, headers=headers)
+    assert response.status_code == 201
+    blocked = service.run_once('supplied-source-fixture')
+    assert blocked['state'] == 'blocked' and blocked['source_packet'] is None
+    assert not blocked['calls'] and not writer['launches']

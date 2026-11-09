@@ -1,7 +1,7 @@
 """Signed-in LF2 preparation/review; creating a request performs no host work."""
 import hashlib
 import json
-from typing import Literal
+from typing import Annotated,Literal
 
 from fastapi import HTTPException,Request
 from fastapi.responses import HTMLResponse,Response
@@ -22,6 +22,7 @@ class PreparationRequest(BaseModel):
     audience:str=Field(min_length=1,max_length=200)
     owner:Literal['codex','claude']='codex'
     model:Literal['sonnet-medium','opus']|None=None
+    primary_urls:tuple[Annotated[str,Field(min_length=8,max_length=2000)],...]=Field(default=(),max_length=3)
     token_policy:LongFormTokenPolicy=Field(default_factory=LongFormTokenPolicy)
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 from uuid import uuid4
 from tubeforge.core.errors import InsufficientSourcesError,ProviderCancellation,RetryableProviderError
 from tubeforge.domain.contracts import ContentRequest,SourceReference
@@ -16,7 +17,7 @@ from tubeforge.long_form.validation import validate_draft,validate_review
 from tubeforge.long_form.usage import observed_usage
 from tubeforge.long_form.client import LongFormHostRefusal
 from tubeforge.pipeline.long_form_reference import reference_content_identity
-from tubeforge.providers.content.research import ResearchResult
+from tubeforge.providers.content.research import ResearchResult,ResearchSource
 from tubeforge.providers.content.youtube_skills import voice_for
 
 
@@ -25,21 +26,32 @@ class LongFormWritingService:
         self.repository=repository;self.intakes=intakes;self.client=client;self.settings=settings;self.source_capture=source_capture or capture_primary_packet
         self.heavy_work=heavy_work or HeavyWorkLeaseRepository(repository.sessions)
 
-    def create(self,*,intake_id,intake_revision,topic,angle,audience,owner='codex',model=None,actor='local-operator',token_policy=None):
+    def create(self,*,intake_id,intake_revision,topic,angle,audience,owner='codex',model=None,actor='local-operator',token_policy=None,primary_urls=()):
         intake=self.intakes.get(intake_id,intake_revision)['intake']
         if intake['state']!='ready' or intake['snapshot'] is None:raise ValueError('Capture a usable reference transcript before preparing a script')
         reference=ReferenceSnapshot.model_validate(intake['snapshot']);request=intake['request']
         identity,voice=voice_for(self.settings.pipeline.codex,request['channel_identity'])
         if owner not in {'codex','claude'} or (owner=='claude' and not self.settings.pipeline.claude.enabled):raise ValueError('Choose an enabled script owner')
         if owner=='codex' and model is not None:raise ValueError('Codex uses its reviewed host model; Claude choices cannot select it')
+        sources=(SourceReference(source_id='brief-context',url='https://local.invalid/long-form-brief',title='Unverified brief context; research required'),)
+        if primary_urls:
+            if not 2<=len(primary_urls)<=3:raise ValueError('Supply two or three distinct primary HTTPS pages')
+            supplied=[]
+            for url in primary_urls:
+                lead=ResearchSource(source_id='lead',url=url,title='Operator-supplied source')
+                if urlsplit(lead.url).fragment:raise ValueError('Supply the primary page URL without a fragment')
+                supplied.append(str(SourceReference(source_id='lead',url=lead.url,title=lead.title).url))
+            if len(set(supplied))!=len(supplied):raise ValueError('Supply distinct primary HTTPS pages')
+            sources=tuple(SourceReference(source_id=f'primary-{index}',url=url,title=f'Supplied primary page {index}')
+                          for index,url in enumerate(sorted(supplied),1))
         brief=ContentRequest(topic=topic or reference.title,angle=angle,audience=audience,language=request['language'],channel_identity=identity,channel_voice_profile=voice,
             target_duration_seconds=request['target_duration_seconds'],aspect_ratio='16:9',prompt_version=PROFILE,production_mode='generated',review_mode='manual',
             preset_name='long-form-script-v1',script_owner=owner,script_model=model,
-            sources=(SourceReference(source_id='brief-context',url='https://local.invalid/long-form-brief',title='Unverified brief context; research required'),))
+            sources=sources)
         policy=token_policy or LongFormTokenPolicy()
         config=self.settings.pipeline.claude if owner=='claude' else self.settings.pipeline.codex
         policy=policy.model_copy(update={'maximum_narration_attempts':min(policy.maximum_narration_attempts,config.invocation_limit)})
-        return self.repository.create(brief,reference,intake_id=intake_id,intake_revision=intake_revision,actor=actor,token_policy=policy)
+        return self.repository.create(brief,reference,intake_id=intake_id,intake_revision=intake_revision,actor=actor,token_policy=policy,research_required=not primary_urls)
 
     @staticmethod
     def _result(call):
@@ -175,6 +187,15 @@ class LongFormWritingService:
         stopped=lambda:cancelled() or not self.repository.owns(claim)
         try:
             run=self.repository.get(claim['run_id']);stage=run['next_stage'];call=self.repository.stage_call(run['id'],stage)
+            if stage=='capture_sources':
+                request=ContentRequest.model_validate(run['request'])
+                leads=ResearchResult(status='ready',assessment='Operator-supplied primary URLs. Review claims against locally captured excerpts.',
+                    sources=[ResearchSource(source_id=s.source_id,url=str(s.url),title=s.title) for s in request.sources])
+                sourced,packet=self.source_capture(request,leads,cancelled=stopped)
+                if stopped():return None
+                self.repository.store_sources(claim,sourced,{**packet,'retrieval_mode':'lf2_operator_primary_capture'})
+                self.repository.release(claim,next_stage='draft')
+                return self.repository.get(run['id'])
             if call is None:
                 message=self._message(run);admission=measure(message)
                 model=self.client.preflight(message,admission)

@@ -54,6 +54,11 @@ MAIN = """
           <label for="lfTopic">Video topic</label><input id="lfTopic" required maxlength="500">
           <label for="lfAngle">New angle</label><textarea id="lfAngle" required maxlength="1000" placeholder="What should our video explain differently?"></textarea>
           <label for="lfAudience">Audience</label><input id="lfAudience" required maxlength="200" placeholder="Who is watching?">
+          <details><summary>Use your own primary sources</summary>
+            <label for="lfPrimaryUrls">Primary page URLs</label>
+            <textarea id="lfPrimaryUrls" maxlength="6002" rows="3" aria-describedby="lfPrimaryHelp" placeholder="One HTTPS URL per line"></textarea>
+            <p id="lfPrimaryHelp" class="lf-muted">Enter two or three primary pages. TubeForge captures them before drafting and skips the writer’s research call. Leave blank to use writer research.</p>
+          </details>
           <label for="lfWriter">Writer</label><select id="lfWriter" required disabled></select>
           <p id="lfBudget" class="lf-muted"></p>
           <button id="lfCreate" type="submit" disabled>Queue preparation</button>
@@ -354,7 +359,9 @@ SCRIPT = r"""
     el('lfMeta').textContent = run.request.target_duration_seconds / 60 + ' min target · '
       + owner + (run.expected_model ? ' · ' + run.expected_model : '')
       + ' · Reference revision ' + run.intake_revision;
-    el('lfMessage').textContent = run.message || (active.has(run.state) ? 'Next stage: ' + run.next_stage : '');
+    el('lfMessage').textContent = run.message || (active.has(run.state)
+      ? run.next_stage === 'capture_sources' ? 'Next: capture supplied primary pages.' : 'Next stage: ' + run.next_stage
+      : '');
     el('lfOriginal').href = '/references?intake=' + encodeURIComponent(run.intake_id) + '&revision=' + run.intake_revision;
     el('lfExport').href = root + '/' + run.id + '/export?review_identity=' + run.review_identity;
     const newDraft = JSON.stringify([run.id, run.draft_sha256]);
@@ -483,7 +490,8 @@ SCRIPT = r"""
     try {
       const run = await api(root, {method: 'POST', body: JSON.stringify({
         intake_id, intake_revision: Number(revision), topic: el('lfTopic').value, angle: el('lfAngle').value,
-        audience: el('lfAudience').value, owner: writer.id, model: writer.model
+        audience: el('lfAudience').value, owner: writer.id, model: writer.model,
+        primary_urls: el('lfPrimaryUrls').value.split('\n').map(url => url.trim()).filter(Boolean)
       })});
       if (version === selectionVersion) {
         choose(run.id);

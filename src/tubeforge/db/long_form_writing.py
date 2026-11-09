@@ -35,7 +35,7 @@ class LongFormWritingRepository:
     def _event(self,db,row,event,actor,**details):
         db.add(Event(run_id=row.id,event=event,actor=actor[:128],details_json=json_text(details),created_at=self.clock()))
 
-    def create(self,request,reference,*,intake_id,intake_revision,actor,token_policy=None):
+    def create(self,request,reference,*,intake_id,intake_revision,actor,token_policy=None,research_required=True):
         policy=token_policy or LongFormTokenPolicy()
         if reference.transcript_origin=='unavailable' or reference.language.casefold()!=request.language.casefold():
             raise ValueError('Script preparation needs usable reference text in the requested language')
@@ -49,8 +49,8 @@ class LongFormWritingRepository:
                 now=self.clock();identity=uuid4().hex;reference_json=reference.model_dump_json()
                 row=Run(id=identity,brief_sha256=key,intake_id=intake_id,intake_revision=intake_revision,
                     initial_request_json=request.model_dump_json(),request_json=request.model_dump_json(),reference_json=reference_json,reference_sha256=sha(reference_json),
-                    ledger_json=LongFormCallLedger(brief_sha256=key,research_required=True).model_dump_json(),token_policy_json=policy.model_dump_json(),reserved_tokens=0,
-                    state='pending',next_stage='research',created_at=now,updated_at=now)
+                    ledger_json=LongFormCallLedger(brief_sha256=key,research_required=research_required).model_dump_json(),token_policy_json=policy.model_dump_json(),reserved_tokens=0,
+                    state='pending',next_stage='research' if research_required else 'capture_sources',created_at=now,updated_at=now)
                 db.add(row);self._event(db,row,'preparation_created',actor)
             else:self._event(db,row,'duplicate_preparation_reused',actor)
             db.commit();return self.get(row.id)
@@ -212,6 +212,8 @@ class LongFormWritingRepository:
                 original=original if isinstance(original,str) else json_text(original)
                 if message.rejected_output!=original or message.local_rejection!=(row.message,):raise WritingConflict('Raw repair input differs from the recorded rejected output/reason')
             expected_source=sha(row.source_packet_json) if row.source_packet_json else None
+            if not ledger.research_required and message.stage=='draft' and expected_source is None:
+                raise WritingConflict('Capture the supplied primary pages before reserving a draft')
             if message.source_packet_sha256!=expected_source:raise WritingConflict('Stage source packet identity changed')
             ordinal=len(ledger.calls)+1;expected=f'lf2-{row.id}-call-{ordinal}'
             if message.call_id!=expected:raise WritingConflict('Call ID must preserve the durable reservation order')
@@ -271,20 +273,26 @@ class LongFormWritingRepository:
         encoded=json_text(packet);validate_request_source_packet(request,encoded.encode())
         with self.sessions() as db:
             db.execute(text('BEGIN IMMEDIATE'));row=self._owned(db,claim)
-            call=db.scalar(select(Call).where(Call.run_id==row.id,Call.stage=='research'))
-            if call is None or call.state!='succeeded':raise WritingConflict('Primary-source capture requires finished research')
-            from tubeforge.providers.content.research import ResearchResult
-            response=json.loads(call.response_json);result=response.get('result',response)
-            research=ResearchResult.model_validate(result.get('output'))
-            if research.status!='ready' or result.get('provenance',{}).get('web_searches',0)<1:
-                raise WritingConflict('Primary-source capture requires a completed research result with actual search evidence')
-            known={(s.source_id,s.url) for s in research.sources}
+            initial=ContentRequest.model_validate_json(row.initial_request_json)
+            ledger=LongFormCallLedger.model_validate_json(row.ledger_json)
+            if ledger.research_required:
+                call=db.scalar(select(Call).where(Call.run_id==row.id,Call.stage=='research'))
+                if call is None or call.state!='succeeded':raise WritingConflict('Primary-source capture requires finished research')
+                from tubeforge.providers.content.research import ResearchResult
+                response=json.loads(call.response_json);result=response.get('result',response)
+                research=ResearchResult.model_validate(result.get('output'))
+                if research.status!='ready' or result.get('provenance',{}).get('web_searches',0)<1:
+                    raise WritingConflict('Primary-source capture requires a completed research result with actual search evidence')
+                known={(s.source_id,s.url) for s in research.sources}
+            else:
+                if ledger.calls or packet.get('retrieval_mode')!='lf2_operator_primary_capture':
+                    raise WritingConflict('Supplied primary pages must be captured before model calls')
+                known={(s.source_id,str(s.url)) for s in initial.sources}
             if len(request.sources)<2 or any((s.source_id,str(s.url)) not in known for s in request.sources):
-                raise WritingConflict('Captured sources differ from the immutable research result')
+                raise WritingConflict('Captured sources differ from the immutable source leads')
             if row.source_packet_json is not None:
                 if row.source_packet_json!=encoded or row.request_json!=request.model_dump_json():raise WritingConflict('Captured source packet is immutable')
                 return
-            initial=ContentRequest.model_validate_json(row.initial_request_json)
             if request.model_dump(exclude={'sources'})!=initial.model_dump(exclude={'sources'}):raise WritingConflict('Research cannot rewrite the canonical brief')
             row.source_packet_json=encoded;row.request_json=request.model_dump_json();row.next_stage='draft';row.updated_at=self.clock()
             self._event(db,row,'primary_sources_captured',row.claim_owner,source_packet_sha256=sha(encoded));db.commit()

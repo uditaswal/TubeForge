@@ -160,9 +160,12 @@ def check_delayed_cancellation(page, runtime):
     from playwright.sync_api import expect
 
     page.locator('#lfTopic').fill('Synthetic pending cancellation')
+    page.get_by_text('Use your own primary sources', exact=True).click()
+    page.locator('#lfPrimaryUrls').fill('https://example.com/primary\nhttps://example.org/primary')
     page.locator('#lfCreate').click()
     expect(page.locator('#lfTitle')).to_have_text('Synthetic pending cancellation')
     expect(page.locator('#lfState')).to_have_text('Queued')
+    expect(page.locator('#lfMessage')).to_have_text('Next: capture supplied primary pages.')
     run_id = runtime.long_form_writing.repository.list()[0]['id']
     pattern = '**/api/long-form/' + run_id
     held = []
