@@ -116,17 +116,19 @@ def invoke_claude(message):
     try:
         runner.BUDGET.check()
         command=runner.build_command(output_schema(message.stage),model=model,effort=limits['effort'],web_search=message.stage=='research',system_prompt=SYSTEM_PROMPT)
-        command.extend(['--max-turns',str(limits['max_turns'])])
+        if limits['max_turns'] is not None:
+            command.extend(['--max-turns',str(limits['max_turns'])])
     except (BudgetExceededError,runner.RunnerUnavailableError) as error:
         raise LongFormInvocationError('Claude stage refused before launch',dict(output=None,raw_output=None,usage=None,provenance=provenance,invocation_started=False,
             error_code='quota_exhausted' if isinstance(error,BudgetExceededError) else 'runner_unavailable',error='Claude allowance or executable unavailable; no invocation launched.')) from error
     runner.BUDGET.record(usd=None,label='lf2 launch')
-    environment = {
-        **os.environ,
-        'CLAUDE_CODE_EFFORT_LEVEL': limits['effort'],
-        'CLAUDE_CODE_MAX_OUTPUT_TOKENS': str(limits['max_output_tokens']),
-        'MAX_STRUCTURED_OUTPUT_RETRIES': str(limits['structured_output_attempts']),
-    }
+    environment = os.environ.copy()
+    if message.stage != 'research':
+        environment.update(
+            CLAUDE_CODE_EFFORT_LEVEL=limits['effort'],
+            CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(limits['max_output_tokens']),
+            MAX_STRUCTURED_OUTPUT_RETRIES=str(limits['structured_output_attempts']),
+        )
     with tempfile.TemporaryDirectory(prefix='tubeforge-claude-lf2-') as folder:
         try:
             completed=subprocess.run(command,input=prompt.encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd=folder,timeout=runner.TIMEOUT_SECONDS,check=False,env=environment)

@@ -27,9 +27,9 @@ def claude_stage_limits(message):
     research = message.stage == 'research'
     return {
         'effort': 'high' if message.request.script_model == 'opus' else 'medium' if research else 'low',
-        'max_turns': 6 if research else 2,
-        'max_output_tokens': stage_output_limit(message),
-        'structured_output_attempts': 1,
+        'max_turns': None if research else 2,
+        'max_output_tokens': None if research else stage_output_limit(message),
+        'structured_output_attempts': None if research else 1,
     }
 
 
