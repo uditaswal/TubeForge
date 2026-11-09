@@ -5,6 +5,7 @@ import hashlib
 import json
 
 from tubeforge.long_form.wire import draft_context
+from tubeforge.domain.long_form import LongFormChapter
 from tubeforge.domain.long_form_writing import LongFormDraftResult,LongFormHostRequest,LongFormReviewResult,PROFILE
 from tubeforge.providers.content.research import ResearchResult
 from tubeforge.providers.content.youtube_skills import load_resources
@@ -26,8 +27,13 @@ def output_schema(stage):
             if field in package.get('required',[]):package['required'].remove(field)
         for field in ('terminal_cues','card_cues','teaching_cues'):
             schema['$defs']['ScenePlan']['properties'].pop(field,None)
+        schema['$defs']['ScenePlan']['properties']['visual_elements']['description'] = (
+            'For comparison, flow_diagram, timeline or source_card, provide exactly three short display elements. '
+            'Use an ordinary descriptive visual type when a scene only needs two panels or a simple illustration.'
+        )
         for field in ('review_status','human_review_required'):
             schema['$defs']['CitedClaim']['properties'].pop(field,None)
+        schema['$defs']['VideoMetadata']['properties'].pop('chapters',None)
     # Remove unused canonical-request/Short definitions instead of paying to echo
     # application-owned evidence in both the schema and the model's output.
     definitions=schema.get('$defs',{});used=set()
@@ -87,8 +93,11 @@ def build_prompt(message:LongFormHostRequest):
         instructions=(f'Apply {PROFILE}: 16:9, {request.target_duration_seconds} seconds, {minimum}–{maximum} spoken narration words. '
             'yt-script is the sole narration authority. The attached long-form scope overrides all Short-only scene/word/loop/portrait rules. '
             'Write one original, coherent grounded script and exact chapter groups, five distinct hooks, ten titles and two or three substantive improvements. '
+            'Provide chapters once in the top-level groups; TubeForge derives the video metadata chapter labels from them. '
             'The reference is context only; primary-source excerpts support claims. Do not echo application-owned request, hashes, usage or approval. '
             'Keep narration separate from scene direction, citations and scores. Return insufficient_sources if evidence cannot support the promise. '
+            'Give each scene one concise teaching direction. Use a plain descriptive visual type for simple illustrations or two-panel comparisons. '
+            'The explicit comparison, flow_diagram, timeline and source_card types each require exactly three short visual_elements. '
             'Follow the supplied output schema. Do not call tools, fetch URLs or run local files during narration; Python scores candidates afterward.')
         if message.stage=='repair':
             instructions+=' This is the final narration attempt: address the supplied review defects in one coherent replacement; no further automatic retry is allowed.'
@@ -107,6 +116,15 @@ def bind_draft(raw,request):
         if 'request' in package and package['request']!=request.model_dump(mode='json'):
             raise ValueError('writer changed the application-owned request')
         package['request']=request.model_dump(mode='json');raw={**raw,'package':package}
+        metadata=package.get('metadata')
+        chapters=raw.get('chapters')
+        if isinstance(metadata,dict) and 'chapters' not in metadata and isinstance(chapters,list):
+            # Validate groups before indexing their first section. The canonical
+            # envelope still verifies order and exact section coverage.
+            groups=[LongFormChapter.model_validate(group) for group in chapters]
+            package['metadata']={**metadata,'chapters':[
+                {'section_id':group.section_ids[0],'label':group.title} for group in groups
+            ]}
         if isinstance(package.get('claims'),list):
             bound=[]
             for claim in package['claims']:

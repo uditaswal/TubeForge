@@ -102,6 +102,7 @@ def test_writer_output_never_echoes_sources_and_short_output_resources_are_uncha
     message,draft,_,_=writing_inputs();raw=draft.model_dump(mode='json');raw['package'].pop('request')
     raw['package'].pop('clip_candidates',None)
     raw['package']['metadata']['engagement_comment']=None
+    raw['package']['metadata'].pop('chapters')
     for scene in raw['package']['scene_plans']:
         for field in ('terminal_cues','card_cues','teaching_cues'):scene.pop(field,None)
     for claim in raw['package']['claims']:

@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC,datetime
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -11,7 +12,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from tubeforge.long_form.admission import measure
+from tubeforge.long_form.admission import claude_stage_limits, measure
 from tubeforge.long_form.prompts import build_prompt,output_schema
 from tubeforge.long_form.receipts import HostReceiptStore
 from tubeforge.providers.content.host_runner_protocol import HostRunnerSuccess
@@ -107,20 +108,28 @@ def invoke_codex(message,*,root):
 def invoke_claude(message):
     from tubeforge import host_claude_runner as runner
     from tubeforge.claude_budget import BudgetExceededError
-    model,effort=runner.resolve_model(message)
+    model,_=runner.resolve_model(message)
     if message.resolved_model!=model:raise LongFormRuntimeMismatch('Claude host model differs from the exact reserved model; no invocation launched')
     prompt=build_prompt(message);started=time.monotonic()
-    provenance=dict(provider='host-claude-long-form',model=model,generated_at=datetime.now(UTC).isoformat(),prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest())
+    limits=claude_stage_limits(message)
+    provenance=dict(provider='host-claude-long-form',model=model,generated_at=datetime.now(UTC).isoformat(),prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),claude_cli=limits)
     try:
         runner.BUDGET.check()
-        command=runner.build_command(output_schema(message.stage),model=model,effort=effort,web_search=message.stage=='research',system_prompt=SYSTEM_PROMPT)
+        command=runner.build_command(output_schema(message.stage),model=model,effort=limits['effort'],web_search=message.stage=='research',system_prompt=SYSTEM_PROMPT)
+        command.extend(['--max-turns',str(limits['max_turns'])])
     except (BudgetExceededError,runner.RunnerUnavailableError) as error:
         raise LongFormInvocationError('Claude stage refused before launch',dict(output=None,raw_output=None,usage=None,provenance=provenance,invocation_started=False,
             error_code='quota_exhausted' if isinstance(error,BudgetExceededError) else 'runner_unavailable',error='Claude allowance or executable unavailable; no invocation launched.')) from error
     runner.BUDGET.record(usd=None,label='lf2 launch')
+    environment = {
+        **os.environ,
+        'CLAUDE_CODE_EFFORT_LEVEL': limits['effort'],
+        'CLAUDE_CODE_MAX_OUTPUT_TOKENS': str(limits['max_output_tokens']),
+        'MAX_STRUCTURED_OUTPUT_RETRIES': str(limits['structured_output_attempts']),
+    }
     with tempfile.TemporaryDirectory(prefix='tubeforge-claude-lf2-') as folder:
         try:
-            completed=subprocess.run(command,input=prompt.encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd=folder,timeout=runner.TIMEOUT_SECONDS,check=False)
+            completed=subprocess.run(command,input=prompt.encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd=folder,timeout=runner.TIMEOUT_SECONDS,check=False,env=environment)
         except subprocess.TimeoutExpired as error:
             raise LongFormInvocationError('Claude stage timed out',dict(output=None,**preserved_bytes(error.stdout,kind='cli_response'),usage=None,provenance=provenance,invocation_started=True,error_code='timeout',error='Claude stage timed out; this call will not be launched again.')) from error
         except OSError as error:

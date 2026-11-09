@@ -45,11 +45,18 @@ def test_claude_stage_preserves_global_spend_guard_and_long_form_system_scope(mo
     monkeypatch.setattr(runner,'BUDGET',budget);monkeypatch.setattr(runner,'claude_binary',lambda:'stub-claude')
     def invoke(argv,**kwargs):
         calls.append(argv)
+        assert kwargs['env']['CLAUDE_CODE_EFFORT_LEVEL'] == 'low'
+        assert kwargs['env']['CLAUDE_CODE_MAX_OUTPUT_TOKENS'] == '16000'
+        assert kwargs['env']['MAX_STRUCTURED_OUTPUT_RETRIES'] == '1'
         return SimpleNamespace(returncode=0,stdout=json.dumps({'structured_output':{'synthetic':True},'usage':{'input_tokens':100},'total_cost_usd':0.01}).encode(),stderr=b'')
     monkeypatch.setattr(host.subprocess,'run',invoke)
     evidence=host.invoke_claude(message)
     assert len(calls)==1 and calls[0][calls[0].index('--system-prompt')+1]==host.SYSTEM_PROMPT
     assert calls[0][calls[0].index('--tools')+1]==''
+    limits = host.measure(message)['claude_cli']
+    assert calls[0][calls[0].index('--effort')+1] == limits['effort'] == 'low'
+    assert int(calls[0][calls[0].index('--max-turns')+1]) == limits['max_turns'] == 2
+    assert evidence['provenance']['claude_cli'] == limits
     assert '--max-budget-usd' in calls[0]
     budget.check.assert_called_once_with();assert budget.record.call_count==2
     assert evidence['usage']['input_tokens']==100 and evidence['usage']['total_cost_usd']==0.01
