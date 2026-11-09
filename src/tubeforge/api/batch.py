@@ -89,16 +89,24 @@ def register_batch_routes(app, runtime, build_request):
             items = [item for item in items if item['plan_id'] == plan_id]
         if day:
             items = [item for item in items if (item['short'].get('publish_at') or '')[:10] == day.isoformat()]
+        from tubeforge.api.batch_stage import stage_for
         for item in items:
             item['qa'] = None
+            item['thumbnail_url'] = None
             if item['job_id']:
                 job = runtime.jobs.get(item['job_id'])
                 item['status'] = job.state.value
                 item['failure_message'] = job.failure_message
                 if job.failure_message and 'exhaust' in job.failure_message.lower():
                     item['status'] = 'needs operator decision'
-                item['qa'] = (repository.for_job(job.id) or {}).get('batch_qa')
+                options = repository.for_job(job.id) or {}
+                item['qa'] = options.get('batch_qa')
+                item['review_state'] = (options.get('batch_review') or {}).get('state')
+                if any(a.name == 'thumbnail' for a in runtime.artifacts.list_for_job(job.id)):
+                    item['thumbnail_url'] = f'/api/jobs/{job.id}/artifacts/thumbnail'
                 item['activity_url'] = f'/api/jobs/{job.id}/events'
+        for item in items:
+            item['stage'] = stage_for(item['status'] if item['job_id'] else None, item.get('review_state'))
         finished = [item for item in items if item['status'] == 'final_ready']
         durations = []
         for item in finished:
