@@ -138,7 +138,7 @@ def operator_script_clause(request: ContentRequest) -> str:
     return (" OPERATOR SCRIPT: the operator wrote the narration in request.operator_script. Use it as the narration: keep its wording, order and meaning, "
             "split it into scenes of 8-15 words (blank lines mark the operator's scene breaks), and change words only to fix grammar, spoken-form symbols or the length. "
             f"If it has more than {budget['max']} words, cut the least important sentences; if under {budget['aim_low']}, fill gaps only with short source-supported sentences in the same voice. "
-            "Do not add facts, numbers or claims the sources do not support, and cite a source for every claim the script makes. The hook-scoring rules below still apply to scene 1: tighten it only as much as needed. ")
+            "Do not add facts, numbers or claims the sources do not support, and cite a source for every claim the script makes. If a scene breaks the numbers rule (more than two spoken numbers, or three in one sentence), round or drop figures in that scene only and keep the rest of the wording. The hook-scoring rules below still apply to scene 1: tighten it only as much as needed. ")
 
 
 def narration_word_limits(request: ContentRequest) -> tuple[int, int]:
