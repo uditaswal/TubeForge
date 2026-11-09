@@ -11,8 +11,13 @@ quickjs = pytest.importorskip('quickjs')
 DOM = r'''
 class Element {
  constructor(tag='div'){this.tagName=tag;this.children=[];this.dataset={};this.value='';this.textContent='';this.disabled=false;this._html='';this.files=[];}
- append(...items){this.children.push(...items);}
- replaceChildren(...items){this.children=[...items];}
+ setAttribute(name,value){this[name]=value;}
+ focus(){}
+ append(...items){for(const it of items){if(it instanceof Element)it.parentNode=this;this.children.push(it);}}
+ replaceChildren(...items){this.children=[];this.append(...items);}
+ get nextSibling(){const p=this.parentNode;return p?(p.children[p.children.indexOf(this)+1]||null):null;}
+ removeChild(c){this.children=this.children.filter(x=>x!==c);c.parentNode=null;return c;}
+ insertBefore(n,ref){n.parentNode=this;this.children.splice(this.children.indexOf(ref),0,n);return n;}
  set innerHTML(value){this._html=value;}
  get innerHTML(){return this._html;}
  querySelectorAll(selector){let result=[];function walk(el,inside){inside=inside||el.id==='actions';for(const child of el.children){if(!(child instanceof Element))continue;if(selector==='#actions button'&&inside&&child.tagName==='button')result.push(child);walk(child,inside);}}walk(this,false);return result;}

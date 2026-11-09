@@ -143,6 +143,9 @@ def test_review_javascript_saves_confirmed_transitions_and_keeps_player(review):
     run('detail.querySelectorAll("#actions button")[3].onclick()')
     assert snapshot(client)['state'] == 'ready'
     run('detail.querySelectorAll("#actions button")[1].onclick()')
+    assert snapshot(client)['state'] == 'ready'  # Reject only asks for confirmation first
+    assert context.eval('detail.children.some(x=>x.id==="confirmBar")')
+    run('detail.children.find(x=>x.id==="confirmBar").children[1].children[0].onclick()')
     assert snapshot(client)['decision'] == 'rejected'
 
 
@@ -302,3 +305,24 @@ def test_plans_stage_chip_follows_identity_checked_review_state(review):
     assert saved == 'ready'
     item = plan_item()
     assert item['stage'] == 'needs_review' and item['review_state'] == 'needs_review'
+
+
+def test_reject_and_regenerate_need_confirmation_and_cancel_changes_nothing(review):
+    from test_batch_ui_runtime import runtime
+    client, backend, repo, job_id, root = review
+    context, run = runtime(client, client.get('/batch/review').text)
+    assert 'id="confirmBar"' not in client.get('/batch/review').text  # created on demand, not static
+    run('list.children[0].children[0].onclick()')
+    for index, label in [(1, 'Reject'), (2, 'Regenerate')]:
+        run(f'detail.querySelectorAll("#actions button")[{index}].onclick()')
+        bar = 'detail.children.find(x=>x.id==="confirmBar")'
+        assert context.eval(f'{bar}.children[0].textContent.length > 20')
+        assert context.eval(f'{bar}.children[1].children[0].textContent') == f'Confirm {label.lower()}'
+        run(f'{bar}.children[1].children[1].onclick()')  # Cancel
+        assert not context.eval('detail.children.some(x=>x.id==="confirmBar")')
+        assert snapshot(client)['decision'] is None
+    assert repo.for_job(job_id) is not None and backend.jobs.get(job_id).state == JobState.FINAL_READY
+    # Confirming regenerate creates the new generation
+    run('detail.querySelectorAll("#actions button")[2].onclick()')
+    run('detail.children.find(x=>x.id==="confirmBar").children[1].children[0].onclick()')
+    assert context.eval('notice.textContent.includes("New job created")')
