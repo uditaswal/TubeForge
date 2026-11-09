@@ -15,7 +15,33 @@ The installed socket answered but rejected the LF2 preflight operation as an unk
 
 The wheel is `artifacts/review/long-form-lf2-d-codex/tubeforge-0.1.0-py3-none-any.whl`, SHA-256 `94faf811f5f1c7d33b38e5e852e56110bfd27bbeb1d92476d03373f18c0d96cf`. This preparation used zero model calls. Local admission is separate from observed provider usage and cannot predict the five-hour allowance.
 
-For the host administrator, use the existing root-owned service deployment steps to install the reviewed wheel and its tokenizer dependency, prime the tokenizer cache and install the updated service unit. Retain the pinned Codex runtime, dedicated account, socket and existing receipts. Restart the Codex service when idle and verify the dedicated CLI uses subscription authentication. The pilot uses an isolated preparation DB and needs no production queue migration for this trial. [Host deployment and tokenizer setup](deploy/codex-runner-runtime.md#long-form-preparation)
+The operator approved the host update and this exact 100,000-unit pilot. The host requires an interactive administrator password. Run the following from the repository root once the restricted service is idle. The existing pinned runtime, dedicated account, socket and receipts are retained. The pilot uses an isolated preparation database.
+
+```bash
+pilot_wheel=artifacts/review/long-form-lf2-d-codex/tubeforge-0.1.0-py3-none-any.whl
+runner_venv=/opt/tubeforge-codex-runner/venv
+runner_cache=/opt/tubeforge-codex-runner/tokenizer-cache
+printf '%s  %s\n' '94faf811f5f1c7d33b38e5e852e56110bfd27bbeb1d92476d03373f18c0d96cf' "$pilot_wheel" | sha256sum -c &&
+sudo "$runner_venv/bin/python" -m pip install 'tiktoken>=0.12,<1' &&
+sudo "$runner_venv/bin/python" -m pip install --force-reinstall --no-deps "$pilot_wheel" &&
+sudo install -d -o root -g root -m 0755 "$runner_cache" &&
+sudo env TIKTOKEN_CACHE_DIR="$runner_cache" "$runner_venv/bin/python" -c "import tiktoken; tiktoken.get_encoding('o200k_base')" &&
+sudo chmod -R a+rX "$runner_cache" &&
+sudo install -o root -g root -m 0644 docs/deploy/tubeforge-codex-runner.service /etc/systemd/system/tubeforge-codex-runner.service &&
+sudo systemctl daemon-reload &&
+sudo systemctl try-restart tubeforge-codex-runner.service
+```
+
+Verify that the dedicated CLI reports a ChatGPT subscription login:
+
+```bash
+runner_runtime=/opt/tubeforge-codex-runner/codex-runtime
+sudo -u tubeforge-codex env CODEX_HOME=/var/lib/tubeforge-codex/.codex \
+  PATH="$runner_runtime/node/bin:/usr/bin:/bin" "$runner_runtime/node/bin/node" \
+  "$runner_runtime/lib/node_modules/@openai/codex/bin/codex.js" login status
+```
+
+[Host deployment and tokenizer setup](deploy/codex-runner-runtime.md#long-form-preparation)
 
 After the update, run the no-generation socket preflight from the checkout:
 
@@ -23,4 +49,4 @@ After the update, run the no-generation socket preflight from the checkout:
 .venv-benchmark/bin/python -I artifacts/review/long-form-lf2-d-codex/preflight_installed.py
 ```
 
-The expected result is exact model, request, admission and resource agreement. The live trial requires authorization for this specific brief and budget. Acceptance then requires the real draft and independent review, checked arithmetic and grounding, local hook and title scores and observed usage.
+The expected result is exact model, request, admission and resource agreement. After the matching preflight and dedicated subscription check, the approved launcher accepts `--run-approved-subscription-pilot` for this exact brief and budget. Acceptance then requires the real draft and independent review, checked arithmetic and grounding, local hook and title scores and observed usage.
