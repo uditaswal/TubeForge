@@ -103,11 +103,19 @@ def test_writer_output_never_echoes_sources_and_short_output_resources_are_uncha
     raw['package'].pop('clip_candidates',None)
     raw['package']['metadata']['engagement_comment']=None
     raw['package']['metadata'].pop('chapters')
+    for section in raw['package']['script_sections']:
+        section.pop('scene_id')
     for scene in raw['package']['scene_plans']:
-        for field in ('terminal_cues','card_cues','teaching_cues'):scene.pop(field,None)
+        for field in ('scene_id','search_queries','fallback_visual','terminal_cues','card_cues','teaching_cues'):scene.pop(field,None)
     for claim in raw['package']['claims']:
         claim.pop('review_status');claim.pop('human_review_required')
-    assert bind_draft(raw,message.request)==draft
+    bound=bind_draft(raw,message.request)
+    assert [section.narration for section in bound.package.script_sections] == [section.narration for section in draft.package.script_sections]
+    assert bound.chapters == draft.chapters
+    assert [section.scene_id for section in bound.package.script_sections] == [scene.scene_id for scene in bound.package.scene_plans]
+    assert all(scene.search_queries == (scene.visual_subject,) for scene in bound.package.scene_plans)
+    with pytest.raises(ValueError,match='one-to-one'):
+        bind_draft({**raw,'package':{**raw['package'],'scene_plans':raw['package']['scene_plans'][:-1]}},message.request)
     jsonschema.validate(raw,output_schema('draft'))
     assert 'ContentRequest' not in output_schema('draft')['$defs']
     assert 'reference_short' not in output_schema('draft')['$defs']['ContentPackage']['properties']

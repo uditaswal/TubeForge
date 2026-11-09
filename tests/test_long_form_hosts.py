@@ -118,7 +118,7 @@ def test_codex_failure_retains_rejected_bytes_before_workspace_cleanup(monkeypat
     assert not workspaces[-1].exists()
 
 
-@pytest.mark.parametrize('failure',['malformed','timeout','oversized','error_envelope'])
+@pytest.mark.parametrize('failure',['malformed','timeout','oversized','error_envelope','zero_usage_error'])
 def test_claude_failure_retains_bounded_original_evidence(monkeypatch,failure):
     import hashlib,subprocess
     from tubeforge import host_claude_runner as runner
@@ -126,6 +126,8 @@ def test_claude_failure_retains_bounded_original_evidence(monkeypatch,failure):
     raw=b'incomplete rejected CLI response'
     if failure=='error_envelope':
         raw=b'{"is_error":true,"subtype":"error_max_turns","errors":["No structured response"],"usage":{"input_tokens":100}}'
+    if failure=='zero_usage_error':
+        raw=b'{"is_error":true,"subtype":"error_max_structured_output_retries","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}'
     monkeypatch.setattr(runner,'BUDGET',Mock(max_usd_per_call=1.50));monkeypatch.setattr(runner,'claude_binary',lambda:'stub-claude')
     if failure=='oversized':monkeypatch.setattr(runner,'MAX_OUTPUT_BYTES',1)
     def invoke(*args,**kwargs):
@@ -139,6 +141,8 @@ def test_claude_failure_retains_bounded_original_evidence(monkeypatch,failure):
     if failure=='error_envelope':
         assert evidence['raw_output_kind']=='cli_response'
         assert evidence['usage']['input_tokens']==100
+    if failure=='zero_usage_error':
+        assert evidence['usage'] is None
 
 
 def test_prepared_model_cannot_change_on_host_restart_before_launch(tmp_path):

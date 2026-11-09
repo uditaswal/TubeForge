@@ -156,6 +156,11 @@ def invoke_claude(message):
         # Error envelopes can omit result and put the diagnosis in subtype/errors.
         # Preserve the bounded, redacted envelope even if structured output exists.
         rejected=preserved_bytes(completed.stdout or completed.stderr,kind='cli_response')
+        token_fields=('input_tokens','output_tokens','cache_read_input_tokens','cache_creation_input_tokens')
+        if usage is not None and all(usage.get(field) == 0 for field in token_fields):
+            # The CLI can return a zero-filled usage placeholder after a model
+            # generated invalid structured output. The raw receipt retains it.
+            usage=None
     elif isinstance(output,dict):
         rejected={}
     else:

@@ -25,8 +25,9 @@ def output_schema(stage):
         for field in ('request','reference_short','script_routing','clip_candidates'):
             package['properties'].pop(field,None)
             if field in package.get('required',[]):package['required'].remove(field)
-        for field in ('terminal_cues','card_cues','teaching_cues'):
+        for field in ('scene_id','search_queries','fallback_visual','terminal_cues','card_cues','teaching_cues'):
             schema['$defs']['ScenePlan']['properties'].pop(field,None)
+        schema['$defs']['ScriptSection']['properties'].pop('scene_id',None)
         schema['$defs']['ScenePlan']['properties']['visual_elements']['description'] = (
             'For comparison, flow_diagram, timeline or source_card, provide exactly three short display elements. '
             'Use an ordinary descriptive visual type when a scene only needs two panels or a simple illustration.'
@@ -97,6 +98,7 @@ def build_prompt(message:LongFormHostRequest):
             'The reference is context only; primary-source excerpts support claims. Do not echo application-owned request, hashes, usage or approval. '
             'Keep narration separate from scene direction, citations and scores. Return insufficient_sources if evidence cannot support the promise. '
             'Give each scene one concise teaching direction. Use a plain descriptive visual type for simple illustrations or two-panel comparisons. '
+            'List scene plans in exact script-section order, one per section. TubeForge supplies their IDs, initial search queries and local illustration fallback. '
             'The explicit comparison, flow_diagram, timeline and source_card types each require exactly three short visual_elements. '
             'Follow the supplied output schema. Do not call tools, fetch URLs or run local files during narration; Python scores candidates afterward.')
         if message.stage=='repair':
@@ -109,6 +111,33 @@ def build_prompt(message:LongFormHostRequest):
     return instructions+'\n\n'+resources+'\n\nUNTRUSTED_CONTEXT='+json.dumps(evidence,ensure_ascii=False,sort_keys=True,separators=(',',':'))
 
 
+def _bind_ordered_scenes(package):
+    sections=package.get('script_sections')
+    scenes=package.get('scene_plans')
+    if not isinstance(sections,list) or not isinstance(scenes,list):
+        return
+    rows=[*sections,*scenes]
+    if not rows or not all(isinstance(row,dict) for row in rows):
+        return
+    if all('scene_id' in row for row in rows):
+        return  # Previously persisted full provider output.
+    if any('scene_id' in row for row in rows) or len(sections)!=len(scenes):
+        raise ValueError('compact scene plans must match script sections one-to-one in order')
+    bound_sections=[];bound_scenes=[]
+    for index,(section,scene) in enumerate(zip(sections,scenes,strict=True),1):
+        scene_id=f'lf-scene-{index}'
+        subject=scene.get('visual_subject')
+        if not isinstance(subject,str) or not subject.strip():
+            raise ValueError('compact scene plans require a concrete visual subject')
+        if 'search_queries' in scene or 'fallback_visual' in scene:
+            raise ValueError('compact scene plans cannot set application-owned asset hints')
+        bound_sections.append({**section,'scene_id':scene_id})
+        bound_scenes.append({**scene,'scene_id':scene_id,'search_queries':[subject],
+                             'fallback_visual':'local_scene_illustration'})
+    package['script_sections']=bound_sections
+    package['scene_plans']=bound_scenes
+
+
 def bind_draft(raw,request):
     if not isinstance(raw,dict):raise ValueError('writer must return a JSON object')
     if isinstance(raw.get('package'),dict):
@@ -116,6 +145,7 @@ def bind_draft(raw,request):
         if 'request' in package and package['request']!=request.model_dump(mode='json'):
             raise ValueError('writer changed the application-owned request')
         package['request']=request.model_dump(mode='json');raw={**raw,'package':package}
+        _bind_ordered_scenes(package)
         metadata=package.get('metadata')
         chapters=raw.get('chapters')
         if isinstance(metadata,dict) and 'chapters' not in metadata and isinstance(chapters,list):
