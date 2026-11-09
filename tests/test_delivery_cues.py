@@ -231,3 +231,34 @@ def test_synthesis_inserts_the_gaps_and_keeps_alignment_text(tmp_path, monkeypat
     _FakeKokoro.calls = []
     prepare.synthesize(topic, off, tmp_path, "af_bella")
     assert len(_FakeKokoro.calls) == 1                                  # no gaps, one synthesis call, as before
+
+
+def _whisper_run(tmp_path, monkeypatch, whisper_setting):
+    monkeypatch.setattr(prepare, "KokoroVoiceProvider", _FakeKokoro)
+    monkeypatch.setattr(prepare, "PiperVoiceProvider", lambda settings: None)
+    monkeypatch.setattr(prepare, "file_hash", lambda path: "h")
+    settings = _settings("cues-v1")
+    if whisper_setting is not None:
+        settings.pipeline.reference_short.delivery_whisper = whisper_setting
+    cues = (Cue(kind="whisper", at=2, end=5), Cue(kind="pause", at=6, seconds=0.5))
+    _FakeKokoro.calls = []
+    prepare.synthesize(_topic(tmp_path, cues), settings, tmp_path, "af_bella")
+    return list(_FakeKokoro.calls)
+
+
+def test_whisper_cues_are_spoken_plainly_by_default_but_other_cues_still_apply(tmp_path, monkeypatch):
+    calls = _whisper_run(tmp_path, monkeypatch, None)
+    assert all(scale is None for _, scale in calls)  # no whisper-speed (0.9) render
+    assert [text for text, _ in calls] == ["It was quiet and nobody noticed", "the failure until Friday."]  # the pause cue still splits
+
+
+def test_whisper_cues_are_honoured_only_when_explicitly_enabled(tmp_path, monkeypatch):
+    calls = _whisper_run(tmp_path, monkeypatch, "on")
+    assert ("quiet and nobody", "0.90") in calls
+
+
+def test_whisper_setting_defaults_to_off_in_config_and_production_yaml():
+    from pathlib import Path
+    from tubeforge.core.config import ReferenceShortConfig, load_settings
+    assert ReferenceShortConfig().delivery_whisper == "off"
+    assert load_settings(Path("config/production.yaml")).pipeline.reference_short.delivery_whisper == "off"

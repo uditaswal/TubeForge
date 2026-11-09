@@ -678,6 +678,9 @@ class ReferenceShortConfig(BaseModel):
     voice_processing: Literal["off", "gentle-v1"] = "off"
     # Honour pause/breath/stress/whisper cues bound from the narration; scenes without cues are unaffected.
     delivery_cues: Literal["off", "cues-v1"] = "cues-v1"
+    # The [whisper] cue is disabled: its noise re-excitation removes the voice entirely and sounded wrong to the
+    # operator (9 Nov 2026). While "off", whisper cues in a script are spoken as plain speech. See docs/HANDOFF.md.
+    delivery_whisper: Literal["off", "on"] = "off"
     # Advisory transcription check of the synthesised voice (reuses the alignment model); never fails a job.
     pronunciation_check: Literal["off", "advisory"] = "advisory"
     # A short silence before and after spelled-out acronyms so the letters stay intelligible.
