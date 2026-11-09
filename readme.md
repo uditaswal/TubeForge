@@ -90,13 +90,14 @@ python -m pytest
 
 Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment`, `local-media`).
 
-LF2 local script admission is under implementation ([plan](docs/long-form-lf2-plan.md), [phase A evidence](docs/long-form-lf2-a-review.md)); no long-form production job is enabled yet. The declared `tiktoken` dependency measures local plain text/schema only. The setup command above primes its public vocabulary once. Docker primes a readable `/opt/tubeforge/tokenizer-cache` at build time; host runners need their own explicit cache setup ([deployment instructions](docs/deploy/codex-runner-runtime.md#long-form-preparation)). Runtime preflight checks the vocabulary hash and fails closed when it is missing or corrupt rather than downloading implicitly. These measurements do not reveal remaining Codex/Claude subscription allowance.
+Long-form script preparation is available in the reviewed branch through **Long-form scripts**. It takes an exact ready reference revision through drafting and operator review. Landscape rendering is a separate phase. See the [Studio workflow](docs/operations/long-form-scripts.md) and [LF2 plan](docs/long-form-lf2-plan.md). The declared `tiktoken` dependency measures local plain text/schema only. The setup command above primes its public vocabulary once. Docker primes a readable `/opt/tubeforge/tokenizer-cache` at build time; host runners need their own explicit cache setup ([deployment instructions](docs/deploy/codex-runner-runtime.md#long-form-preparation)). Runtime preflight checks the vocabulary hash and fails closed when it is missing or corrupt rather than downloading implicitly. These measurements do not reveal remaining Codex/Claude subscription allowance.
 
 ## Documentation
 
 | Topic | Where |
 | --- | --- |
 | Reference-video intake: link, metadata, captions and supplied transcript | [Operator workflow](docs/operations/reference-intake.md) |
+| Prepare and review a 10–15-minute script | [Studio workflow](docs/operations/long-form-scripts.md) |
 | Planned 10–15-minute video generation (not enabled) | [Implementation plan](docs/long-form-reference-video-plan.md) |
 | Long-form editorial design and local contract evidence | [Editorial proposal](docs/long-form-editorial-proposal.md), [LF0 acceptance](docs/long-form-lf0-acceptance.md) |
 | Index | [docs/README.md](docs/README.md) |

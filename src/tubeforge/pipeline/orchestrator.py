@@ -208,6 +208,8 @@ class PipelineOrchestrator:
                 return job
 
     def _run_stage(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None = None) -> None:
+        if job.request.prompt_version == "m6-content-long-v1":
+            raise ProviderValidationError("Use the long-form script preparation workflow. Landscape rendering is a separate phase.")
         if job.state is JobState.TOPIC_CREATED:
             if job.request.production_mode != "source_clip" and job.request.prompt_version in self.retired_prompt_versions:
                 raise ProviderValidationError(f"the {job.request.prompt_version} video format is retired; create a new video with a current preset")

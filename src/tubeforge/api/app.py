@@ -271,6 +271,8 @@ def _with_page_text(source: SourceReference) -> SourceReference:
 
 
 def _reject_retired_format(request: ContentRequest, settings: Settings) -> None:
+    if request.prompt_version == "m6-content-long-v1":
+        raise HTTPException(status_code=422, detail="Long-form scripts use the dedicated preparation/review workflow; long-form rendering is not enabled.")
     if request.production_mode != "source_clip" and request.prompt_version in settings.pipeline.video_generation.retired_prompt_versions:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"the {request.prompt_version} video format is retired; use a current preset")
 
@@ -1046,6 +1048,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_batch_routes(app, runtime, batch_request)
     from tubeforge.api.reference_intake import register_reference_routes
     register_reference_routes(app, runtime, application_settings)
+    from tubeforge.api.long_form import register_long_form_routes
+    register_long_form_routes(app, runtime, application_settings)
 
     @app.post("/api/jobs", status_code=status.HTTP_201_CREATED, tags=["jobs"])
     def create_job(request: ContentRequest) -> dict[str, object]:

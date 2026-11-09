@@ -109,6 +109,18 @@ class LongFormWritingRepository:
             review_sha256=sha(row.review_json) if row.review_json else None,reviewed_draft_sha256=row.reviewed_draft_sha256)
         decisions=db.scalars(select(Decision).where(Decision.run_id==row.id).order_by(Decision.created_at)).all()
         events=db.scalars(select(Event).where(Event.run_id==row.id).order_by(Event.id.desc()).limit(60)).all()
+        # Editorial outcomes remain visible even after routine worker events roll
+        # out of the recent activity feed. Each run has at most two draft calls.
+        draft_events=db.scalars(select(Event).where(Event.run_id==row.id,
+            Event.event.in_(['draft_captured','draft_rejected'])).order_by(Event.id)).all()
+        outcomes={}
+        for event in draft_events:
+            details=json.loads(event.details_json)
+            call_id=details.get('call_id')
+            if event.event=='draft_rejected':
+                outcomes[call_id]=dict(disposition='rejected',reason=details.get('reason'))
+            else:
+                outcomes[call_id]=dict(disposition='current' if call_id==row.draft_call_id else 'superseded',reason=None)
         return dict(id=row.id,state=row.state,next_stage=row.next_stage,message=row.message,brief_sha256=row.brief_sha256,
             intake_id=row.intake_id,intake_revision=row.intake_revision,request=json.loads(row.request_json),reference=json.loads(row.reference_json),
             source_packet=packet,reference_snapshot_sha256=row.reference_sha256,draft=json.loads(row.draft_json) if row.draft_json else None,
@@ -118,7 +130,7 @@ class LongFormWritingRepository:
             review_identity=sha(json_text(bundle)) if row.draft_json else None,
             ledger=ledger.model_dump(mode='json'),usage=summarize_usage(ledger),token_policy=policy.model_dump(mode='json'),reserved_tokens=row.reserved_tokens,
             expected_model=row.expected_model,
-            calls=[self._call_view(c) for c in calls],decisions=[dict(decision=d.decision,actor=d.actor,draft_sha256=d.draft_sha256,created_at=d.created_at.replace(tzinfo=UTC).isoformat()) for d in decisions],
+            calls=[{**self._call_view(c),'draft_outcome':outcomes.get(c.id)} for c in calls],decisions=[dict(decision=d.decision,actor=d.actor,draft_sha256=d.draft_sha256,review_identity=d.review_identity,created_at=d.created_at.replace(tzinfo=UTC).isoformat()) for d in decisions],
             activity=[dict(event=e.event,actor=e.actor,details=json.loads(e.details_json),created_at=e.created_at.replace(tzinfo=UTC).isoformat()) for e in reversed(events)])
 
     def get(self,run_id):

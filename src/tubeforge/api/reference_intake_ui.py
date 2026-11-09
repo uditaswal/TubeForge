@@ -29,7 +29,7 @@ MAIN='''<main class="shell"><div class="studio-page-head"><div><h1>Reference vid
 <section class="panel reference-history"><h2>Capture history</h2><p id="historyNotice" role="status" class="reference-meta">Loading saved references…</p><ul id="referenceList" class="reference-list"></ul><button type="button" id="reloadReferences" class="secondary">Refresh history</button></section>
 <section id="referenceDetail" class="panel reference-detail" aria-label="Reference details"><p id="detailNotice" class="reference-error" role="status"></p>
 <div id="emptyReference"><h2>No reference selected</h2><p class="reference-meta">Paste a public link to capture its title and transcript, or open a saved reference.</p></div>
-<div id="selectedReference" hidden><span id="referenceState" class="reference-state"></span><h2 id="referenceTitle" class="reference-title"></h2><p id="referenceMeta" class="reference-meta"></p><p><a id="referenceSource" target="_blank" rel="noopener noreferrer">Open original video</a> · <a id="downloadReference">Download captured context</a></p>
+<div id="selectedReference" hidden><span id="referenceState" class="reference-state"></span><h2 id="referenceTitle" class="reference-title"></h2><p id="referenceMeta" class="reference-meta"></p><p><a id="referenceSource" target="_blank" rel="noopener noreferrer">Open original video</a> · <a id="downloadReference">Download captured context</a></p><p><a id="prepareLongForm" hidden>Prepare long-form script</a></p>
 <label for="referenceRevision">Revision</label><select id="referenceRevision" aria-label="Reference revision"></select><p id="referenceMessage" role="status" aria-live="polite"></p><ul id="referenceLimitations" class="reference-limitations"></ul>
 <div class="actions"><button id="refreshReference" type="button" class="secondary">Capture fresh revision</button><button id="cancelReference" type="button" class="secondary">Cancel pending capture</button></div>
 <h3>Transcript</h3><p id="transcriptSummary" class="reference-meta"></p><div id="referenceTranscript" class="reference-transcript" tabindex="0" aria-label="Captured transcript"></div>
@@ -53,6 +53,7 @@ $('emptyReference').hidden=true;$('selectedReference').hidden=false;$('reference
 $('referenceTitle').textContent=s?.title||'Reference '+v.request.reference_url.split('v=')[1];$('referenceSource').href=v.request.reference_url;
 $('referenceMeta').textContent=s?`${s.creator} · ${clock(s.duration_seconds)} source duration · ${s.language} · ${s.transcript_origin.replaceAll('_',' ')} · captured ${new Date(s.captured_at).toLocaleString()}${detail.cache_hit?' · reused saved capture':''}`:'Waiting for the worker to retrieve public metadata and captions.';
 $('downloadReference').hidden=!s;$('downloadReference').href=`/api/reference-intakes/${v.intake_id}/snapshot?revision=${v.revision}`;
+$('prepareLongForm').hidden=v.state!=='ready';$('prepareLongForm').href='/long-form?intake='+v.intake_id+'&revision='+v.revision;
 $('referenceRevision').replaceChildren(...detail.revisions.map(r=>{const option=document.createElement('option');option.value=r.revision;option.textContent=`Revision ${r.revision} · ${labels[r.state]}`;option.selected=r.revision===v.revision;return option;}));
 $('referenceMessage').textContent=v.message||(v.state==='ready'?'Transcript context is available. Factual research and script review come next.':v.state==='pending'?'Queued or being captured by the worker. This is not a generation approval.':'');
 $('referenceLimitations').replaceChildren(...(s?.limitations||[]).map(text=>{const li=document.createElement('li');li.textContent=text;return li;}));
@@ -68,6 +69,8 @@ async function revise(action){if(busy||selectionLoading||!current||current.intak
 $('refreshReference').onclick=()=>revise('refresh');$('cancelReference').onclick=()=>revise('cancel');$('saveTranscript').onclick=()=>revise('transcript');$('referenceRevision').onchange=()=>{revision=Number($('referenceRevision').value);current=null;selectionLoading=true;lastSignature='';controls();loadDetail();};
 $('transcriptFile').onchange=async()=>{const file=$('transcriptFile').files[0];if(!file)return;if(file.size>1000000){say('transcriptNotice','Transcript file exceeds 1 MB.',true);return;}$('transcriptText').value=await file.text();say('transcriptNotice','File read locally. Save to create a transcript revision.');};
 $('reloadReferences').onclick=()=>{loadHistory();loadDetail();};api('/api/reference-intakes/options').then(options=>{$('referenceChannel').replaceChildren(...options.channels.map(channel=>{const o=document.createElement('option');o.value=channel;o.textContent=channel;return o;}));}).catch(error=>say('referenceNotice','Could not load channel choices. '+error.message,true));
+const deepLink=new URLSearchParams(location.search),deepId=deepLink.get('intake'),deepRev=Number(deepLink.get('revision'));
+if(/^[a-f0-9]{32}$/.test(deepId||'')&&Number.isSafeInteger(deepRev)&&deepRev>0)choose(deepId,deepRev);
 loadHistory();setInterval(()=>{if(!document.hidden){loadHistory();loadDetail();}},2500);
 })();
 '''
