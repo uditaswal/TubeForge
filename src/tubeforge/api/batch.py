@@ -114,7 +114,7 @@ def register_batch_routes(app, runtime, build_request):
         # Approved/Ready come from the identity-checked Day review snapshot, never from the raw saved decision.
         verified = {entry['id']: entry['state'] for entry in reviews.list_day()} if any(state in {'approved', 'ready'} for state in saved_review.values()) else {}
         for item in items:
-            item['review_state'] = verified.get(item['id'])
+            item['review_state'] = verified.get(item['short']['id'])
             item['stage'] = stage_for(item['status'] if item['job_id'] else None, item['review_state'])
         finished = [item for item in items if item['status'] == 'final_ready']
         durations = []
