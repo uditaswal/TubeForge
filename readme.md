@@ -100,6 +100,7 @@ Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment
 | Opt-in classic video design tokens (local benchmark option) | [docs/video-design-tokens.md](docs/video-design-tokens.md) |
 | Scene direction review and local benchmark evidence | [docs/video-direction-review.md](docs/video-direction-review.md) |
 | Batch plans: import, queue, disclosure/rights review, staged export | [docs/batch-plans.md](docs/batch-plans.md) |
+| Settings page (`/settings`): script prompt size, source trimming, automatic retry of rejected scripts, worker retries; no restart needed | [docs/settings.md](docs/settings.md) |
 | Video quality standard | [docs/SHORT_FORM_VIDEO_RULEBOOK.md](docs/SHORT_FORM_VIDEO_RULEBOOK.md) |
 | Security policy | [SECURITY.md](SECURITY.md) |
 
