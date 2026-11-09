@@ -22,13 +22,15 @@ pilot_wheel=artifacts/review/long-form-lf2-d-codex/tubeforge-0.1.0-py3-none-any.
 runner_venv=/opt/tubeforge-codex-runner/venv
 runner_cache=/opt/tubeforge-codex-runner/tokenizer-cache
 printf '%s  %s\n' '94faf811f5f1c7d33b38e5e852e56110bfd27bbeb1d92476d03373f18c0d96cf' "$pilot_wheel" | sha256sum -c &&
-sudo "$runner_venv/bin/python" -m pip install 'tiktoken>=0.12,<1' &&
+sudo "$runner_venv/bin/python" -m pip install 'tiktoken>=0.12,<1' 'Pillow>=11,<13' &&
 sudo "$runner_venv/bin/python" -m pip install --force-reinstall --no-deps "$pilot_wheel" &&
 sudo install -d -o root -g root -m 0755 "$runner_cache" &&
 sudo env TIKTOKEN_CACHE_DIR="$runner_cache" "$runner_venv/bin/python" -c "import tiktoken; tiktoken.get_encoding('o200k_base')" &&
 sudo chmod -R a+rX "$runner_cache" &&
 sudo install -o root -g root -m 0644 docs/deploy/tubeforge-codex-runner.service /etc/systemd/system/tubeforge-codex-runner.service &&
 sudo systemctl daemon-reload &&
+sudo systemctl reset-failed tubeforge-codex-runner.service tubeforge-codex-runner.socket &&
+sudo systemctl start tubeforge-codex-runner.socket &&
 sudo systemctl try-restart tubeforge-codex-runner.service
 ```
 
@@ -50,3 +52,5 @@ After the update, run the no-generation socket preflight from the checkout:
 ```
 
 The expected result is exact model, request, admission and resource agreement. After the matching preflight and dedicated subscription check, the approved launcher accepts `--run-approved-subscription-pilot` for this exact brief and budget. Acceptance then requires the real draft and independent review, checked arithmetic and grounding, local hook and title scores and observed usage.
+
+The first installed preflight reset before dispatch. The host import check reproduced missing Pillow (PIL), and the service and socket reached their startup limit. The install command above now includes Pillow. The pilot ledger remains untouched.
