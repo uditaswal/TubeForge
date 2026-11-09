@@ -49,6 +49,7 @@ Plan `story-nosql` / `story-cache` / `story-lb` (day 2026-11-04) ran end to end:
 
 ## Next step
 
+- **Operator listened to the Track D audio (9 Nov):** (1) Voice cues: plain **A is better**; cued **B has something odd at about 0:06**. Measured, not heard: in B the line "The worst part was how quiet it was" (the `[whisper]` segment, about 7.4 s on) is not recognised by Whisper at all, so the whisper DSP (`rendering/shorts/delivery.py`, noise re-excitation) is the likely cause; confirm by A/B-ing that segment alone before changing it. Until then do not ask writers for `[whisper]`; `[pause]`, `[breath]` and `*stress*` are not implicated yet. (2) Pronunciation: `after-v2` is better than `before` (API reads correctly). (3) Gaps: **selective gaps (v4) preferred over no gaps, and they sound fine** around LDAP/log4j. No code changed for this.
 - **Own script + pronunciation (8 Nov, IMPLEMENTED, browser-checked on a temp stack, no live writer call):** `ContentRequest.operator_script` (plan `narration`, Studio "Your own script"), prompt clause `operator_script_clause`, `pipeline/script_fit.py`, `/api/script-fit`, `/api/script-guide`, shared UI `api/script_tools_ui.py` (Studio form, markdown mode, Batch plans, script-review fit meter). `spoken.py`: README/JSON/YAML/GUI read as words, `RULES_REVISION` in the profile hash. Not yet seen: a real writer honouring an operator script (needs the operator's go-ahead for one Claude call), and job `3b207d32…` must be regenerated to hear the README fix.
 
 
