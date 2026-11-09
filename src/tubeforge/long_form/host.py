@@ -149,12 +149,20 @@ def invoke_claude(message):
     provenance.update(web_searches=searches,elapsed_seconds=round(time.monotonic()-started,3))
     output=envelope.get('structured_output')
     raw_result=str(envelope.get('result') or '')
-    rejected={} if isinstance(output,dict) else preserved_bytes(raw_result if envelope else completed.stdout,kind='model_output' if envelope else 'cli_response')
+    failed=bool(completed.returncode or envelope.get('is_error') or not envelope)
+    if failed:
+        # Error envelopes can omit result and put the diagnosis in subtype/errors.
+        # Preserve the bounded, redacted envelope even if structured output exists.
+        rejected=preserved_bytes(completed.stdout or completed.stderr,kind='cli_response')
+    elif isinstance(output,dict):
+        rejected={}
+    else:
+        rejected=preserved_bytes(raw_result or completed.stdout,kind='model_output' if raw_result else 'cli_response')
     raw_output=None if isinstance(output,dict) else rejected['raw_output']
     output=output if isinstance(output,dict) else None
     evidence=dict(output=output,raw_output=raw_output,usage=usage,provenance=provenance,invocation_started=True)
     evidence.update(rejected)
-    if completed.returncode or envelope.get('is_error') or not envelope:
+    if failed:
         raise LongFormInvocationError('Claude stage did not complete',dict(**evidence,error_code='invocation_failed',error='Claude CLI did not return a completed result.'))
     if message.stage=='research' and not searches:
         raise LongFormInvocationError('Research had no search evidence',dict(**evidence,error_code='insufficient_sources',error='No completed live web search was recorded; source URLs are not accepted.'))
