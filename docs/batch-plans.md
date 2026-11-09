@@ -13,7 +13,7 @@ Optional fields include `length_s` (30–90; default 60), `ending` (`loop` or
 `thumbnail: {text: ..., visual: ...}`, `tags`, and opaque `narration` text.
 Publish dates are metadata; importing never schedules or uploads anything.
 
-**Your own script.** `narration` is now used: the writer keeps your wording and order, splits it
+**Your own script.** Add `script: |` (or `narration: |`, the same field; giving both is an error) to the short's yaml block. `narration` is used: the writer keeps your wording and order, splits it
 into 8–15-word scenes (blank lines mark your scene breaks), and only trims, fixes spoken-form
 symbols or fills gaps from the cited sources. It still passes the hook/craft gates and the script
 review, where you can edit every section. Studio's New generation form has the same optional

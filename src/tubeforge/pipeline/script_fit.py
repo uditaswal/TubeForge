@@ -54,7 +54,7 @@ def analyze_script(sections_or_text: str | list[str], length_s: int) -> dict:
 
 
 def plan_template(length_s: int = 60) -> str:
-    """The markdown plan format, with an own-script ``narration`` block, sized for ``length_s``."""
+    """The markdown plan format, with an own-script ``script`` block (``narration`` is accepted as the same field), sized for ``length_s``."""
     b = reference_word_budget(length_s)
     third = round(length_s / 6)
     return f'''## Short title
@@ -79,11 +79,11 @@ sources:                   # optional page URLs; when given, no web research run
   - https://example.com/source-page
 thumbnail: {{text: "Short Words", visual: "What the thumbnail shows"}}
 tags: [tag one, tag two]
-narration: |
-  Optional: your own script, {b["aim_low"]}-{b["aim_high"]} words for {length_s} s.
+script: |                 # optional: your own narration (``narration`` works too)
+  Your own script, {b["aim_low"]}-{b["aim_high"]} words for {length_s} s.
   Short sentences. One idea per line or paragraph, 8-15 spoken words each.
 
-  Blank lines separate scenes. Leave narration out to let the AI write it.
+  Blank lines separate scenes. Leave `script` out to let the AI write it.
 ```
 '''
 
@@ -114,7 +114,7 @@ Write ONLY the narration plus a markdown plan block in the format at the end.
 - Optional delivery tags inside narration only: [pause 0.4], [breath], *stressed word* (at most 2 per scene), [whisper]...[/whisper] (at most 2 per video).
 
 ## Output format
-Return one markdown plan. Put the narration in the `narration` field; separate scenes with a blank line.
+Return one markdown plan. Put the narration in the `script` field; separate scenes with a blank line.
 
 {plan_template(length_s)}
 '''

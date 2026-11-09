@@ -54,11 +54,21 @@ def test_script_fit_and_guide_endpoints_and_dashboard_controls(tmp_path):
         assert fit["status"] == "too_short" and fit["max_words"] == 177
         assert client.post("/api/script-fit", json={"length_s": 60}).status_code == 422
         guide = client.get("/api/script-guide?length_s=45").json()["markdown"]
-        assert "45-second" in guide and "narration: |" in guide
-        assert "narration: |" in client.get("/api/script-guide?kind=format&length_s=30").json()["markdown"]
+        assert "45-second" in guide and "script: |" in guide
+        assert "script: |" in client.get("/api/script-guide?kind=format&length_s=30").json()["markdown"]
         assert client.get("/api/script-guide?length_s=200").status_code == 422
         page = client.get("/").text
         assert "operatorScript" in page and "Copy AI script guide" in page
         plan = "## A\n\n```yaml\nid: a-1\ntitle: T\nconcept: C\nbeats:\n  - {t: 0, point: Hook}\nnarration: |\n  One two three four five six seven eight nine ten.\n```\n"
         data = client.post("/api/batch-plans/import", json={"markdown": plan}).json()
         assert data["script_fit"]["a-1"]["status"] == "too_short"
+
+
+def test_script_is_an_alias_for_narration_and_both_together_is_an_error():
+    from tubeforge.batch_plans import parse_batch
+    base = "## A\n\n```yaml\nid: a-1\ntitle: T\nconcept: C\nbeats:\n  - {t: 0, point: Hook}\n%s\n```\n"
+    ok = parse_batch(base % "script: |\n  First scene here.\n\n  Second scene here.")
+    assert not ok.errors and ok.shorts[0].narration.startswith("First scene here.")
+    both = parse_batch(base % "script: One\nnarration: Two")
+    assert both.errors and "either `script` or `narration`" in both.errors[0].message
+    assert parse_batch(base % "narration: Old name still works.").shorts[0].narration == "Old name still works."

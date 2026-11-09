@@ -53,6 +53,17 @@ class BatchShort(BaseModel):
     tags: list[str] = Field(default_factory=list)
     narration: str | None = Field(default=None, max_length=12_000)
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_script_alias(cls, data):
+        """``script:`` is the obvious name for the operator's own narration; it means exactly ``narration:``."""
+        if isinstance(data, dict) and "script" in data:
+            if "narration" in data:
+                raise ValueError("give your script once: use either `script` or `narration`, not both")
+            data = {**data, "narration": data["script"]}
+            del data["script"]
+        return data
+
 
 class BatchError(BaseModel):
     line: int
