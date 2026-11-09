@@ -1578,6 +1578,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detail = "; ".join(f"{'.'.join(str(part) for part in item['loc']) or 'request'}: {item['msg']}" for item in error.errors())
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from error
         _reject_retired_format(new_request, application_settings)
+        new_request = _fit_prompt(new_request, application_settings)   # an oversized retry is trimmed (or refused with numbers) before it is queued
         destinations = tuple(item["account_id"] for item in runtime.jobs.destination_intents(job_id))
         try:
             created = runtime.jobs.create(uuid4().hex, new_request, destination_account_ids=destinations, video_description=runtime.jobs.video_description(job_id))

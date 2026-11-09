@@ -197,3 +197,25 @@ def test_auto_retry_can_be_switched_off_from_the_settings(store, tmp_path):
         provider.generate_package(ask)
     assert not isinstance(rejected.value, RetryableProviderError)
     database.dispose()
+
+
+def test_retry_as_new_trims_an_oversized_request_instead_of_failing_again(store, tmp_path):
+    """The failed LeetCode job: three long source pages pushed the prompt over the ceiling before any writer call."""
+    from tubeforge.domain.states import JobState
+    from tubeforge.pipeline.prompt_budget import prompt_length
+    client, db = _client(tmp_path)
+    with client:
+        runtime = client.app.state.runtime
+        runtime.auth.create_admin("operator", "correct-horse-battery-staple")
+        client.post("/login", json={"username": "operator", "password": "correct-horse-battery-staple"})
+        client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
+        oversized = _request([24_000, 24_000, 24_000])
+        assert prompt_length(oversized) > 90_000
+        failed = runtime.jobs.create("failed-big", oversized, destination_account_ids=(), video_description=None)
+        runtime.jobs.update_state(failed.id, JobState.FAILED_VALIDATION)
+        created = client.post(f"/api/jobs/{failed.id}/retry", json={})
+        assert created.status_code == 201, created.text
+        new = runtime.jobs.get(created.json()["id"])
+        assert prompt_length(new.request) <= 90_000 and len(new.request.sources[0].excerpt) < 24_000
+        assert created.json()["request_edited"] is True                       # truthful: the saved request differs once the size check trimmed it
+    db.dispose()
