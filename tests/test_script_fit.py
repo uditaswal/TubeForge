@@ -72,3 +72,14 @@ def test_script_is_an_alias_for_narration_and_both_together_is_an_error():
     both = parse_batch(base % "script: One\nnarration: Two")
     assert both.errors and "either `script` or `narration`" in both.errors[0].message
     assert parse_batch(base % "narration: Old name still works.").shorts[0].narration == "Old name still works."
+
+
+def test_numbers_rule_is_checked_before_queueing_so_it_cannot_reject_an_operator_script_later():
+    """The LeetCode script's scene 3 had 'two seven' and 'five hundred': four spoken numbers, over the writer's limit of two."""
+    from tubeforge.pipeline.script_fit import analyze_script
+    bad = "The correlation was just zero point two seven, and gains slowed past five hundred problems."
+    rows = analyze_script(bad + "\n\nThis second scene has no figures in it at all, so it is fine.", 60)["sections"]
+    assert "4 numbers in one scene" in rows[0]["note"] or "numbers" in rows[0]["note"]
+    assert rows[1]["note"] == "" or "short" in rows[1]["note"] or "long" in rows[1]["note"]
+    good = analyze_script("The correlation was weak, about zero point three.\n\nGains slowed past about five hundred problems, though volume still helps.", 60)["sections"]
+    assert all("number" not in row["note"] for row in good)

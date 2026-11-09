@@ -219,3 +219,14 @@ def test_retry_as_new_trims_an_oversized_request_instead_of_failing_again(store,
         assert prompt_length(new.request) <= 90_000 and len(new.request.sources[0].excerpt) < 24_000
         assert created.json()["request_edited"] is True                       # truthful: the saved request differs once the size check trimmed it
     db.dispose()
+
+
+def test_a_script_the_writers_own_repair_already_rejected_is_not_scheduled_for_another_try(store, tmp_path):
+    from tests.test_youtube_skills import request
+    from tubeforge.core.errors import ProviderValidationError
+    provider, _ask, database = _rejecting_provider(tmp_path, [])
+    class Reservation: cache_key = "k"
+    provider.cache.generation_retryable = lambda key: True
+    assert provider._retry_rejected_script(ProviderValidationError("Claude output failed validation twice: scene 3 packs 4 numbers"), Reservation(), "invalid_output") is False
+    assert provider._retry_rejected_script(ProviderValidationError("schema field missing"), Reservation(), "invalid_output") is True
+    database.dispose()

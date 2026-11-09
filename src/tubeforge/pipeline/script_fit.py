@@ -27,6 +27,17 @@ def split_sections(text: str) -> list[str]:
     return [" ".join(p.split()) for p in paragraphs]
 
 
+def _number_note(text: str) -> str:
+    """The craft gate rejects a scene with more than two spoken numbers (two..billion count) or a sentence with three; say so now."""
+    from tubeforge.providers.content.craft import MAX_NUMBERS_PER_SCENE, _numbers
+    count = len(_numbers(text))
+    if count > MAX_NUMBERS_PER_SCENE:
+        return f"{count} numbers in one scene (the writer's check allows {MAX_NUMBERS_PER_SCENE}): round them or move one to the next scene"
+    if any(len(_numbers(sentence)) >= 3 for sentence in re.split(r"(?<=[.!?])\s+", text)):
+        return "a sentence with 3 or more numbers sounds like a list: split it or round them"
+    return ""
+
+
 def analyze_script(sections_or_text: str | list[str], length_s: int) -> dict:
     """Word/time fit of a script against ``length_s``; ``suggestion`` says what to cut or add."""
     sections = split_sections(sections_or_text) if isinstance(sections_or_text, str) else [s.strip() for s in sections_or_text if s.strip()]
@@ -36,6 +47,7 @@ def analyze_script(sections_or_text: str | list[str], length_s: int) -> dict:
         words = spoken_words(text)
         note = "too short (under 8 words): merge it into a neighbour" if words < SECTION_MIN_WORDS else \
                "too long (over 15 words): split it into two scenes" if words > SECTION_MAX_WORDS else ""
+        note = note or _number_note(text)
         rows.append({"index": index, "words": words, "note": note, "text": text})
     total = sum(row["words"] for row in rows)
     if total == 0:

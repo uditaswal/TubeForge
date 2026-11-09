@@ -197,6 +197,8 @@ class HostRunnerContentProvider:
             return False
         if failure_code not in {None, "invalid_output", "quality_rejected"}:   # source mismatch, runner allowance, quota...: not a retry
             return False
+        if "failed validation twice" in str(error):   # the writer's own repair pass already used the second attempt
+            return False
         return self.cache.generation_retryable(reservation.cache_key)
 
     def _now(self) -> datetime:
