@@ -25,6 +25,15 @@ from tubeforge.providers.content.prompts import build_content_prompt, prompt_evi
 from tubeforge.providers.fake import FakeContentProvider
 from tubeforge.scheduling.service import request_from_topic
 
+@pytest.fixture(autouse=True)
+def _no_auto_retry(tmp_path, monkeypatch):
+    """These tests check the first rejection itself; automatic retry has its own tests in test_runtime_settings.py."""
+    from tubeforge.core import runtime_settings
+    store = runtime_settings.RuntimeSettings(tmp_path / "runtime-settings.json")
+    store.path.write_text(json.dumps({"values": {"generation.auto_retry_rejected": False}}))
+    monkeypatch.setattr(runtime_settings, "_shared", store)
+
+
 
 def request():
     return ContentRequest(topic="Review a video", angle="Exact script review", notes=("Hook", "Source check", "Narration", "Scenes"), target_duration_seconds=45,

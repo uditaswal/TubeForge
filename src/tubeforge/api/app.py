@@ -275,6 +275,27 @@ def _reject_retired_format(request: ContentRequest, settings: Settings) -> None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"the {request.prompt_version} video format is retired; use a current preset")
 
 
+def _fit_prompt(request: ContentRequest, settings: Settings) -> ContentRequest:
+    """Measure the assembled writer prompt now: shorten long source excerpts to fit, or refuse with the numbers."""
+    from tubeforge.core import runtime_settings as runtime_values
+    from tubeforge.pipeline.prompt_budget import PromptTooLarge, fit_request
+    store = runtime_values.shared()
+    configured = settings.pipeline.claude.max_prompt_chars if request.script_owner == "claude" else settings.pipeline.codex.max_prompt_chars
+    try:
+        fitted, report = fit_request(
+            request, max_chars=runtime_values.effective_max_prompt_chars(request.script_owner, configured),
+            min_per_source=store.value("prompt.min_chars_per_source", 1_500), margin=store.value("prompt.margin_chars", 2_500),
+            auto_trim=store.value("prompt.auto_trim_sources", True))
+    except PromptTooLarge as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    except ValueError:  # a template this check does not know: leave it to the writer's own validation
+        return request
+    if report.changed:
+        import logging
+        logging.getLogger("tubeforge.prompt_budget").info(report.summary())
+    return fitted
+
+
 def _video_request(value: VideoBriefRequest, settings: Settings, *, available_music: set[str] | None = None) -> ContentRequest:
     generation = settings.pipeline.video_generation
     name = value.preset or generation.default_preset
@@ -336,7 +357,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     owner, claude_model = SCRIPT_MODELS[choice]
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
-    return ContentRequest(
+    request = ContentRequest(
         script_owner=owner, script_model=claude_model, script_routing_mode=value.script_routing_mode, ending=value.ending, video_style=value.video_style,
         operator_script=(value.operator_script or "").strip() or None,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
@@ -349,6 +370,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         music_track=music, visual_style=value.visual_style or preset.visual_style, visual_source=value.visual_source, mcp_servers=tuple(mcp), voice_id=voice_id, voice_speed_scale=voice_speed_scale,
         preset_name=name, aspect_ratio=preset.aspect_ratio,
     )
+    return _fit_prompt(request, settings)
 
 
 def _source_clip_request(value: SourceClipRequest) -> ContentRequest:
@@ -1044,6 +1066,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return routing_policy.apply(build_batch_request(short, application_settings))
     runtime.scheduler.batch_request_factory = batch_request
     register_batch_routes(app, runtime, batch_request)
+    from tubeforge.api.runtime_settings import register_settings_routes
+    register_settings_routes(app, runtime)
 
     @app.post("/api/jobs", status_code=status.HTTP_201_CREATED, tags=["jobs"])
     def create_job(request: ContentRequest) -> dict[str, object]:
@@ -1554,6 +1578,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detail = "; ".join(f"{'.'.join(str(part) for part in item['loc']) or 'request'}: {item['msg']}" for item in error.errors())
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from error
         _reject_retired_format(new_request, application_settings)
+        new_request = _fit_prompt(new_request, application_settings)   # an oversized retry is trimmed (or refused with numbers) before it is queued
         destinations = tuple(item["account_id"] for item in runtime.jobs.destination_intents(job_id))
         try:
             created = runtime.jobs.create(uuid4().hex, new_request, destination_account_ids=destinations, video_description=runtime.jobs.video_description(job_id))
