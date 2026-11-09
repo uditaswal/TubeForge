@@ -32,10 +32,11 @@ all pixels, audio and encoding are local and cost no tokens.
 - Operator verified: pronunciation fix and selective acronym gaps sound right; plain narration preferred over `[whisper]`; the Day review shorts (2026-11-04 `story-*`, and `pilot-ms1`) were watched and are fine. **Nothing is approved or published**; Approve/Stage is clicked in Day review (`/batch/review`).
 - `[whisper]` is OFF: `pipeline.reference_short.delivery_whisper: "off"` (`config/production.yaml`); whisper cues are spoken plainly. The yt-script prompt still teaches it (changing it needs the host wheel redeploy, operator sudo). Test clips: `artifacts/review/whisper-test-20261109/`.
 - Full suite on `dev`: 1020 passed; the only failure is `test_voice_preview_is_synthesized_once…` (no `piper` on the host; passes in the worker image). Fresh worktrees need the gitignored `models/` folder symlinked in.
+- Operator review (9 Nov): "all looks fine" for the Batch plans / Day review changes and the shorts above. That is the visual sign-off for batch UI M-U1 and M-U2 (confirmations); Approve/Stage in Day review is still the operator's click.
 - Real bug fixed: `GET /api/batch-plans` returned 500 when a topic's job had been deleted (shows "job missing" now).
 
 ## Next step (in order)
-1. **Operator:** rebuild the stack, look at `/batch` and Day review, approve/stage the 2026-11-04 shorts; click "Retry approved media stages" on job `49bfc7ef…`.
+1. **Operator:** approve/stage the 2026-11-04 shorts in Day review (rebuild with `scripts/restart_stack.sh` if not done); click "Retry approved media stages" on job `49bfc7ef…`.
 2. **Codex (LF2):** operator approved more Claude spend for the long-form pilots and said the long-form branch may merge after review. Still needs a spend figure per pilot, and deployment review of migrations `20261108_0033` and `0034`. Phase D is blocked on structured-draft failures (`docs/long-form-lf2-d-*.md`).
 3. **Claude, UI:** Day review shows the script beside its sources; then M-U4 (empty/loading/error/disabled states, focus order, contrast).
 4. **Claude, scripts:** one go-ahead Claude call to confirm a writer honours an operator script; script-naturalness leftovers (a running example with concrete values, v1/v2 scope, a figure in the hook; `docs/script-naturalness-plan.md`); `claude/script-audit` worktree holds Round 3.
