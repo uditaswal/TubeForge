@@ -54,3 +54,49 @@ After the update, run the no-generation socket preflight from the checkout:
 The expected result is exact model, request, admission and resource agreement. After the matching preflight and dedicated subscription check, the approved launcher accepts `--run-approved-subscription-pilot` for this exact brief and budget. Acceptance then requires the real draft and independent review, checked arithmetic and grounding, local hook and title scores and observed usage.
 
 The first installed preflight reset before dispatch. The host import check reproduced missing Pillow (PIL), and the service and socket reached their startup limit. The install command above now includes Pillow. The pilot ledger remains untouched.
+
+## Revised held-out book pilot
+
+The original pilot is terminal. The new ten-minute brief follows two books
+whose predictions move in the same direction after one weight update. The
+viewer predicts whether the held-out book improves before seeing its error
+grow. The run reuses the three captured primary pages and starts at draft
+with an empty call ledger.
+
+| Setting | Reviewed value |
+| --- | --- |
+| Isolated preparation | `8a34b8a9acff49f6916b59c9c9d889f4` |
+| Provider | Dedicated subscription Codex CLI, fixed `gpt-5.6-sol` |
+| Dispatch | One draft and one independent review if admitted |
+| First reservation | 32,026 units |
+| Total admission | 100,000 units |
+| Fallback and repair | None |
+
+The installed socket answered and matched the model, request, schema and all
+eight skill hashes. Its prompt was stale and reserved 32,009 units. The newly
+built wheel matches the exact 32,026-unit admission and all eight skill
+hashes. The staged wheel and request are under
+`artifacts/review/long-form-lf2-d-codex/held-out-books-pilot/`.
+
+Once the host service is idle, an administrator can verify and install the
+staged wheel. The pinned CLI, login, tokenizer cache and existing receipts
+stay in place.
+
+```sh
+pilot_dir=artifacts/review/long-form-lf2-d-codex/held-out-books-pilot
+pilot_wheel="$pilot_dir/tubeforge-0.1.0-py3-none-any.whl"
+printf '%s  %s\n' 'a787a04d560c50612d3ab9348cc4a46955a7e477298893010ca9d93fa9b2772d' "$pilot_wheel" | sha256sum -c &&
+sudo /opt/tubeforge-codex-runner/venv/bin/python -m pip install --force-reinstall --no-deps "$pilot_wheel" &&
+sudo systemctl try-restart tubeforge-codex-runner.service
+```
+
+The following sends only a zero-call preflight to the updated socket:
+
+```sh
+PYTHONPATH=src .venv-benchmark/bin/python artifacts/review/long-form-lf2-d-codex/held-out-books-pilot/preflight.py
+```
+
+A matching installed preflight and separate authorization for this pilot
+gate dispatch. Acceptance requires the exact independent review, checked toy
+arithmetic, grounding, originality and hook/title reports. Report observed
+usage separately from local admission and any unknown subscription fraction.
