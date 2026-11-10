@@ -152,3 +152,53 @@ or output usage stops further reservations. Local text counts and reservations
 are admission limits, not a provider-side hard output cap or a measurement of
 remaining subscription quota. This document is deployment preparation, not
 evidence that the branch has been deployed or a live script accepted.
+
+## Dedicated Docker runner qualification
+
+The opt-in `compose.codex-runner.yaml` overlay replaces the worker's Codex
+socket mount with a project-local volume. The runner uses a second volume for
+its dedicated authentication and receipts. The worker sees only the socket.
+Use worker UID/GID 1000 for this qualification. The runner preserves peer UID
+authorization and the pinned Bubblewrap invocation.
+
+Build and run the startup check in a separate Compose project:
+
+```sh
+docker compose -p tubeforge-lf2-runner-check -f compose.yaml -f compose.codex-runner.yaml build codex-runner
+docker compose -p tubeforge-lf2-runner-check -f compose.yaml -f compose.codex-runner.yaml run --rm --no-deps codex-runner
+```
+
+Startup verifies the tokenizer cache and exercises the actual Bubblewrap
+namespace with the pinned Node executable before it opens the socket. A
+namespace denial is a failed qualification. Keep the current host runner
+active until the isolated container passes both startup and typed LF2 socket
+preflight. Use fresh dedicated subscription authentication for the container
+before a live trial. Keep the test volume separate from the live host allowance
+and receipts.
+
+After startup succeeds, start the isolated runner with `up -d --no-deps
+codex-runner` and send a reviewed serialized `LongFormHostRequest` as the
+worker UID. The client computes the expected admission and sends only the
+preflight operation:
+
+```sh
+docker compose -p tubeforge-lf2-runner-check -f compose.yaml -f compose.codex-runner.yaml \
+  exec -T --user 1000:1000 codex-runner python -c '
+import sys
+from tubeforge.core.config import CodexProviderConfig
+from tubeforge.domain.long_form_writing import LongFormHostRequest
+from tubeforge.long_form.admission import measure
+from tubeforge.long_form.client import LongFormHostClient
+
+request = LongFormHostRequest.model_validate_json(sys.stdin.buffer.read())
+assert request.request.script_owner == "codex"
+config = CodexProviderConfig(model=request.resolved_model, socket_timeout_seconds=8)
+print(LongFormHostClient(config, None).preflight(request, measure(request)))
+' < reviewed-lf2-request.json
+```
+
+On the current development host the image built successfully, but the bounded
+startup probe exited with Bubblewrap's `No permissions to create new
+namespace` error before binding the socket. Docker qualification remains
+blocked on a compatible runtime policy. The restricted host service remains
+the working transport for pilot preparation.

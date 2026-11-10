@@ -1,0 +1,31 @@
+# Opt-in overlay. Use an isolated project for qualification.
+services:
+  codex-runner:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: deploy/codex-runner/Dockerfile
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp
+    volumes:
+      - codex-runner-state:/var/lib/tubeforge-codex
+      - codex-runner-socket:/run/tubeforge-codex
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; assert Path('/run/tubeforge-codex/codex.sock').is_socket()"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    restart: unless-stopped
+  worker:
+    depends_on:
+      codex-runner:
+        condition: service_healthy
+    volumes:
+      - codex-runner-socket:/run/tubeforge-codex:ro
+
+volumes:
+  codex-runner-state:
+  codex-runner-socket:
