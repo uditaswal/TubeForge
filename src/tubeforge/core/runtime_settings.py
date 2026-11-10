@@ -53,6 +53,11 @@ DEFINITIONS: tuple[Definition, ...] = (
                "int", lambda s: 1_500, 500, 10_000),
     Definition("prompt.margin_chars", "Script prompt size", "Safety margin (characters)",
                "Room left under the limit for the repair and editor passes.", "int", lambda s: 2_500, 0, 20_000),
+    Definition("script.exact_by_default", "Your own scripts", "Use every script I provide word for word",
+               "When on, any script you give (Studio box, batch `script`/`narration`) is used exactly: the Claude writer only plans the "
+               "visuals around it, your wording is forced back in, and the hook/craft/number checks are skipped. Off means a script is "
+               "fitted and checked like AI-written text unless the short sets exact itself. Needs the Claude writer. You vouch for the facts.",
+               "bool", lambda s: False),
     Definition("generation.auto_retry_rejected", "Retries", "Retry a rejected script automatically",
                "When the writer's script fails validation and the source packet still has an attempt left, queue the next "
                "attempt by itself instead of stopping. It never exceeds the two-attempt allowance.",

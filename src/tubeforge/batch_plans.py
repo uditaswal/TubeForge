@@ -52,6 +52,14 @@ class BatchShort(BaseModel):
     thumbnail: Thumbnail = Field(default_factory=Thumbnail)
     tags: list[str] = Field(default_factory=list)
     narration: str | None = Field(default=None, max_length=12_000)
+    # exact = use the script word for word (Claude writer only): no rewriting, no writing checks.
+    script_mode: Literal["assist", "exact"] = "assist"
+
+    @model_validator(mode="after")
+    def exact_needs_a_script(self):
+        if self.script_mode == "exact" and not (self.narration or "").strip():
+            raise ValueError("script_mode: exact needs a script (or narration) in the same block")
+        return self
 
     @model_validator(mode="before")
     @classmethod
