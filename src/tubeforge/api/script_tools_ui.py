@@ -55,15 +55,17 @@ SCRIPT_TOOLS_SCRIPT = r"""<script>
     const area=document.createElement('textarea');area.id='operatorScript';area.maxLength=12000;
     area.placeholder='Paste your narration. Blank lines separate scenes. Leave empty to let the AI write it. The writer keeps your wording and only splits, trims or fills it to fit; you review it before anything renders.';
     label.append(area);
+    const exactLabel=document.createElement('label');exactLabel.className='checkbox';const exact=document.createElement('input');exact.type='checkbox';exact.id='exactScript';
+    exactLabel.append(exact,document.createTextNode(' Use my script exactly, word for word (Claude writer; skips rewriting and the writing checks; I vouch for the facts)'));
     const box=meter();
     const lengthOf=()=>Number(form.querySelector('[name=duration_seconds]')?.value)||60;
     const bar=toolbar(lengthOf);
     const submit=form.querySelector('button[type="submit"]');
-    (submit?submit.before.bind(submit):form.append.bind(form))(label,box,bar);
+    (submit?submit.before.bind(submit):form.append.bind(form))(label,exactLabel,box,bar);
     const refit=()=>{if(!area.value.trim()){box.hidden=true;return;}fit(box,()=>({text:area.value,length_s:Math.min(90,Math.max(30,lengthOf()))}));};
     area.addEventListener('input',refit);form.querySelector('[name=duration_seconds]')?.addEventListener('input',refit);
     const previous=window.fetch;
-    window.fetch=(url,init={})=>{if(String(url)==='/api/videos'&&init.body&&area.value.trim()){try{const body=JSON.parse(init.body);body.operator_script=area.value.trim();init={...init,body:JSON.stringify(body)};}catch(_){}}return previous(url,init);};
+    window.fetch=(url,init={})=>{if(String(url)==='/api/videos'&&init.body&&area.value.trim()){try{const body=JSON.parse(init.body);body.operator_script=area.value.trim();if(exact.checked)body.exact_script=true;init={...init,body:JSON.stringify(body)};}catch(_){}}return previous(url,init);};
     form.addEventListener('reset',()=>{setTimeout(()=>{box.hidden=true;},0);});
   }
   const mdPanel=document.querySelector('#markdownModePanel');

@@ -13,6 +13,7 @@ shared by the web server and the worker. API: `GET /api/runtime-settings`, `PUT`
 | `prompt.auto_trim_sources` | on | While a request is built, shorten the longest source excerpts (at a sentence end, longest first) so the prompt fits. Off: a too-large brief is refused with the numbers instead. |
 | `prompt.min_chars_per_source` | 1500 | Trimming never goes below this per source; if it still does not fit the brief is refused. |
 | `prompt.margin_chars` | 2500 | Room left under the ceiling for the repair and editor passes. |
+| `script.exact_by_default` | off | Treat every script you provide as exact (see "Exact script" in `docs/batch-plans.md`): wording forced in, writing checks skipped, Claude writer only. |
 | `generation.auto_retry_rejected` | on | A script that fails validation is retried by the worker while the source packet still has an attempt left. |
 | `worker.max_attempts` | `worker.max_attempts` in config (3) | Worker retries for temporary failures (runner down, timeout) before a job fails. |
 

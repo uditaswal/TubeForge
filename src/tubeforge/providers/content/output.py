@@ -37,6 +37,9 @@ def unwrap_generation(raw: object, *, request: ContentRequest | None = None) -> 
                 raise ProviderValidationError("Generated request echo differs from the trusted request")
         package["request"] = request.model_dump(mode="json")
         if request.prompt_version == "m6-content-v8":
+            if request.exact_script:
+                from tubeforge.providers.content.exact_script import apply_exact_script
+                package = apply_exact_script(package, request)
             package = bind_reference_output(package, request)
         raw = {**raw, "package": package}
     result = ContentGenerationResult.model_validate(raw)

@@ -134,6 +134,12 @@ def operator_script_clause(request: ContentRequest) -> str:
     """Prompt text for an operator-written script (empty when none): keep their words, fit them, add no new facts."""
     if not request.operator_script:
         return ""
+    if request.exact_script:
+        return (" OPERATOR SCRIPT (EXACT): request.operator_script is the final narration, approved word for word by the operator. "
+                "Do not change, reorder, add or remove any word. Return one script section and one scene per block of the script (blank lines separate scenes; "
+                "a single block is split into its sentences), in order, with the narration copied verbatim. Plan everything around it: scene templates, headings, "
+                "diagrams, figures and sources. Cite the closest supplied source for each factual claim the script makes and set its confidence honestly (low where "
+                "no source supports it). The hook, length and style guidance below does not apply to the wording; only the structure and the visual fields must be valid. ")
     budget = reference_word_budget(request.target_duration_seconds)
     return (" OPERATOR SCRIPT: the operator wrote the narration in request.operator_script. Use it as the narration: keep its wording, order and meaning, "
             "split it into scenes of 8-15 words (blank lines mark the operator's scene breaks), and change words only to fix grammar, spoken-form symbols or the length. "
@@ -318,14 +324,15 @@ def validate_video_package(package: ContentPackage, request: ContentRequest, *, 
         cap = reference_word_budget(request.target_duration_seconds)["max"] + 4
         if words > cap:
             raise ProviderValidationError(f"{provider_name} narration has {words} words; reference Shorts of {request.target_duration_seconds} seconds need at most {cap} so the video stays within the target")
-        from tubeforge.providers.content.youtube_skills import hook_gate
-        weak = hook_gate(package)
-        if weak:
-            raise ProviderValidationError(f"{provider_name} {weak}")
-        from tubeforge.providers.content.craft import craft_problems
-        craft = craft_problems(package)
-        if craft:
-            raise ProviderValidationError(f"{provider_name} script craft needs repair: " + " | ".join(craft))
+        if not request.exact_script:   # the operator's own wording is not graded for hook strength or craft
+            from tubeforge.providers.content.youtube_skills import hook_gate
+            weak = hook_gate(package)
+            if weak:
+                raise ProviderValidationError(f"{provider_name} {weak}")
+            from tubeforge.providers.content.craft import craft_problems
+            craft = craft_problems(package)
+            if craft:
+                raise ProviderValidationError(f"{provider_name} script craft needs repair: " + " | ".join(craft))
         # Fail closed before narration/TTS: every scene must fit the phone layout.
         # Report every offending scene at once so a writer can repair them in one pass.
         from tubeforge.rendering.shorts.layout import LayoutError, SceneRenderer

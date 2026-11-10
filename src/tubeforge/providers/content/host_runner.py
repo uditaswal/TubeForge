@@ -173,7 +173,7 @@ class HostRunnerContentProvider:
             raise ProviderValidationError("host runner output source packet differs from the requested source packet")
         validate_video_package(package, request, provider_name=self.script_owner.title())
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, evaluate
-        if request.prompt_version in SKILL_TEMPLATES:
+        if request.prompt_version in SKILL_TEMPLATES and not request.exact_script:
             evaluate(package)
         claims = tuple(claim.model_copy(update={"review_status": ClaimReviewStatus.NEEDS_REVIEW, "human_review_required": True}) if claim.time_sensitive or claim.confidence in {ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM} else claim for claim in package.claims)
         return package.model_copy(update={"claims": claims})

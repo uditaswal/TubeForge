@@ -91,7 +91,8 @@ sources:                   # optional page URLs; when given, no web research run
   - https://example.com/source-page
 thumbnail: {{text: "Short Words", visual: "What the thumbnail shows"}}
 tags: [tag one, tag two]
-script: |                 # optional: your own narration (``narration`` works too)
+script_mode: assist        # assist (the writer fits and checks your script) or exact (word for word; Claude writer only)
+script: |                 # optional: your own narration (the name narration works too)
   Your own script, {b["aim_low"]}-{b["aim_high"]} words for {length_s} s.
   Short sentences. One idea per line or paragraph, 8-15 spoken words each.
 

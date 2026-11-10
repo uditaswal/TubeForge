@@ -144,6 +144,8 @@ class VideoBriefRequest(BaseModel):
     video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
     # Optional operator-written narration (see pipeline/script_fit.py); the writer keeps its wording.
     operator_script: str | None = Field(default=None, max_length=12_000)
+    # Use operator_script word for word (Claude writer only): it only plans the visuals, and the writing checks are skipped.
+    exact_script: bool = False
     script_routing_mode: str | None = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
@@ -355,11 +357,16 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         else:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Claude script writers are not enabled in this TubeForge configuration")
     owner, claude_model = SCRIPT_MODELS[choice]
+    from tubeforge.core import runtime_settings as runtime_values
+    exact_script = bool((value.operator_script or "").strip()) and (value.exact_script or runtime_values.shared().value("script.exact_by_default", False))
+    if exact_script and owner != "claude":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Using your script exactly needs the Claude writer; choose a Claude script model")
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
     request = ContentRequest(
         script_owner=owner, script_model=claude_model, script_routing_mode=value.script_routing_mode, ending=value.ending, video_style=value.video_style,
         operator_script=(value.operator_script or "").strip() or None,
+        exact_script=exact_script,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
