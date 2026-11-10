@@ -29,9 +29,9 @@ class LongFormRuntimeMismatch(ValueError):
     invocation_started=False
 
 
-def preserved_bytes(raw,*,kind='model_output'):
+def preserved_bytes(raw,*,kind='model_output',limit=80000):
     raw=raw.encode() if isinstance(raw,str) else raw or b''
-    prefix=raw[:80000];text=prefix.decode('utf-8',errors='replace');clean=redact(text)
+    prefix=raw[:limit];text=prefix.decode('utf-8',errors='replace');clean=redact(text)
     return dict(raw_output=clean,raw_output_kind=kind,original_output_bytes=len(raw),original_output_sha256=hashlib.sha256(raw).hexdigest(),
         retained_prefix_bytes=len(prefix),truncated=len(raw)>len(prefix),redacted=clean!=text)
 
@@ -66,6 +66,14 @@ def _output(raw):
     return value,None
 
 
+def _codex_failure_diagnostics(stdout, stderr, *, returncode=None):
+    diagnostics = {'exit_status': returncode}
+    for stream, raw in (('stdout', stdout), ('stderr', stderr)):
+        if raw:
+            diagnostics[stream] = preserved_bytes(raw, kind=f'cli_{stream}', limit=4096)
+    return diagnostics
+
+
 def invoke_codex(message,*,root):
     from tubeforge import host_codex_runner as runner
     if message.resolved_model!=runner.CODEX_MODEL:raise LongFormRuntimeMismatch('Codex host model differs from the exact reserved model; no invocation launched')
@@ -82,7 +90,8 @@ def invoke_codex(message,*,root):
             completed=subprocess.run(command,input=prompt.encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=runner.TIMEOUT_SECONDS,check=False)
         except subprocess.TimeoutExpired as error:
             usage,searches=_codex_usage(error.stdout)
-            rejected=preserved_file(output_path) or preserved_bytes(error.stdout,kind='cli_events')
+            rejected=preserved_file(output_path) or preserved_bytes(b'')
+            rejected['cli_diagnostics'] = _codex_failure_diagnostics(error.stdout, error.stderr)
             raise LongFormInvocationError('Codex long-form stage timed out',dict(output=None,**rejected,usage=usage,
                 provenance={**provenance,'web_searches':searches},invocation_started=True,error_code='timeout',error='Codex stage timed out; this call will not be launched again.')) from error
         except OSError as error:
@@ -98,6 +107,9 @@ def invoke_codex(message,*,root):
         evidence=dict(output=output,raw_output=raw_output,usage=usage,provenance=provenance,invocation_started=True)
         if output is None:evidence.update(preserved_bytes(raw))
         if completed.returncode or not raw:
+            evidence['cli_diagnostics'] = _codex_failure_diagnostics(
+                completed.stdout, completed.stderr, returncode=completed.returncode
+            )
             raise LongFormInvocationError('Codex stage did not complete',dict(**evidence,error_code='invocation_failed',error='Codex CLI did not return a bounded completed result.'))
         if message.stage=='research' and not searches:
             raise LongFormInvocationError('Research had no search evidence',dict(**evidence,error_code='insufficient_sources',error='No completed live web search was recorded; source URLs are not accepted.'))

@@ -28,3 +28,17 @@ Core owner edits runtime/protocol/host/repository/worker wiring. Prompt/profile 
 Enforce stage count, two narration attempts and conservative token reservations before dispatch; never present unknown usage as zero or a character estimate as a subscription measurement. Measure the full prompt, schema and expected output before proposing the real trial. Report provider/model, effective stage/token/output limits, existing shared allowance, fallback and acceptance test before launch. No paid API or local LLM is authorized. Request a concrete bounded CLI trial only after the implementation and preflight are reviewable.
 
 The operator selected the available 3Blue1Brown capture for real-script acceptance. Its supplied transcript remains unverified reference context; independent primary sources must ground the new script. The TECHNETIUM reference has metadata but no accessible captions and still needs a supplied transcript.
+
+## LF2 D unblock sequence
+
+The installed Codex runner passed preflight and returned a library book-sorting draft with 35,506 reported tokens. Local validation rejected its optional engagement comment because it did not pose a question. The repair exited without a completed result or known usage. Preserve the terminal run and its allowance.
+
+| Order | Owner and outcome | Acceptance evidence | Out of scope |
+| --- | --- | --- | --- |
+| 1 | Codex. Persist actionable runner failure diagnostics. | Offline replay of a failed CLI exit and timeout produces bounded, redacted receipts. Reopening a receipt cannot launch again. | Live calls or allowance changes. |
+| 2 | Codex. Fix the output contract using the saved draft. | Replay the actual draft offline. Make optional comment handling explicit. Verify that a comment-only defect does not require regenerating narration and that the result still goes to independent review. | Weakening grounding or creative gates. |
+| 3 | Claude can take a separate branch. Make the dedicated writer runner reproducible with Docker. | Clean build, dedicated persistent auth and receipts, pinned dependencies and tokenizer data, and zero-call socket preflight. | Changes to LF2 validation, prompts, receipt format or the active deployment. |
+| 4 | Codex. Integrate the fixes and qualify one ten-minute script. | Reviewable exact preflight and separately authorized pilot. Inspect the complete script, grounding, originality, hook/title scores and independent review. Report observed usage and unknowns separately. | Reusing the terminal allowance or claiming a five-hour quota percentage. |
+| 5 | Follow the existing LF3–LF6 gates after LF2 D acceptance. | Inspect a real landscape ten-minute render with timed narration, thumbnail and final QA before qualifying fifteen minutes. | Publishing. |
+
+Steps 1–2 own the writer application and its tests. Step 3 owns container build, Compose and deployment documentation and uses the existing socket interface.

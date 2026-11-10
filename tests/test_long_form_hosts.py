@@ -158,3 +158,37 @@ def test_prepared_model_cannot_change_on_host_restart_before_launch(tmp_path):
     # Old receipts remain inspectable across a deployment/model change.
     inspected=host.handle(message.model_copy(update={'operation':'InspectLongFormCallV1'}),provider='codex',root=tmp_path,invoke=invoke,check_runtime=lambda:None,model='model-B')
     assert inspected.package['state']=='prepared'
+
+
+@pytest.mark.parametrize('timeout', [False, True])
+def test_codex_failed_receipt_preserves_redacted_cli_diagnostics(monkeypatch, tmp_path, timeout):
+    from tubeforge import host_codex_runner as runner
+
+    message, _, _, _ = writing_inputs()
+    message = message.model_copy(update={'resolved_model': runner.CODEX_MODEL})
+    monkeypatch.setattr(runner, 'bubblewrap_args', lambda workspace: ['stub-cli', 'exec'])
+    stdout = b'{"type":"turn.failed","error":{"message":"request failed"}}\n'
+    stderr = b'token=test-secret-value\n' + b'x' * 5000
+    process = Mock()
+    if timeout:
+        process.side_effect = host.subprocess.TimeoutExpired('stub-cli', 1, output=stdout, stderr=stderr)
+    else:
+        process.return_value = SimpleNamespace(returncode=2, stdout=stdout, stderr=stderr)
+    monkeypatch.setattr(host.subprocess, 'run', process)
+
+    store = HostReceiptStore(tmp_path)
+    store.prepare(message)
+    invoke = lambda request: host.invoke_codex(request, root=tmp_path)
+    receipt = store.execute(message, invoke)
+    assert receipt['state'] == 'failed'
+    assert receipt['result']['usage'] is None
+    assert receipt['result']['error_code'] == ('timeout' if timeout else 'invocation_failed')
+    diagnostics = receipt['result']['cli_diagnostics']
+    assert diagnostics['exit_status'] == (None if timeout else 2)
+    assert 'request failed' in diagnostics['stdout']['raw_output']
+    assert diagnostics['stderr']['redacted']
+    assert diagnostics['stderr']['truncated']
+    assert diagnostics['stderr']['retained_prefix_bytes'] == 4096
+    assert 'test-secret-value' not in json.dumps(receipt)
+    assert store.execute(message, invoke) == receipt
+    process.assert_called_once()
