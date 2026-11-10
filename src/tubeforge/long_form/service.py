@@ -143,6 +143,9 @@ class LongFormWritingService:
                 validate_draft(draft,call['message'],reference,source_packet_bytes=json_text(run['source_packet']).encode())
                 if cancelled():raise ProviderCancellation('Preparation stopped after draft validation')
                 self.repository.store_draft(claim,draft)
+                metadata = result['output']['package']['metadata']
+                if metadata.get('engagement_comment') is not None and draft.package.metadata.engagement_comment is None:
+                    self.repository.audit(claim, 'optional_engagement_comment_omitted', {'call_id': call['call_id']})
             except InsufficientSourcesError:raise
             except (ValueError,TypeError) as error:
                 attempts=run['usage']['narration_attempts']

@@ -38,6 +38,8 @@ def workflow(tmp_path):
             if state['mode']=='review_repair':output=review_result(decision='repair',findings=[dict(severity='blocker',category='clarity',section_ids=['section-1'],detail='Synthetic fixture needs a clearer example.')]).model_dump(mode='json')
         else:
             raw=draft.model_dump(mode='json');raw['package']['request']=message.request.model_dump(mode='json')
+            if state['mode'] == 'invalid_comment':
+                raw['package']['metadata']['engagement_comment'] = 'Share your result below.'
             if message.stage=='repair':raw['package']['script_sections'][1]['narration']=raw['package']['script_sections'][1]['narration'].replace('Synthetic','Separate',1)
             if state['mode']=='both_bad' or (state['mode']=='first_bad' and message.stage=='draft'):
                 output=None
@@ -194,3 +196,18 @@ def test_disconnect_while_host_runs_retains_global_exclusion_until_receipt_finis
     run=tick(service,repo,state)
     assert run['next_stage']=='draft' and state['launches']==['research']
     assert service.heavy_work.acquire('media-worker',now=now[0],lease_seconds=60)
+
+
+def test_invalid_optional_comment_preserves_narration_and_reaches_review(workflow):
+    service, repo, _, state, _ = workflow
+    state['mode'] = 'invalid_comment'
+    for _ in range(3):
+        run = tick(service, repo, state)
+    assert run['state'] == 'awaiting_review', run['message']
+    assert state['launches'] == ['research', 'draft', 'review']
+    raw = run['calls'][1]['response']['result']['output']['package']
+    bound = run['draft']['package']
+    assert raw['metadata']['engagement_comment'] == 'Share your result below.'
+    assert 'engagement_comment' not in bound['metadata']
+    assert bound['script_sections'] == raw['script_sections']
+    assert any(entry['event'] == 'optional_engagement_comment_omitted' for entry in run['activity'])

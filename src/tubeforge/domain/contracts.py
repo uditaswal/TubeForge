@@ -7,7 +7,7 @@ from datetime import date, datetime
 from enum import StrEnum
 
 from pydantic.json_schema import SkipJsonSchema
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator, model_serializer
 
 from tubeforge.rendering.shorts.schema import REFERENCE_SHORT_MAX_SECONDS, ShortsTopic
 
@@ -327,14 +327,15 @@ class VideoMetadata(DomainModel):
             value.pop("engagement_comment", None)
         return value
 
-    @model_validator(mode="after")
-    def validate_engagement_comment(self) -> VideoMetadata:
-        text = (self.engagement_comment or "").casefold()
+    @field_validator("engagement_comment")
+    @classmethod
+    def validate_engagement_comment(cls, comment: str | None) -> str | None:
+        text = (comment or "").casefold()
         if any(marker in text for marker in ("http://", "https://", "www.", "@", "#")):
             raise ValueError("engagement comment must not contain links, mentions or hashtags")
-        if self.engagement_comment is not None and "?" not in self.engagement_comment:
+        if comment is not None and "?" not in comment:
             raise ValueError("engagement comment must pose a question")
-        return self
+        return comment
 
 
 class ThumbnailBrief(DomainModel):

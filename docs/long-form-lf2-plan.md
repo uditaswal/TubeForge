@@ -42,3 +42,5 @@ The installed Codex runner passed preflight and returned a library book-sorting 
 | 5 | Follow the existing LF3–LF6 gates after LF2 D acceptance. | Inspect a real landscape ten-minute render with timed narration, thumbnail and final QA before qualifying fifteen minutes. | Publishing. |
 
 Steps 1–2 own the writer application and its tests. Step 3 owns container build, Compose and deployment documentation and uses the existing socket interface.
+
+Steps 1 and 2 are locally **VERIFIED**. The saved book-sorting draft passed local validation with six chapters and 1,452 unchanged narration words after omitting the invalid comment. The hook and title scorers ran. A simulated workflow verified that an invalid optional comment reaches independent review without a narration repair. The original pilot remains terminal and LF2 D remains **BLOCKED** pending the dedicated runner and live acceptance.

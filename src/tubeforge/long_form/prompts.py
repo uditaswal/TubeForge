@@ -4,6 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 
+from pydantic import ValidationError
+
+from tubeforge.domain.contracts import VideoMetadata
 from tubeforge.long_form.wire import draft_context
 from tubeforge.domain.long_form import LongFormChapter
 from tubeforge.domain.long_form_writing import LongFormDraftResult,LongFormHostRequest,LongFormReviewResult,PROFILE
@@ -94,6 +97,7 @@ def build_prompt(message:LongFormHostRequest):
         instructions=(f'Apply {PROFILE}: 16:9, {request.target_duration_seconds} seconds, {minimum}–{maximum} spoken narration words. '
             'yt-script is the sole narration authority. The attached long-form scope overrides all Short-only scene/word/loop/portrait rules. '
             'Write one original, coherent grounded script and exact chapter groups, five distinct hooks, ten titles and two or three substantive improvements. '
+            'Omit engagement_comment unless it is a short question without links, mentions or hashtags. '
             'Provide chapters once in the top-level groups; TubeForge derives the video metadata chapter labels from them. '
             'The reference is context only; primary-source excerpts support claims. Do not echo application-owned request, hashes, usage or approval. '
             'Keep narration separate from scene direction, citations and scores. Return insufficient_sources if evidence cannot support the promise. '
@@ -147,6 +151,13 @@ def bind_draft(raw,request):
         package['request']=request.model_dump(mode='json');raw={**raw,'package':package}
         _bind_ordered_scenes(package)
         metadata=package.get('metadata')
+        if isinstance(metadata, dict) and 'engagement_comment' in metadata:
+            try:
+                VideoMetadata.model_validate(metadata)
+            except ValidationError as error:
+                if any(item['loc'] == ('engagement_comment',) for item in error.errors()):
+                    metadata = {key: value for key, value in metadata.items() if key != 'engagement_comment'}
+                    package['metadata'] = metadata
         chapters=raw.get('chapters')
         if isinstance(metadata,dict) and 'chapters' not in metadata and isinstance(chapters,list):
             # Validate groups before indexing their first section. The canonical

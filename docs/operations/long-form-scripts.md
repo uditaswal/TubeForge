@@ -11,3 +11,5 @@ In Studio at <http://127.0.0.1:62065>, open **Reference videos** and capture a p
 If a worker loses a host response, the preparation checks the existing receipt. **Check host receipt** shows the host's current result without launching a writer. A cancelled preparation keeps its reservations and recorded evidence. A blocked or exhausted brief retains its attempt history for review.
 
 The reviewed installation requires database migration `20261108_0034`, a matching worker and host wheel, and the public tokenizer vocabulary cache. [Host setup](../deploy/codex-runner-runtime.md#long-form-preparation)
+
+The engagement comment is optional. If the writer returns an invalid one, TubeForge omits it from the review draft and records the omission in activity. The original provider receipt retains the submitted comment. The narration still goes through the usual validation and independent review.
