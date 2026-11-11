@@ -104,6 +104,7 @@ One phase at a time. Each phase needs its acceptance evidence before the next on
 - Out of scope: Instagram, scheduling, public visibility.
 
 ### P2: Instagram connect + Reels publish. Owner: **Claude**
+**Status: IMPLEMENTED on `claude/publish-instagram`; fake-transport and temp-stack browser tests pass; live check BLOCKED on operator credentials, the HTTPS callback decision (D1) and a go-ahead for one real post. Review: `docs/instagram-publishing-review.md`.**
 - Outcome: Studio connects the Instagram professional account and publishes one approved Reel
   through the same drafts → submit → delivery queue. Studio shows the permalink.
 - Work:

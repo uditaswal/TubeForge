@@ -239,5 +239,6 @@ class DeliveryExecutor:
         if claim.platform == "youtube":
             return observation.title == metadata.get("title") and observation.caption == metadata.get("caption") and observation.privacy == metadata.get("visibility", "private")
         if claim.platform == "instagram":
-            return observation.caption == metadata.get("caption")
+            from tubeforge.providers.publishing.account_instagram import instagram_full_caption
+            return observation.caption == instagram_full_caption(metadata)
         return False

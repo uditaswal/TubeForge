@@ -120,7 +120,7 @@ class DeliveryQueue:
             row = session.get(DestinationDeliveryRecord, delivery_id)
             if row is None:
                 raise KeyError(delivery_id)
-            if row.platform != "youtube" or row.state != "unknown_outcome" or row.claim_owner is not None or not row.remote_session_id or row.remote_id:
+            if row.platform not in {"youtube", "instagram"} or row.state != "unknown_outcome" or row.claim_owner is not None or not row.remote_session_id or row.remote_id:
                 raise ValueError("this destination has no inspectable uncertain upload session")
             if row.requested_action:
                 raise ValueError("a reconciliation action is already pending")

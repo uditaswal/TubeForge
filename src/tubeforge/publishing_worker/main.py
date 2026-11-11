@@ -12,10 +12,14 @@ from tubeforge.core.config import load_settings
 from tubeforge.db.session import create_database
 from tubeforge.pipeline.delivery_executor import DeliveryExecutor
 from tubeforge.pipeline.delivery_queue import DeliveryQueue
+from tubeforge.providers.publishing.account_instagram import AccountInstagramAdapter
 from tubeforge.providers.publishing.account_youtube import AccountYouTubeAdapter
 from tubeforge.publishing_worker.presence import PublisherWorkerPresence
-from tubeforge.security.account_credentials import AccountCredentialManager, GoogleCredentialRefresher
+from tubeforge.security.account_credentials import AccountCredentialManager, GoogleCredentialRefresher, InstagramCredentialRefresher
 from tubeforge.security.secrets import TokenCipher
+
+
+PLATFORMS = {"youtube", "instagram"}
 
 
 def main() -> None:
@@ -26,11 +30,13 @@ def main() -> None:
     database = create_database(settings.database)
     cipher = TokenCipher(encryption_key)
     youtube = AccountYouTubeAdapter()
+    instagram = AccountInstagramAdapter()
     google_refresh = GoogleCredentialRefresher()
-    manager = AccountCredentialManager(database.session_factory, cipher, {"youtube": google_refresh})
+    instagram_refresh = InstagramCredentialRefresher()
+    manager = AccountCredentialManager(database.session_factory, cipher, {"youtube": google_refresh, "instagram": instagram_refresh})
     queue = DeliveryQueue(database.session_factory)
     stage_root = settings.pipeline.voice.artifact_root.parent / "publishing" / "staging"
-    executor = DeliveryExecutor(database.session_factory, queue, cipher, stage_root, {"youtube": youtube}, manager)
+    executor = DeliveryExecutor(database.session_factory, queue, cipher, stage_root, {"youtube": youtube, "instagram": instagram}, manager)
     presence = PublisherWorkerPresence(database.session_factory)
     worker_id = f"publisher-{uuid4().hex}"
     stopping = False
@@ -39,7 +45,7 @@ def main() -> None:
     def keep_presence() -> None:
         while not heartbeat_stop.wait(10):
             try:
-                presence.heartbeat(worker_id, {"youtube"})
+                presence.heartbeat(worker_id, PLATFORMS)
             except Exception:
                 logging.exception("publisher worker heartbeat failed")
 
@@ -49,7 +55,7 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    presence.heartbeat(worker_id, {"youtube"})
+    presence.heartbeat(worker_id, PLATFORMS)
     heartbeat_thread = Thread(target=keep_presence, name="publisher-heartbeat", daemon=True)
     heartbeat_thread.start()
     try:
@@ -71,6 +77,8 @@ def main() -> None:
         heartbeat_thread.join(timeout=5)
         presence.stop(worker_id)
         youtube.client.close()
+        instagram.client.close()
+        instagram_refresh.client.close()
         google_refresh.client.close()
         database.dispose()
 
