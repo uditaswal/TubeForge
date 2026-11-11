@@ -23,7 +23,8 @@ not VERIFIED: nothing has run against a real Meta app or account.
   `publishing_worker/main.py` (registers `instagram` and its refresher), `compose.yaml` env names.
 
 ## Evidence
-- New tests: 14 (`test_instagram_oauth`, `test_account_instagram_adapter`, `test_instagram_connect_api`,
+- Executor invariants (self-review, `tests/test_instagram_executor.py`, real executor + queue + adapter over a fake transport): one publish then verification against the reviewed caption; a lost publish result lands in `unknown_outcome`, no blind re-upload, and a container reported `PUBLISHED` stays unresolved with exactly one `media_publish` call. Codex's independent review is still pending.
+- New tests: 16 (`test_instagram_oauth`, `test_account_instagram_adapter`, `test_instagram_connect_api`,
   two in `test_manual_publish_drafts`) pass. Publishing/queue/oauth/account/dashboard group: all pass except
   `test_delivery_cues::test_whisper_setting_defaults_to_off_in_config_and_production_yaml`, which fails the
   same way on the base branch.
