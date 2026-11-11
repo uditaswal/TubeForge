@@ -58,7 +58,7 @@ All values go in the project `.env` (git-ignored, read by Compose). Never paste 
 3. Permissions: `instagram_business_basic`, `instagram_business_content_publish`. App stays in
    Development mode. Add your Instagram account under App roles → Instagram testers, and accept
    the invite in the Instagram app (Settings → Website permissions → Apps and websites).
-4. Business login settings → redirect URI `https://localhost:62065/oauth/instagram/callback` (see D1).
+4. Business login settings → redirect URI `https://localhost:62443/oauth/instagram/callback` (see D1).
 5. Put the values in `.env`: `TUBEFORGE_INSTAGRAM_APP_ID`, `TUBEFORGE_INSTAGRAM_APP_SECRET`,
    `TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI`.
 
@@ -66,7 +66,7 @@ After that: `scripts/restart_stack.sh`, open Studio → Accounts → Connect, ap
 
 ## 2. Decisions (recommendation first)
 
-- **D1 OAuth callback over the SSH tunnel.** *Recommended:* accept `http://127.0.0.1`/`localhost`
+- **D1 OAuth callback over the SSH tunnel (resolved for Instagram by `scripts/local_tls_proxy.py`).** *Recommended:* accept `http://127.0.0.1`/`localhost`
   redirects for Google only (Google permits loopback). Meta requires https, so add an opt-in
   loopback TLS listener on the same port (self-signed `localhost` certificate, created by a script).
   The fallback for Instagram is to paste the long-lived token from the Meta dashboard ("Generate
@@ -104,7 +104,7 @@ One phase at a time. Each phase needs its acceptance evidence before the next on
 - Out of scope: Instagram, scheduling, public visibility.
 
 ### P2: Instagram connect + Reels publish. Owner: **Claude**
-**Status: IMPLEMENTED on `claude/publish-instagram`; fake-transport and temp-stack browser tests pass; live check BLOCKED on operator credentials, the HTTPS callback decision (D1) and a go-ahead for one real post. Review: `docs/instagram-publishing-review.md`.**
+**Status: IMPLEMENTED on `claude/publish-instagram` (HTTPS callback front added, D1 resolved); fake-transport and temp-stack browser tests pass; live check BLOCKED on operator the Meta credentials and a go-ahead for one real post. Review: `docs/instagram-publishing-review.md`.**
 - Outcome: Studio connects the Instagram professional account and publishes one approved Reel
   through the same drafts → submit → delivery queue. Studio shows the permalink.
 - Work:

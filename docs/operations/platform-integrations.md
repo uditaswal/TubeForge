@@ -22,7 +22,7 @@ Page is needed, and Facebook Login stays a separate contract.
 Setup (operator, once): create a Meta Business app, add *Instagram → API setup with Instagram login*,
 request `instagram_business_basic` and `instagram_business_content_publish`, keep the app in
 Development mode, add your account as an Instagram tester and accept the invite in the Instagram app.
-Set the redirect URI to `https://localhost:62065/oauth/instagram/callback` (Meta requires https;
+Set the redirect URI to `https://localhost:62443/oauth/instagram/callback` (Meta requires https;
 see the TLS note below) and put these in `.env`:
 `TUBEFORGE_INSTAGRAM_APP_ID`, `TUBEFORGE_INSTAGRAM_APP_SECRET`, `TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI`.
 
@@ -39,9 +39,12 @@ see the TLS note below) and put these in `.env`:
 - **Uncertain outcomes:** if the worker loses the result, Studio offers *Inspect* and *Resume* on
   the saved container. A container Instagram reports as already published is never republished,
   and its media id is not guessed: check the account before retrying.
-- **TLS note:** the dashboard is plain HTTP on loopback. For the Instagram redirect, terminate TLS
-  for `localhost:62065` locally (tunnel your browser to it) or use the token-paste fallback in
-  `docs/publishing-plan.md` (decision D1). Status: BLOCKED on the operator's choice.
+- **HTTPS front (decision D1, resolved):** on the machine where you open the browser, run
+  `python scripts/local_tls_proxy.py`. It serves `https://localhost:62443` and forwards to the
+  dashboard on `127.0.0.1:62065` (through your SSH tunnel). It makes a self-signed certificate under
+  `data/run/tls` (git-ignored); accept the browser warning once. Open Studio at
+  `https://localhost:62443`, sign in there, then connect Instagram: the session cookie belongs to the
+  origin that set it. It binds loopback only and never logs request lines (they can carry OAuth codes).
 
 ## Facebook
 

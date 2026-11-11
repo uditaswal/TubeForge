@@ -32,9 +32,13 @@ not VERIFIED: nothing has run against a real Meta app or account.
   390 px: no JS errors, no horizontal overflow; *Connect Instagram* visible and enabled once status reports
   configured.
 
+## HTTPS callback (D1)
+`scripts/local_tls_proxy.py` (loopback `https://localhost:62443` → dashboard, self-signed cert under git-ignored
+`data/run/tls`); `tests/test_local_tls_proxy.py` proves body, cookie and forwarded-proto relay over TLS.
+Not tried against Meta's real redirect.
+
 ## Not done / BLOCKED
-- Live connect and one real Reel: needs the Meta app, `.env` values, a decision on the HTTPS callback (D1),
-  and the operator's go-ahead for that exact post.
+- Live connect and one real Reel: needs the Meta app, `.env` values, the operator's go-ahead for that exact post.
 - Duration check (Reels ≤ 90 s) and Shorts preflight are Codex's P1 preflight; this adapter only checks size.
 - Proactive refresh at 10 days left and expiry alerts are P5.
 
