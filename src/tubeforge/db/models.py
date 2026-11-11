@@ -159,6 +159,8 @@ class DestinationDeliveryRecord(Base):
     remote_id: Mapped[str | None] = mapped_column(String(500))
     remote_url: Mapped[str | None] = mapped_column(Text)
     remote_session_id: Mapped[str | None] = mapped_column(Text)
+    remote_session_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remote_container_id: Mapped[str | None] = mapped_column(String(500))
     requested_action: Mapped[str | None] = mapped_column(String(32))
     requested_by: Mapped[str | None] = mapped_column(String(64))
     requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

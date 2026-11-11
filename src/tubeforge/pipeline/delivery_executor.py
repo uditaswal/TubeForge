@@ -25,6 +25,27 @@ class UploadReceipt:
 
 
 @dataclass(frozen=True, slots=True)
+class RemoteSession:
+    """Persisted upload/container session; expiry must be timezone-aware."""
+    session_id: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ContainerReceipt:
+    """Upload completed into a container, but no public post exists yet."""
+    container_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContainerObservation:
+    state: str  # processing, ready, published, expired, failed
+    remote_id: str | None = None
+    remote_url: str | None = None
+    retry_after_seconds: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RemoteObservation:
     state: str  # published, processing, missing
     external_account_id: str | None = None
@@ -37,11 +58,26 @@ class RemoteObservation:
 class DestinationAdapter(Protocol):
     """An adapter must create a resumable remote session before upload bytes."""
 
-    def open_session(self, *, external_account_id: str, credential: dict[str, object], asset_path: Path, metadata: dict[str, object]) -> str: ...
-    def upload(self, *, session_id: str, external_account_id: str, credential: dict[str, object], asset_path: Path, metadata: dict[str, object], heartbeat: Callable[[], bool]) -> UploadReceipt: ...
+    def open_session(self, *, external_account_id: str, credential: dict[str, object], asset_path: Path, metadata: dict[str, object]) -> str | RemoteSession: ...
+    def upload(self, *, session_id: str, external_account_id: str, credential: dict[str, object], asset_path: Path, metadata: dict[str, object], heartbeat: Callable[[], bool]) -> UploadReceipt | ContainerReceipt: ...
     def inspect(self, *, remote_id: str, external_account_id: str, credential: dict[str, object]) -> RemoteObservation: ...
-    def inspect_session(self, *, session_id: str, credential: dict[str, object], asset_size: int) -> UploadReceipt | None: ...
-    def resume_session(self, *, session_id: str, credential: dict[str, object], asset_path: Path, heartbeat: Callable[[], bool]) -> UploadReceipt: ...
+    def inspect_session(self, *, session_id: str, credential: dict[str, object], asset_size: int) -> UploadReceipt | ContainerReceipt | None: ...
+    def resume_session(self, *, session_id: str, credential: dict[str, object], asset_path: Path, heartbeat: Callable[[], bool]) -> UploadReceipt | ContainerReceipt: ...
+
+
+class ContainerDestinationAdapter(DestinationAdapter, Protocol):
+    """Separate processing inspection and an externally visible publish mutation."""
+
+    def inspect_container(self, *, container_id: str, external_account_id: str, credential: dict[str, object]) -> ContainerObservation: ...
+    def publish_container(self, *, container_id: str, external_account_id: str, credential: dict[str, object], heartbeat: Callable[[], bool]) -> UploadReceipt: ...
+
+
+class ProviderRateLimitHint(RuntimeError):
+    """Read-only/pre-mutation rate limit with a provider-supplied delay."""
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__("destination rate limit")
+        self.retry_after_seconds = retry_after_seconds
 
 
 class SafePreflightError(RuntimeError):
@@ -116,6 +152,35 @@ class DeliveryExecutor:
             else:
                 self.queue.verification_attention(claim, "remote publication does not match the reviewed destination or metadata")
             return claim.delivery_id
+        if claim.kind in {"container_check", "container_publish"}:
+            if claim.remote_session_expires_at is None or _as_utc(claim.remote_session_expires_at) <= datetime.now(UTC):
+                self.queue.container_defer(claim, "remote container expired before publication", fail=True)
+                return claim.delivery_id
+            if claim.kind == "container_check":
+                try:
+                    observation = adapter.inspect_container(container_id=claim.remote_container_id or "", external_account_id=claim.external_account_id, credential=credential)
+                    delay = max(1, min(3600, int(observation.retry_after_seconds or 120)))
+                    self.queue.container_observed(claim, observation.state, retry_at=datetime.now(UTC) + timedelta(seconds=delay), remote_id=observation.remote_id, remote_url=observation.remote_url)
+                except ProviderRateLimitHint as error:
+                    delay = max(1, min(3600, int(error.retry_after_seconds)))
+                    self.queue.container_defer(claim, "destination rate limit", retry_at=datetime.now(UTC) + timedelta(seconds=delay))
+                except Exception:
+                    self.queue.container_defer(claim, "container status is temporarily unavailable", retry_at=datetime.now(UTC) + timedelta(minutes=2))
+                return claim.delivery_id
+            if not self.queue.heartbeat(claim):
+                return claim.delivery_id
+            if _as_utc(claim.remote_session_expires_at) <= datetime.now(UTC):
+                self.queue.container_defer(claim, "remote container expired before publication", fail=True)
+                return claim.delivery_id
+            try:
+                receipt = adapter.publish_container(container_id=claim.remote_container_id or "", external_account_id=claim.external_account_id, credential=credential, heartbeat=lambda: self.queue.heartbeat(claim))
+                if not isinstance(receipt, UploadReceipt) or not receipt.remote_id:
+                    raise ValueError("published media identity is missing")
+            except Exception:
+                self.queue.uncertain(claim, "remote container publication outcome is unknown")
+                return claim.delivery_id
+            self.queue.container_published(claim, receipt.remote_id, remote_url=receipt.remote_url)
+            return claim.delivery_id
         # Refresh may cross Pacific midnight; reserve against the current day too.
         if claim.platform == "youtube":
             try:
@@ -136,7 +201,15 @@ class DeliveryExecutor:
         except Exception:
             self.queue.uncertain(claim, "remote session creation outcome is unknown")
             return claim.delivery_id
-        self.queue.record_session(claim, self.cipher.encrypt({"session_id": session_id}))
+        expiry = session_id.expires_at if isinstance(session_id, RemoteSession) else None
+        session_id = session_id.session_id if isinstance(session_id, RemoteSession) else session_id
+        try:
+            if not isinstance(session_id, str) or not session_id:
+                raise ValueError("remote session identity is invalid")
+            self.queue.record_session(claim, self.cipher.encrypt({"session_id": session_id}), expires_at=expiry)
+        except (ValueError, TypeError):
+            self.queue.uncertain(claim, "remote session could not be recorded safely")
+            return claim.delivery_id
         try:
             receipt = adapter.upload(
                 session_id=session_id, external_account_id=claim.external_account_id,
@@ -146,7 +219,13 @@ class DeliveryExecutor:
         except Exception:
             self.queue.uncertain(claim, "remote upload outcome is unknown")
             return claim.delivery_id
-        self.queue.upload_accepted(claim, receipt.remote_id, remote_url=receipt.remote_url)
+        if isinstance(receipt, ContainerReceipt):
+            try:
+                self.queue.container_staged(claim, receipt.container_id)
+            except ValueError:
+                self.queue.uncertain(claim, "remote container outcome could not be recorded safely")
+        else:
+            self.queue.upload_accepted(claim, receipt.remote_id, remote_url=receipt.remote_url)
         return claim.delivery_id
 
     def run_requested_action(self, worker_id: str) -> str | None:
@@ -177,6 +256,14 @@ class DeliveryExecutor:
         except (OSError, ValueError, CredentialBusy, CredentialReconnectRequired, CredentialRefreshTemporary):
             self.queue.reconciliation_unresolved(claim, "saved session or account credential is unavailable")
             return claim.delivery_id
+        if claim.remote_container_id:
+            try:
+                observation = adapter.inspect_container(container_id=claim.remote_container_id, external_account_id=claim.external_account_id, credential=credential)
+                delay = max(1, min(3600, int(observation.retry_after_seconds or 120)))
+                self.queue.container_observed(claim, observation.state, retry_at=datetime.now(UTC) + timedelta(seconds=delay), remote_id=observation.remote_id, remote_url=observation.remote_url)
+            except Exception:
+                self.queue.reconciliation_unresolved(claim, "remote container publication could not be proven")
+            return claim.delivery_id
         try:
             receipt = adapter.inspect_session(session_id=session_id, credential=credential, asset_size=asset.stat().st_size)
         except Exception:
@@ -184,6 +271,8 @@ class DeliveryExecutor:
             return claim.delivery_id
         if receipt is None:
             self.queue.reconciliation_unresolved(claim, "remote upload is incomplete; resume the saved session before any new upload")
+        elif isinstance(receipt, ContainerReceipt):
+            self.queue.container_staged(claim, receipt.container_id)
         else:
             self.queue.reconciled_uploaded(claim, receipt.remote_id, remote_url=receipt.remote_url)
         return claim.delivery_id
@@ -212,7 +301,10 @@ class DeliveryExecutor:
         except Exception:
             self.queue.reconciliation_unresolved(claim, "same-session upload continuation could not be proven")
             return claim.delivery_id
-        self.queue.reconciled_uploaded(claim, receipt.remote_id, remote_url=receipt.remote_url)
+        if isinstance(receipt, ContainerReceipt):
+            self.queue.container_staged(claim, receipt.container_id)
+        else:
+            self.queue.reconciled_uploaded(claim, receipt.remote_id, remote_url=receipt.remote_url)
         return claim.delivery_id
 
     def _inputs(self, claim: DeliveryClaim) -> tuple[Path, dict[str, object]]:
@@ -248,12 +340,16 @@ class DeliveryExecutor:
         retry_at = datetime.now(UTC) + timedelta(seconds=seconds)
         if claim.kind == "upload":
             self.queue.preflight_retry(claim, reason, retry_at=retry_at)
+        elif claim.kind in {"container_check", "container_publish"}:
+            self.queue.container_defer(claim, reason, retry_at=retry_at)
         else:
             self.queue.verification_pending(claim, retry_at=retry_at)
 
     def _reject_before_remote(self, claim: DeliveryClaim, reason: str) -> None:
         if claim.kind == "upload":
             self.queue.preflight_failed(claim, reason)
+        elif claim.kind in {"container_check", "container_publish"}:
+            self.queue.container_defer(claim, reason, fail=True)
         else:
             self.queue.verification_attention(claim, reason)
 
@@ -266,3 +362,7 @@ class DeliveryExecutor:
         if claim.platform == "instagram":
             return observation.caption == metadata.get("caption")
         return False
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)

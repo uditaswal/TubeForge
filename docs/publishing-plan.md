@@ -186,7 +186,7 @@ Proceed in order; each checkpoint is accepted locally before the next. Live plat
 | Checkpoint | User-visible outcome | Acceptance test and evidence | Out of scope |
 |---|---|---|---|
 | P1 | Safe private YouTube upload and readiness | Fake-transport field and preflight tests, durable quota tests, signed-in Studio check; real private upload and remote inspection separately authorized | Instagram, schedules, public visibility |
-| Delivery core | Instagram-shaped upload, expiry and separate publication are crash-safe | Fake adapter tests for expiry, publish-once and crash reconciliation | Instagram provider and OAuth implementation |
+| Delivery core — **VERIFIED** for fake-backed local scope | Instagram-shaped upload, expiry and separate publication are crash-safe | 8 fake adapter tests; publishing selection 106 passed, 1 opt-in browser skip; container migration round trip passed | Instagram provider and OAuth implementation, real publication |
 | P3 | One checksum-bound review creates independent destination drafts | API and isolation tests using approved Day review evidence | Claude's UI |
 | P4 | Pending posts honor slots, audit restrictions, grace and cadence | Migration round trip and frozen-clock schedule/cadence tests | Live schedule without exact-post approval; Claude's UI |
 | P5 | Worker starts safely and retries respect provider limits | Seven-day fake soak, retry tests and signed-in responsive check | Real week or public publication without approval |

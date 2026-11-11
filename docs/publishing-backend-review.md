@@ -35,9 +35,14 @@ No external upload, publication, deployment, push or merge has occurred.
 
 ## Remaining work
 
-The Instagram-shaped delivery core and its interface for Claude, cross-posting,
-scheduling, provider rate-limit handling, default worker startup and seven-day fake
-soak are **NOT STARTED** on this branch. Claude owns Instagram OAuth, the Instagram
-adapter and API per-platform gates. The two tracks must agree on an executor protocol
-before integration; the current adapter protocol does not yet support a separate
-container publish step or expiry.
+The Instagram-shaped delivery core is **VERIFIED** for fake-backed local scope:
+`tests/test_container_delivery.py` has eight passing cases including container expiry,
+upload interruption, lost publish response, stale publish lease, publish-once guard
+and bounded polling hints. The full requested publishing selection passed 106 tests
+with one opt-in browser skip. Migration `20261111_0034` upgraded, downgraded and
+re-upgraded on a temporary database. The adapter contract for Claude is in
+`docs/HANDOFF.md`. Instagram OAuth, the real Instagram adapter and its per-platform
+API gates remain Claude's work and have not been verified here.
+
+Cross-posting, scheduling, provider backoff/jitter beyond the container hint,
+default worker startup and the seven-day fake soak remain **NOT STARTED**.

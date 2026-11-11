@@ -39,8 +39,35 @@ all pixels, audio and encoding are local and cost no tokens.
 - Real bug fixed: `GET /api/batch-plans` returned 500 when a topic's job had been deleted (shows "job missing" now).
 
 ## Next step (in order)
-- **Publishing P1 — IMPLEMENTED, not VERIFIED:** the approved Day-review disclosure and exact final are bound into a private YouTube draft; local media checks, configurable upload fields, estimated quota ledger and readiness are in place. Fake upload/verification and the three-width signed-in readiness check passed; upgrade/downgrade/re-upgrade of migration `20261111_0033` passed on a temporary DB. The project `.env` lacks `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET` and `TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI`. A real private upload is **BLOCKED** until credentials, a named approved final and exact-post operator permission are supplied. The requested publishing/delivery/OAuth/account/scheduling selection passed (99 passed, 1 separately run browser skip); after a quota reservation adjustment the relevant focused group passed (16 tests). Next: run `PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q tests/test_youtube_review.py tests/test_youtube_quota.py tests/test_youtube_preflight.py` and continue the fake-backed delivery-core phase. No Instagram container/publish protocol is ready for Claude yet; do not assume the existing `DestinationAdapter` supports it.
+- **Publishing P1 — IMPLEMENTED, not VERIFIED:** the approved Day-review disclosure and exact final are bound into a private YouTube draft; local media checks, configurable upload fields, estimated quota ledger and readiness are in place. Fake upload/verification and the three-width signed-in readiness check passed; upgrade/downgrade/re-upgrade of migration `20261111_0033` passed on a temporary DB. The project `.env` lacks `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET` and `TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI`. A real private upload is **BLOCKED** until credentials, a named approved final and exact-post operator permission are supplied. The publishing/delivery/OAuth/account/scheduling selection passed (106 passed, 1 separately run browser skip); the separately expanded container tests passed 8 tests. Next: run `PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q tests/test_container_delivery.py tests/test_batch_review_api.py` and implement the P3 checksum-bound Day-review draft handoff. Migration `20261111_0034` adds the container fields; upgrade/downgrade/re-upgrade passed on a temporary DB. The fake-backed delivery core is **VERIFIED** for its local tests; the Instagram provider and real post remain **NOT STARTED** on this branch.
 - **Publishing pipeline (11 Nov, branch `feature/publish-pipeline` from `dev`, worktree `../tubeforge-publish`, NOT STARTED):** plan `docs/publishing-plan.md`. Operator only sets up Google + Meta credentials (section 1, values in `.env`). Next: **Codex P1** (YouTube private upload end to end: loopback OAuth redirect, made-for-kids/synthetic-media fields, quota ledger) on `codex/publish-youtube`; **Claude P2** (Instagram Login + resumable Reels adapter) on `claude/publish-instagram`. Every real upload needs the operator's go-ahead for that exact post.
+
+### Instagram adapter contract for Claude
+
+Implement `ContainerDestinationAdapter` in `pipeline/delivery_executor.py`; do not
+publish during `upload`. `open_session(...)` returns `RemoteSession(session_id,
+expires_at)`: the session string is encrypted in the queue and the timezone-aware
+expiry is the provider's actual container deadline (Instagram normally 24 hours).
+`upload(...)` returns `ContainerReceipt(container_id)` only after bytes are accepted;
+`inspect_session(...)` / `resume_session(...)` can return that receipt during
+reconciliation of an interrupted upload. Keep the container ID stable. The executor
+persists it before processing or publishing.
+
+`inspect_container(container_id, external_account_id, credential)` is read-only and
+returns `ContainerObservation(state, remote_id=None, remote_url=None,
+retry_after_seconds=None)`, where state is `processing`, `ready`, `published`,
+`expired` or `failed`; `published` requires the actual media ID. A read-only rate
+limit may raise `ProviderRateLimitHint(seconds)`; polling delays are bounded to 1–3600 s.
+`publish_container(..., heartbeat)` is the separate mutation and returns
+`UploadReceipt(media_id, remote_url)` after success. Call the heartbeat before remote
+writes; never retry publication inside the adapter. Any ambiguous publish exception or
+expired publish lease becomes `unknown_outcome`; inspection must prove a published
+media ID, and a still-ready or expired container does not authorize another publish.
+`inspect(...)` verifies the final account and caption. The API's separate exact-post
+confirmation and Claude's per-platform gate are still required before a real Reel.
+Migrations on this branch are `20261111_0033` → `20261111_0034`; reconcile any parallel
+migration heads deliberately when integrating.
+
 0. **LeetCode video (10 Nov): job `642dc2b2…` is at `script_approval_required`: operator reviews the script in Generations** (12 scenes, 169 words, your wording kept in 7 scenes; grounded claims c1-c10, scene 10's "more than half" is claim c9). Earlier failures and their causes: prompt over the 90,000 ceiling (three 24k-character excerpts + the 57k fixed prompt), then the craft gate's numbers rule (two..billion count; at most 2 per scene) on an operator script. Both are now handled before queueing; see `docs/settings.md`.
 1. **Operator:** approve/stage the 2026-11-04 shorts in Day review (rebuild with `scripts/restart_stack.sh` if not done); click "Retry approved media stages" on job `49bfc7ef…`.
 2. **Codex (LF2):** operator approved more Claude spend for the long-form pilots and said the long-form branch may merge after review. Still needs a spend figure per pilot, and deployment review of migrations `20261108_0033` and `0034`. Phase D is blocked on structured-draft failures (`docs/long-form-lf2-d-*.md`).
