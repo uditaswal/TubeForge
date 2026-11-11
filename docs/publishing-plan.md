@@ -148,6 +148,8 @@ Backend **IMPLEMENTED**: authenticated defaults and draft-preparation endpoints 
   outcomes, and a forced failure on one destination leaves the other intact.
 
 ### P4: Scheduled publishing at slots. Owner: **Codex** (backend) + **Claude** (UI)
+
+Backend **IMPLEMENTED**: per-destination UTC slots, a 30-minute Instagram preparation window and late grace, audited cadence-warning override, and distinct pause/cancel actions. YouTube starts privately; a future `publishAt` requires both the audit flag and an explicit per-schedule future-public confirmation, which is frozen with the delivery. A late audited YouTube slot is refused locally rather than sent as a past `publishAt`. Frozen-clock on-time/late/missed/downtime/IST, override and boundary-fencing tests passed (10 focused); the signed-in audit/readiness check passed at three widths, the 0035 migration round trip passed, and the publishing regression selection passed 117 tests with one separately run browser skip. Claude's calendar UI and any real scheduled post remain unverified. Out of scope: real scheduling without exact-post authorization and public release.
 - Outcome: the operator schedules approved posts to the plan's slots (13:00 / 19:00 IST). Posts
   go out on time without the operator present.
 - Codex:
@@ -190,7 +192,7 @@ Proceed in order; each checkpoint is accepted locally before the next. Live plat
 | P1 | Safe private YouTube upload and readiness | Fake-transport field and preflight tests, durable quota tests, signed-in Studio check; real private upload and remote inspection separately authorized | Instagram, schedules, public visibility |
 | Delivery core — **VERIFIED** for fake-backed local scope | Instagram-shaped upload, expiry and separate publication are crash-safe | 8 fake adapter tests; publishing selection 106 passed, 1 opt-in browser skip; container migration round trip passed | Instagram provider and OAuth implementation, real publication |
 | P3 — **IMPLEMENTED** backend | One checksum-bound review creates independent destination drafts | API and isolation tests: 17 focused passed; publishing selection 107 passed, 1 separately run browser skip | Claude's UI and platform gate; real cross-post |
-| P4 | Pending posts honor slots, audit restrictions, grace and cadence | Migration round trip and frozen-clock schedule/cadence tests | Live schedule without exact-post approval; Claude's UI |
+| P4 — **IMPLEMENTED** backend | Pending posts honor slots, audit restrictions, grace and cadence | 10 frozen-clock tests; migration round trip; three-width signed-in audit check; publishing selection 117 passed, 1 separately run browser skip | Live schedule without exact-post approval; Claude's UI |
 | P5 | Worker starts safely and retries respect provider limits | Seven-day fake soak, retry tests and signed-in responsive check | Real week or public publication without approval |
 
 ## 4. Relay order and hand-offs

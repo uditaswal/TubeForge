@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import UTC, datetime
 import hashlib
 import re
 from typing import Callable
@@ -23,18 +24,30 @@ CHUNK_BYTES = 8 * 1024 * 1024
 class AccountYouTubeAdapter:
     """Only opens a session; the executor persists it before sending video bytes."""
 
-    def __init__(self, client: httpx.Client | None = None, *, ffprobe: str = "ffprobe", max_bytes: int = 2_000_000_000, category_id: str = "22", self_declared_made_for_kids: bool = False) -> None:
+    def __init__(self, client: httpx.Client | None = None, *, ffprobe: str = "ffprobe", max_bytes: int = 2_000_000_000, category_id: str = "22", self_declared_made_for_kids: bool = False, youtube_api_audited: bool = False, clock: Callable[[], datetime] | None = None) -> None:
         if not re.fullmatch(r"[0-9]{1,6}", category_id) or type(self_declared_made_for_kids) is not bool:
             raise ValueError("YouTube category or made-for-kids setting is invalid")
         self.client = client or httpx.Client(timeout=60, follow_redirects=False)
         self.ffprobe, self.max_bytes = ffprobe, max_bytes
+        if type(youtube_api_audited) is not bool:
+            raise ValueError("YouTube audit setting must be boolean")
         self.category_id, self.self_declared_made_for_kids = category_id, self_declared_made_for_kids
+        self.youtube_api_audited = youtube_api_audited
+        self.clock = clock or (lambda: datetime.now(UTC))
 
     def preflight(self, *, asset_path: Path, metadata: dict[str, object]) -> None:
         if metadata.get("visibility", "private") != "private":
             raise SafePreflightError("only private YouTube uploads are currently permitted")
         if type(metadata.get("contains_synthetic_media")) is not bool:
             raise SafePreflightError("reviewed synthetic-media disclosure is required")
+        scheduled = metadata.get("scheduled_for")
+        if scheduled is not None and self.youtube_api_audited and metadata.get("schedule_audit_allowed") is True:
+            try:
+                stamp = datetime.fromisoformat(str(scheduled).replace("Z", "+00:00"))
+                if stamp.utcoffset() is None or stamp <= self.clock():
+                    raise ValueError("past or naive time")
+            except (ValueError, TypeError) as error:
+                raise SafePreflightError("scheduled YouTube publish time must be in the future") from error
         digest = metadata.get("thumbnail_sha256")
         if digest is not None and _thumbnail_content(asset_path, digest) is None:
             raise SafePreflightError("reviewed thumbnail is unavailable or changed")
@@ -66,11 +79,17 @@ class AccountYouTubeAdapter:
             raise SafePreflightError("YouTube channel identity response is invalid", category="retry") from error
         if not isinstance(channels, list) or len(channels) != 1 or not isinstance(channels[0], dict) or channels[0].get("id") != external_account_id:
             raise SafePreflightError("YouTube token does not belong to the selected channel", category="auth")
+        status = {"privacyStatus": visibility, "selfDeclaredMadeForKids": self.self_declared_made_for_kids, "containsSyntheticMedia": metadata["contains_synthetic_media"]}
+        if self.youtube_api_audited and metadata.get("schedule_audit_allowed") is True and metadata.get("scheduled_for") is not None:
+            scheduled = datetime.fromisoformat(str(metadata["scheduled_for"]).replace("Z", "+00:00"))
+            if scheduled <= self.clock():
+                raise SafePreflightError("scheduled YouTube publish time must be in the future")
+            status["publishAt"] = scheduled.astimezone(UTC).isoformat().replace("+00:00", "Z")
         response = self.client.post(
             UPLOAD_URL,
             params={"uploadType": "resumable", "part": "snippet,status"},
             headers={"Authorization": f"Bearer {access_token}", "X-Upload-Content-Length": str(asset_path.stat().st_size), "X-Upload-Content-Type": "video/mp4"},
-            json={"snippet": {"title": title, "description": description, "tags": tags, "categoryId": self.category_id}, "status": {"privacyStatus": visibility, "selfDeclaredMadeForKids": self.self_declared_made_for_kids, "containsSyntheticMedia": metadata["contains_synthetic_media"]}},
+            json={"snippet": {"title": title, "description": description, "tags": tags, "categoryId": self.category_id}, "status": status},
         )
         if response.status_code != 200:
             raise ValueError("YouTube did not open a resumable upload session")
@@ -168,7 +187,7 @@ class AccountYouTubeAdapter:
         return RemoteObservation(
             "published" if processing == "succeeded" else "processing",
             str(snippet.get("channelId") or ""), snippet.get("title"), snippet.get("description"),
-            f"https://www.youtube.com/watch?v={remote_id}", status.get("privacyStatus"),
+            f"https://www.youtube.com/watch?v={remote_id}", status.get("privacyStatus"), status.get("publishAt"),
         )
 
     def inspect_session(self, *, session_id: str, credential: dict[str, object], asset_size: int) -> UploadReceipt | None:

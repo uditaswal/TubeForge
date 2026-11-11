@@ -31,6 +31,7 @@ def main() -> None:
         max_bytes=settings.pipeline.youtube.max_upload_bytes,
         category_id=settings.pipeline.youtube.category_id,
         self_declared_made_for_kids=settings.pipeline.youtube.self_declared_made_for_kids,
+        youtube_api_audited=settings.pipeline.youtube.youtube_api_audited,
     )
     google_refresh = GoogleCredentialRefresher()
     manager = AccountCredentialManager(database.session_factory, cipher, {"youtube": google_refresh})

@@ -873,7 +873,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "manual_submission_enabled": youtube_ready,
             "readiness": {
                 "youtube": {"worker_live": "youtube" in platforms, "oauth_configured": youtube_oauth,
-                            "account_connected": bool(connected("youtube")), "quota": youtube_quota, "ready": youtube_ready},
+                            "account_connected": bool(connected("youtube")), "quota": youtube_quota, "ready": youtube_ready,
+                            "youtube_api_audited": application_settings.pipeline.youtube.youtube_api_audited,
+                            "audit_state": "audited" if application_settings.pipeline.youtube.youtube_api_audited else "audit pending: private only"},
                 "instagram": {"worker_live": "instagram" in platforms, "oauth_configured": False,
                               "account_connected": bool(connected("instagram")), "quota": None, "ready": False},
             },
@@ -937,12 +939,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "reviewed_identity": manual_posts.review_identity(post.id),
                 "created_at": _as_ist(post.created_at),
                 "submitted_at": _as_ist(post.submitted_at) if post.submitted_at else None,
+                "scheduled_for": _as_ist(post.scheduled_at) if post.scheduled_at else None,
                 "destinations": [{
                     "id": item.id, "account_id": item.account_id, "platform": item.platform,
                     "external_account_id": item.external_account_id, "state": item.state,
                     "metadata": json.loads(item.metadata_json), "attempt_count": item.attempt_count,
                     "error_message": item.error_message, "remote_id": item.remote_id,
                     "remote_url": item.remote_url,
+                    "scheduled_for": _as_ist(item.scheduled_for) if item.scheduled_for else None,
+                    "youtube_schedule_audited": item.youtube_schedule_audited,
+                    "can_pause_pending": item.state in {"pending", "retry_wait", "container_processing", "container_ready"} and not item.claim_owner and not item.remote_id and not (item.platform == "youtube" and item.remote_session_id),
+                    "can_resume_pending": item.state == "paused" and not item.claim_owner and not item.remote_id and not (item.platform == "youtube" and item.remote_session_id),
+                    "can_cancel_pending": item.state in {"pending", "retry_wait", "container_processing", "container_ready", "paused"} and not item.claim_owner and not item.remote_id and not (item.platform == "youtube" and item.remote_session_id),
                     "requested_action": item.requested_action,
                     "requested_by": item.requested_by,
                     "requested_at": _as_ist(item.requested_at) if item.requested_at else None,
@@ -1098,6 +1106,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return routing_policy.apply(build_batch_request(short, application_settings))
     runtime.scheduler.batch_request_factory = batch_request
     register_batch_routes(app, runtime, batch_request)
+    from tubeforge.api.publishing_schedule import register_publishing_schedule_routes
+    register_publishing_schedule_routes(app, runtime, publisher_presence, manual_posts, delivery_queue)
     from tubeforge.api.runtime_settings import register_settings_routes
     register_settings_routes(app, runtime)
 
@@ -1323,7 +1333,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
               row.append(details);history.append(row);
             }
           }catch(_){if(history.textContent==='Loading drafts…')history.textContent='Could not load publishing drafts.';}}
-          async function loadWorkerState(){try{const response=await fetch('/api/publishing/status');if(!response.ok)throw Error();const result=await response.json();workerReady=Boolean(result.manual_submission_enabled);const yt=result.readiness?.youtube;workerOnline=Boolean(yt?.worker_live);workerState.textContent=yt?`YouTube: worker ${yt.worker_live?'online':'offline'} · authorization ${yt.oauth_configured?'configured':'not configured'} · account ${yt.account_connected?'connected':'not connected'} · estimated upload quota ${yt.quota.remaining_units} / ${yt.quota.daily_units} units remaining${workerReady?'':' · submission unavailable'}.`:'Publisher status unavailable.';}catch(_){workerReady=false;workerOnline=false;workerState.textContent='Publisher worker status is unavailable. Drafts can be saved; submission is disabled.';}for(const button of history.querySelectorAll('[data-submit-draft]'))button.disabled=!workerReady||button.dataset.reviewed!=='true';for(const button of history.querySelectorAll('[data-reconcile]'))button.disabled=!workerOnline;}
+          async function loadWorkerState(){try{const response=await fetch('/api/publishing/status');if(!response.ok)throw Error();const result=await response.json();workerReady=Boolean(result.manual_submission_enabled);const yt=result.readiness?.youtube;workerOnline=Boolean(yt?.worker_live);workerState.textContent=yt?`YouTube: worker ${yt.worker_live?'online':'offline'} · authorization ${yt.oauth_configured?'configured':'not configured'} · account ${yt.account_connected?'connected':'not connected'} · estimated upload quota ${yt.quota.remaining_units} / ${yt.quota.daily_units} units remaining · ${yt.audit_state}${workerReady?'':' · submission unavailable'}.`:'Publisher status unavailable.';}catch(_){workerReady=false;workerOnline=false;workerState.textContent='Publisher worker status is unavailable. Drafts can be saved; submission is disabled.';}for(const button of history.querySelectorAll('[data-submit-draft]'))button.disabled=!workerReady||button.dataset.reviewed!=='true';for(const button of history.querySelectorAll('[data-reconcile]'))button.disabled=!workerOnline;}
           refreshHistory.onclick=async()=>{refreshHistory.disabled=true;refreshHistory.textContent='Refreshing activity…';await loadDrafts();refreshHistory.disabled=false;refreshHistory.textContent='Refresh publishing activity';};
           function applyVideoIntent(){const video=videosById.get(videoSelect.value);planned.replaceChildren();for(const row of rows.values()){row.check.checked=false;row.caption.value='';if(row.title)row.title.value='';if(row.tags)row.tags.value='';}if(!video)return;const intents=video.destination_intents||[];if(!intents.length){planned.textContent='This video has no saved destination plan. Choose a connected account below to prepare a draft.';for(const row of rows.values()){if(video.video_description&&video.video_description.length<=row.caption.maxLength)row.caption.value=video.video_description;if(row.title)row.title.value=video.title.slice(0,100);}return;}const heading=document.createElement('strong');heading.textContent='Saved creation plan';planned.append(heading);for(const intent of intents){const account=accountsById.get(intent.account_id),row=rows.get(intent.account_id),fits=row&&intent.description.length<=row.caption.maxLength;const line=document.createElement('p');line.textContent=intent.platform+' · '+intent.account_name+' · '+intent.category+(fits?' — ready for draft review':row?' — description exceeds this platform’s limit; shorten it before selecting':' — '+(account?.status||'account unavailable')+'; connection or platform draft support required');planned.append(line);if(row){row.check.checked=Boolean(fits);row.caption.value=fits?intent.description:'';if(row.title)row.title.value=video.title.slice(0,100);}}}
           videoSelect.onchange=applyVideoIntent;

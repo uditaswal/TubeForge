@@ -32,10 +32,7 @@ outcomes. It cannot see API use by other clients in the Google project; inspect 
 Cloud quota as well. A quota refusal is recorded on the delivery and does not trigger
 repeated remote requests.
 
-Google may restrict an unaudited API project to private uploads. Complete the YouTube
-API Services audit before relying on scheduled/public publishing; scheduling and its
-audit control are not implemented on this branch. Local fake tests are not proof of a
-real upload. A real private upload requires separate operator permission for that final.
+Google may restrict an unaudited API project to private uploads. `pipeline.youtube.youtube_api_audited` defaults to false and Studio shows “audit pending: private only”. Only set it after the project's audit is approved. A future YouTube `publishAt` also requires an explicit future-public confirmation when scheduling that exact reviewed draft; the choice is frozen at scheduling time. Instagram preparation starts 30 minutes before its slot; unstarted work over 30 minutes late is marked missed. The calendar UI is still awaiting integration. Local fake tests are not proof of a real upload or schedule. A real private upload requires separate operator permission for that final.
 
 ## Instagram and Facebook
 

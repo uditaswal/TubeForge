@@ -65,6 +65,7 @@ def test_publishing_readiness_responsive_and_signed_in(tmp_path, monkeypatch):
                     page.goto(base + '/#publishing', wait_until='domcontentloaded')
                     page.get_by_text('estimated upload quota 8400 / 10000 units remaining', exact=False).wait_for()
                     assert page.get_by_text('worker online', exact=False).count() >= 1
+                    assert page.get_by_text('audit pending: private only', exact=False).count() >= 1
                     assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
                     assert not errors
                     page.screenshot(path=str(evidence / f'{name}.png'), full_page=True)

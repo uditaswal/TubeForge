@@ -510,6 +510,7 @@ class YouTubePublishingConfig(BaseModel):
     chunk_size_bytes: int = Field(default=8_388_608, ge=262_144, le=64_000_000)
     category_id: str = Field(default="22", pattern=r"^[0-9]{1,6}$")
     self_declared_made_for_kids: bool = False
+    youtube_api_audited: bool = False
     max_upload_bytes: int = Field(default=2_000_000_000, ge=1)
     daily_quota_units: int = Field(default=10_000, ge=1)
     upload_quota_units: int = Field(default=1_600, ge=1)

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.db.models import DeliveryAttemptRecord, DestinationDeliveryRecord, PublishJobRecord, SocialAccountRecord
@@ -25,6 +25,7 @@ class DeliveryClaim:
     remote_session_id: str | None
     remote_container_id: str | None = None
     remote_session_expires_at: datetime | None = None
+    scheduled_for: datetime | None = None
 
 
 class DeliveryQueue:
@@ -40,15 +41,28 @@ class DeliveryQueue:
         if platforms is not None and not platforms:
             return None
         with self.session_factory.begin() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             self._recover_expired(session, now)
+            missed = session.scalars(select(DestinationDeliveryRecord).where(
+                DestinationDeliveryRecord.claim_owner.is_(None),
+                DestinationDeliveryRecord.scheduled_for.is_not(None),
+                DestinationDeliveryRecord.scheduled_for < now - timedelta(minutes=30),
+                DestinationDeliveryRecord.state.in_({"pending", "retry_wait", "container_processing", "container_ready"}),
+            )).all()
+            for row in missed:
+                row.state, row.error_message, row.updated_at = "missed", "scheduled slot passed the 30-minute grace period", now
+                row.next_retry_at = None
+                self._refresh_parent(session, row.publish_job_id, now)
+            upload_due = or_(DestinationDeliveryRecord.platform != "instagram", DestinationDeliveryRecord.scheduled_for.is_(None), DestinationDeliveryRecord.scheduled_for <= now + timedelta(minutes=30))
+            publish_due = or_(DestinationDeliveryRecord.scheduled_for.is_(None), DestinationDeliveryRecord.scheduled_for <= now)
             eligibility = [
                 DestinationDeliveryRecord.claim_owner.is_(None),
                 or_(
-                    DestinationDeliveryRecord.state == "pending",
-                    (DestinationDeliveryRecord.state == "retry_wait") & (DestinationDeliveryRecord.next_retry_at <= now),
+                    (DestinationDeliveryRecord.state == "pending") & upload_due,
+                    (DestinationDeliveryRecord.state == "retry_wait") & (DestinationDeliveryRecord.next_retry_at <= now) & upload_due,
                     (DestinationDeliveryRecord.state == "verifying") & or_(DestinationDeliveryRecord.next_retry_at.is_(None), DestinationDeliveryRecord.next_retry_at <= now),
                     (DestinationDeliveryRecord.state == "container_processing") & or_(DestinationDeliveryRecord.next_retry_at.is_(None), DestinationDeliveryRecord.next_retry_at <= now),
-                    DestinationDeliveryRecord.state == "container_ready",
+                    (DestinationDeliveryRecord.state == "container_ready") & publish_due,
                 ),
             ]
             if platforms is not None:
@@ -109,7 +123,7 @@ class DeliveryQueue:
                 if post is not None and post.state == "queued":
                     post.state = "dispatching"
                     post.updated_at = now
-                return DeliveryClaim(row.id, row.publish_job_id, owner, token, kind, row.platform, row.account_id, row.external_account_id, row.remote_id, row.remote_session_id, row.remote_container_id, row.remote_session_expires_at)
+                return DeliveryClaim(row.id, row.publish_job_id, owner, token, kind, row.platform, row.account_id, row.external_account_id, row.remote_id, row.remote_session_id, row.remote_container_id, row.remote_session_expires_at, row.scheduled_for)
         return None
 
     def heartbeat(self, claim: DeliveryClaim, *, now: datetime | None = None, lease_seconds: int = 120) -> bool:
@@ -154,6 +168,43 @@ class DeliveryQueue:
             ).values(requested_action=action, requested_by=actor, requested_at=now, updated_at=now))
             if changed.rowcount != 1:
                 raise ValueError("destination changed while requesting reconciliation")
+
+    def pending_action(self, delivery_id: str, action: str, actor: str, *, now: datetime | None = None) -> str:
+        """Pause, resume or cancel only local, unclaimed pending work."""
+        if action not in {"pause", "resume", "cancel"} or not actor or len(actor) > 64:
+            raise ValueError("valid pending action and operator are required")
+        now = now or datetime.now(UTC)
+        with self.session_factory.begin() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            self._recover_expired(session, now)
+            row = session.get(DestinationDeliveryRecord, delivery_id)
+            if row is None:
+                raise KeyError(delivery_id)
+            if row.claim_owner or row.remote_id:
+                raise ValueError("delivery is in flight or already remote; pending action is unavailable")
+            if row.platform == "youtube" and row.remote_session_id:
+                raise ValueError("YouTube session already started; reconcile the remote outcome")
+            eligible = {"pending", "retry_wait", "container_processing", "container_ready"}
+            if action == "resume":
+                if row.state != "paused" or row.paused_from_state not in eligible:
+                    raise ValueError("only a paused pending delivery can be resumed")
+                row.state, row.paused_from_state = row.paused_from_state, None
+            elif action == "pause":
+                if row.state not in eligible:
+                    raise ValueError("only an unclaimed pending delivery can be paused")
+                row.paused_from_state, row.state = row.state, "paused"
+            else:
+                if row.state not in eligible | {"paused"}:
+                    raise ValueError("only an unclaimed pending delivery can be cancelled")
+                row.state, row.paused_from_state, row.next_retry_at = "cancelled", None, None
+            audit_detail = f"{action} requested by {actor}"
+            row.error_message = audit_detail if action == "cancel" else None
+            row.updated_at = now
+            session.add(DeliveryAttemptRecord(id=uuid4().hex, delivery_id=row.id, claim_token=uuid4().hex,
+                kind=action, state=row.state, remote_session_id=row.remote_session_id, remote_id=None,
+                error_message=audit_detail, started_at=now, finished_at=now))
+            self._refresh_parent(session, row.publish_job_id, now)
+            return row.state
 
     def retry_after_reconnect(self, delivery_id: str, actor: str, *, now: datetime | None = None) -> str:
         """Release auth-required work only after the exact account reconnects."""
@@ -252,7 +303,7 @@ class DeliveryQueue:
                 state="started", remote_session_id=row.remote_session_id, remote_id=None,
                 error_message=None, started_at=now, finished_at=None,
             ))
-            return DeliveryClaim(row.id, row.publish_job_id, owner, token, "resume" if resume else "reconcile", row.platform, row.account_id, row.external_account_id, None, row.remote_session_id, row.remote_container_id, row.remote_session_expires_at)
+            return DeliveryClaim(row.id, row.publish_job_id, owner, token, "resume" if resume else "reconcile", row.platform, row.account_id, row.external_account_id, None, row.remote_session_id, row.remote_container_id, row.remote_session_expires_at, row.scheduled_for)
 
     def reconciled_uploaded(self, claim: DeliveryClaim, remote_id: str, *, remote_url: str | None = None, now: datetime | None = None) -> None:
         if claim.kind not in {"reconcile", "resume"} or not remote_id:
@@ -456,6 +507,23 @@ class DeliveryQueue:
             attempt.state, attempt.error_message, attempt.finished_at = "unknown_outcome", reason[:500], now
             self._refresh_parent(session, row.publish_job_id, now)
 
+    def mark_missed(self, claim: DeliveryClaim, *, now: datetime | None = None) -> None:
+        """Fence a slot that crossed its grace period before a remote mutation."""
+        if claim.kind not in {"upload", "container_publish"}:
+            raise ValueError("upload or container-publish claim is required")
+        now = now or datetime.now(UTC)
+        with self.session_factory.begin() as session:
+            row = self._owned(session, claim, now, "uploading" if claim.kind == "upload" else "publishing")
+            if not row.scheduled_for or _utc(row.scheduled_for) + timedelta(minutes=30) >= now:
+                raise ValueError("scheduled delivery is not beyond its grace period")
+            if claim.kind == "upload" and row.remote_session_id:
+                raise ValueError("started remote session requires reconciliation")
+            row.state, row.error_message = "missed", "scheduled slot passed the 30-minute grace period"
+            self._release(row, now)
+            attempt = self._attempt(session, claim)
+            attempt.state, attempt.error_message, attempt.finished_at = "missed", row.error_message, now
+            self._refresh_parent(session, row.publish_job_id, now)
+
     def container_defer(self, claim: DeliveryClaim, reason: str, *, retry_at: datetime | None = None, fail: bool = False, now: datetime | None = None) -> None:
         """Release a container claim only while no publish mutation has begun."""
         if claim.kind not in {"container_check", "container_publish"}:
@@ -524,10 +592,18 @@ class DeliveryQueue:
             return
         if all(state == "published" for state in states):
             post.state = "published"
+        elif all(state == "cancelled" for state in states):
+            post.state = "cancelled"
+        elif all(state == "missed" for state in states):
+            post.state = "missed"
         elif "unknown_outcome" in states or "reconciling" in states:
             post.state = "attention_required"
-        elif any(state in {"failed", "auth_required"} for state in states):
+        elif any(state in {"failed", "auth_required", "missed", "cancelled"} for state in states):
             post.state = "partial_failure"
+        elif all(state == "paused" for state in states):
+            post.state = "paused"
+        elif "paused" in states:
+            post.state = "partially_paused"
         elif "verifying" in states:
             post.state = "verifying"
         else:

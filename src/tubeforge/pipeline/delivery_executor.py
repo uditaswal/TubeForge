@@ -53,6 +53,7 @@ class RemoteObservation:
     caption: str | None = None
     remote_url: str | None = None
     privacy: str | None = None
+    publish_at: str | None = None
 
 
 class DestinationAdapter(Protocol):
@@ -169,6 +170,9 @@ class DeliveryExecutor:
                 return claim.delivery_id
             if not self.queue.heartbeat(claim):
                 return claim.delivery_id
+            if claim.scheduled_for and _as_utc(claim.scheduled_for) + timedelta(minutes=30) < datetime.now(UTC):
+                self.queue.mark_missed(claim)
+                return claim.delivery_id
             if _as_utc(claim.remote_session_expires_at) <= datetime.now(UTC):
                 self.queue.container_defer(claim, "remote container expired before publication", fail=True)
                 return claim.delivery_id
@@ -189,6 +193,9 @@ class DeliveryExecutor:
                 self._reject_before_remote(claim, str(error))
                 return claim.delivery_id
         if not self.queue.heartbeat(claim):
+            return claim.delivery_id
+        if claim.scheduled_for and _as_utc(claim.scheduled_for) + timedelta(minutes=30) < datetime.now(UTC):
+            self.queue.mark_missed(claim)
             return claim.delivery_id
         try:
             session_id = adapter.open_session(external_account_id=claim.external_account_id, credential=credential, asset_path=asset, metadata=metadata)
@@ -317,6 +324,10 @@ class DeliveryExecutor:
             metadata = json.loads(delivery.metadata_json)
             if not isinstance(metadata, dict):
                 raise ValueError("destination metadata is invalid")
+            if claim.platform == "youtube" and delivery.scheduled_for is not None:
+                metadata["scheduled_for"] = _as_utc(delivery.scheduled_for).isoformat().replace("+00:00", "Z")
+                metadata["schedule_audit_allowed"] = bool(delivery.youtube_schedule_audited)
+                metadata["expect_publish_at"] = bool(delivery.youtube_schedule_audited and getattr(self.adapters.get("youtube"), "youtube_api_audited", False))
             stage_root = self.stage_root.resolve(strict=True)
             path = Path(asset.staged_path)
             if path.is_symlink() or path.parent.resolve(strict=True) != stage_root or path.name != f"{asset.sha256}.mp4":
@@ -358,7 +369,17 @@ class DeliveryExecutor:
         if observation.external_account_id != claim.external_account_id:
             return False
         if claim.platform == "youtube":
-            return observation.title == metadata.get("title") and observation.caption == metadata.get("caption") and observation.privacy == metadata.get("visibility", "private")
+            if not (observation.title == metadata.get("title") and observation.caption == metadata.get("caption") and observation.privacy == metadata.get("visibility", "private")):
+                return False
+            scheduled = metadata.get("scheduled_for")
+            if scheduled and metadata.get("expect_publish_at"):
+                if not observation.publish_at:
+                    return False
+                try:
+                    return datetime.fromisoformat(str(scheduled).replace("Z", "+00:00")) == datetime.fromisoformat(observation.publish_at.replace("Z", "+00:00"))
+                except ValueError:
+                    return False
+            return not observation.publish_at
         if claim.platform == "instagram":
             return observation.caption == metadata.get("caption")
         return False

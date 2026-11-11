@@ -54,5 +54,13 @@ publishing regression selection passed 107 tests with one separately run browser
 A changed staged thumbnail is refused before upload. Real cross-posting remains
 unverified and requires the operator's exact-post go-ahead.
 
-Scheduling, provider backoff/jitter beyond the container hint, default worker startup
-and the seven-day fake soak remain **NOT STARTED**.
+P4 scheduling backend is **IMPLEMENTED**: per-delivery slots, an IST default, a
+30-minute preparation window and late fence, durable cadence override and distinct
+pending pause/resume/cancel actions. YouTube `publishAt` requires a recorded audit
+setting and explicit future-public confirmation; missing/past times fail closed.
+Ten frozen-clock/scheduling tests, a temporary-DB migration round trip and a signed-in
+three-width audit/readiness browser check passed. Publishing regression: 117 passed,
+one separately run browser skip. Real scheduling and Claude's calendar UI are unverified.
+
+Provider backoff/jitter beyond the container hint, default worker startup and the
+seven-day fake soak remain **NOT STARTED**.
