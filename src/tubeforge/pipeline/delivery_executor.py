@@ -173,7 +173,7 @@ class DeliveryExecutor:
             self.queue.reconciliation_unresolved(claim, "destination resume adapter is unavailable")
             return claim.delivery_id
         try:
-            asset, _ = self._inputs(claim)
+            asset, metadata = self._inputs(claim)
             credential = self.credential_manager.resolve(claim.account_id, claim.owner)
             envelope = self.cipher.decrypt(claim.remote_session_id or "")
             session_id = envelope.get("session_id")
@@ -183,7 +183,7 @@ class DeliveryExecutor:
             self.queue.reconciliation_unresolved(claim, "saved session or account credential is unavailable")
             return claim.delivery_id
         try:
-            receipt = adapter.resume_session(session_id=session_id, credential=credential, asset_path=asset, heartbeat=lambda: self.queue.heartbeat(claim))
+            receipt = adapter.resume_session(session_id=session_id, credential=credential, asset_path=asset, heartbeat=lambda: self.queue.heartbeat(claim), **({"metadata": metadata} if claim.platform == "instagram" else {}))
         except Exception:
             self.queue.reconciliation_unresolved(claim, "same-session upload continuation could not be proven")
             return claim.delivery_id

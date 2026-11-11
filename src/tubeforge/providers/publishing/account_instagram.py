@@ -76,9 +76,10 @@ class AccountInstagramAdapter:
         self._send(uri, token, asset_path, 0, heartbeat)
         return self._finish(container, external_account_id, token, heartbeat)
 
-    def resume_session(self, *, session_id: str, credential: dict[str, object], asset_path: Path, heartbeat: Callable[[], bool]) -> UploadReceipt:
+    def resume_session(self, *, session_id: str, credential: dict[str, object], asset_path: Path, heartbeat: Callable[[], bool], metadata: dict[str, object] | None = None) -> UploadReceipt:
         container, uri = _session(session_id)
         token = _token(credential)
+        metadata_caption = instagram_full_caption(metadata) if metadata else None
         state = self._status(container, token)
         if state in {"PUBLISHED", "ERROR", "EXPIRED"}:
             raise ValueError(f"Instagram container is {state}; it cannot be continued")
@@ -87,6 +88,7 @@ class AccountInstagramAdapter:
             if offset < asset_path.stat().st_size:
                 self._send(uri, token, asset_path, offset, heartbeat)
         user = self._user_id(token)
+        self._refuse_if_already_posted(user, token, metadata_caption)
         return self._finish(container, user, token, heartbeat)
 
     def inspect_session(self, *, session_id: str, credential: dict[str, object], asset_size: int) -> UploadReceipt | None:
@@ -101,7 +103,9 @@ class AccountInstagramAdapter:
     def inspect(self, *, remote_id: str, external_account_id: str, credential: dict[str, object]) -> RemoteObservation:
         token = _token(credential)
         response = self.client.get(f"{GRAPH}/{remote_id}", headers=_bearer(token), params={"fields": "id,permalink,caption,owner,media_type"})
-        if response.status_code == 400 and _json(response).get("error", {}).get("code") in {100, 33}:
+        error = _json(response).get("error")
+        error = error if isinstance(error, dict) else {}
+        if response.status_code == 400 and (error.get("code") == 33 or (error.get("code") == 100 and error.get("error_subcode") == 33)):
             return RemoteObservation("missing")
         if response.status_code != 200:
             raise ValueError("Instagram publication inspection failed")
@@ -124,6 +128,8 @@ class AccountInstagramAdapter:
             self._sleep(self.poll_seconds)
         else:
             raise ValueError("Instagram is still processing the video; reconcile the saved container")
+        if not heartbeat():
+            raise RuntimeError("delivery lease was lost before publishing")
         response = self.client.post(f"{GRAPH}/{user_id}/media_publish", headers=_bearer(token), data={"creation_id": container})
         media = _json(response).get("id")
         if response.status_code != 200 or not isinstance(media, str) or not media:
@@ -135,6 +141,15 @@ class AccountInstagramAdapter:
         except httpx.HTTPError:
             permalink = None
         return UploadReceipt(media, permalink if isinstance(permalink, str) else None)
+
+    def _refuse_if_already_posted(self, user_id: str, token: str, caption: str | None) -> None:
+        """A lost publish response may not yet show as PUBLISHED; never publish again if the post exists."""
+        data = self._get(f"{GRAPH}/{user_id}/media", token, {"fields": "id,caption,timestamp", "limit": "10"})
+        rows = data.get("data") if isinstance(data.get("data"), list) else []
+        if caption is None and rows:
+            raise ValueError("recent posts exist and the reviewed caption is unavailable; check the account")
+        if any(isinstance(row, dict) and row.get("caption") == caption for row in rows):
+            raise ValueError("a recent post with the reviewed caption already exists; check the account before retrying")
 
     def _send(self, uri: str, token: str, asset_path: Path, offset: int, heartbeat: Callable[[], bool]) -> None:
         size = asset_path.stat().st_size

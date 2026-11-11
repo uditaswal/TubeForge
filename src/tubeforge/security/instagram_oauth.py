@@ -51,8 +51,11 @@ class InstagramAccountOAuth:
             })
             short.raise_for_status()
             short_data = short.json()
+            if isinstance(short_data.get("data"), list) and short_data["data"] and isinstance(short_data["data"][0], dict):
+                short_data = short_data["data"][0]  # older response shape
             short_token = short_data.get("access_token")
-            granted = {item for item in str(short_data.get("permissions") or "").replace(" ", "").split(",") if item}
+            permissions = short_data.get("permissions")
+            granted = {str(item) for item in permissions} if isinstance(permissions, list) else {item for item in str(permissions or "").replace(" ", "").split(",") if item}
             if not isinstance(short_token, str) or not short_token:
                 raise ProviderAuthenticationError("Instagram did not return an access token")
             if not set(SCOPES).issubset(granted):

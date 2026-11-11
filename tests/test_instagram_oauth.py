@@ -62,8 +62,19 @@ def test_refresher_paths() -> None:
     refreshed = client(200, {"access_token": "new", "expires_in": 5_184_000})(credential)
     assert refreshed.value["token"] == "new" and refreshed.value["user_id"] == "1"
     with pytest.raises(CredentialReconnectRequired):
-        client(400)(credential)
+        client(400, {"error": {"code": 190}})(credential)
+    with pytest.raises(CredentialRefreshTemporary):
+        client(400, {"error": {"code": 1}})(credential)
     with pytest.raises(CredentialRefreshTemporary):
         client(500)(credential)
     with pytest.raises(CredentialReconnectRequired):
         client(200)({"token": "x"})
+
+
+def test_wrapped_token_response_and_list_permissions_are_accepted() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.instagram.com":
+            return httpx.Response(200, json={"data": [{"access_token": "short", "user_id": 1, "permissions": ["instagram_business_basic", "instagram_business_content_publish"]}]})
+        return _happy()(request)
+
+    assert _oauth(handler).exchange_and_discover(code="c").user_id == "1784"

@@ -84,7 +84,11 @@ class InstagramCredentialRefresher:
             response = self.client.get(INSTAGRAM_REFRESH_URL, params={"grant_type": "ig_refresh_token", "access_token": token})
         except httpx.HTTPError as error:
             raise CredentialRefreshTemporary("Instagram token refresh is temporarily unavailable") from error
-        if response.status_code in {400, 401, 403}:
+        try:
+            error = response.json().get("error")
+        except ValueError:
+            error = None
+        if response.status_code in {400, 401, 403} and isinstance(error, dict) and error.get("code") == 190:
             raise CredentialReconnectRequired("Instagram refresh access was revoked or expired")
         if response.status_code != 200:
             raise CredentialRefreshTemporary("Instagram token refresh was not accepted")

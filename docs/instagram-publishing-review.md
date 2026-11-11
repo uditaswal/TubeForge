@@ -32,6 +32,13 @@ not VERIFIED: nothing has run against a real Meta app or account.
   390 px: no JS errors, no horizontal overflow; *Connect Instagram* visible and enabled once status reports
   configured.
 
+## Independent review (read-only subagent, 11 Nov; not Codex)
+No hard invariant violations. Fixed from its findings: resume now refuses to publish if a recent post already has the
+reviewed caption (a lost publish response may not yet show as `PUBLISHED`); lease heartbeat before `media_publish`;
+wrapped token response and list-form permissions accepted; only OAuth error 190 forces a reconnect (other 400s are
+temporary); "missing" needs error subcode 33; `httpx`/`httpcore` loggers pinned to WARNING (tokens ride query strings).
+Tests: 18 Instagram tests. This review does not replace Codex's.
+
 ## HTTPS callback (D1)
 `scripts/local_tls_proxy.py` (loopback `https://localhost:62443` → dashboard, self-signed cert under git-ignored
 `data/run/tls`); `tests/test_local_tls_proxy.py` proves body, cookie and forwarded-proto relay over TLS.
