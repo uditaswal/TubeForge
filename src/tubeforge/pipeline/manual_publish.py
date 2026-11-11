@@ -20,7 +20,7 @@ class ManualPublishService:
         self.session_factory = session_factory
         self.review_repository = review_repository or BatchReviewRepository(session_factory)
 
-    def create_draft(self, asset_id: str, destination_metadata: dict[str, dict[str, object]]) -> PublishJobRecord:
+    def create_draft(self, asset_id: str, destination_metadata: dict[str, dict[str, object]], *, source_review_identity: str | None = None) -> PublishJobRecord:
         if not destination_metadata:
             raise ValueError("select at least one destination")
         now = datetime.now(UTC)
@@ -31,8 +31,8 @@ class ManualPublishService:
                 if asset is None or asset.state not in {"ready", "reserved"}:
                     raise ValueError("canonical video is not available for publishing")
                 post = PublishJobRecord(
-                    id=post_id, asset_id=asset.id, source="manual", edition=0,
-                    state="draft", metadata_json=json.dumps({"source_job_id": asset.source_job_id, "sha256": asset.sha256}, sort_keys=True),
+                    id=post_id, asset_id=asset.id, source="day_review" if source_review_identity else "manual", edition=0,
+                    state="draft", metadata_json=json.dumps({"source_job_id": asset.source_job_id, "sha256": asset.sha256, "source_review_identity": source_review_identity}, sort_keys=True),
                     scheduled_at=None, created_at=now, updated_at=now,
                 )
                 session.add(post)
@@ -46,6 +46,8 @@ class ManualPublishService:
                     metadata = dict(metadata)
                     if account.platform == "youtube":
                         disclosure = reviewed_youtube_disclosure(session, asset, self.review_repository)
+                        if source_review_identity is not None and disclosure["reviewed_identity"] != source_review_identity:
+                            raise ValueError("Day-review approval changed; review the final again")
                         metadata["contains_synthetic_media"] = disclosure["contains_synthetic_media"]
                         metadata["disclosure_review"] = disclosure
                     session.add(DestinationDeliveryRecord(
@@ -77,7 +79,7 @@ class ManualPublishService:
                 raise ValueError("publish draft is incomplete")
             return self._review_identity(asset, deliveries)
 
-    def submit(self, post_id: str, *, reviewed_identity: str, actor: str, supported_platforms: set[str]) -> PublishJobRecord:
+    def submit(self, post_id: str, *, reviewed_identity: str, actor: str, supported_platforms: set[str], confirmed_public_accounts: frozenset[str] = frozenset()) -> PublishJobRecord:
         """Queue the exact reviewed artifact and destination snapshots atomically."""
         if not actor or len(actor) > 64 or not supported_platforms:
             raise ValueError("operator and live destination worker are required")
@@ -99,8 +101,12 @@ class ManualPublishService:
             for delivery in deliveries:
                 if delivery.platform not in supported_platforms:
                     raise ValueError("selected destination has no live publisher worker")
-                if delivery.platform != "youtube" or json.loads(delivery.metadata_json).get("visibility", "private") != "private":
-                    raise ValueError("manual submission currently supports private YouTube posts only")
+                if delivery.platform == "youtube" and json.loads(delivery.metadata_json).get("visibility", "private") != "private":
+                    raise ValueError("only private YouTube posts are supported")
+                if delivery.platform == "instagram" and delivery.account_id not in confirmed_public_accounts:
+                    raise ValueError("explicit confirmation is required for each public Instagram post")
+                if delivery.platform not in {"youtube", "instagram"}:
+                    raise ValueError("destination platform does not support publishing")
                 if delivery.platform == "youtube":
                     disclosure = reviewed_youtube_disclosure(session, asset, self.review_repository)
                     metadata = json.loads(delivery.metadata_json)
@@ -113,6 +119,11 @@ class ManualPublishService:
                     raise ValueError("destination is no longer a draft")
                 delivery.state = "pending"
                 delivery.updated_at = now
+            public_accounts = sorted(delivery.account_id for delivery in deliveries if delivery.platform == "instagram")
+            if public_accounts:
+                post_metadata = json.loads(post.metadata_json)
+                post_metadata["public_confirmation"] = {"account_ids": public_accounts, "actor": actor, "reviewed_identity": reviewed_identity, "at": now.isoformat()}
+                post.metadata_json = json.dumps(post_metadata, sort_keys=True)
             post.state = "queued"
             post.reviewed_identity = reviewed_identity
             post.submitted_at = now
@@ -150,6 +161,10 @@ class ManualPublishService:
             raise ValueError("YouTube description must be at most 5000 UTF-8 bytes and omit angle brackets")
         if platform == "instagram" and len(caption) > 2_200:
             raise ValueError("Instagram caption must be at most 2200 characters")
+        if platform == "instagram":
+            import re
+            if len(re.findall(r"(?<!\w)#[\w]+", caption)) > 30:
+                raise ValueError("Instagram caption must have at most 30 hashtags")
         hashtags = metadata.get("hashtags", [])
         if not isinstance(hashtags, list) or len(hashtags) > 30 or any(not isinstance(tag, str) or not tag.startswith("#") or len(tag) < 2 for tag in hashtags):
             raise ValueError("hashtags must be a list of up to 30 nonempty #tags")

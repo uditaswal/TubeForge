@@ -134,6 +134,8 @@ One phase at a time. Each phase needs its acceptance evidence before the next on
 - Out of scope: Facebook Reels, carousel or story posts, comments.
 
 ### P3: Cross-post from one review. Owners: **Claude** (UI) + **Codex** (backend)
+
+Backend **IMPLEMENTED**: authenticated defaults and draft-preparation endpoints bind the current Day-review identity, stage the checksummed final/thumbnail, derive destination-specific metadata, and record explicit Instagram confirmation at service submission. The 17-test focused group and 107-test publishing regression selection passed. Claude's UI/API platform-gate integration and the real cross-post are **NOT STARTED** on this branch, so P3 is not end-to-end verified. Contract: `docs/HANDOFF.md`.
 - Outcome: in Day review / Publishing, one approved final makes one draft with both destinations,
   each with its own platform metadata (YouTube title + description + tags; Instagram caption +
   hashtags), all from `publication_suggest.py`. The operator reviews it once and submits once.
@@ -187,7 +189,7 @@ Proceed in order; each checkpoint is accepted locally before the next. Live plat
 |---|---|---|---|
 | P1 | Safe private YouTube upload and readiness | Fake-transport field and preflight tests, durable quota tests, signed-in Studio check; real private upload and remote inspection separately authorized | Instagram, schedules, public visibility |
 | Delivery core — **VERIFIED** for fake-backed local scope | Instagram-shaped upload, expiry and separate publication are crash-safe | 8 fake adapter tests; publishing selection 106 passed, 1 opt-in browser skip; container migration round trip passed | Instagram provider and OAuth implementation, real publication |
-| P3 | One checksum-bound review creates independent destination drafts | API and isolation tests using approved Day review evidence | Claude's UI |
+| P3 — **IMPLEMENTED** backend | One checksum-bound review creates independent destination drafts | API and isolation tests: 17 focused passed; publishing selection 107 passed, 1 separately run browser skip | Claude's UI and platform gate; real cross-post |
 | P4 | Pending posts honor slots, audit restrictions, grace and cadence | Migration round trip and frozen-clock schedule/cadence tests | Live schedule without exact-post approval; Claude's UI |
 | P5 | Worker starts safely and retries respect provider limits | Seven-day fake soak, retry tests and signed-in responsive check | Real week or public publication without approval |
 

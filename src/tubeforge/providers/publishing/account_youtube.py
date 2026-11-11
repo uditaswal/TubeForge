@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import re
 from typing import Callable
 from urllib.parse import urlsplit
@@ -34,6 +35,9 @@ class AccountYouTubeAdapter:
             raise SafePreflightError("only private YouTube uploads are currently permitted")
         if type(metadata.get("contains_synthetic_media")) is not bool:
             raise SafePreflightError("reviewed synthetic-media disclosure is required")
+        digest = metadata.get("thumbnail_sha256")
+        if digest is not None and _thumbnail_content(asset_path, digest) is None:
+            raise SafePreflightError("reviewed thumbnail is unavailable or changed")
         try:
             check_youtube_short(asset_path, ffprobe=self.ffprobe, max_bytes=self.max_bytes)
         except YouTubePreflightError as error:
@@ -86,12 +90,12 @@ class AccountYouTubeAdapter:
         digest = metadata.get("thumbnail_sha256")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             return
-        path = asset_path.parent / "thumbnails" / f"{digest}.jpg"
+        content = _thumbnail_content(asset_path, digest)
+        if content is None:
+            return
         try:
-            if path.is_symlink() or not path.is_file() or path.stat().st_size > 2_000_000:
-                return
-            self.client.post(THUMBNAIL_URL, params={"videoId": remote_id}, headers={"Authorization": f"Bearer {access_token}", "Content-Type": "image/jpeg"}, content=path.read_bytes())
-        except (httpx.HTTPError, OSError):
+            self.client.post(THUMBNAIL_URL, params={"videoId": remote_id}, headers={"Authorization": f"Bearer {access_token}", "Content-Type": "image/jpeg"}, content=content)
+        except httpx.HTTPError:
             return
 
     def resume_session(self, *, session_id: str, credential: dict[str, object], asset_path: Path, heartbeat: Callable[[], bool]) -> UploadReceipt:
@@ -181,6 +185,19 @@ class AccountYouTubeAdapter:
 
     def _status_request(self, session_id: str, access_token: str, asset_size: int) -> httpx.Response:
         return self.client.put(session_id, headers={"Authorization": f"Bearer {access_token}", "Content-Range": f"bytes */{asset_size}", "Content-Length": "0"}, content=b"")
+
+
+def _thumbnail_content(asset_path: Path, digest: object) -> bytes | None:
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        return None
+    path = asset_path.parent / "thumbnails" / f"{digest}.jpg"
+    try:
+        if path.parent.is_symlink() or path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 2_000_000:
+            return None
+        content = path.read_bytes()
+        return content if hashlib.sha256(content).hexdigest() == digest else None
+    except OSError:
+        return None
 
 
 def _token(credential: dict[str, object]) -> str:

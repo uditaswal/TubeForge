@@ -44,5 +44,15 @@ re-upgraded on a temporary database. The adapter contract for Claude is in
 `docs/HANDOFF.md`. Instagram OAuth, the real Instagram adapter and its per-platform
 API gates remain Claude's work and have not been verified here.
 
-Cross-posting, scheduling, provider backoff/jitter beyond the container hint,
-default worker startup and the seven-day fake soak remain **NOT STARTED**.
+P3 cross-post backend is **IMPLEMENTED**: a current approved Day-review identity
+previews destination defaults and creates one checksum-bound two-platform draft,
+with the reviewed thumbnail staged atomically. Instagram confirmation is explicit
+and recorded in the service; the API gate and UI remain Claude's integration. Tests
+cover stale approval, caption and hashtag limits, explicit confirmation and both
+directions of destination-failure isolation: 17 focused tests passed. The requested
+publishing regression selection passed 107 tests with one separately run browser skip.
+A changed staged thumbnail is refused before upload. Real cross-posting remains
+unverified and requires the operator's exact-post go-ahead.
+
+Scheduling, provider backoff/jitter beyond the container hint, default worker startup
+and the seven-day fake soak remain **NOT STARTED**.
