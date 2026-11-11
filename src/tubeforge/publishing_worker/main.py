@@ -12,6 +12,7 @@ from tubeforge.core.config import load_settings
 from tubeforge.db.session import create_database
 from tubeforge.pipeline.delivery_executor import DeliveryExecutor
 from tubeforge.pipeline.delivery_queue import DeliveryQueue
+from tubeforge.pipeline.youtube_quota import YouTubeQuotaLedger
 from tubeforge.providers.publishing.account_youtube import AccountYouTubeAdapter
 from tubeforge.publishing_worker.presence import PublisherWorkerPresence
 from tubeforge.security.account_credentials import AccountCredentialManager, GoogleCredentialRefresher
@@ -25,12 +26,18 @@ def main() -> None:
         raise RuntimeError("publisher worker requires an account encryption key")
     database = create_database(settings.database)
     cipher = TokenCipher(encryption_key)
-    youtube = AccountYouTubeAdapter()
+    youtube = AccountYouTubeAdapter(
+        ffprobe=str(settings.pipeline.voice.ffprobe_executable),
+        max_bytes=settings.pipeline.youtube.max_upload_bytes,
+        category_id=settings.pipeline.youtube.category_id,
+        self_declared_made_for_kids=settings.pipeline.youtube.self_declared_made_for_kids,
+    )
     google_refresh = GoogleCredentialRefresher()
     manager = AccountCredentialManager(database.session_factory, cipher, {"youtube": google_refresh})
     queue = DeliveryQueue(database.session_factory)
     stage_root = settings.pipeline.voice.artifact_root.parent / "publishing" / "staging"
-    executor = DeliveryExecutor(database.session_factory, queue, cipher, stage_root, {"youtube": youtube}, manager)
+    quota = YouTubeQuotaLedger(database.session_factory, daily_units=settings.pipeline.youtube.daily_quota_units, upload_units=settings.pipeline.youtube.upload_quota_units)
+    executor = DeliveryExecutor(database.session_factory, queue, cipher, stage_root, {"youtube": youtube}, manager, quota)
     presence = PublisherWorkerPresence(database.session_factory)
     worker_id = f"publisher-{uuid4().hex}"
     stopping = False

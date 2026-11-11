@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.db.models import DestinationDeliveryRecord, PublishingAssetRecord, SocialAccountRecord
 from tubeforge.pipeline.delivery_queue import DeliveryClaim, DeliveryQueue
+from tubeforge.pipeline.youtube_quota import YouTubeQuotaExhausted, YouTubeQuotaLedger
 from tubeforge.security.account_credentials import AccountCredentialManager, CredentialBusy, CredentialReconnectRequired, CredentialRefreshTemporary, GoogleCredentialRefresher
 from tubeforge.security.secrets import TokenCipher
 
@@ -56,10 +57,12 @@ class DeliveryExecutor:
         self, session_factory: sessionmaker[Session], queue: DeliveryQueue,
         cipher: TokenCipher, stage_root: Path, adapters: dict[str, DestinationAdapter],
         credential_manager: AccountCredentialManager | None = None,
+        youtube_quota: YouTubeQuotaLedger | None = None,
     ) -> None:
         self.session_factory, self.queue, self.cipher = session_factory, queue, cipher
         self.stage_root, self.adapters = stage_root, adapters
         self.credential_manager = credential_manager or AccountCredentialManager(session_factory, cipher, {"youtube": GoogleCredentialRefresher()})
+        self.youtube_quota = youtube_quota or YouTubeQuotaLedger(session_factory)
 
     def run_once(self, worker_id: str) -> str | None:
         claim = self.queue.claim_next(worker_id, platforms=set(self.adapters))
@@ -74,6 +77,19 @@ class DeliveryExecutor:
         except (OSError, ValueError, json.JSONDecodeError) as error:
             self._reject_before_remote(claim, "destination credential or canonical video is unavailable")
             return claim.delivery_id
+        # Credential refresh may contact the provider. Check the local file first.
+        if claim.kind == "upload" and callable(getattr(adapter, "preflight", None)):
+            try:
+                adapter.preflight(asset_path=asset, metadata=metadata)
+            except SafePreflightError as error:
+                self._reject_before_remote(claim, str(error))
+                return claim.delivery_id
+        if claim.kind == "upload" and claim.platform == "youtube":
+            try:
+                self.youtube_quota.reserve(claim)
+            except YouTubeQuotaExhausted as error:
+                self._reject_before_remote(claim, str(error))
+                return claim.delivery_id
         try:
             credential = self.credential_manager.resolve(claim.account_id, claim.owner)
         except CredentialBusy:
@@ -100,13 +116,22 @@ class DeliveryExecutor:
             else:
                 self.queue.verification_attention(claim, "remote publication does not match the reviewed destination or metadata")
             return claim.delivery_id
+        # Refresh may cross Pacific midnight; reserve against the current day too.
+        if claim.platform == "youtube":
+            try:
+                self.youtube_quota.reserve(claim)
+            except YouTubeQuotaExhausted as error:
+                self._reject_before_remote(claim, str(error))
+                return claim.delivery_id
+        if not self.queue.heartbeat(claim):
+            return claim.delivery_id
         try:
             session_id = adapter.open_session(external_account_id=claim.external_account_id, credential=credential, asset_path=asset, metadata=metadata)
         except SafePreflightError as error:
             if error.category == "retry":
                 self._wait_before_remote(claim, seconds=120, reason="destination preflight is temporarily unavailable")
             else:
-                self.queue.preflight_failed(claim, "destination preflight rejected the reviewed post", authentication=error.category == "auth")
+                self.queue.preflight_failed(claim, str(error), authentication=error.category == "auth")
             return claim.delivery_id
         except Exception:
             self.queue.uncertain(claim, "remote session creation outcome is unknown")

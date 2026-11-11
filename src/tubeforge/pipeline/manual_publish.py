@@ -11,11 +11,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.db.models import DestinationDeliveryRecord, PublishJobRecord, PublishingAssetRecord, SocialAccountRecord
+from tubeforge.db.batch_review import BatchReviewRepository
+from tubeforge.pipeline.youtube_review import reviewed_youtube_disclosure
 
 
 class ManualPublishService:
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: sessionmaker[Session], *, review_repository: BatchReviewRepository | None = None) -> None:
         self.session_factory = session_factory
+        self.review_repository = review_repository or BatchReviewRepository(session_factory)
 
     def create_draft(self, asset_id: str, destination_metadata: dict[str, dict[str, object]]) -> PublishJobRecord:
         if not destination_metadata:
@@ -40,6 +43,11 @@ class ManualPublishService:
                     if account.platform not in {"youtube", "instagram"}:
                         raise ValueError("destination platform does not support publishing")
                     self._validate_metadata(account.platform, metadata)
+                    metadata = dict(metadata)
+                    if account.platform == "youtube":
+                        disclosure = reviewed_youtube_disclosure(session, asset, self.review_repository)
+                        metadata["contains_synthetic_media"] = disclosure["contains_synthetic_media"]
+                        metadata["disclosure_review"] = disclosure
                     session.add(DestinationDeliveryRecord(
                         id=uuid4().hex, publish_job_id=post_id, asset_id=asset.id,
                         account_id=account.id, platform=account.platform,
@@ -93,6 +101,11 @@ class ManualPublishService:
                     raise ValueError("selected destination has no live publisher worker")
                 if delivery.platform != "youtube" or json.loads(delivery.metadata_json).get("visibility", "private") != "private":
                     raise ValueError("manual submission currently supports private YouTube posts only")
+                if delivery.platform == "youtube":
+                    disclosure = reviewed_youtube_disclosure(session, asset, self.review_repository)
+                    metadata = json.loads(delivery.metadata_json)
+                    if metadata.get("disclosure_review") != disclosure or metadata.get("contains_synthetic_media") is not disclosure["contains_synthetic_media"]:
+                        raise ValueError("reviewed disclosure changed or was unavailable; prepare and review a new draft")
                 account = session.get(SocialAccountRecord, delivery.account_id)
                 if account is None or account.disabled or account.status != "connected" or account.last_validated_at is None or not account.credential_ciphertext or account.external_account_id != delivery.external_account_id:
                     raise ValueError("destination account needs reconnection before submission")

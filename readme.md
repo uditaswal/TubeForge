@@ -14,7 +14,7 @@ You brief a topic in the Creator Studio dashboard (or let a schedule pick one). 
 - Local narration (Kokoro, Piper) with Whisper word alignment
 - Final-video quality checks: decodability, loudness (−15…−13 LUFS), true peak (≤ −1.5 dB)
 - Dashboard with login, CSRF protection, audited approvals, topic queue, schedules and activity history
-- Publishing preparation: title, description and thumbnail suggestions; encrypted OAuth credential envelopes; dry-run YouTube upload
+- Publishing preparation: title, description and thumbnail suggestions; encrypted OAuth credentials; a private YouTube delivery queue under local verification
 - Structured, rotating, redacted application logs
 
 ## Engineering Highlights
@@ -125,4 +125,4 @@ docs/                       Public documentation
 
 In **Generations → Revise one scene**, direction warnings show the selected scene’s teaching purpose/reveal gaps and similar recent channel angles. These are advisory; saving an edit creates a separate draft that needs fresh exact-script and preview approval. Older videos without saved channel context say so.
 
-Local rendering, review and approval workflows are working. Live YouTube upload is gated behind operator OAuth credentials and dry-run by default; Instagram publishing is not implemented. Operator-facing setup details beyond this page are in the `docs/` guides above.
+Local rendering, review and approval workflows are working. Private YouTube delivery has local fake-service coverage but is not yet verified with a real account; each real upload requires a separate operator go-ahead. Approve the exact final and disclosure in Day review before preparing a YouTube draft. See [platform integrations](docs/operations/platform-integrations.md) for credentials, quota and reconnect details. Instagram publishing is not implemented on this branch. Operator-facing setup details beyond this page are in the `docs/` guides above.

@@ -79,9 +79,9 @@ def test_video_creation_snapshots_exact_accounts_and_description_defaults(tmp_pa
         assert "plannedVideoDestinations" in dashboard
         assert "applyVideoIntent" in dashboard
         draft = client.post("/api/publishing/drafts", json={"job_id": job_id, "destinations": {ids[0]: {"title": "The first computing machines", "caption": intents[1]["description"] if intents[1]["account_id"] == ids[0] else intents[0]["description"], "tags": ["history"]}}}, headers=csrf)
-        assert draft.status_code == 201, draft.text
-        assert draft.json()["asset_sha256"] == digest
-        assert draft.json()["destinations"][0]["state"] == "draft"
+        # Final-ready alone is not a reviewed disclosure decision.
+        assert draft.status_code == 422
+        assert 'Day-review approval' in draft.json()['detail']
     reopened = create_app(settings)
     with TestClient(reopened) as client:
         assert client.post("/login", json={"username": "operator", "password": "correct-horse-battery-staple"}).status_code == 200

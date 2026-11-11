@@ -1,6 +1,8 @@
 """Signed-in manual draft API uses a real final video and verified destination."""
 from __future__ import annotations
 
+import pytest
+
 from argparse import Namespace
 from datetime import UTC, datetime
 import hashlib
@@ -22,8 +24,16 @@ from tubeforge.domain.states import JobState
 from tubeforge.publishing_worker.presence import PublisherWorkerPresence
 
 
+@pytest.fixture(autouse=True)
+def _reviewed_disclosure_for_queue_tests(monkeypatch):
+    monkeypatch.setattr("tubeforge.pipeline.manual_publish.reviewed_youtube_disclosure", lambda session, asset, reviews: {"contains_synthetic_media": False, "reviewed_identity": "review", "evidence_identity": "evidence", "record_sha256": "record"})
+
+
 def test_signed_in_manual_draft_snapshots_real_video_and_destination(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TUBEFORGE_ACCOUNT_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID", "test-client")
+    monkeypatch.setenv("TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET", "test-secret")
+    monkeypatch.setenv("TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI", "http://127.0.0.1:62065/oauth/youtube/callback")
     db_path = tmp_path / "publish-api.db"
     root = Path(__file__).resolve().parents[1]
     config = Config(str(root / "alembic.ini"))
@@ -66,9 +76,15 @@ def test_signed_in_manual_draft_snapshots_real_video_and_destination(tmp_path: P
         assert "Resume after account reconnect" in dashboard.text
         assert "I reviewed this exact video and every destination detail" in dashboard.text
         assert "'/submit'" in dashboard.text
-        assert client.get("/api/publishing/status").json() == {"worker_online": False, "platforms": [], "manual_submission_enabled": False}
+        before = client.get("/api/publishing/status").json()
+        assert not before["worker_online"] and not before["manual_submission_enabled"]
+        assert before["readiness"]["youtube"]["oauth_configured"]
+        assert before["readiness"]["youtube"]["account_connected"]
+        assert before["readiness"]["youtube"]["quota"]["remaining_units"] == 10_000
         PublisherWorkerPresence(runtime.database.session_factory).heartbeat("test-publisher", {"youtube"})
-        assert client.get("/api/publishing/status").json() == {"worker_online": True, "platforms": ["youtube"], "manual_submission_enabled": True}
+        online = client.get("/api/publishing/status").json()
+        assert online["worker_online"] and online["manual_submission_enabled"]
+        assert online["readiness"]["youtube"]["ready"] and not online["readiness"]["instagram"]["ready"]
         assert client.get("/api/publishing/ready-videos").json()[0]["job_id"] == "job-1"
         body = {"job_id": "job-1", "destinations": {"yt": {"title": "A real test", "caption": "A sourced description", "tags": ["test"]}}}
         assert client.post("/api/publishing/drafts", json=body).status_code == 403

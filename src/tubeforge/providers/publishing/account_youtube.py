@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from tubeforge.pipeline.delivery_executor import RemoteObservation, SafePreflightError, UploadReceipt
+from tubeforge.pipeline.youtube_preflight import YouTubePreflightError, check_youtube_short
 
 
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
@@ -21,10 +22,25 @@ CHUNK_BYTES = 8 * 1024 * 1024
 class AccountYouTubeAdapter:
     """Only opens a session; the executor persists it before sending video bytes."""
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(self, client: httpx.Client | None = None, *, ffprobe: str = "ffprobe", max_bytes: int = 2_000_000_000, category_id: str = "22", self_declared_made_for_kids: bool = False) -> None:
+        if not re.fullmatch(r"[0-9]{1,6}", category_id) or type(self_declared_made_for_kids) is not bool:
+            raise ValueError("YouTube category or made-for-kids setting is invalid")
         self.client = client or httpx.Client(timeout=60, follow_redirects=False)
+        self.ffprobe, self.max_bytes = ffprobe, max_bytes
+        self.category_id, self.self_declared_made_for_kids = category_id, self_declared_made_for_kids
+
+    def preflight(self, *, asset_path: Path, metadata: dict[str, object]) -> None:
+        if metadata.get("visibility", "private") != "private":
+            raise SafePreflightError("only private YouTube uploads are currently permitted")
+        if type(metadata.get("contains_synthetic_media")) is not bool:
+            raise SafePreflightError("reviewed synthetic-media disclosure is required")
+        try:
+            check_youtube_short(asset_path, ffprobe=self.ffprobe, max_bytes=self.max_bytes)
+        except YouTubePreflightError as error:
+            raise SafePreflightError(str(error)) from error
 
     def open_session(self, *, external_account_id: str, credential: dict[str, object], asset_path: Path, metadata: dict[str, object]) -> str:
+        self.preflight(asset_path=asset_path, metadata=metadata)
         access_token = _token(credential)
         title = metadata.get("title")
         description = metadata.get("caption")
@@ -50,7 +66,7 @@ class AccountYouTubeAdapter:
             UPLOAD_URL,
             params={"uploadType": "resumable", "part": "snippet,status"},
             headers={"Authorization": f"Bearer {access_token}", "X-Upload-Content-Length": str(asset_path.stat().st_size), "X-Upload-Content-Type": "video/mp4"},
-            json={"snippet": {"title": title, "description": description, "tags": tags, "categoryId": "22"}, "status": {"privacyStatus": visibility}},
+            json={"snippet": {"title": title, "description": description, "tags": tags, "categoryId": self.category_id}, "status": {"privacyStatus": visibility, "selfDeclaredMadeForKids": self.self_declared_made_for_kids, "containsSyntheticMedia": metadata["contains_synthetic_media"]}},
         )
         if response.status_code != 200:
             raise ValueError("YouTube did not open a resumable upload session")

@@ -506,7 +506,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application_settings.pipeline.voice.artifact_root,
         ffprobe=str(application_settings.pipeline.voice.ffprobe_executable),
     )
-    manual_posts = ManualPublishService(runtime.database.session_factory)
+    from tubeforge.db.batch_review import BatchReviewRepository
+    manual_posts = ManualPublishService(runtime.database.session_factory, review_repository=BatchReviewRepository(
+        runtime.database.session_factory, runtime.orchestrator.artifact_root, runtime.orchestrator.music_catalog,
+    ))
     delivery_queue = DeliveryQueue(runtime.database.session_factory)
     publisher_presence = PublisherWorkerPresence(runtime.database.session_factory)
 
@@ -662,7 +665,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/oauth/youtube/status", tags=["social accounts"])
     def youtube_oauth_status() -> dict[str, object]:
         configured = application_settings.auth.enabled and google_oauth is not None and oauth_store is not None
-        return {"configured": configured, "reason": None if configured else "Google application, HTTPS callback, account encryption key, and Studio login are required"}
+        return {"configured": configured, "reason": None if configured else "Google application, HTTPS or loopback HTTP callback, account encryption key, and Studio login are required"}
 
     @app.post("/api/oauth/youtube/start", tags=["social accounts"])
     def start_youtube_oauth(value: OAuthStartRequest, request: Request) -> dict[str, str]:
@@ -851,8 +854,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/publishing/status", tags=["publishing"])
     def publishing_worker_status() -> dict[str, object]:
+        from tubeforge.pipeline.youtube_quota import YouTubeQuotaLedger
         platforms = sorted(publisher_presence.live_platforms())
-        return {"worker_online": bool(platforms), "platforms": platforms, "manual_submission_enabled": bool(runtime.token_cipher and "youtube" in platforms)}
+        accounts = runtime.accounts.list()
+        connected = lambda platform: any(
+            item.platform == platform and item.status == "connected" and not item.disabled
+            and item.external_account_id and item.last_validated_at for item in accounts
+        )
+        youtube_quota = YouTubeQuotaLedger(
+            runtime.database.session_factory, daily_units=application_settings.pipeline.youtube.daily_quota_units,
+            upload_units=application_settings.pipeline.youtube.upload_quota_units,
+        ).status()
+        youtube_oauth = bool(application_settings.auth.enabled and google_oauth and oauth_store)
+        youtube_ready = bool("youtube" in platforms and youtube_oauth and connected("youtube")
+                             and youtube_quota["remaining_units"] >= youtube_quota["upload_units"])
+        return {
+            "worker_online": bool(platforms), "platforms": platforms,
+            "manual_submission_enabled": youtube_ready,
+            "readiness": {
+                "youtube": {"worker_live": "youtube" in platforms, "oauth_configured": youtube_oauth,
+                            "account_connected": bool(connected("youtube")), "quota": youtube_quota, "ready": youtube_ready},
+                "instagram": {"worker_live": "instagram" in platforms, "oauth_configured": False,
+                              "account_connected": bool(connected("instagram")), "quota": None, "ready": False},
+            },
+        }
 
     @app.post("/api/publishing/drafts", status_code=status.HTTP_201_CREATED, tags=["publishing"])
     def create_manual_publish_draft(value: ManualPublishDraftRequest) -> dict[str, object]:
@@ -1231,7 +1256,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const videoLabel=document.createElement('label');videoLabel.textContent='Finished video';
           const videoSelect=document.createElement('select');videoSelect.id='publishVideo';videoSelect.disabled=true;videoLabel.append(videoSelect);
           const preview=document.createElement('button');preview.type='button';preview.className='small secondary';preview.textContent='Preview selected video';preview.disabled=true;preview.onclick=()=>{const dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');if(!dialog||!player||!videoSelect.value)return;document.querySelector('#videoTitle').textContent='Publishing preview: '+videoSelect.selectedOptions[0].textContent;player.pause();player.src='/api/jobs/'+encodeURIComponent(videoSelect.value)+'/artifacts/final';player.autoplay=false;dialog.showModal();};
-          const destinationLabel=document.createElement('div');destinationLabel.className='sub';destinationLabel.style.marginTop='14px';destinationLabel.textContent='Destinations and individual post details';
+          const destinationLabel=document.createElement('div');destinationLabel.className='sub';destinationLabel.style.marginTop='14px';destinationLabel.textContent='Destinations and individual post details. YouTube requires an approved Day review and its disclosure decision for this exact final.';
           const planned=document.createElement('div');planned.id='plannedVideoDestinations';planned.className='sub';planned.style.marginTop='10px';planned.setAttribute('role','status');
           const destinations=document.createElement('div');destinations.id='publishDestinations';destinations.textContent='Loading connected accounts…';
           const save=document.createElement('button');save.type='button';save.id='savePublishDraft';save.textContent='Save publishing draft';save.disabled=true;
@@ -1240,7 +1265,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const refreshHistory=document.createElement('button');refreshHistory.type='button';refreshHistory.className='small secondary';refreshHistory.textContent='Refresh publishing activity';refreshHistory.style.marginBottom='12px';
           const history=document.createElement('div');history.id='publishDraftHistory';history.className='muted';history.textContent='Loading drafts…';
           panel.append(heading,help,workerState,videoLabel,preview,destinationLabel,planned,destinations,save,status,historyHeading,refreshHistory,history);shell.append(panel);
-          const rows=new Map(),videosById=new Map(),accountsById=new Map();let workerReady=false;
+          const rows=new Map(),videosById=new Map(),accountsById=new Map();let workerReady=false,workerOnline=false;
 
           const pkgBox=document.createElement('fieldset');pkgBox.style.cssText='border:1px solid #31415f;border-radius:9px;margin-top:14px';
           pkgBox.innerHTML='<legend>Upload-ready package — title, description and thumbnail are prefilled and fully editable</legend><div class="sub" id="pkgStatus" role="status">Select a finished video to prepare its title, two-line description and thumbnail.</div><label>Video title<input id="pkgTitle" maxlength="100"></label><label>Description (two lines)<textarea id="pkgDesc" rows="3" maxlength="5000"></textarea></label><label>Keyword tags, comma separated<input id="pkgTags"></label><div class="actions"><button type="button" class="small secondary" id="pkgCopyTitle">Copy title</button><button type="button" class="small secondary" id="pkgCopyDesc">Copy description</button></div><label class="checkbox" id="pkgGuidesRow" style="display:none"><input type="checkbox" id="pkgGuides"> Show Shorts safe-area guides (review only; not in the file)</label><img id="pkgThumb" alt="Thumbnail preview" style="display:none;width:100%;max-width:480px;border-radius:10px;margin-top:10px;border:1px solid #31415f"><label>Thumbnail text (2–3 punchy words)<input id="pkgText" maxlength="48"></label><label>Video moment<select id="pkgFrame"></select></label><label>Logo badge<select id="pkgLogo"></select></label><label>Title ideas<select id="pkgTitles"></select></label><div class="actions"><button type="button" class="small" id="pkgUpdate">Update thumbnail</button><label class="small secondary" style="display:inline-block;cursor:pointer;padding:8px 12px">Upload my own image<input id="pkgFile" type="file" accept="image/png,image/jpeg" hidden></label><a id="pkgDownload" class="small secondary" style="display:none;padding:8px 12px" download>Download thumbnail</a></div>';
@@ -1277,15 +1302,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
               const identity=document.createElement('p');identity.className='sub';identity.textContent='Video SHA-256: '+draft.asset_sha256;details.append(identity);
               for(const item of draft.destinations){
                 const account=document.createElement('p');account.textContent=item.platform+' · '+item.external_account_id+' · '+item.state.replaceAll('_',' ')+' · '+item.attempt_count+' attempt(s)';details.append(account);
-                const metadata=document.createElement('pre');metadata.style.whiteSpace='pre-wrap';metadata.style.overflowWrap='anywhere';metadata.textContent=JSON.stringify(item.metadata,null,2);details.append(metadata);
+                const metadata=document.createElement('p');metadata.style.whiteSpace='pre-wrap';metadata.style.overflowWrap='anywhere';const m=item.metadata;metadata.textContent=[m.title?'Title: '+m.title:null,'Description: '+m.caption,m.tags?.length?'Tags: '+m.tags.join(', '):null,item.platform==='youtube'?'Synthetic media disclosure: '+(m.contains_synthetic_media===true?'yes':m.contains_synthetic_media===false?'no':'not reviewed'):null].filter(Boolean).join('\\n');details.append(metadata);
                 if(item.error_message){const error=document.createElement('p');error.className='failure';error.textContent=item.error_message;details.append(error);}
                 if(item.remote_id){const remote=document.createElement('p');remote.className='sub';remote.textContent='Remote ID: '+item.remote_id;details.append(remote);}
                 if(item.remote_url){try{const url=new URL(item.remote_url);if(url.protocol==='https:'){const link=document.createElement('a');link.href=url.href;link.rel='noopener noreferrer';link.target='_blank';link.textContent='View remote post';details.append(link);}}catch(_){}}
                 if(item.attempts.length){const activity=document.createElement('details');const activityLabel=document.createElement('summary');activityLabel.textContent='Destination attempt history ('+item.attempts.length+')';activity.append(activityLabel);for(const attempt of item.attempts){const event=document.createElement('p');event.className='sub';event.textContent=attempt.started_at+' · '+attempt.kind+' · '+attempt.state+(attempt.finished_at?' · ended '+attempt.finished_at:'')+(attempt.error_message?' · '+attempt.error_message:'')+(attempt.remote_id?' · remote '+attempt.remote_id:'');activity.append(event);}details.append(activity);}
                 if(item.requested_action){const pending=document.createElement('p');pending.className='sub';pending.textContent=(item.requested_action==='inspect'?'Remote inspection':'Saved-session continuation')+' requested; waiting for the publisher worker.';details.append(pending);}
-                if(item.can_inspect){const inspect=document.createElement('button');inspect.type='button';inspect.className='small secondary';inspect.textContent='Inspect saved remote session';inspect.dataset.reconcile='true';inspect.disabled=!workerReady;inspect.onclick=()=>requestDeliveryAction(item,'inspect',inspect);details.append(inspect);}
-                if(item.can_resume){const resume=document.createElement('button');resume.type='button';resume.className='small secondary';resume.textContent='Continue saved upload session';resume.dataset.reconcile='true';resume.disabled=!workerReady;resume.onclick=()=>requestDeliveryAction(item,'resume',resume);details.append(resume);}
-                if(item.can_retry_after_reconnect){const retry=document.createElement('button');retry.type='button';retry.className='small secondary';retry.textContent='Resume after account reconnect';retry.dataset.reconcile='true';retry.disabled=!workerReady;retry.onclick=()=>requestDeliveryAction(item,'retry_after_reconnect',retry);details.append(retry);}
+                if(item.can_inspect){const inspect=document.createElement('button');inspect.type='button';inspect.className='small secondary';inspect.textContent='Inspect saved remote session';inspect.dataset.reconcile='true';inspect.disabled=!workerOnline;inspect.onclick=()=>requestDeliveryAction(item,'inspect',inspect);details.append(inspect);}
+                if(item.can_resume){const resume=document.createElement('button');resume.type='button';resume.className='small secondary';resume.textContent='Continue saved upload session';resume.dataset.reconcile='true';resume.disabled=!workerOnline;resume.onclick=()=>requestDeliveryAction(item,'resume',resume);details.append(resume);}
+                if(item.can_retry_after_reconnect){const retry=document.createElement('button');retry.type='button';retry.className='small secondary';retry.textContent='Resume after account reconnect';retry.dataset.reconcile='true';retry.disabled=!workerOnline;retry.onclick=()=>requestDeliveryAction(item,'retry_after_reconnect',retry);details.append(retry);}
                 else if(item.state==='auth_required'){const reconnectNote=document.createElement('p');reconnectNote.className='sub';reconnectNote.textContent='Reconnect this exact account before resuming its destination.';details.append(reconnectNote);}
               }
               const supported=draft.destinations.length>0&&draft.destinations.every(item=>item.platform==='youtube'&&(item.metadata.visibility||'private')==='private');
@@ -1298,7 +1323,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
               row.append(details);history.append(row);
             }
           }catch(_){if(history.textContent==='Loading drafts…')history.textContent='Could not load publishing drafts.';}}
-          async function loadWorkerState(){try{const response=await fetch('/api/publishing/status');if(!response.ok)throw Error();const result=await response.json();workerReady=Boolean(result.manual_submission_enabled);workerState.textContent=workerReady?'Publisher worker online for private YouTube submission.':'Publisher worker unavailable. Drafts can be saved; submission is disabled.';}catch(_){workerReady=false;workerState.textContent='Publisher worker status is unavailable. Drafts can be saved; submission is disabled.';}for(const button of history.querySelectorAll('[data-submit-draft]'))button.disabled=!workerReady||button.dataset.reviewed!=='true';for(const button of history.querySelectorAll('[data-reconcile]'))button.disabled=!workerReady;}
+          async function loadWorkerState(){try{const response=await fetch('/api/publishing/status');if(!response.ok)throw Error();const result=await response.json();workerReady=Boolean(result.manual_submission_enabled);const yt=result.readiness?.youtube;workerOnline=Boolean(yt?.worker_live);workerState.textContent=yt?`YouTube: worker ${yt.worker_live?'online':'offline'} · authorization ${yt.oauth_configured?'configured':'not configured'} · account ${yt.account_connected?'connected':'not connected'} · estimated upload quota ${yt.quota.remaining_units} / ${yt.quota.daily_units} units remaining${workerReady?'':' · submission unavailable'}.`:'Publisher status unavailable.';}catch(_){workerReady=false;workerOnline=false;workerState.textContent='Publisher worker status is unavailable. Drafts can be saved; submission is disabled.';}for(const button of history.querySelectorAll('[data-submit-draft]'))button.disabled=!workerReady||button.dataset.reviewed!=='true';for(const button of history.querySelectorAll('[data-reconcile]'))button.disabled=!workerOnline;}
           refreshHistory.onclick=async()=>{refreshHistory.disabled=true;refreshHistory.textContent='Refreshing activity…';await loadDrafts();refreshHistory.disabled=false;refreshHistory.textContent='Refresh publishing activity';};
           function applyVideoIntent(){const video=videosById.get(videoSelect.value);planned.replaceChildren();for(const row of rows.values()){row.check.checked=false;row.caption.value='';if(row.title)row.title.value='';if(row.tags)row.tags.value='';}if(!video)return;const intents=video.destination_intents||[];if(!intents.length){planned.textContent='This video has no saved destination plan. Choose a connected account below to prepare a draft.';for(const row of rows.values()){if(video.video_description&&video.video_description.length<=row.caption.maxLength)row.caption.value=video.video_description;if(row.title)row.title.value=video.title.slice(0,100);}return;}const heading=document.createElement('strong');heading.textContent='Saved creation plan';planned.append(heading);for(const intent of intents){const account=accountsById.get(intent.account_id),row=rows.get(intent.account_id),fits=row&&intent.description.length<=row.caption.maxLength;const line=document.createElement('p');line.textContent=intent.platform+' · '+intent.account_name+' · '+intent.category+(fits?' — ready for draft review':row?' — description exceeds this platform’s limit; shorten it before selecting':' — '+(account?.status||'account unavailable')+'; connection or platform draft support required');planned.append(line);if(row){row.check.checked=Boolean(fits);row.caption.value=fits?intent.description:'';if(row.title)row.title.value=video.title.slice(0,100);}}}
           videoSelect.onchange=applyVideoIntent;

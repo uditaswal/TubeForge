@@ -1,7 +1,7 @@
 # Publishing plan: YouTube + Instagram upload pipeline
 
 Branch: `feature/publish-pipeline` (from `dev` `088928b`, worktree `../tubeforge-publish`).
-Status: **NOT STARTED** (plan only, 11 Nov 2026).
+Status: **IMPLEMENTED** in part (P1 local implementation; real upload and later phases remain unverified).
 Goal: an approved final from Day review or Publishing goes, without manual file handling, to the
 operator's YouTube channel and Instagram professional account. It goes first as private or
 immediate posts, then at scheduled slots. Each post's remote state is verified and shown in Studio.
@@ -23,13 +23,18 @@ in Studio. Claude and Codex do everything else.
 | Scheduling at slots (`publishAt`, Instagram slot submit) | design doc §Scheduling | **NOT STARTED** |
 | Day review → publish hand-off | `pipeline/publication_batch_export.py` (local staged export only) | NOT STARTED |
 
-Known gaps in the YouTube path:
-- The OAuth redirect must be `https://`, but the dashboard is loopback-only behind an SSH tunnel.
-- `selfDeclaredMadeForKids` and `containsSyntheticMedia` are never sent. Without them YouTube falls
-  back to channel defaults, and the altered-content disclosure would be missing.
-- `categoryId` is hard-coded to `22`.
-- There is no Shorts check (≤ 3 min, 9:16) and no quota accounting (an upload costs about 1,600 of
-  10,000 units per day).
+P1 status (11 Nov): **IMPLEMENTED**. The requested publishing/delivery/OAuth/account/scheduling regression selection passed (99 passed, 1 opt-in browser skip); the browser check was run separately and passed. Loopback OAuth, reviewed disclosure binding,
+private-only adapter fields, local H.264/AAC 9:16 preflight, a durable estimated daily
+quota reservation and per-platform readiness are implemented. A fake-service test
+runs an approved review through upload and remote metadata verification; the quota
+migration upgraded, downgraded and re-upgraded on a temporary database. The signed-in
+readiness screen passed Chromium checks at 1440, 768 and 390 px; captures are under
+`artifacts/review/publishing-p1-readiness/`. The operator's encryption key and Google
+OAuth values are missing from the project `.env`. A real private upload and remote
+copy inspection are **BLOCKED** until those values are configured, an exact final is
+approved, and the operator authorizes its private upload. Scheduling and Instagram
+remain **NOT STARTED** on this branch. The local quota is a conservative estimate of
+TubeForge upload reservations; it cannot see other applications' Google API usage.
 
 ## 1. Operator: credentials only (one-time)
 
@@ -173,6 +178,18 @@ One phase at a time. Each phase needs its acceptance evidence before the next on
   - The operator's sign-off makes publishing **VERIFIED**.
 
 Later (not in this plan): YouTube/Instagram analytics ingestion into channel reports, Facebook Reels, public YouTube once the audit passes (only a config flip if P4 holds).
+
+## Backend execution checkpoints (11 Nov 2026)
+
+Proceed in order; each checkpoint is accepted locally before the next. Live platform actions require separate authorization for the exact post.
+
+| Checkpoint | User-visible outcome | Acceptance test and evidence | Out of scope |
+|---|---|---|---|
+| P1 | Safe private YouTube upload and readiness | Fake-transport field and preflight tests, durable quota tests, signed-in Studio check; real private upload and remote inspection separately authorized | Instagram, schedules, public visibility |
+| Delivery core | Instagram-shaped upload, expiry and separate publication are crash-safe | Fake adapter tests for expiry, publish-once and crash reconciliation | Instagram provider and OAuth implementation |
+| P3 | One checksum-bound review creates independent destination drafts | API and isolation tests using approved Day review evidence | Claude's UI |
+| P4 | Pending posts honor slots, audit restrictions, grace and cadence | Migration round trip and frozen-clock schedule/cadence tests | Live schedule without exact-post approval; Claude's UI |
+| P5 | Worker starts safely and retries respect provider limits | Seven-day fake soak, retry tests and signed-in responsive check | Real week or public publication without approval |
 
 ## 4. Relay order and hand-offs
 

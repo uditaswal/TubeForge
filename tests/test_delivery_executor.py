@@ -19,6 +19,11 @@ from tubeforge.security.account_credentials import AccountCredentialManager, Ref
 from tubeforge.security.secrets import TokenCipher
 
 
+@pytest.fixture(autouse=True)
+def _reviewed_disclosure_for_queue_tests(monkeypatch):
+    monkeypatch.setattr("tubeforge.pipeline.manual_publish.reviewed_youtube_disclosure", lambda session, asset, reviews: {"contains_synthetic_media": False, "reviewed_identity": "review", "evidence_identity": "evidence", "record_sha256": "record"})
+
+
 def _submit(draft: ManualPublishService, post_id: str) -> None:
     draft.submit(post_id, reviewed_identity=draft.review_identity(post_id), actor="operator", supported_platforms={"youtube"})
 
@@ -212,5 +217,36 @@ def test_explicit_resume_uses_saved_session_without_reopening_upload(tmp_path: P
         with database.session_factory() as session:
             assert session.get(PublishJobRecord, post.id).state == "published"
         assert (adapter.opened, adapter.uploaded, adapter.resumed) == (1, 1, 1)
+    finally:
+        database.dispose()
+
+
+def test_quota_exhaustion_fails_before_refresh_or_remote_requests(tmp_path: Path) -> None:
+    from tubeforge.pipeline.youtube_quota import YouTubeQuotaLedger
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'exhausted.db'}"))
+    Base.metadata.create_all(database.engine)
+    stage = tmp_path / 'staging'
+    stage.mkdir()
+    content = b'known final video'
+    digest = hashlib.sha256(content).hexdigest()
+    (stage / f'{digest}.mp4').write_bytes(content)
+    now = datetime.now(UTC)
+    cipher = TokenCipher(Fernet.generate_key().decode())
+    with database.session_factory.begin() as session:
+        session.add(PublishingAssetRecord(id='asset', sha256=digest, staged_path=str(stage / f'{digest}.mp4'), source_job_id='job', size_bytes=len(content), duration_seconds=30, width=1080, height=1920, state='ready', created_at=now))
+        session.add(SocialAccountRecord(id='yt', platform='youtube', display_name='Channel', external_account_id='UC-real', auth_type='oauth', credential_ciphertext=cipher.encrypt({'token': 'fake'}), scopes_json='[]', token_expires_at=None, status='connected', capabilities_json='[]', is_default=False, disabled=False, last_validated_at=now, created_at=now, updated_at=now))
+    class NoNetworkCredentials:
+        def resolve(self, *args):
+            raise AssertionError('quota must be checked before credential refresh')
+    try:
+        draft = ManualPublishService(database.session_factory)
+        post = draft.create_draft('asset', {'yt': {'title': 'Reviewed title', 'caption': 'Reviewed description'}})
+        _submit(draft, post.id)
+        adapter = OfflineYouTube()
+        executor = DeliveryExecutor(database.session_factory, DeliveryQueue(database.session_factory), cipher, stage, {'youtube': adapter}, NoNetworkCredentials(), YouTubeQuotaLedger(database.session_factory, daily_units=1000, upload_units=1600))
+        assert executor.run_once('worker')
+        delivery = draft.deliveries(post.id)[0]
+        assert delivery.state == 'failed' and '1000 units left, 1600 additional units required' in delivery.error_message
+        assert adapter.opened == 0 and adapter.uploaded == 0
     finally:
         database.dispose()

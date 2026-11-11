@@ -14,6 +14,11 @@ from tubeforge.db.session import create_database
 from tubeforge.pipeline.manual_publish import ManualPublishService
 
 
+@pytest.fixture(autouse=True)
+def _reviewed_disclosure_for_queue_tests(monkeypatch):
+    monkeypatch.setattr("tubeforge.pipeline.manual_publish.reviewed_youtube_disclosure", lambda session, asset, reviews: {"contains_synthetic_media": False, "reviewed_identity": "review", "evidence_identity": "evidence", "record_sha256": "record"})
+
+
 def test_manual_draft_reserves_exact_accounts_and_excludes_default_duplicate(tmp_path: Path) -> None:
     database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'draft.db'}"))
     Base.metadata.create_all(database.engine)
