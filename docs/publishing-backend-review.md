@@ -25,11 +25,7 @@ for uncertain or pre-upload failures and does not include calls from other clien
 The disclosure decision currently requires an approved Day-review final and its
 registered disclosure artifact. Quota exhaustion pauses the delivery for explicit operator resume.
 
-The project `.env` is missing `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY`,
-`TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET` and
-`TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI`. A real private upload needs those values, a
-named approved final and the operator's go-ahead for that exact post. Its Google
-snapshot, processing, thumbnail and downloaded remote frames remain unverified.
+The feature worktree has no `.env`. On 12 Nov the original project `.env` had nonempty entries for `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET` and `TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI`; their validity and account connection have not been tested. A real private upload needs a named approved final and the operator's go-ahead for that exact post. Its Google snapshot, processing, thumbnail and downloaded remote frames remain unverified.
 No external upload, publication, deployment, push or merge has occurred.
 
 ## Remaining work
@@ -65,4 +61,4 @@ P5 backend is **IMPLEMENTED**: the worker starts by default and remains idle wit
 
 The reviewed parallel Instagram adapter at `claude/publish-instagram` commit `5ec244b` publishes during upload/resume, does not implement separate container inspection and publication, appends hashtags a second time, and treats quota exhaustion as retryable. It must be adapted to the protocol in `docs/HANDOFF.md`; the executor rejects its current interface before remote work. A published container without a provable media ID remains an unknown outcome. Claude owns that adapter, OAuth and the platform gate.
 
-The Instagram configuration is also missing `TUBEFORGE_INSTAGRAM_APP_ID`, `TUBEFORGE_INSTAGRAM_APP_SECRET` and `TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI`. Live acceptance is blocked on the relevant credentials, integration, a named approved final and separate exact-post permission. The first private YouTube upload reserves an estimated 1,600 units by default.
+The original project `.env` also has nonempty `TUBEFORGE_INSTAGRAM_APP_ID`, `TUBEFORGE_INSTAGRAM_APP_SECRET` and `TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI`; their validity is untested. Live acceptance is blocked on integration, a named approved final and separate exact-post permission. The first private YouTube upload reserves an estimated 1,600 units by default.

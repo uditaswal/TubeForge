@@ -29,10 +29,7 @@ quota reservation and per-platform readiness are implemented. A fake-service tes
 runs an approved review through upload and remote metadata verification; the quota
 migration upgraded, downgraded and re-upgraded on a temporary database. The signed-in
 readiness screen passed Chromium checks at 1440, 768 and 390 px; captures are under
-`artifacts/review/publishing-p1-readiness/`. The operator's encryption key and Google
-OAuth values are missing from the project `.env`. A real private upload and remote
-copy inspection are **BLOCKED** until those values are configured, an exact final is
-approved, and the operator authorizes its private upload. Scheduling and the Instagram-shaped delivery core are implemented locally; the real Instagram provider remains unintegrated. The local quota is a conservative estimate of
+`artifacts/review/publishing-p1-readiness/`. The feature worktree has no `.env`; the original project `.env` now has nonempty encryption and Google OAuth entries, whose validity has not been tested. A real private upload and remote copy inspection are **BLOCKED** until an exact final is approved and the operator authorizes its private upload. Scheduling and the Instagram-shaped delivery core are implemented locally; the real Instagram provider remains unintegrated. The local quota is a conservative estimate of
 TubeForge upload reservations; it cannot see other applications' Google API usage.
 
 ## 1. Operator: credentials only (one-time)

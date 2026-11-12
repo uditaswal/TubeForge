@@ -41,6 +41,7 @@ all pixels, audio and encoding are local and cost no tokens.
 ## Next step (in order)
 - **Publishing P1, P3–P5 backend — IMPLEMENTED; live acceptance BLOCKED.** Fake upload, scheduling, reconciliation and responsive signed-in checks passed; the seven-day fake soak delivered 42 of 42 destinations without duplicates or losses (`artifacts/review/publishing-backend-soak-20261112/summary.json`). Migrations 0033–0035 passed temporary-DB round trips. Full suite passed: 1,140 passed, 34 skipped (`/tmp/tubeforge-publish-full-20261112.log`). Next: integrate the parallel adapter and gate after review. A real upload needs credentials, a named approved final and permission for that exact post; no upload is authorized yet. Claude's UI and Instagram integration remain unverified. See `docs/publishing-backend-review.md` for blockers and evidence.
 - **Parallel integration:** Claude owns Instagram Login, the Reels adapter and the API per-platform gate on `claude/publish-instagram`; follow the contracts below. Every real upload needs the operator’s go-ahead for that exact post.
+- **Next command:** `git -C /home/uditaswal/docker/tubeforge/tubeforge-publish-ig log -1 --oneline` — check whether Claude's branch has advanced beyond reviewed commit `5ec244b`, then review its adapter and gate against the contract below before integration. Do not merge or upload without the required authorization.
 
 ### Cross-post API handoff for Claude
 
