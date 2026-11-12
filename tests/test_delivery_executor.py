@@ -246,7 +246,67 @@ def test_quota_exhaustion_fails_before_refresh_or_remote_requests(tmp_path: Path
         executor = DeliveryExecutor(database.session_factory, DeliveryQueue(database.session_factory), cipher, stage, {'youtube': adapter}, NoNetworkCredentials(), YouTubeQuotaLedger(database.session_factory, daily_units=1000, upload_units=1600))
         assert executor.run_once('worker')
         delivery = draft.deliveries(post.id)[0]
-        assert delivery.state == 'failed' and '1000 units left, 1600 additional units required' in delivery.error_message
+        assert delivery.state == 'quota_paused' and '1000 units left, 1600 additional units required' in delivery.error_message
         assert adapter.opened == 0 and adapter.uploaded == 0
+    finally:
+        database.dispose()
+
+
+def test_provider_auth_failure_fences_reconnect_against_credential_changes(tmp_path: Path):
+    from tubeforge.pipeline.delivery_executor import SafePreflightError
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'auth-fence.db'}"))
+    Base.metadata.create_all(database.engine)
+    stage = tmp_path / 'staging'
+    stage.mkdir()
+    content = b'known final video'
+    digest = hashlib.sha256(content).hexdigest()
+    (stage / f'{digest}.mp4').write_bytes(content)
+    cipher = TokenCipher(Fernet.generate_key().decode())
+    credential = {'token': 'old-token'}
+    now = datetime.now(UTC)
+    with database.session_factory.begin() as session:
+        for index in (1, 2):
+            # Independent identities, same known bytes are sufficient for this account-fencing test.
+            session.add(PublishingAssetRecord(id=f'asset-{index}', sha256=(str(index) * 64), staged_path=str(stage / f'{str(index) * 64}.mp4'), source_job_id=f'job-{index}', size_bytes=len(content), duration_seconds=30, width=1080, height=1920, state='ready', created_at=now))
+            (stage / f'{str(index) * 64}.mp4').write_bytes(content)
+        session.add(SocialAccountRecord(id='yt', platform='youtube', display_name='Channel', external_account_id='UC-real', auth_type='oauth', credential_ciphertext=cipher.encrypt(credential), scopes_json='[]', token_expires_at=None, status='connected', capabilities_json='[]', is_default=False, disabled=False, last_validated_at=now, created_at=now, updated_at=now))
+    # Replace the staged-byte checker for these synthetic hashes; all remote
+    # operations below remain fake and the test targets account fencing only.
+    drafts = ManualPublishService(database.session_factory)
+    class Credentials:
+        def resolve(self, account_id, owner):
+            return credential
+    class RejectingAdapter:
+        def __init__(self, reconnect_during_call=False):
+            self.reconnect_during_call = reconnect_during_call
+        def open_session(self, **kwargs):
+            if self.reconnect_during_call:
+                with database.session_factory.begin() as session:
+                    account = session.get(SocialAccountRecord, 'yt')
+                    account.credential_ciphertext = cipher.encrypt({'token': 'new-token'})
+                    account.status = 'connected'
+            raise SafePreflightError('account needs reconnection', category='auth')
+    try:
+        first = drafts.create_draft('asset-1', {'yt': {'title': 'Title 1', 'caption': 'Description'}})
+        _submit(drafts, first.id)
+        executor = DeliveryExecutor(database.session_factory, DeliveryQueue(database.session_factory), cipher, stage, {'youtube': RejectingAdapter()}, Credentials())
+        executor._inputs = lambda claim: (stage / f'{"1" * 64}.mp4', {'title': 'Title 1', 'caption': 'Description'})
+        executor.run_once('worker')
+        with database.session_factory() as session:
+            assert session.get(SocialAccountRecord, 'yt').status == 'reconnect_required'
+        with pytest.raises(ValueError, match='reconnect'):
+            executor.queue.retry_after_reconnect(drafts.deliveries(first.id)[0].id, 'operator')
+        with database.session_factory.begin() as session:
+            account = session.get(SocialAccountRecord, 'yt')
+            account.status = 'connected'
+            account.credential_ciphertext = cipher.encrypt(credential)
+        second = drafts.create_draft('asset-2', {'yt': {'title': 'Title 2', 'caption': 'Description'}})
+        _submit(drafts, second.id)
+        executor.adapters['youtube'] = RejectingAdapter(reconnect_during_call=True)
+        executor._inputs = lambda claim: (stage / f'{"2" * 64}.mp4', {'title': 'Title 2', 'caption': 'Description'})
+        executor.run_once('worker')
+        with database.session_factory() as session:
+            account = session.get(SocialAccountRecord, 'yt')
+            assert account.status == 'connected' and cipher.decrypt(account.credential_ciphertext)['token'] == 'new-token'
     finally:
         database.dispose()

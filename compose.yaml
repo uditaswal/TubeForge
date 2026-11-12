@@ -105,7 +105,6 @@ services:
     mem_limit: 768m
 
   publisher-worker:
-    profiles: ["publishing"]
     build: .
     image: tubeforge-app:local
     user: "${TUBEFORGE_HOST_UID:-1000}:${TUBEFORGE_HOST_GID:-1000}"

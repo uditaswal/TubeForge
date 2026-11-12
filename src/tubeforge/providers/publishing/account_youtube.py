@@ -10,7 +10,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from tubeforge.pipeline.delivery_executor import RemoteObservation, SafePreflightError, UploadReceipt
+from tubeforge.pipeline.delivery_executor import ProviderAuthError, ProviderQuotaError, ProviderRateLimitHint, RemoteObservation, SafePreflightError, UploadReceipt
+from tubeforge.pipeline.provider_backoff import provider_hint
 from tubeforge.pipeline.youtube_preflight import YouTubePreflightError, check_youtube_short
 
 
@@ -72,7 +73,11 @@ class AccountYouTubeAdapter:
         except httpx.HTTPError as error:
             raise SafePreflightError("YouTube channel identity check is unavailable", category="retry") from error
         if identity.status_code != 200:
-            raise SafePreflightError("YouTube channel identity could not be checked", category="auth" if identity.status_code in {401, 403} else "retry")
+            category = _response_category(identity)
+            raise SafePreflightError("YouTube channel identity could not be checked", category=category, retry_after_seconds=provider_hint(identity.headers))
+        usage_hint = provider_hint(identity.headers)
+        if usage_hint is not None:
+            raise SafePreflightError("YouTube provider requested a delay before upload", category="retry", retry_after_seconds=usage_hint)
         try:
             channels = identity.json().get("items", [])
         except (ValueError, AttributeError) as error:
@@ -92,6 +97,8 @@ class AccountYouTubeAdapter:
             json={"snippet": {"title": title, "description": description, "tags": tags, "categoryId": self.category_id}, "status": status},
         )
         if response.status_code != 200:
+            if response.status_code in {400, 401, 403, 429}:
+                raise SafePreflightError("YouTube rejected upload session creation", category=_response_category(response), retry_after_seconds=provider_hint(response.headers))
             raise ValueError("YouTube did not open a resumable upload session")
         session_id = response.headers.get("Location", "")
         _session_url(session_id)
@@ -128,6 +135,7 @@ class AccountYouTubeAdapter:
         if response.status_code in {200, 201}:
             return _receipt(response)
         if response.status_code != 308:
+            _raise_provider_error(response)
             raise ValueError("saved YouTube session cannot be resumed safely")
         acknowledged = _acknowledged(response, size)
         offset = acknowledged + 1
@@ -156,6 +164,7 @@ class AccountYouTubeAdapter:
                 if response.status_code in {200, 201}:
                     return _receipt(response)
                 if response.status_code != 308:
+                    _raise_provider_error(response)
                     raise ValueError("YouTube upload outcome needs session reconciliation")
                 # A partial acknowledgement must cover exactly this chunk. Any
                 # unexpected range is reconciled from the saved session URI.
@@ -172,7 +181,11 @@ class AccountYouTubeAdapter:
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if response.status_code != 200:
+            _raise_provider_error(response)
             raise ValueError("YouTube publication inspection failed")
+        usage_hint = provider_hint(response.headers)
+        if usage_hint is not None:
+            raise ProviderRateLimitHint(usage_hint)
         items = response.json().get("items", [])
         if not items:
             return RemoteObservation("missing")
@@ -200,10 +213,40 @@ class AccountYouTubeAdapter:
             return None
         if response.status_code in {200, 201}:
             return _receipt(response)
+        _raise_provider_error(response)
         raise ValueError("YouTube upload session outcome could not be proven")
 
     def _status_request(self, session_id: str, access_token: str, asset_size: int) -> httpx.Response:
         return self.client.put(session_id, headers={"Authorization": f"Bearer {access_token}", "Content-Range": f"bytes */{asset_size}", "Content-Length": "0"}, content=b"")
+
+
+def _response_category(response: httpx.Response) -> str:
+    if response.status_code == 429:
+        return "retry"
+    try:
+        body = response.json()
+        error = body.get("error", {}) if isinstance(body, dict) else {}
+        errors = error.get("errors", []) if isinstance(error, dict) else []
+        reasons = {item.get("reason") for item in errors if isinstance(item, dict)}
+    except (ValueError, TypeError):
+        reasons = set()
+    if reasons & {"quotaExceeded", "dailyLimitExceeded", "uploadLimitExceeded"}:
+        return "quota"
+    if reasons & {"rateLimitExceeded", "userRateLimitExceeded"}:
+        return "retry"
+    if response.status_code in {401, 403}:
+        return "auth"
+    return "invalid" if response.status_code == 400 else "retry"
+
+
+def _raise_provider_error(response: httpx.Response) -> None:
+    category = _response_category(response)
+    if category == "quota":
+        raise ProviderQuotaError("YouTube quota exhausted")
+    if category == "auth":
+        raise ProviderAuthError("YouTube account requires reconnection")
+    if response.status_code == 429 or (response.status_code == 403 and category == "retry"):
+        raise ProviderRateLimitHint(provider_hint(response.headers) or 120)
 
 
 def _thumbnail_content(asset_path: Path, digest: object) -> bytes | None:

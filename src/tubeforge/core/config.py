@@ -838,7 +838,7 @@ class Settings(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
 
 
-def load_settings(config_path: Path | None = None) -> Settings:
+def load_settings(config_path: Path | None = None, *, validate_providers: bool = True) -> Settings:
     """Load and validate YAML settings from a safe, explicit configuration file."""
     selected_path = config_path or Path(os.environ.get("TUBEFORGE_CONFIG", DEFAULT_CONFIG_PATH))
     try:
@@ -862,7 +862,8 @@ def load_settings(config_path: Path | None = None) -> Settings:
     if tts_listen_port:
         raw_config.setdefault("pipeline", {}).setdefault("piper", {})["listen_port"] = tts_listen_port
     settings = Settings.model_validate(raw_config)
-    validate_selected_provider(settings)
+    if validate_providers:
+        validate_selected_provider(settings)
     return settings
 
 

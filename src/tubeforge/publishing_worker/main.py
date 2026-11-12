@@ -20,25 +20,35 @@ from tubeforge.security.secrets import TokenCipher
 
 
 def main() -> None:
-    settings = load_settings()
+    # Publishing has no dependency on the rendering models or writer process.
+    settings = load_settings(validate_providers=False)
     encryption_key = os.environ.get("TUBEFORGE_ACCOUNT_ENCRYPTION_KEY")
-    if not encryption_key:
-        raise RuntimeError("publisher worker requires an account encryption key")
     database = create_database(settings.database)
-    cipher = TokenCipher(encryption_key)
-    youtube = AccountYouTubeAdapter(
-        ffprobe=str(settings.pipeline.voice.ffprobe_executable),
-        max_bytes=settings.pipeline.youtube.max_upload_bytes,
-        category_id=settings.pipeline.youtube.category_id,
-        self_declared_made_for_kids=settings.pipeline.youtube.self_declared_made_for_kids,
-        youtube_api_audited=settings.pipeline.youtube.youtube_api_audited,
-    )
-    google_refresh = GoogleCredentialRefresher()
-    manager = AccountCredentialManager(database.session_factory, cipher, {"youtube": google_refresh})
-    queue = DeliveryQueue(database.session_factory)
-    stage_root = settings.pipeline.voice.artifact_root.parent / "publishing" / "staging"
-    quota = YouTubeQuotaLedger(database.session_factory, daily_units=settings.pipeline.youtube.daily_quota_units, upload_units=settings.pipeline.youtube.upload_quota_units)
-    executor = DeliveryExecutor(database.session_factory, queue, cipher, stage_root, {"youtube": youtube}, manager, quota)
+    cipher = None
+    if encryption_key:
+        try:
+            cipher = TokenCipher(encryption_key)
+        except (ValueError, TypeError):
+            logging.warning("publisher worker is idle: account encryption key is invalid")
+    else:
+        logging.info("publisher worker is idle until an account encryption key is configured")
+    youtube = google_refresh = executor = None
+    active_platforms: set[str] = set()
+    if cipher is not None:
+        youtube = AccountYouTubeAdapter(
+            ffprobe=str(settings.pipeline.voice.ffprobe_executable),
+            max_bytes=settings.pipeline.youtube.max_upload_bytes,
+            category_id=settings.pipeline.youtube.category_id,
+            self_declared_made_for_kids=settings.pipeline.youtube.self_declared_made_for_kids,
+            youtube_api_audited=settings.pipeline.youtube.youtube_api_audited,
+        )
+        google_refresh = GoogleCredentialRefresher()
+        manager = AccountCredentialManager(database.session_factory, cipher, {"youtube": google_refresh})
+        queue = DeliveryQueue(database.session_factory)
+        stage_root = settings.pipeline.voice.artifact_root.parent / "publishing" / "staging"
+        quota = YouTubeQuotaLedger(database.session_factory, daily_units=settings.pipeline.youtube.daily_quota_units, upload_units=settings.pipeline.youtube.upload_quota_units)
+        executor = DeliveryExecutor(database.session_factory, queue, cipher, stage_root, {"youtube": youtube}, manager, quota)
+        active_platforms = {"youtube"}
     presence = PublisherWorkerPresence(database.session_factory)
     worker_id = f"publisher-{uuid4().hex}"
     stopping = False
@@ -47,7 +57,7 @@ def main() -> None:
     def keep_presence() -> None:
         while not heartbeat_stop.wait(10):
             try:
-                presence.heartbeat(worker_id, {"youtube"})
+                presence.heartbeat(worker_id, active_platforms)
             except Exception:
                 logging.exception("publisher worker heartbeat failed")
 
@@ -57,14 +67,14 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    presence.heartbeat(worker_id, {"youtube"})
+    presence.heartbeat(worker_id, active_platforms)
     heartbeat_thread = Thread(target=keep_presence, name="publisher-heartbeat", daemon=True)
     heartbeat_thread.start()
     try:
         while not stopping:
             try:
-                delivery_id = executor.run_requested_action(worker_id)
-                if delivery_id is None:
+                delivery_id = executor.run_requested_action(worker_id) if executor is not None else None
+                if delivery_id is None and executor is not None:
                     delivery_id = executor.run_once(worker_id)
             except Exception:
                 # An in-flight lease will expire to UNKNOWN_OUTCOME; no new
@@ -78,8 +88,10 @@ def main() -> None:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=5)
         presence.stop(worker_id)
-        youtube.client.close()
-        google_refresh.client.close()
+        if youtube is not None:
+            youtube.client.close()
+        if google_refresh is not None:
+            google_refresh.client.close()
         database.dispose()
 
 

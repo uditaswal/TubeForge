@@ -27,6 +27,9 @@ class CredentialReconnectRequired(RuntimeError):
 
 class CredentialRefreshTemporary(RuntimeError):
     """The refresh request failed without proof that access was revoked."""
+    def __init__(self, message: str, *, retry_after_seconds: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,10 +57,11 @@ class GoogleCredentialRefresher:
             })
         except httpx.HTTPError as error:
             raise CredentialRefreshTemporary("Google token refresh is temporarily unavailable") from error
-        if response.status_code == 400 and response.json().get("error") == "invalid_grant":
-            raise CredentialReconnectRequired("Google refresh access was revoked")
+        if response.status_code in {400, 401, 403}:
+            raise CredentialReconnectRequired("Google refresh access or application authorization was rejected")
         if response.status_code != 200:
-            raise CredentialRefreshTemporary("Google token refresh was not accepted")
+            from tubeforge.pipeline.provider_backoff import provider_hint
+            raise CredentialRefreshTemporary("Google token refresh was not accepted", retry_after_seconds=provider_hint(response.headers))
         data = response.json()
         token, lifetime = data.get("access_token"), data.get("expires_in")
         if not isinstance(token, str) or not token or not isinstance(lifetime, int) or lifetime < 60:

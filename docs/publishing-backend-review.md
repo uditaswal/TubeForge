@@ -1,6 +1,6 @@
 # Publishing backend review
 
-## Current checkpoint: P1 local implementation
+## Current checkpoint: publishing backend
 
 **IMPLEMENTED; live acceptance remains BLOCKED.** This branch accepts Google loopback
 HTTP callbacks, binds an operator's Day-review disclosure decision to the exact final
@@ -18,13 +18,12 @@ locally encoded Short was driven through Day-review approval, draft submission, 
 YouTube transport, quota reservation and matching remote observation. The quota
 migration upgraded, downgraded and re-upgraded on a temporary SQLite database. A
 subsequent targeted group passed **16 tests** after tightening quota reservations.
-The full suite has not been run.
+The full suite passed: 1,140 passed, 34 skipped in 17m20s (`/tmp/tubeforge-publish-full-20261112.log`); skips include opt-in native and browser checks.
 
 The local quota is conservative, not a Google quota balance: it retains reservations
 for uncertain or pre-upload failures and does not include calls from other clients.
 The disclosure decision currently requires an approved Day-review final and its
-registered disclosure artifact. Quota exhaustion is a terminal local failure in this
-checkpoint; the requested operations pause/recovery behavior remains to be built.
+registered disclosure artifact. Quota exhaustion pauses the delivery for explicit operator resume.
 
 The project `.env` is missing `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY`,
 `TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET` and
@@ -62,5 +61,8 @@ Ten frozen-clock/scheduling tests, a temporary-DB migration round trip and a sig
 three-width audit/readiness browser check passed. Publishing regression: 117 passed,
 one separately run browser skip. Real scheduling and Claude's calendar UI are unverified.
 
-Provider backoff/jitter beyond the container hint, default worker startup and the
-seven-day fake soak remain **NOT STARTED**.
+P5 backend is **IMPLEMENTED**: the worker starts by default and remains idle without a valid key; bounded provider hints and jitter, quota pause/resume, fenced reconnect state and downtime burst protection are covered by tests. The seven-day fake soak delivered 42 of 42 destinations with zero duplicates and zero losses (`artifacts/review/publishing-backend-soak-20261112/summary.json`). The signed-in readiness screen passed at 1440, 768 and 390 px (`artifacts/review/publishing-p5-readiness/`). A real scheduled week and operator sign-off remain unverified.
+
+The reviewed parallel Instagram adapter at `claude/publish-instagram` commit `5ec244b` publishes during upload/resume, does not implement separate container inspection and publication, appends hashtags a second time, and treats quota exhaustion as retryable. It must be adapted to the protocol in `docs/HANDOFF.md`; the executor rejects its current interface before remote work. A published container without a provable media ID remains an unknown outcome. Claude owns that adapter, OAuth and the platform gate.
+
+The Instagram configuration is also missing `TUBEFORGE_INSTAGRAM_APP_ID`, `TUBEFORGE_INSTAGRAM_APP_SECRET` and `TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI`. Live acceptance is blocked on the relevant credentials, integration, a named approved final and separate exact-post permission. The first private YouTube upload reserves an estimated 1,600 units by default.

@@ -232,6 +232,9 @@ def test_worker_requires_both_scheduled_consent_snapshot_and_current_audit_confi
         session.add(SocialAccountRecord(id='yt', platform='youtube', display_name='Channel', external_account_id='UC-one', auth_type='oauth', credential_ciphertext=cipher.encrypt({'token': 'fake'}), scopes_json='[]', token_expires_at=None, status='connected', capabilities_json='[]', is_default=False, disabled=False, last_validated_at=now, created_at=now, updated_at=now))
         session.add(PublishJobRecord(id='post', asset_id='asset', source='test', edition=0, state='queued', metadata_json='{}', created_at=now, updated_at=now))
         session.add(DestinationDeliveryRecord(id='delivery', publish_job_id='post', asset_id='asset', account_id='yt', platform='youtube', external_account_id='UC-one', edition=0, state='pending', required=True, metadata_json='{"title":"Title","caption":"Description"}', scheduled_for=now + timedelta(days=1), youtube_schedule_audited=False, attempt_count=0, created_at=now, updated_at=now))
+        session.flush()
+        post = session.get(PublishJobRecord, 'post')
+        post.reviewed_identity = ManualPublishService._review_identity(session.get(PublishingAssetRecord, 'asset'), [session.get(DestinationDeliveryRecord, 'delivery')])
     class Adapter:
         youtube_api_audited = True
     try:
@@ -248,5 +251,36 @@ def test_worker_requires_both_scheduled_consent_snapshot_and_current_audit_confi
         executor.adapters['youtube'].youtube_api_audited = False
         _, metadata = executor._inputs(claim)
         assert metadata['schedule_audit_allowed'] is True and metadata['expect_publish_at'] is False
+    finally:
+        db.dispose()
+
+
+
+def test_downtime_recovery_does_not_burst_overdue_posts(tmp_path):
+    from tubeforge.publishing_worker.presence import PublisherWorkerPresence
+    db, queue = _queue(tmp_path, [SLOT, SLOT + timedelta(minutes=5)])
+    restart = SLOT + timedelta(minutes=10)
+    try:
+        with db.session_factory.begin() as session:
+            for i in range(2):
+                row = session.get(DestinationDeliveryRecord, f'delivery-{i}')
+                row.state = 'container_ready'
+                row.remote_session_id = f'sealed-{i}'
+                row.remote_container_id = f'container-{i}'
+                row.remote_session_expires_at = SLOT + timedelta(hours=24)
+        PublisherWorkerPresence(db.session_factory).heartbeat('restarted', {'instagram'}, now=restart)
+        first = queue.claim_next('restarted', now=restart)
+        assert first and first.kind == 'container_publish'
+        queue.container_published(first, 'media-1', now=restart + timedelta(seconds=1))
+        verification = queue.claim_next('restarted', now=restart + timedelta(seconds=2))
+        assert verification and verification.kind == 'verify'
+        queue.verified_published(verification, now=restart + timedelta(seconds=3))
+        assert queue.claim_next('restarted', now=restart + timedelta(seconds=4)) is None
+        with db.session_factory() as session:
+            delayed = session.get(DestinationDeliveryRecord, 'delivery-1')
+            assert delayed.state == 'container_ready' and delayed.next_retry_at is not None
+            assert 'burst' in delayed.error_message
+        assert queue.claim_next('restarted', now=SLOT + timedelta(minutes=36)) is None
+        assert _state(db, 'delivery-1')[0] == 'missed'
     finally:
         db.dispose()

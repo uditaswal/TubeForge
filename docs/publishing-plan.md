@@ -1,7 +1,7 @@
 # Publishing plan: YouTube + Instagram upload pipeline
 
-Branch: `feature/publish-pipeline` (from `dev` `088928b`, worktree `../tubeforge-publish`).
-Status: **IMPLEMENTED** in part (P1 local implementation; real upload and later phases remain unverified).
+Branch: `codex/publish-youtube`; parallel Instagram work remains separate.
+Status: P1 and P3–P5 backend **IMPLEMENTED**; real upload, Instagram integration and end-to-end acceptance are **BLOCKED**.
 Goal: an approved final from Day review or Publishing goes, without manual file handling, to the
 operator's YouTube channel and Instagram professional account. It goes first as private or
 immediate posts, then at scheduled slots. Each post's remote state is verified and shown in Studio.
@@ -18,10 +18,10 @@ in Studio. Claude and Codex do everything else.
 | Drafts → reviewed identity → submit | `pipeline/manual_publish.py`, `/api/publishing/drafts*` | IMPLEMENTED (YouTube-only gate in `submit`/`actions`) |
 | Durable delivery queue, leases, unknown-outcome reconcile/resume | `pipeline/delivery_queue.py`, `pipeline/delivery_executor.py` | IMPLEMENTED |
 | YouTube resumable upload + thumbnail + inspect | `providers/publishing/account_youtube.py` | IMPLEMENTED, no live upload yet |
-| Publisher worker (Compose profile `publishing`) | `publishing_worker/main.py` | IMPLEMENTED, registers `youtube` only |
-| Instagram | only account profile rows, caption length check, `_matches` stub | **NOT STARTED** |
-| Scheduling at slots (`publishAt`, Instagram slot submit) | design doc §Scheduling | **NOT STARTED** |
-| Day review → publish hand-off | `pipeline/publication_batch_export.py` (local staged export only) | NOT STARTED |
+| Publisher worker (default Compose services) | `publishing_worker/main.py` | IMPLEMENTED, registers `youtube` only |
+| Instagram | separate container delivery core | fake-backed core **VERIFIED**; provider integration pending |
+| Scheduling at slots (`publishAt`, Instagram slot submit) | delivery queue and scheduling API | backend **IMPLEMENTED**, live scheduling unverified |
+| Day review → publish hand-off | `pipeline/publication_batch_export.py`, batch publishing API | **IMPLEMENTED**, fake-tested |
 
 P1 status (11 Nov): **IMPLEMENTED**. The requested publishing/delivery/OAuth/account/scheduling regression selection passed (99 passed, 1 opt-in browser skip); the browser check was run separately and passed. Loopback OAuth, reviewed disclosure binding,
 private-only adapter fields, local H.264/AAC 9:16 preflight, a durable estimated daily
@@ -32,8 +32,7 @@ readiness screen passed Chromium checks at 1440, 768 and 390 px; captures are un
 `artifacts/review/publishing-p1-readiness/`. The operator's encryption key and Google
 OAuth values are missing from the project `.env`. A real private upload and remote
 copy inspection are **BLOCKED** until those values are configured, an exact final is
-approved, and the operator authorizes its private upload. Scheduling and Instagram
-remain **NOT STARTED** on this branch. The local quota is a conservative estimate of
+approved, and the operator authorizes its private upload. Scheduling and the Instagram-shaped delivery core are implemented locally; the real Instagram provider remains unintegrated. The local quota is a conservative estimate of
 TubeForge upload reservations; it cannot see other applications' Google API usage.
 
 ## 1. Operator: credentials only (one-time)
@@ -166,6 +165,8 @@ Backend **IMPLEMENTED**: per-destination UTC slots, a 30-minute Instagram prepar
   scheduled Instagram post landing within 2 min of their slots.
 
 ### P5: Operations hardening. Split
+
+Backend **IMPLEMENTED**: default worker startup, idle readiness without a valid encryption key, bounded retry hints and jitter, quota pause/resume, credential fencing and recovery burst protection. Seven simulated days produced 42 successful fake deliveries, zero duplicates and zero losses (`artifacts/review/publishing-backend-soak-20261112/summary.json`). A signed-in three-width readiness check passed. Real-week acceptance and Claude-owned UI/provider work remain unverified.
 - **Claude:**
   - Alerts in Studio for `auth_required`, token expiring in under 10 days, quota near the cap, and
     missed slots.
@@ -193,7 +194,7 @@ Proceed in order; each checkpoint is accepted locally before the next. Live plat
 | Delivery core — **VERIFIED** for fake-backed local scope | Instagram-shaped upload, expiry and separate publication are crash-safe | 8 fake adapter tests; publishing selection 106 passed, 1 opt-in browser skip; container migration round trip passed | Instagram provider and OAuth implementation, real publication |
 | P3 — **IMPLEMENTED** backend | One checksum-bound review creates independent destination drafts | API and isolation tests: 17 focused passed; publishing selection 107 passed, 1 separately run browser skip | Claude's UI and platform gate; real cross-post |
 | P4 — **IMPLEMENTED** backend | Pending posts honor slots, audit restrictions, grace and cadence | 10 frozen-clock tests; migration round trip; three-width signed-in audit check; publishing selection 117 passed, 1 separately run browser skip | Live schedule without exact-post approval; Claude's UI |
-| P5 | Worker starts safely and retries respect provider limits | Seven-day fake soak, retry tests and signed-in responsive check | Real week or public publication without approval |
+| P5 — **IMPLEMENTED** backend | Worker starts safely and retries respect provider limits | 42 fake deliveries over seven days; zero duplicates or losses; retry tests and signed-in responsive check | Real week or public publication without approval |
 
 ## 4. Relay order and hand-offs
 

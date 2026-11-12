@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import or_, select, text, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from tubeforge.db.models import DeliveryAttemptRecord, DestinationDeliveryRecord, PublishJobRecord, SocialAccountRecord
+from tubeforge.db.models import DeliveryAttemptRecord, DestinationDeliveryRecord, PublishJobRecord, PublisherWorkerHeartbeatRecord, SocialAccountRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +26,7 @@ class DeliveryClaim:
     remote_container_id: str | None = None
     remote_session_expires_at: datetime | None = None
     scheduled_for: datetime | None = None
+    attempt_number: int = 1
 
 
 class DeliveryQueue:
@@ -62,7 +63,7 @@ class DeliveryQueue:
                     (DestinationDeliveryRecord.state == "retry_wait") & (DestinationDeliveryRecord.next_retry_at <= now) & upload_due,
                     (DestinationDeliveryRecord.state == "verifying") & or_(DestinationDeliveryRecord.next_retry_at.is_(None), DestinationDeliveryRecord.next_retry_at <= now),
                     (DestinationDeliveryRecord.state == "container_processing") & or_(DestinationDeliveryRecord.next_retry_at.is_(None), DestinationDeliveryRecord.next_retry_at <= now),
-                    (DestinationDeliveryRecord.state == "container_ready") & publish_due,
+                    (DestinationDeliveryRecord.state == "container_ready") & publish_due & or_(DestinationDeliveryRecord.next_retry_at.is_(None), DestinationDeliveryRecord.next_retry_at <= now),
                 ),
             ]
             if platforms is not None:
@@ -85,6 +86,27 @@ class DeliveryQueue:
                     self._refresh_parent(session, row.publish_job_id, now)
                     continue
                 kind = {"verifying": "verify", "container_processing": "container_check", "container_ready": "container_publish"}.get(row.state, "upload")
+                # During downtime recovery, allow one overdue publication and
+                # defer another for the same account instead of bursting them.
+                if kind == "container_publish" and row.scheduled_for and _utc(row.scheduled_for) < now:
+                    heartbeat = session.get(PublisherWorkerHeartbeatRecord, owner)
+                    recovering = heartbeat is None or _utc(heartbeat.started_at) > _utc(row.scheduled_for)
+                    if recovering:
+                        attempt_time = func.coalesce(DeliveryAttemptRecord.finished_at, DeliveryAttemptRecord.started_at)
+                        latest = session.scalar(select(func.max(attempt_time)).join(
+                            DestinationDeliveryRecord, DeliveryAttemptRecord.delivery_id == DestinationDeliveryRecord.id,
+                        ).where(
+                            DestinationDeliveryRecord.account_id == row.account_id,
+                            DestinationDeliveryRecord.id != row.id,
+                            DeliveryAttemptRecord.kind == "container_publish",
+                            DeliveryAttemptRecord.state.in_({"accepted", "unknown_outcome"}),
+                            attempt_time > now - timedelta(minutes=30),
+                        ))
+                        if latest is not None:
+                            row.next_retry_at = _utc(latest) + timedelta(minutes=30)
+                            row.error_message = "overdue publication delayed to avoid a recovery burst"
+                            row.updated_at = now
+                            continue
                 if kind in {"container_check", "container_publish"}:
                     if not row.remote_container_id or not row.remote_session_id or not row.remote_session_expires_at:
                         row.state, row.error_message, row.updated_at = "unknown_outcome", "saved container identity or expiry is missing", now
@@ -123,7 +145,7 @@ class DeliveryQueue:
                 if post is not None and post.state == "queued":
                     post.state = "dispatching"
                     post.updated_at = now
-                return DeliveryClaim(row.id, row.publish_job_id, owner, token, kind, row.platform, row.account_id, row.external_account_id, row.remote_id, row.remote_session_id, row.remote_container_id, row.remote_session_expires_at, row.scheduled_for)
+                return DeliveryClaim(row.id, row.publish_job_id, owner, token, kind, row.platform, row.account_id, row.external_account_id, row.remote_id, row.remote_session_id, row.remote_container_id, row.remote_session_expires_at, row.scheduled_for, max(1, row.attempt_count))
         return None
 
     def heartbeat(self, claim: DeliveryClaim, *, now: datetime | None = None, lease_seconds: int = 120) -> bool:
@@ -180,14 +202,15 @@ class DeliveryQueue:
             row = session.get(DestinationDeliveryRecord, delivery_id)
             if row is None:
                 raise KeyError(delivery_id)
-            if row.claim_owner or row.remote_id:
+            resuming_quota = action == "resume" and row.state == "quota_paused"
+            if row.claim_owner or (row.remote_id and not resuming_quota):
                 raise ValueError("delivery is in flight or already remote; pending action is unavailable")
-            if row.platform == "youtube" and row.remote_session_id:
+            if row.platform == "youtube" and row.remote_session_id and not resuming_quota:
                 raise ValueError("YouTube session already started; reconcile the remote outcome")
             eligible = {"pending", "retry_wait", "container_processing", "container_ready"}
             if action == "resume":
-                if row.state != "paused" or row.paused_from_state not in eligible:
-                    raise ValueError("only a paused pending delivery can be resumed")
+                if row.state not in {"paused", "quota_paused"} or row.paused_from_state not in eligible | {"verifying", "unknown_outcome"}:
+                    raise ValueError("only a paused pending or quota-limited delivery can be resumed")
                 row.state, row.paused_from_state = row.paused_from_state, None
             elif action == "pause":
                 if row.state not in eligible:
@@ -257,6 +280,7 @@ class DeliveryQueue:
                 DestinationDeliveryRecord.state == "unknown_outcome",
                 DestinationDeliveryRecord.claim_owner.is_(None),
                 DestinationDeliveryRecord.requested_action.in_({"inspect", "resume"}),
+                or_(DestinationDeliveryRecord.next_retry_at.is_(None), DestinationDeliveryRecord.next_retry_at <= now),
                 DestinationDeliveryRecord.platform.in_(platforms),
             ).order_by(DestinationDeliveryRecord.requested_at, DestinationDeliveryRecord.id).limit(20)).all()
             for row in rows:
@@ -278,7 +302,7 @@ class DeliveryQueue:
         with self.session_factory.begin() as session:
             self._recover_expired(session, now)
             row = session.get(DestinationDeliveryRecord, delivery_id)
-            if row is None or row.state != "unknown_outcome" or row.claim_owner is not None or not row.remote_session_id or row.remote_id or (resume and row.remote_container_id):
+            if row is None or row.state != "unknown_outcome" or row.claim_owner is not None or not row.remote_session_id or row.remote_id or (row.next_retry_at is not None and _utc(row.next_retry_at) > now) or (resume and row.remote_container_id):
                 return None
             other = session.scalar(select(DestinationDeliveryRecord.id).where(
                 DestinationDeliveryRecord.account_id == row.account_id,
@@ -303,7 +327,7 @@ class DeliveryQueue:
                 state="started", remote_session_id=row.remote_session_id, remote_id=None,
                 error_message=None, started_at=now, finished_at=None,
             ))
-            return DeliveryClaim(row.id, row.publish_job_id, owner, token, "resume" if resume else "reconcile", row.platform, row.account_id, row.external_account_id, None, row.remote_session_id, row.remote_container_id, row.remote_session_expires_at, row.scheduled_for)
+            return DeliveryClaim(row.id, row.publish_job_id, owner, token, "resume" if resume else "reconcile", row.platform, row.account_id, row.external_account_id, None, row.remote_session_id, row.remote_container_id, row.remote_session_expires_at, row.scheduled_for, max(1, row.attempt_count))
 
     def reconciled_uploaded(self, claim: DeliveryClaim, remote_id: str, *, remote_url: str | None = None, now: datetime | None = None) -> None:
         if claim.kind not in {"reconcile", "resume"} or not remote_id:
@@ -317,13 +341,14 @@ class DeliveryQueue:
             attempt.remote_id, attempt.state, attempt.finished_at = remote_id, "accepted", now
             self._refresh_parent(session, row.publish_job_id, now)
 
-    def reconciliation_unresolved(self, claim: DeliveryClaim, reason: str, *, now: datetime | None = None) -> None:
+    def reconciliation_unresolved(self, claim: DeliveryClaim, reason: str, *, retry_at: datetime | None = None, now: datetime | None = None) -> None:
         if claim.kind not in {"reconcile", "resume"}:
             raise ValueError("reconciliation claim is required")
         now = now or datetime.now(UTC)
         with self.session_factory.begin() as session:
             row = self._owned(session, claim, now, "reconciling")
             row.state, row.error_message = "unknown_outcome", reason[:500]
+            row.next_retry_at = retry_at
             self._release(row, now)
             attempt = self._attempt(session, claim)
             attempt.state, attempt.error_message, attempt.finished_at = "unresolved", row.error_message, now
@@ -485,26 +510,55 @@ class DeliveryQueue:
             attempt.state, attempt.error_message, attempt.finished_at = "retry_wait", row.error_message, now
             self._refresh_parent(session, row.publish_job_id, now)
 
-    def auth_required(self, claim: DeliveryClaim, reason: str, *, now: datetime | None = None) -> None:
+    def auth_required(self, claim: DeliveryClaim, reason: str, *, credential_ciphertext: str | None = None, now: datetime | None = None) -> None:
         now = now or datetime.now(UTC)
         with self.session_factory.begin() as session:
             owned_state = {"verify": "verifying", "container_check": "container_processing", "container_publish": "publishing"}.get(claim.kind, "uploading")
             row = self._owned(session, claim, now, owned_state)
             row.state, row.error_message = "auth_required", reason[:500]
+            if credential_ciphertext is not None:
+                account = session.get(SocialAccountRecord, claim.account_id)
+                if (account is not None and account.credential_ciphertext == credential_ciphertext
+                        and account.external_account_id == claim.external_account_id and account.status == "connected"):
+                    account.status = "reconnect_required"
+                    account.updated_at = now
             self._release(row, now)
             attempt = self._attempt(session, claim)
             attempt.state, attempt.error_message, attempt.finished_at = "auth_required", row.error_message, now
             self._refresh_parent(session, row.publish_job_id, now)
 
-    def uncertain(self, claim: DeliveryClaim, reason: str, *, now: datetime | None = None) -> None:
+    def uncertain(self, claim: DeliveryClaim, reason: str, *, retry_at: datetime | None = None, now: datetime | None = None) -> None:
         """Stop automatic retries when a remote mutation may have occurred."""
         now = now or datetime.now(UTC)
         with self.session_factory.begin() as session:
             row = self._owned(session, claim, now, "publishing" if claim.kind == "container_publish" else "uploading")
             row.state, row.error_message = "unknown_outcome", reason[:500]
+            row.next_retry_at = retry_at
             self._release(row, now)
             attempt = self._attempt(session, claim)
             attempt.state, attempt.error_message, attempt.finished_at = "unknown_outcome", reason[:500], now
+            self._refresh_parent(session, row.publish_job_id, now)
+
+    def quota_pause(self, claim: DeliveryClaim, reason: str, *, now: datetime | None = None) -> None:
+        """Stop automatic work; saved sessions require inspection after resumption."""
+        now = now or datetime.now(UTC)
+        states = {"upload": "uploading", "verify": "verifying", "container_check": "container_processing"}
+        if claim.kind not in states:
+            raise ValueError("quota pause requires a pre-mutation or read-only claim")
+        with self.session_factory.begin() as session:
+            row = self._owned(session, claim, now, states[claim.kind])
+            if row.remote_id:
+                resume_state = "verifying"
+            elif claim.kind == "container_check" and row.remote_container_id:
+                resume_state = "container_processing"
+            elif row.remote_session_id:
+                resume_state = "unknown_outcome"
+            else:
+                resume_state = "pending"
+            row.state, row.paused_from_state, row.error_message, row.next_retry_at = "quota_paused", resume_state, reason[:500], None
+            self._release(row, now)
+            attempt = self._attempt(session, claim)
+            attempt.state, attempt.error_message, attempt.finished_at = "quota_paused", row.error_message, now
             self._refresh_parent(session, row.publish_job_id, now)
 
     def mark_missed(self, claim: DeliveryClaim, *, now: datetime | None = None) -> None:
@@ -596,7 +650,7 @@ class DeliveryQueue:
             post.state = "cancelled"
         elif all(state == "missed" for state in states):
             post.state = "missed"
-        elif "unknown_outcome" in states or "reconciling" in states:
+        elif "unknown_outcome" in states or "reconciling" in states or "quota_paused" in states:
             post.state = "attention_required"
         elif any(state in {"failed", "auth_required", "missed", "cancelled"} for state in states):
             post.state = "partial_failure"

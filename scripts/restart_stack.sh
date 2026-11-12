@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rebuild and restart the TubeForge stack from the dev worktree. No sudo needed: Docker is available to the
 # operator's user and the Claude runner is a user-level process.
-#   scripts/restart_stack.sh            rebuild the image, migrate, restart web/worker/scheduler and the Claude runner
+#   scripts/restart_stack.sh            rebuild the image, migrate, restart web/worker/scheduler/publisher-worker and the Claude runner
 #   scripts/restart_stack.sh --no-build restart only (code already built)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,7 +11,7 @@ git status --short | head -5
 echo "commit: $(git log -1 --oneline)"
 if [ "${1:-}" != "--no-build" ]; then docker compose build web; fi
 docker compose run --rm migrate
-docker compose up -d web worker scheduler
+docker compose up -d web worker scheduler publisher-worker
 # Claude runner: stop any running one, then start it from this tree (spend limits come from TUBEFORGE_CLAUDE_* env).
 pkill -f "[t]ubeforge.host_claude_runner" || true
 sleep 2

@@ -74,6 +74,7 @@ def test_signed_in_manual_draft_snapshots_real_video_and_destination(tmp_path: P
         assert "Continue saved upload session" in dashboard.text
         assert "Destination attempt history" in dashboard.text
         assert "Resume after account reconnect" in dashboard.text
+        assert "Resume after quota is available" in dashboard.text
         assert "I reviewed this exact video and every destination detail" in dashboard.text
         assert "'/submit'" in dashboard.text
         before = client.get("/api/publishing/status").json()

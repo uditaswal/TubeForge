@@ -44,7 +44,7 @@ Host script runner (Codex / Claude CLI over a Unix socket)
 Local services: Piper TTS server, FFmpeg, headless Chromium for source captures
 ```
 
-Services run under Docker Compose: `web`, `worker`, `scheduler`, `piper-tts`, a one-shot `migrate`, and an optional `publisher-worker`.
+Services run under Docker Compose: `web`, `worker`, `scheduler`, `publisher-worker`, `piper-tts`, and a one-shot `migrate`. The publisher stays idle without a valid account encryption key.
 
 ## Trade-offs
 
@@ -70,7 +70,7 @@ Prerequisites: Docker with Compose, FFmpeg for host-side checks, and operator-su
 git clone https://github.com/uditaswal/TubeForge.git && cd TubeForge
 cp .env.example .env              # fill in values; never commit .env
 docker compose build              # large first build
-docker compose up -d web worker scheduler
+docker compose up -d web worker scheduler publisher-worker
 docker compose exec web python -m tubeforge.cli create-admin --username you
 ```
 

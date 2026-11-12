@@ -39,7 +39,7 @@ all pixels, audio and encoding are local and cost no tokens.
 - Real bug fixed: `GET /api/batch-plans` returned 500 when a topic's job had been deleted (shows "job missing" now).
 
 ## Next step (in order)
-- **Publishing P1 — IMPLEMENTED, not VERIFIED:** the approved Day-review disclosure and exact final are bound into a private YouTube draft; local media checks, configurable upload fields, estimated quota ledger and readiness are in place. Fake upload/verification and the three-width signed-in readiness check passed; upgrade/downgrade/re-upgrade of migration `20261111_0033` passed on a temporary DB. The project `.env` lacks `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET` and `TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI`. A real private upload is **BLOCKED** until credentials, a named approved final and exact-post operator permission are supplied. The publishing/delivery/OAuth/account/scheduling selection passed (106 passed, 1 separately run browser skip); the separately expanded container tests passed 8 tests. P3 backend is **IMPLEMENTED** with fake-service/API tests (17 focused tests; publishing regression 107 passed, one separately run browser skip); real cross-post and Claude's UI remain unverified. P4 backend is **IMPLEMENTED**: 10 frozen-clock scheduling tests, a migration round trip, three-width signed-in audit/readiness checks and the 117-test publishing regression selection passed. Claude's calendar UI and any real scheduled post remain unverified. Next: run `PYTHONPATH=src .venv-benchmark/bin/python -m pytest -q tests/test_publication_schedule.py tests/test_container_delivery.py` and implement the P5 worker startup, bounded provider backoff and seven-day fake soak. Migrations `20261111_0034` and `20261111_0035` add container and scheduling fields; each passed temporary-DB upgrade/downgrade/re-upgrade. The fake-backed delivery core is **VERIFIED** for its local tests; the Instagram provider and real post remain **NOT STARTED** on this branch.
+- **Publishing P1, P3–P5 backend — IMPLEMENTED; live acceptance BLOCKED.** Fake upload, scheduling, reconciliation and responsive signed-in checks passed; the seven-day fake soak delivered 42 of 42 destinations without duplicates or losses (`artifacts/review/publishing-backend-soak-20261112/summary.json`). Migrations 0033–0035 passed temporary-DB round trips. Full suite passed: 1,140 passed, 34 skipped (`/tmp/tubeforge-publish-full-20261112.log`). Next: integrate the parallel adapter and gate after review. A real upload needs credentials, a named approved final and permission for that exact post; no upload is authorized yet. Claude's UI and Instagram integration remain unverified. See `docs/publishing-backend-review.md` for blockers and evidence.
 - **Parallel integration:** Claude owns Instagram Login, the Reels adapter and the API per-platform gate on `claude/publish-instagram`; follow the contracts below. Every real upload needs the operator’s go-ahead for that exact post.
 
 ### Cross-post API handoff for Claude
@@ -77,7 +77,13 @@ expired publish lease becomes `unknown_outcome`; inspection must prove a publish
 media ID, and a still-ready or expired container does not authorize another publish.
 `inspect(...)` verifies the final account and caption. The API's separate exact-post
 confirmation and Claude's per-platform gate are still required before a real Reel.
-Migrations on this branch are `20261111_0033` → `20261111_0034`; reconcile any parallel
+The reviewed `claude/publish-instagram` adapter at `5ec244b` publishes from `upload`
+and `resume_session`, lacks the separate inspection/publication methods and appends
+hashtags already present in the caption. Adapt it before integration; the executor now
+rejects that protocol before any remote operation and supplies `confirm_public` only
+after validating the recorded exact-draft confirmation. A published container without
+a provable media ID stays unknown; do not guess or publish again. Quota exhaustion
+must pause rather than retry. Migrations on this branch are `20261111_0033` → `20261111_0034` → `20261111_0035`; reconcile any parallel
 migration heads deliberately when integrating.
 
 0. **LeetCode video (10 Nov): job `642dc2b2…` is at `script_approval_required`: operator reviews the script in Generations** (12 scenes, 169 words, your wording kept in 7 scenes; grounded claims c1-c10, scene 10's "more than half" is claim c9). Earlier failures and their causes: prompt over the 90,000 ceiling (three 24k-character excerpts + the 57k fixed prompt), then the craft gate's numbers rule (two..billion count; at most 2 per scene) on an operator script. Both are now handled before queueing; see `docs/settings.md`.
