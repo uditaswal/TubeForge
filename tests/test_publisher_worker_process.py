@@ -33,7 +33,7 @@ def test_isolated_publisher_worker_starts_without_external_requests(tmp_path: Pa
             if process.poll() is not None:
                 raise AssertionError(f"publisher worker exited early with code {process.returncode}")
             time.sleep(0.1)
-        assert presence.live_platforms() == {"youtube"}
+        assert presence.live_platforms() == {"youtube", "instagram"}
         process.terminate()
         process.wait(timeout=8)
         assert process.returncode == 0
