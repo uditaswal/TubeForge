@@ -16,6 +16,7 @@ class Element {
  append(...items){for(const it of items){if(it instanceof Element)it.parentNode=this;this.children.push(it);}}
  replaceChildren(...items){this.children=[];this.append(...items);}
  get nextSibling(){const p=this.parentNode;return p?(p.children[p.children.indexOf(this)+1]||null):null;}
+ remove(){if(this.parentNode)this.parentNode.removeChild(this);}
  removeChild(c){this.children=this.children.filter(x=>x!==c);c.parentNode=null;return c;}
  insertBefore(n,ref){n.parentNode=this;this.children.splice(this.children.indexOf(ref),0,n);return n;}
  set innerHTML(value){this._html=value;}

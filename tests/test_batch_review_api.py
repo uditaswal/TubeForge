@@ -326,3 +326,43 @@ def test_reject_and_regenerate_need_confirmation_and_cancel_changes_nothing(revi
     run('detail.querySelectorAll("#actions button")[2].onclick()')
     run('detail.children.find(x=>x.id==="confirmBar").children[1].children[0].onclick()')
     assert context.eval('notice.textContent.includes("New job created")')
+
+
+def test_disabled_review_actions_say_why_and_raw_errors_are_not_shown(review):
+    """M-U4: a disabled Approve/Stage must explain itself, and a raw filesystem error must never
+    reach the reviewer (it also overflowed phone screens as one unbreakable string)."""
+    from test_batch_ui_runtime import runtime
+    client, backend, repo, job_id, root = review
+    context, run = runtime(client, client.get('/batch/review').text)
+    run('list.children[0].children[0].onclick()')
+    assert context.eval('detail.querySelectorAll("#actions button").every(x=>x["aria-describedby"]==="actionHint")')
+    any_disabled = context.eval('detail.querySelectorAll("#actions button").some(x=>x.disabled)')
+    hint = context.eval('detail.children.find(x=>x.id==="actionHint").textContent')
+    assert (not any_disabled) or hint.strip()
+    run('selected={...selected,reviewed_identity:"older-identity"}')   # the queue now holds a different artifact than the one on screen
+    run('refresh(false)')
+    assert 'changed' in context.eval('detail.children.find(x=>x.id==="actionHint").textContent')
+    assert context.eval('friendlyThumbReason("[Errno 2] No such file or directory: \'data/artifacts/x/t.jpg\'")') == 'Thumbnail unavailable: the file is missing or unreadable.'
+    assert 'missing or unreadable' in context.eval('friendlyVideoError("[Errno 2] No such file or directory: \'data/artifacts/x/final.mp4\'")')
+    assert context.eval('friendlyVideoError("")') == 'The final video is not available for review yet.'
+    assert context.eval('friendlyThumbReason("Brief only; no image requested")') == 'Brief only; no image requested'
+
+
+def test_batch_page_pattern_is_valid_under_the_unicode_sets_flag_and_commit_explains_itself():
+    from tubeforge.api.batch_ui import render_batch_html
+    page = render_batch_html(None)
+    assert 'pattern="[a-z0-9\\-]{1,80}"' in page          # an unescaped trailing hyphen is a SyntaxError in Chromium's /v mode
+    assert 'aria-describedby="commitHint"' in page and 'id="commitHint"' in page
+    assert 'outline:none' not in page.split('.dropzone:hover')[1].split('}')[0]
+
+
+def test_selected_short_missing_from_a_new_list_is_not_reported_as_a_changed_artifact(review):
+    from test_batch_ui_runtime import runtime
+    client, backend, repo, job_id, root = review
+    context, run = runtime(client, client.get('/batch/review').text)
+    run('list.children[0].children[0].onclick()')
+    run('selected={...selected,id:"not-in-this-list"}')   # as if the day filter now excludes the open short
+    run('refresh(false)')
+    assert 'not in the current list' in context.eval('notice.textContent')
+    assert 'not in the current list' in context.eval('detail.children.find(x=>x.id==="actionHint").textContent')
+    assert 'artifact changed' not in context.eval('notice.textContent')
