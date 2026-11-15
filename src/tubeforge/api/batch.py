@@ -84,6 +84,9 @@ def register_batch_routes(app, runtime, build_request):
         combined = {item['short']['id']: item['short'] for item in repository.list()}
         combined.update(incoming)
         cadence = cadence_report(list(combined.values()), app.state.settings.channel_safety)
+        from tubeforge.pipeline.channel_reports import scope_cadence_to_ids
+        # Only warn about the shorts in this import; older shorts' warnings stay on the Batch plans page.
+        cadence = scope_cadence_to_ids(cadence, [short.id for short in plan.shorts])
         from tubeforge.pipeline.script_fit import analyze_script
         fits = {s.id: {k: v for k, v in analyze_script(s.narration, s.length_s).items() if k != 'sections'}
                 for s in plan.shorts if s.narration and s.narration.strip()}

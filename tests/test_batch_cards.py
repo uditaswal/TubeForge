@@ -132,3 +132,20 @@ def test_dangling_job_reference_does_not_break_the_list(tmp_path):
         assert gone['status'] == 'job missing' and gone['stage'] == 'attention' and gone['qa'] is None
         assert any(i['stage'] == 'imported' for i in by_id.values())
     db.dispose()
+
+
+def test_import_cadence_warnings_cover_only_the_shorts_in_that_import(tmp_path):
+    """Queuing one new short must not list every older short that has no publish time."""
+    client, db = _client(tmp_path)
+    with client:
+        client.app.state.runtime.auth.create_admin('operator', 'correct-horse-battery-staple')
+        client.post('/login', json={'username': 'operator', 'password': 'correct-horse-battery-staple'})
+        csrf = client.cookies.get('tubeforge_csrf', '')
+        post = lambda md: client.post('/api/batch-plans/import', headers={'x-csrf-token': csrf}, json={'markdown': md, 'commit': True, 'plan_id': 'default'}).json()
+        post(_plan(('old-one', ''), ('old-two', '')))
+        scoped = post(_plan(('fresh-one', '')))['cadence']
+        assert [w['ids'] for w in scoped['warnings']] == [['fresh-one']]
+        assert scoped['scope']['all_warnings'] == 3 and scoped['scope']['filtered'] is True
+        dated = post(_plan(('fresh-two', '2026-11-12T09:00:00+00:00')))['cadence']
+        assert dated['warnings'] == [] and dated['scope']['all_warnings'] == 3
+    db.dispose()

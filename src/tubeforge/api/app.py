@@ -1541,7 +1541,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
               status.textContent='Queuing generation…';
               const produceResponse=await fetch('/api/batch-plans/produce',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({ids})});
               if(!produceResponse.ok)throw Error(await produceResponse.text());
-              status.textContent='Generation queued. It will appear below shortly.'+(importData.cadence?.warnings?.length?' Cadence warnings: '+importData.cadence.warnings.map(w=>w.ids.join(', ')+': '+w.code).join(' · '):'');
+              status.textContent='Generation queued. It will appear below shortly.'+(importData.cadence?.warnings?.length?' Cadence warnings: '+importData.cadence.warnings.map(w=>w.ids.join(', ')+': '+w.code).join(' · '):'')+(()=>{const left=(importData.cadence?.scope?.all_warnings||0)-(importData.cadence?.warnings?.length||0);return left>0?' ('+left+' warnings about older shorts are on the Batch plans page.)':'';})();
               mdPanel.querySelector('#studioMarkdownText').value='';
               if(typeof refresh==='function')refresh();
             }catch(error){status.textContent='Could not queue this plan: '+error.message;}
