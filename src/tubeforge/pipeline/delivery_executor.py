@@ -363,7 +363,7 @@ class DeliveryExecutor:
             self.queue.reconciliation_unresolved(claim, "destination resume adapter is unavailable")
             return claim.delivery_id
         try:
-            asset, _ = self._inputs(claim)
+            asset, metadata = self._inputs(claim)
             credential = self.credential_manager.resolve(claim.account_id, claim.owner)
             envelope = self.cipher.decrypt(claim.remote_session_id or "")
             session_id = envelope.get("session_id")

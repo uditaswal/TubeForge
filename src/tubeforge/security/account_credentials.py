@@ -15,6 +15,7 @@ from tubeforge.security.secrets import TokenCipher
 
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+INSTAGRAM_REFRESH_URL = "https://graph.instagram.com/refresh_access_token"
 
 
 class CredentialBusy(RuntimeError):
@@ -71,6 +72,36 @@ class GoogleCredentialRefresher:
         if isinstance(data.get("refresh_token"), str) and data["refresh_token"]:
             updated["refresh_token"] = data["refresh_token"]
         return RefreshedCredential(updated, expires_at)
+
+
+class InstagramCredentialRefresher:
+    """Long-lived Instagram tokens refresh in place; they must be older than 24 hours and unexpired."""
+
+    def __init__(self, client: httpx.Client | None = None) -> None:
+        self.client = client or httpx.Client(timeout=15, follow_redirects=False)
+
+    def __call__(self, credential: dict[str, object]) -> RefreshedCredential:
+        token = credential.get("token")
+        if credential.get("token_type") != "instagram_long_lived" or not isinstance(token, str) or not token:
+            raise CredentialReconnectRequired("Instagram credential is incomplete")
+        try:
+            response = self.client.get(INSTAGRAM_REFRESH_URL, params={"grant_type": "ig_refresh_token", "access_token": token})
+        except httpx.HTTPError as error:
+            raise CredentialRefreshTemporary("Instagram token refresh is temporarily unavailable") from error
+        try:
+            error = response.json().get("error")
+        except ValueError:
+            error = None
+        if response.status_code in {400, 401, 403} and isinstance(error, dict) and error.get("code") == 190:
+            raise CredentialReconnectRequired("Instagram refresh access was revoked or expired")
+        if response.status_code != 200:
+            raise CredentialRefreshTemporary("Instagram token refresh was not accepted")
+        data = response.json()
+        new_token, lifetime = data.get("access_token"), data.get("expires_in")
+        if not isinstance(new_token, str) or not new_token or not isinstance(lifetime, int) or lifetime < 3600:
+            raise CredentialRefreshTemporary("Instagram returned an invalid refreshed credential")
+        expires_at = datetime.now(UTC) + timedelta(seconds=lifetime)
+        return RefreshedCredential({**credential, "token": new_token, "expiry": expires_at.isoformat()}, expires_at)
 
 
 class AccountCredentialManager:

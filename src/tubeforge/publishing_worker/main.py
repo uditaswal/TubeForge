@@ -15,8 +15,11 @@ from tubeforge.pipeline.delivery_queue import DeliveryQueue
 from tubeforge.pipeline.youtube_quota import YouTubeQuotaLedger
 from tubeforge.providers.publishing.account_youtube import AccountYouTubeAdapter
 from tubeforge.publishing_worker.presence import PublisherWorkerPresence
-from tubeforge.security.account_credentials import AccountCredentialManager, GoogleCredentialRefresher
+from tubeforge.security.account_credentials import AccountCredentialManager, GoogleCredentialRefresher, InstagramCredentialRefresher
 from tubeforge.security.secrets import TokenCipher
+
+
+PLATFORMS = {"youtube", "instagram"}
 
 
 def main() -> None:

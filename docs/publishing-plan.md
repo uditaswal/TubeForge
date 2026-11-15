@@ -1,6 +1,6 @@
 # Publishing plan: YouTube + Instagram upload pipeline
 
-Branch: `codex/publish-youtube`; parallel Instagram work remains separate.
+The YouTube and Instagram work is being integrated for review on `dev`.
 Status: P1 and P3–P5 backend **IMPLEMENTED**; real upload, Instagram integration and end-to-end acceptance are **BLOCKED**.
 Goal: an approved final from Day review or Publishing goes, without manual file handling, to the
 operator's YouTube channel and Instagram professional account. It goes first as private or
@@ -59,7 +59,7 @@ All values go in the project `.env` (git-ignored, read by Compose). Never paste 
 3. Permissions: `instagram_business_basic`, `instagram_business_content_publish`. App stays in
    Development mode. Add your Instagram account under App roles → Instagram testers, and accept
    the invite in the Instagram app (Settings → Website permissions → Apps and websites).
-4. Business login settings → redirect URI `https://localhost:62065/oauth/instagram/callback` (see D1).
+4. Configure the HTTPS redirect URI required for the Meta app; the local callback setup remains unverified (see D1).
 5. Put the values in `.env`: `TUBEFORGE_INSTAGRAM_APP_ID`, `TUBEFORGE_INSTAGRAM_APP_SECRET`,
    `TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI`.
 
@@ -67,7 +67,7 @@ After that: `scripts/restart_stack.sh`, open Studio → Accounts → Connect, ap
 
 ## 2. Decisions (recommendation first)
 
-- **D1 OAuth callback over the SSH tunnel.** *Recommended:* accept `http://127.0.0.1`/`localhost`
+- **D1 OAuth callback over the SSH tunnel (not yet verified against Meta).** *Recommended:* accept `http://127.0.0.1`/`localhost`
   redirects for Google only (Google permits loopback). Meta requires https, so add an opt-in
   loopback TLS listener on the same port (self-signed `localhost` certificate, created by a script).
   The fallback for Instagram is to paste the long-lived token from the Meta dashboard ("Generate
@@ -105,6 +105,7 @@ One phase at a time. Each phase needs its acceptance evidence before the next on
 - Out of scope: Instagram, scheduling, public visibility.
 
 ### P2: Instagram connect + Reels publish. Owner: **Claude**
+**Status: connection code IMPLEMENTED and fake-tested; Instagram publication BLOCKED until its adapter supports the durable container protocol. The real connection and publication remain unverified. Review: `docs/instagram-publishing-review.md`.**
 - Outcome: Studio connects the Instagram professional account and publishes one approved Reel
   through the same drafts → submit → delivery queue. Studio shows the permalink.
 - Work:
@@ -117,7 +118,7 @@ One phase at a time. Each phase needs its acceptance evidence before the next on
     - inspect = `/{media-id}?fields=permalink,caption,owner`;
     - `inspect_session` = container status.
   - Container 24 h lifetime and the 100 posts / 24 h limit (`content_publishing_limit`).
-  - Worker registers `instagram`. API gates `submit`/`actions`/`status` become per-platform
+  - Worker leaves `instagram` disabled until the adapter supports the container protocol. API gates `submit`/`actions`/`status` become per-platform
     instead of YouTube-only.
   - Studio Connect button, the public-post confirmation (D3), and a caption/hashtag preview
     (2,200 chars, 30 hashtags).
@@ -131,7 +132,7 @@ One phase at a time. Each phase needs its acceptance evidence before the next on
 
 ### P3: Cross-post from one review. Owners: **Claude** (UI) + **Codex** (backend)
 
-Backend **IMPLEMENTED**: authenticated defaults and draft-preparation endpoints bind the current Day-review identity, stage the checksummed final/thumbnail, derive destination-specific metadata, and record explicit Instagram confirmation at service submission. The 17-test focused group and 107-test publishing regression selection passed. Day-review draft preparation UI is **IMPLEMENTED**; Claude's API platform-gate integration and the real cross-post remain **NOT STARTED** on this branch, so P3 is not end-to-end verified. Contract: `docs/HANDOFF.md`.
+Backend **IMPLEMENTED**: authenticated defaults and draft-preparation endpoints bind the current Day-review identity, stage the checksummed final/thumbnail, derive destination-specific metadata, and record explicit Instagram confirmation at service submission. The 17-test focused group and 107-test publishing regression selection passed. Day-review draft preparation UI and connection UI are **IMPLEMENTED**; the integrated public Instagram gate and the real cross-post remain **NOT STARTED**, so P3 is not end-to-end verified. Contract: `docs/HANDOFF.md`.
 - Outcome: in Day review / Publishing, one approved final makes one draft with both destinations,
   each with its own platform metadata (YouTube title + description + tags; Instagram caption +
   hashtags), all from `publication_suggest.py`. The operator reviews it once and submits once.

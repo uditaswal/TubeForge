@@ -50,6 +50,9 @@ services:
       TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID: ${TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID:-}
       TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET: ${TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET:-}
       TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI: ${TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI:-}
+      TUBEFORGE_INSTAGRAM_APP_ID: ${TUBEFORGE_INSTAGRAM_APP_ID:-}
+      TUBEFORGE_INSTAGRAM_APP_SECRET: ${TUBEFORGE_INSTAGRAM_APP_SECRET:-}
+      TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI: ${TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI:-}
     restart: unless-stopped
     mem_limit: 512m
 
@@ -117,6 +120,7 @@ services:
       - ./.agents/skills:/app/.agents/skills:ro
       - ./config:/app/config:ro
       - ./data:/app/data
+      - ./models:/app/models:ro
     environment:
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
