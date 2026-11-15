@@ -1,6 +1,6 @@
 # Publishing plan: YouTube + Instagram upload pipeline
 
-The YouTube and Instagram work is being integrated for review on `dev`.
+The YouTube backend, publishing UI and Instagram connection code are integrated on `dev`; Instagram publication remains disabled.
 Status: P1 and P3–P5 backend **IMPLEMENTED**; real upload, Instagram integration and end-to-end acceptance are **BLOCKED**.
 Goal: an approved final from Day review or Publishing goes, without manual file handling, to the
 operator's YouTube channel and Instagram professional account. It goes first as private or

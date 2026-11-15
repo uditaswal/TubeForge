@@ -64,4 +64,4 @@ The original project `.env` also has nonempty `TUBEFORGE_INSTAGRAM_APP_ID`, `TUB
 
 ## Integration check (15 Nov)
 
-The connection code and current publishing backend were combined locally. The worker advertises only YouTube until the Instagram adapter is adapted to the durable separate-publication protocol. The executor rejects the legacy adapter before any remote call. Combined regression: 151 passed; signed-in responsive checks used a temporary fake stack. Neither platform has been connected or contacted during this integration.
+The connection code and current publishing backend were combined locally and merged into dev. The worker advertises only YouTube until the Instagram adapter is adapted to the durable separate-publication protocol. The executor rejects the legacy adapter before any remote call. Combined regression: 151 passed; signed-in responsive checks used a temporary fake stack. Neither platform has been connected or contacted during this integration.
