@@ -2,6 +2,10 @@
 
 You are developing TubeForge, an automated YouTube-video generation system. This file is the durable rules/safety contract (no milestone history). Current phase and next step: `docs/HANDOFF.md`.
 
+## Publishing branch purpose and status
+
+The publishing work merged into local `dev` prepares approved Shorts for safe delivery, so operators can connect accounts and later schedule or submit the exact reviewed video. Implemented work includes YouTube and Instagram connection controls, private YouTube delivery, reviewed draft preparation, scheduling controls, durable retries and a fake-backed Instagram container protocol. The merged publishing regression passed 151 tests and the seven-day fake soak had no lost or duplicate deliveries. Neither live account connection nor live upload has been verified; Instagram publication stays disabled until its adapter and confirmation gate satisfy the separate-container protocol. A full calendar and live scheduling remain pending. See `docs/internal/project_goals.md` for the current summary and `docs/HANDOFF.md` for the next action.
+
 ## Project records (keep consistent; never copy status between them)
 
 - `doc-internal/design_doc/tubeforge-publishing-design.md` — single current plan/status: contracts, phases, release state, blockers, next five actions. Removed historical docs live only in git history. Update affected stages, status, evidence and next action after each coherent stage.
