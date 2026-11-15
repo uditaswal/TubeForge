@@ -1301,6 +1301,9 @@ class PipelineOrchestrator:
         When source ingestion is enabled, immutable bounded snapshots replace
         those references before the content adapter receives the request.
         """
+        from tubeforge.reference.short_prepare import CONTEXT_PREFIX
+        if any(note.startswith(CONTEXT_PREFIX) for note in job.request.notes) and not self.research_enabled:
+            raise ProviderValidationError("Reference Shorts require independent source research before writing")
         existing = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "effective_content_request")
         if existing is None and self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "effective_content_request") is not None:
             raise ProviderValidationError("saved effective source request is missing or has changed")

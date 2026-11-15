@@ -21,7 +21,11 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
     from test_api_workflow import _migrate
     from test_reference_intake_extractor import FixtureHTTP,player,URL
     database=tmp_path/'browser.db';_migrate(database)
-    app=create_app(Settings(app=AppConfig(name='TubeForge LF1 browser',environment='test'),database=DatabaseConfig(url=f'sqlite:///{database}'),auth=AuthConfig(enabled=True)))
+    from tubeforge.core.config import VideoPresetConfig
+    settings=Settings(app=AppConfig(name='TubeForge LF1 browser',environment='test'),database=DatabaseConfig(url=f'sqlite:///{database}'),auth=AuthConfig(enabled=True))
+    settings.pipeline.sources.research_enabled=True
+    settings.pipeline.video_generation.presets['short']=VideoPresetConfig(aspect_ratio='9:16',prompt_version='m6-content-v8',minimum_duration_seconds=30,maximum_duration_seconds=90,duration_seconds=60)
+    app=create_app(settings)
     runtime=app.state.runtime;runtime.auth.create_admin('intake-reviewer','test-only-browser-intake-password')
     raw=player();raw['captions']={};runtime.reference_intakes.extractor=YoutubeReferenceExtractor(FixtureHTTP(raw))
     listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen()
@@ -69,6 +73,22 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
                     if target=='60':
                         expect(page.locator('#prepareLongForm')).to_be_hidden()
                         expect(page.locator('#referenceList')).to_contain_text('60 sec target')
+                        received=[]
+                        def fake_short(route):
+                            received.append(route.request.post_data_json)
+                            route.fulfill(status=201,json={'job_id':'fake-short','state':'topic_created'})
+                        page.route('**/api/reference-intakes/*/short',fake_short)
+                        page.locator('#prepareShort summary').click()
+                        page.locator('#shortTopic').fill('Original example')
+                        page.locator('#shortAngle').fill('A fresh explanation')
+                        page.locator('#shortStyle').fill('Fast cuts and large captions')
+                        page.locator('#shortWatched').check();page.locator('#shortConfirm').check()
+                        page.locator('#createShort').click()
+                        expect(page.locator('#shortNotice')).to_contain_text('Short job created')
+                        assert received[0]['reference_snapshot_sha256']==runtime.reference_intakes.repository.get(key)['intake']['reference_snapshot_sha256']
+                        assert received[0]['watched_reference'] and received[0]['confirmed_queue']
+                        page.unroute('**/api/reference-intakes/*/short')
+
                     assert len(runtime.reference_intakes.extractor.http.calls)==1
                     detail=runtime.reference_intakes.repository.get(key);identity=detail['intake']['reference_snapshot_sha256']
                     exported=context.request.get(base+f'/api/reference-intakes/{key}/snapshot')

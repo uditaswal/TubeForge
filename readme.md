@@ -62,6 +62,8 @@ New source captures use a consistent dark reader appearance (navy background, li
 outputs retain their existing identity; regenerated assets need a new render and
 artifact review.
 
+A captured reference can also be prepared as an original Short after the operator watches it and supplies visual observations. The Short job requires independent source research and exact script review; automated visual analysis and real end-to-end acceptance are still pending. See [reference intake](docs/operations/reference-intake.md).
+
 ## Run Locally
 
 Prerequisites: Docker with Compose, FFmpeg for host-side checks, and operator-supplied voice models in `models/` (they are large and not committed).

@@ -28,7 +28,7 @@ async def bounded_json(request):
     except (ValueError,UnicodeError):raise HTTPException(422,'Reference request must be valid JSON.') from None
 
 
-def register_reference_routes(app,runtime,settings):
+def register_reference_routes(app,runtime,settings,routing_policy):
     repo=runtime.reference_intakes.repository
     channels=list(settings.pipeline.codex.voice_profiles) or ['default']
     if 'default' not in channels:channels.insert(0,'default')
@@ -49,7 +49,12 @@ def register_reference_routes(app,runtime,settings):
         return render_reference_html(runtime.auth.username_for(session.user_id) if session else None)
 
     @app.get('/api/reference-intakes/options',tags=['references'])
-    def options():return dict(channels=channels,target_durations=[30,60,90,600,720,900],maximum_transcript_bytes=1_000_000)
+    def options():
+        presets=settings.pipeline.video_generation.presets.values()
+        short_ready=settings.pipeline.sources.research_enabled and any(p.aspect_ratio=='9:16' and p.prompt_version=='m6-content-v8' for p in presets)
+        return dict(channels=channels,target_durations=[30,60,90,600,720,900],maximum_transcript_bytes=1_000_000,
+                    short_preparation_available=short_ready,
+                    short_preparation_reason=None if short_ready else 'Enable independent source research and configure a reference-Short preset before preparing a Short.')
 
     @app.get('/api/reference-intakes',tags=['references'])
     def list_intakes():return dict(items=repo.list(),limit=50)
@@ -78,6 +83,18 @@ def register_reference_routes(app,runtime,settings):
         except KeyError:raise HTTPException(404,'Reference intake not found.') from None
         except IntakeConflict as error:raise HTTPException(409,str(error)) from error
         except (ValueError,IntakeFailure):raise HTTPException(422,'Transcript or revision request is invalid. Use ordered SRT/VTT cues inside the video duration, or reload a stale revision.') from None
+
+    @app.post('/api/reference-intakes/{intake_id}/short',status_code=201,tags=['references'])
+    async def create_short(intake_id:str,request:Request):
+        from tubeforge.reference.short_prepare import ShortPreparation,prepare_short
+        from tubeforge.core.errors import ProviderValidationError
+        try:
+            value=ShortPreparation.model_validate(await bounded_json(request))
+            return prepare_short(runtime,settings,routing_policy,intake_id,value,actor(request))
+        except KeyError:raise HTTPException(404,'Reference intake not found.') from None
+        except (ValueError,ValidationError,ProviderValidationError) as error:
+            detail='Complete the Short brief and confirmations.' if isinstance(error,ValidationError) else str(error)
+            raise HTTPException(409,detail) from None
 
     @app.get('/api/reference-intakes/{intake_id}/snapshot',tags=['references'])
     def snapshot(intake_id:str,revision:int|None=None):

@@ -1047,7 +1047,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     runtime.scheduler.batch_request_factory = batch_request
     register_batch_routes(app, runtime, batch_request)
     from tubeforge.api.reference_intake import register_reference_routes
-    register_reference_routes(app, runtime, application_settings)
+    register_reference_routes(app, runtime, application_settings, routing_policy)
     from tubeforge.api.long_form import register_long_form_routes
     register_long_form_routes(app, runtime, application_settings)
 
