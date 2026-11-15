@@ -35,14 +35,14 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
         with sync_playwright() as pw:
             browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
             try:
-                for name,width,height,target in [('desktop',1440,1000,'600'),('tablet',820,1180,'720'),('mobile',390,844,'900')]:
+                for name,width,height,target in [('desktop',1440,1000,'60'),('tablet',820,1180,'720'),('mobile',390,844,'900')]:
                     context=browser.new_context(viewport=dict(width=width,height=height));page=context.new_page();errors=[]
                     page.on('pageerror',lambda error:errors.append(str(error)))
                     page.goto(base+'/login');page.locator('[name=username]').fill('intake-reviewer');page.locator('[name=password]').fill('test-only-browser-intake-password');page.locator('button[type=submit]').click();page.wait_for_url(base+'/')
                     if width<=760:page.locator('.studio-menu').click()
                     page.get_by_role('link',name='Reference videos',exact=True).click();page.wait_for_url(base+'/references')
                     expect(page.get_by_text('Signed in as intake-reviewer',exact=True)).to_have_count(1)
-                    video_id='AbCdEfGhI_'+{'600':'1','720':'2','900':'3'}[target]
+                    video_id='AbCdEfGhI_'+{'60':'1','720':'2','900':'3'}[target]
                     raw=player(video_id=video_id);raw['captions']={}
                     runtime.reference_intakes.extractor=YoutubeReferenceExtractor(FixtureHTTP(raw))
                     page.locator('#referenceUrl').fill(URL.replace('AbCdEfGhI_1',video_id));page.locator('#referenceTarget').select_option(target);page.locator('#captureReference').click()
@@ -66,6 +66,9 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
                     runtime.reference_intakes.run_once('browser-worker')
                     expect(page.locator('#referenceState')).to_have_text('Context captured',timeout=10000)
                     expect(page.locator('#referenceTranscript')).to_contain_text('Operator-supplied fixture transcript.')
+                    if target=='60':
+                        expect(page.locator('#prepareLongForm')).to_be_hidden()
+                        expect(page.locator('#referenceList')).to_contain_text('60 sec target')
                     assert len(runtime.reference_intakes.extractor.http.calls)==1
                     detail=runtime.reference_intakes.repository.get(key);identity=detail['intake']['reference_snapshot_sha256']
                     exported=context.request.get(base+f'/api/reference-intakes/{key}/snapshot')

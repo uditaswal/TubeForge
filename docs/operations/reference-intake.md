@@ -1,11 +1,11 @@
 # Reference-video intake (LF1)
 
-Open Creator Studio at `http://127.0.0.1:62065`, sign in and choose **Reference videos** (`/references`). This workflow captures context for a later original long-form treatment. It does not generate a script or video, verify factual claims, approve material or publish anything.
+Open Creator Studio at `http://127.0.0.1:62065`, sign in and choose **Reference videos** (`/references`). This workflow captures context for a later original Short or long-form treatment. It does not generate a script or video, verify factual claims, approve material or publish anything.
 
 ## Capture and review
 
 1. Paste a public HTTPS YouTube video link. Watch, short, embed and youtu.be links normalize to one video identity.
-2. Choose a configured channel, a 10/12/15-minute target and the exact caption language code (for example `en` or `hi`). The API accepts any target from 600 to 900 seconds. No automatic translation occurs.
+2. Choose a configured channel, a 30/60/90-second Short or 10/12/15-minute target and the exact caption language code (for example `en` or `hi`). The API accepts 25–90 seconds for Shorts or 600–900 seconds for long-form. Short intake is context only; Short preparation and style analysis are not yet available. No automatic translation occurs.
 3. Select **Capture reference**. The web process saves a pending request; the existing TubeForge worker retrieves metadata and accessible captions. A running worker and migration `20261108_0033` are required. The live stack must be rebuilt/migrated/restarted when deploying this branch; it is not deployed by creating an intake.
 4. Review the title, creator, source duration, language, origin, capture time, limitations and timestamped text. **Context captured** means usable transcript context was persisted; it does not mean the source audio/video was inspected or the facts accepted.
 5. Open **Proposed improvement brief** for indexed source excerpts and provisional opening/example/payoff questions. It is deterministic, bound to the exact snapshot hash and makes no AI calls. Its caption-interval percentage describes timestamp coverage only. Research, audience interpretation, originality comparison against the full transcript and accepted scene planning remain later gates.

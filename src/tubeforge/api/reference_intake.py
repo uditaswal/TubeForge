@@ -49,7 +49,7 @@ def register_reference_routes(app,runtime,settings):
         return render_reference_html(runtime.auth.username_for(session.user_id) if session else None)
 
     @app.get('/api/reference-intakes/options',tags=['references'])
-    def options():return dict(channels=channels,target_durations=[600,720,900],maximum_transcript_bytes=1_000_000)
+    def options():return dict(channels=channels,target_durations=[30,60,90,600,720,900],maximum_transcript_bytes=1_000_000)
 
     @app.get('/api/reference-intakes',tags=['references'])
     def list_intakes():return dict(items=repo.list(),limit=50)
@@ -57,7 +57,7 @@ def register_reference_routes(app,runtime,settings):
     @app.post('/api/reference-intakes',status_code=201,tags=['references'])
     async def create(request:Request):
         try:value=ReferenceIntakeRequest.model_validate(await bounded_json(request))
-        except ValidationError:raise HTTPException(422,'Use a public YouTube link, a 600–900 second target, a valid language and bounded timestamped transcript.') from None
+        except ValidationError:raise HTTPException(422,'Use a public YouTube link, a 25–90 second Short or 600–900 second long-form target, a valid language and bounded timestamped transcript.') from None
         if value.channel_identity not in channels:raise HTTPException(422,'Choose a configured channel identity.')
         return repo.create(value,actor(request))
 

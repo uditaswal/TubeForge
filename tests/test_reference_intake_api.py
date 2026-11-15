@@ -93,3 +93,19 @@ def test_oversized_request_never_enqueues(api):
     client,runtime,headers=api
     assert client.post('/api/reference-intakes',content=b' '*2000001,headers=headers).status_code==413
     assert client.get('/api/reference-intakes').json()['items']==[]
+
+
+@pytest.mark.parametrize('target', [25, 30, 60, 90, 600, 720, 900])
+def test_reference_intake_accepts_short_and_long_form_targets(api, target):
+    client, runtime, headers = api
+    response = client.post('/api/reference-intakes', json=dict(reference_url=URL, target_duration_seconds=target), headers=headers)
+    assert response.status_code == 201
+    assert response.json()['intake']['request']['target_duration_seconds'] == target
+    assert client.get('/api/jobs').json() == []
+
+
+@pytest.mark.parametrize('target', [24, 91, 599, 901])
+def test_reference_intake_rejects_unsupported_duration_gap(api, target):
+    client, runtime, headers = api
+    assert client.post('/api/reference-intakes', json=dict(reference_url=URL, target_duration_seconds=target), headers=headers).status_code == 422
+    assert runtime.reference_intakes.extractor.http.calls == []

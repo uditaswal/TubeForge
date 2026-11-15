@@ -101,11 +101,18 @@ class ReferenceSnapshot(DomainModel):
 class ReferenceIntakeRequest(DomainModel):
     """Validated intake input; never a video-generation request or approval."""
     reference_url: str = Field(max_length=2000)
-    target_duration_seconds: int = Field(ge=600, le=900)
+    target_duration_seconds: int = Field(ge=25, le=900)
     channel_identity: str = Field(default='default', pattern=r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
     language: str = Field(default='en', pattern=r'^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$')
 
     supplied_cues: tuple[TranscriptCue, ...] = Field(default=(), max_length=10000)
+
+    @field_validator('target_duration_seconds')
+    @classmethod
+    def supported_target_duration(cls, value):
+        if not (25 <= value <= 90 or 600 <= value <= 900):
+            raise ValueError('target must be a 25–90 second Short or a 600–900 second long-form video')
+        return value
 
     @field_validator('reference_url')
     @classmethod
