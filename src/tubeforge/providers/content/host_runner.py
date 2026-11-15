@@ -96,7 +96,7 @@ class HostRunnerContentProvider:
         preflight_payload = encode_request(GenerateShortsScriptRequest(operation="PreflightContentV1", request=host_request))
         # Reject an unsupported prompt before reserving or charging a model call.
         try:
-            prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
+            prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self._max_prompt_chars())
         except ValueError as error:  # an oversized request is a brief problem, not a transient failure to retry
             if "max_prompt_chars" not in str(error):
                 raise
@@ -141,9 +141,11 @@ class HostRunnerContentProvider:
             self.cache.release_after_invocation_failure(cached, maximum=0, failure={"message": "shared source-packet allowance exhausted"}, now=self._now())
             raise ProviderValidationError("TubeForge's two-attempt limit for this exact source packet is exhausted; operator review is required")
         response = None
+        failure_code = None
         try:
             response = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), generation_payload, self.config.socket_timeout_seconds))
             if not response.ok or response.failure:
+                failure_code = response.failure.code if response.failure else "invalid_output"
                 self._runner_failure(response)
             if response.result is None:
                 raise ProviderValidationError("host runner omitted its result")
@@ -160,6 +162,8 @@ class HostRunnerContentProvider:
                 # or changing the durable invocation allowance.
                 failure["rejected_result"] = response.result.model_dump(mode="json")
             self.cache.release_after_invocation_failure(cached, maximum=self.config.invocation_limit, failure=failure, now=self._now())
+            if self._retry_rejected_script(error, cached, failure_code):
+                raise RetryableProviderError(f"The writer's script was rejected ({str(error)[:300]}); retrying automatically with the remaining attempt") from error
             raise
         self.last_provenance, self.last_usage = provenance, usage
         return package
@@ -172,10 +176,33 @@ class HostRunnerContentProvider:
             raise ProviderValidationError("host runner output source packet differs from the requested source packet")
         validate_video_package(package, request, provider_name=self.script_owner.title())
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, evaluate
-        if request.prompt_version in SKILL_TEMPLATES:
+        if request.prompt_version in SKILL_TEMPLATES and not request.exact_script:
             evaluate(package)
         claims = tuple(claim.model_copy(update={"review_status": ClaimReviewStatus.NEEDS_REVIEW, "human_review_required": True}) if claim.time_sensitive or claim.confidence in {ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM} else claim for claim in package.claims)
         return package.model_copy(update={"claims": claims})
+
+    def _max_prompt_chars(self) -> int:
+        """The configured ceiling, or the operator's value from the dashboard Settings page."""
+        from tubeforge.core import runtime_settings
+        return runtime_settings.effective_max_prompt_chars(self.script_owner, self.config.max_prompt_chars)
+
+    def _retry_rejected_script(self, error: Exception, reservation, failure_code: str | None = None) -> bool:
+        """A script that failed validation is retried by the worker while the source packet still has an attempt left.
+
+        The two-attempt allowance is never exceeded: the next try is refused by the same cache once it is spent.
+        Quota, authentication, sources and cancellation failures are not script quality problems and are not retried here.
+        """
+        from pydantic import ValidationError
+        from tubeforge.core import runtime_settings
+        if not runtime_settings.shared().value("generation.auto_retry_rejected", True):
+            return False
+        if not (type(error) is ProviderValidationError or isinstance(error, ValidationError)):
+            return False
+        if failure_code not in {None, "invalid_output", "quality_rejected"}:   # source mismatch, runner allowance, quota...: not a retry
+            return False
+        if "failed validation twice" in str(error):   # the writer's own repair pass already used the second attempt
+            return False
+        return self.cache.generation_retryable(reservation.cache_key)
 
     def _now(self) -> datetime:
         value = self._clock()

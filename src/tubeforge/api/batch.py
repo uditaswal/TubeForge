@@ -3,6 +3,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import date
+import json
 from typing import Literal
 from tubeforge.batch_plans import parse_batch
 from tubeforge.db.batch_plans import BatchPlanRepository
@@ -25,6 +26,12 @@ class BatchReviewRequest(BaseModel):
     disclosure_required: bool | None = None
     action: Literal['approve', 'reject', 'ready', 'regenerate']
     reviewed_identity: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+
+class CrosspostDraftRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    reviewed_identity: str = Field(pattern=r'^[a-f0-9]{64}$')
+    destination_account_ids: list[str] = Field(min_length=2, max_length=20)
 
 
 class BatchAutomationRequest(BaseModel):
@@ -77,6 +84,9 @@ def register_batch_routes(app, runtime, build_request):
         combined = {item['short']['id']: item['short'] for item in repository.list()}
         combined.update(incoming)
         cadence = cadence_report(list(combined.values()), app.state.settings.channel_safety)
+        from tubeforge.pipeline.channel_reports import scope_cadence_to_ids
+        # Only warn about the shorts in this import; older shorts' warnings stay on the Batch plans page.
+        cadence = scope_cadence_to_ids(cadence, [short.id for short in plan.shorts])
         from tubeforge.pipeline.script_fit import analyze_script
         fits = {s.id: {k: v for k, v in analyze_script(s.narration, s.length_s).items() if k != 'sections'}
                 for s in plan.shorts if s.narration and s.narration.strip()}
@@ -89,16 +99,33 @@ def register_batch_routes(app, runtime, build_request):
             items = [item for item in items if item['plan_id'] == plan_id]
         if day:
             items = [item for item in items if (item['short'].get('publish_at') or '')[:10] == day.isoformat()]
+        from tubeforge.api.batch_stage import stage_for
+        saved_review = {}
         for item in items:
             item['qa'] = None
+            item['thumbnail_url'] = None
             if item['job_id']:
-                job = runtime.jobs.get(item['job_id'])
+                try:
+                    job = runtime.jobs.get(item['job_id'])
+                except KeyError:  # the generation was deleted; one dangling topic must not blank the whole page
+                    item['status'] = 'job missing'
+                    item['failure_message'] = 'The linked generation no longer exists.'
+                    continue
                 item['status'] = job.state.value
                 item['failure_message'] = job.failure_message
                 if job.failure_message and 'exhaust' in job.failure_message.lower():
                     item['status'] = 'needs operator decision'
-                item['qa'] = (repository.for_job(job.id) or {}).get('batch_qa')
+                options = repository.for_job(job.id) or {}
+                item['qa'] = options.get('batch_qa')
+                saved_review[item['id']] = (options.get('batch_review') or {}).get('state')
+                if any(a.name == 'thumbnail' for a in runtime.artifacts.list_for_job(job.id)):
+                    item['thumbnail_url'] = f'/api/jobs/{job.id}/artifacts/thumbnail'
                 item['activity_url'] = f'/api/jobs/{job.id}/events'
+        # Approved/Ready come from the identity-checked Day review snapshot, never from the raw saved decision.
+        verified = {entry['id']: entry['state'] for entry in reviews.list_day()} if any(state in {'approved', 'ready'} for state in saved_review.values()) else {}
+        for item in items:
+            item['review_state'] = verified.get(item['short']['id'])
+            item['stage'] = stage_for(item['status'] if item['job_id'] else None, item['review_state'])
         finished = [item for item in items if item['status'] == 'final_ready']
         durations = []
         for item in finished:
@@ -106,7 +133,7 @@ def register_batch_routes(app, runtime, build_request):
             seconds = sum(float(e.details.get('elapsed_seconds', 0)) for e in events if e.event_type == 'batch_run_finished')
             if seconds:
                 durations.append(seconds)
-        remaining = sum(bool(item['job_id']) and item['status'] not in {'final_ready', 'failed_validation', 'failed_exhausted', 'cancelled', 'needs operator decision'} for item in items)
+        remaining = sum(bool(item['job_id']) and item['status'] not in {'final_ready', 'failed_validation', 'failed_exhausted', 'cancelled', 'needs operator decision', 'job missing'} for item in items)
         waiting = any(item['status'] in {'script_approval_required', 'preview_ready'} for item in items)
         eta = round(sum(durations) / len(durations) * remaining) if durations and not waiting else None
         # ETA is unknown until completed jobs supply measured timings.
@@ -139,6 +166,43 @@ def register_batch_routes(app, runtime, build_request):
     @app.get('/api/batch-plans/review', tags=['batch'])
     def day_review(day: date | None = None):
         return reviews.list_day(day.isoformat() if day else None)
+
+    @app.get('/api/batch-plans/{short_id}/post-defaults', tags=['batch'])
+    def crosspost_defaults(short_id: str, reviewed_identity: str, request: Request):
+        if runtime.auth.session(request.cookies.get('tubeforge_session')) is None:
+            raise HTTPException(401, detail='Studio sign-in is required')
+        from tubeforge.pipeline.publication_crosspost import DayReviewCrosspost
+        try:
+            return DayReviewCrosspost(runtime.database.session_factory, reviews, None, None).preview(short_id, reviewed_identity)
+        except KeyError as error:
+            raise HTTPException(404, detail='reviewed short not found') from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, detail=str(error)) from error
+
+    @app.post('/api/batch-plans/{short_id}/prepare-post', status_code=201, tags=['batch'])
+    def prepare_crosspost(short_id: str, value: CrosspostDraftRequest, request: Request):
+        if runtime.auth.session(request.cookies.get('tubeforge_session')) is None:
+            raise HTTPException(401, detail='Studio sign-in is required')
+        from tubeforge.pipeline.manual_publish import ManualPublishService
+        from tubeforge.pipeline.publication_crosspost import DayReviewCrosspost
+        from tubeforge.pipeline.publishing_assets import PublishingAssetRegistry
+        settings = app.state.settings
+        assets = PublishingAssetRegistry(runtime.database.session_factory, runtime.jobs, runtime.artifacts,
+            settings.pipeline.voice.artifact_root, ffprobe=str(settings.pipeline.voice.ffprobe_executable))
+        drafts = ManualPublishService(runtime.database.session_factory, review_repository=reviews)
+        try:
+            post = DayReviewCrosspost(runtime.database.session_factory, reviews, assets, drafts).prepare(
+                short_id, value.reviewed_identity, value.destination_account_ids)
+        except KeyError as error:
+            raise HTTPException(404, detail='reviewed short not found') from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, detail=str(error)) from error
+        return {'id': post.id, 'state': post.state, 'asset_id': post.asset_id,
+                'source_review_identity': value.reviewed_identity,
+                'reviewed_identity': drafts.review_identity(post.id),
+                'destinations': [{'id': item.id, 'account_id': item.account_id, 'platform': item.platform,
+                                  'state': item.state, 'metadata': json.loads(item.metadata_json)}
+                                 for item in drafts.deliveries(post.id)]}
 
     @app.get('/api/batch-plans/safety-report', tags=['batch'])
     def safety_report(day: date | None = None):

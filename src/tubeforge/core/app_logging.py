@@ -170,6 +170,8 @@ def configure_logging(service: str) -> Path:
     if _configured.get("service") == service:
         return log_dir
     level = getattr(logging, os.environ.get("TUBEFORGE_LOG_LEVEL", "INFO").upper(), logging.INFO)
+    for noisy in ("httpx", "httpcore"):  # provider calls carry tokens in query strings
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     max_bytes = int(float(os.environ.get("TUBEFORGE_LOG_MAX_MB", "10")) * 1024 * 1024)
     retention = float(os.environ.get("TUBEFORGE_LOG_RETENTION_DAYS", "5"))
     formatter = JsonFormatter(service)

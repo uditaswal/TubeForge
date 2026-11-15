@@ -17,6 +17,7 @@ gitleaks-report*.json
 
 # --- Python environments, caches, build output ---
 .venv*/
+/.venv-benchmark
 .deps/
 __pycache__/
 *.py[cod]

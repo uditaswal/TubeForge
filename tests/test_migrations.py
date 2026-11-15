@@ -36,6 +36,8 @@ def test_fresh_sqlite_database_upgrades_to_head(tmp_path: Path) -> None:
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publisher_worker_heartbeats'")).scalar_one() == "publisher_worker_heartbeats"
             assert connection.execute(text("SELECT reviewed_identity, submitted_at, submitted_by FROM publish_jobs LIMIT 0")).keys() == ["reviewed_identity", "submitted_at", "submitted_by"]
             assert connection.execute(text("SELECT requested_action, requested_by, requested_at FROM destination_deliveries LIMIT 0")).keys() == ["requested_action", "requested_by", "requested_at"]
+            assert connection.execute(text("SELECT scheduled_for, paused_from_state, youtube_schedule_audited, remote_container_id, remote_session_expires_at FROM destination_deliveries LIMIT 0")).keys() == ["scheduled_for", "paused_from_state", "youtube_schedule_audited", "remote_container_id", "remote_session_expires_at"]
+            assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='youtube_quota_charges'")).scalar_one() == "youtube_quota_charges"
             assert connection.execute(text("SELECT invocation_count, failure_json FROM generation_cache LIMIT 0")).keys() == ["invocation_count", "failure_json"]
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='heavy_work_leases'")).scalar_one() == "heavy_work_leases"
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publication_observations'")).scalar_one() == "publication_observations"
@@ -137,7 +139,7 @@ def test_reference_intake_upgrade_and_downgrade_preserve_existing_tables(tmp_pat
     url=f"sqlite:///{tmp_path/'reference-migration.db'}"
     config=Config(str(root/'alembic.ini'));config.set_main_option('script_location',str(root/'migrations'))
     config.cmd_opts=Namespace(x=[f'database_url={url}'])
-    command.upgrade(config,'20261105_0032')
+    command.upgrade(config,'20261111_0035')
     engine=create_engine(url)
     before=set(inspect(engine).get_table_names())
     command.upgrade(config,'20261108_0033')
@@ -145,7 +147,7 @@ def test_reference_intake_upgrade_and_downgrade_preserve_existing_tables(tmp_pat
     assert after-before=={'reference_intake_revisions','reference_intake_events'}
     with engine.connect() as connection:
         assert list(connection.execute(text('SELECT claim_owner, claim_token, lease_expires_at, snapshot_sha256 FROM reference_intake_revisions LIMIT 0')).keys())==['claim_owner','claim_token','lease_expires_at','snapshot_sha256']
-    command.downgrade(config,'20261105_0032')
+    command.downgrade(config,'20261111_0035')
     assert set(inspect(engine).get_table_names())==before
     command.upgrade(config,'20261108_0033')
     assert set(inspect(engine).get_table_names())==after

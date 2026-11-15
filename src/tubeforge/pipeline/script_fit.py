@@ -27,6 +27,17 @@ def split_sections(text: str) -> list[str]:
     return [" ".join(p.split()) for p in paragraphs]
 
 
+def _number_note(text: str) -> str:
+    """The craft gate rejects a scene with more than two spoken numbers (two..billion count) or a sentence with three; say so now."""
+    from tubeforge.providers.content.craft import MAX_NUMBERS_PER_SCENE, _numbers
+    count = len(_numbers(text))
+    if count > MAX_NUMBERS_PER_SCENE:
+        return f"{count} numbers in one scene (the writer's check allows {MAX_NUMBERS_PER_SCENE}): round them or move one to the next scene"
+    if any(len(_numbers(sentence)) >= 3 for sentence in re.split(r"(?<=[.!?])\s+", text)):
+        return "a sentence with 3 or more numbers sounds like a list: split it or round them"
+    return ""
+
+
 def analyze_script(sections_or_text: str | list[str], length_s: int) -> dict:
     """Word/time fit of a script against ``length_s``; ``suggestion`` says what to cut or add."""
     sections = split_sections(sections_or_text) if isinstance(sections_or_text, str) else [s.strip() for s in sections_or_text if s.strip()]
@@ -36,6 +47,7 @@ def analyze_script(sections_or_text: str | list[str], length_s: int) -> dict:
         words = spoken_words(text)
         note = "too short (under 8 words): merge it into a neighbour" if words < SECTION_MIN_WORDS else \
                "too long (over 15 words): split it into two scenes" if words > SECTION_MAX_WORDS else ""
+        note = note or _number_note(text)
         rows.append({"index": index, "words": words, "note": note, "text": text})
     total = sum(row["words"] for row in rows)
     if total == 0:
@@ -54,7 +66,7 @@ def analyze_script(sections_or_text: str | list[str], length_s: int) -> dict:
 
 
 def plan_template(length_s: int = 60) -> str:
-    """The markdown plan format, with an own-script ``narration`` block, sized for ``length_s``."""
+    """The markdown plan format, with an own-script ``script`` block (``narration`` is accepted as the same field), sized for ``length_s``."""
     b = reference_word_budget(length_s)
     third = round(length_s / 6)
     return f'''## Short title
@@ -63,7 +75,7 @@ def plan_template(length_s: int = 60) -> str:
 id: my-short-id            # lowercase letters, digits and dashes; unique
 title: "Up to 100 characters"
 concept: "One sentence: what this Short is about"
-length_s: {length_s}       # 30-90
+length_s: {length_s}               # 30-90
 ending: loop               # loop (last line flows into the hook) or debate (closes on a question)
 channel: engineering       # optional
 publish_at: 2026-11-10T09:00:00+05:30   # optional, metadata only
@@ -79,11 +91,12 @@ sources:                   # optional page URLs; when given, no web research run
   - https://example.com/source-page
 thumbnail: {{text: "Short Words", visual: "What the thumbnail shows"}}
 tags: [tag one, tag two]
-narration: |
-  Optional: your own script, {b["aim_low"]}-{b["aim_high"]} words for {length_s} s.
+script_mode: assist        # assist (the writer fits and checks your script) or exact (word for word; Claude writer only)
+script: |                  # optional: your own narration (the name narration works too)
+  Your own script, {b["aim_low"]}-{b["aim_high"]} words for {length_s} s.
   Short sentences. One idea per line or paragraph, 8-15 spoken words each.
 
-  Blank lines separate scenes. Leave narration out to let the AI write it.
+  Blank lines separate scenes. Leave `script` out to let the AI write it.
 ```
 '''
 
@@ -114,7 +127,7 @@ Write ONLY the narration plus a markdown plan block in the format at the end.
 - Optional delivery tags inside narration only: [pause 0.4], [breath], *stressed word* (at most 2 per scene), [whisper]...[/whisper] (at most 2 per video).
 
 ## Output format
-Return one markdown plan. Put the narration in the `narration` field; separate scenes with a blank line.
+Return one markdown plan. Put the narration in the `script` field; separate scenes with a blank line.
 
 {plan_template(length_s)}
 '''

@@ -51,3 +51,14 @@ def test_google_oauth_rejects_missing_refresh_or_channel() -> None:
     oauth = GoogleAccountOAuth("client", "secret", "https://studio.example/callback", flow_factory=Mock(return_value=flow), build_service=Mock(return_value=service))
     with pytest.raises(ProviderAuthenticationError, match="exactly one"):
         oauth.exchange_and_discover(code="code", state="state", code_verifier="verifier")
+
+
+@pytest.mark.parametrize("uri", ["http://127.0.0.1:62065/oauth/youtube/callback", "http://localhost:62065/callback", "https://studio.example/callback"])
+def test_google_oauth_accepts_https_and_loopback_http(uri: str) -> None:
+    assert GoogleAccountOAuth("client", "secret", uri).redirect_uri == uri
+
+
+@pytest.mark.parametrize("uri", ["http://example.com/callback", "http://localhost.example.com/callback", "http://localhost@evil.example/callback", "http://127.0.0.2/callback", "https://user@example.com/callback", "https://example.com:invalid/callback", "https://example.com/callback#fragment"])
+def test_google_oauth_rejects_unsafe_callbacks(uri: str) -> None:
+    with pytest.raises(ValueError, match="callback"):
+        GoogleAccountOAuth("client", "secret", uri)

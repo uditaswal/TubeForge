@@ -306,7 +306,7 @@ def _validate_once(raw, request, version, *, final: bool = False):
         from tubeforge.providers.content.prompts import validate_video_package
         validate_video_package(package, request.request, provider_name="Claude")
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, evaluate
-        if version in SKILL_TEMPLATES:
+        if version in SKILL_TEMPLATES and not request.request.exact_script:
             evaluate(package)  # titles, thumbnail words, hook options: repairable like any other rule
     except (ValidationError, ProviderValidationError) as error:
         if isinstance(error, InsufficientSourcesError):
@@ -329,7 +329,8 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
     usage_total: dict[str, object] = {"attempts": 0, "total_cost_usd": 0.0}
     room_notes: dict[str, object] = {}
     room = None
-    if version == "m6-content-v8" and writers_room_enabled():
+    exact = request.request.exact_script   # the operator's wording is final: no angle pass, no editor pass, no hook rewrite
+    if version == "m6-content-v8" and writers_room_enabled() and not exact:
         room, room_notes["angle"] = angle_pass(request, root, model=model, effort=effort, usage_total=usage_total)
     prompt = build_content_prompt(request.request, template_version=version, max_chars=MAX_PROMPT_CHARS, writers_room=room)
     from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, preflight
@@ -363,7 +364,7 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
                     "\nReturn the complete corrected output, changing only what is needed to fix these errors.")
     if package is None:
         raise ProviderValidationError("Claude output failed validation twice: " + last_error)
-    if version == "m6-content-v8" and writers_room_enabled():
+    if version == "m6-content-v8" and writers_room_enabled() and not exact:
         edited, edited_normalizations, room_notes["editor"] = editor_pass(
             request, root, raw, model=model, effort=effort, schema=schema, version=version, usage_total=usage_total)
         if edited is not None:
@@ -373,7 +374,7 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
                                       "generated_at": datetime.now(UTC).isoformat(),
                                       "elapsed_seconds": round(time.monotonic() - started, 3),
                                       "invocations": invocations, "attempts": usage_total["attempts"]}
-    if skill_hashes is not None:
+    if skill_hashes is not None and not exact:
         from tubeforge.providers.content.youtube_skills import select_hook
         try:
             package, provenance["youtube_skills"] = select_hook(package)

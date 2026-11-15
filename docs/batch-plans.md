@@ -13,7 +13,7 @@ Optional fields include `length_s` (30–90; default 60), `ending` (`loop` or
 `thumbnail: {text: ..., visual: ...}`, `tags`, and opaque `narration` text.
 Publish dates are metadata; importing never schedules or uploads anything.
 
-**Your own script.** `narration` is now used: the writer keeps your wording and order, splits it
+**Your own script.** Add `script: |` (or `narration: |`, the same field; giving both is an error) to the short's yaml block. `narration` is used: the writer keeps your wording and order, splits it
 into 8–15-word scenes (blank lines mark your scene breaks), and only trims, fixes spoken-form
 symbols or fills gaps from the cited sources. It still passes the hook/craft gates and the script
 review, where you can edit every section. Studio's New generation form has the same optional
@@ -21,6 +21,8 @@ review, where you can edit every section. Studio's New generation form has the s
 seconds, aim range, what to cut or add), from `POST /api/script-fit`. **Copy markdown format** and
 **Copy AI script guide** (30/45/60/75/90 s) give the plan template and a brief to paste into
 another AI agent (`GET /api/script-guide?kind=format|guide&length_s=`).
+
+**Exact script (word for word).** Add `script_mode: exact` next to `script:` in the yaml block (or tick "Use my script exactly" in Studio's New generation form, or turn on "Use every script I provide word for word" in Settings). The Claude writer then only plans the scenes, headings, diagrams and sources around your text: your wording is forced back in after it answers, so nothing can change a word, and the hook, craft, number and title checks and the rewriting passes are skipped. Structure, layout, the length cap and claim/source binding still apply, the claims are marked for review, and you vouch for the facts. Requirements: the Claude writer (Codex is refused), one scene per blank-line block, and the length cap for the video. `assist` (the default) keeps the old behaviour: the writer fits and checks your script.
 
 **Pronunciation.** All-caps acronyms are spelled by letter; words said as words must be listed.
 Built in: README, JSON, YAML, GUI, TODO, FIXME, and any 5–6-letter capitals with a pronounceable

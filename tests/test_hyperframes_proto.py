@@ -146,11 +146,17 @@ SYNTHETIC_TERMINAL_DURATION = 5.535  # Kokoro audio 5.355 s + the standard 0.18 
 
 
 def test_word_groups_matches_the_pil_renderers_own_grouping_and_maps_real_timing():
+    from tubeforge.rendering.shorts.layout import caption_groups
     groups = _word_groups(_hook_scene().caption, WORDS_10)
-    assert [g["words"] for g in groups] == [["YOU", "HOST", "ON"], ["RAILWAY?", "STOP"],
-                                            ["SCROLLING,", "HACKERS"], ["HIT", "IT", "WEDNESDAY."]]
-    assert groups[0]["start"] == WORDS_10[0][0] and groups[0]["end"] == WORDS_10[2][1]
-    assert groups[-1]["start"] == WORDS_10[7][0] and groups[-1]["end"] == WORDS_10[9][1]
+    # Grouping is phrase-aware and owned by the PIL renderer's caption_groups; the proto must not diverge from it.
+    expected = [list(g) for g in caption_groups(_hook_scene().caption)]
+    assert [g["words"] for g in groups] == expected
+    assert [w for g in expected for w in g] == [w for g in groups for w in g["words"]] and len(expected) >= 3
+    cursor = 0
+    for group, words in zip(groups, expected):  # each group spans exactly its own measured words
+        assert group["start"] == WORDS_10[cursor][0] and group["end"] == WORDS_10[cursor + len(words) - 1][1]
+        cursor += len(words)
+    assert cursor == len(WORDS_10)
 
 
 def test_word_groups_rejects_a_word_count_mismatch():

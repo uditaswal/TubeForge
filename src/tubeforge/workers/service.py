@@ -26,6 +26,11 @@ def _event(event: str, **fields: object) -> None:
 class WorkerService:
     """Claim and run at most one job; all database work brackets orchestration."""
 
+    def _max_attempts(self) -> int:
+        """Worker retries for temporary failures: the configured value, or the operator's from the Settings page."""
+        from tubeforge.core import runtime_settings
+        return runtime_settings.shared().value("worker.max_attempts", self.config.max_attempts)
+
     def __init__(self, worker_id: str, jobs: JobRepository, orchestrator: PipelineOrchestrator, config: WorkerConfig = WorkerConfig(), clock: Callable[[], datetime] | None = None, heavy_work: HeavyWorkLeaseRepository | None = None) -> None:
         self.worker_id, self.jobs, self.orchestrator, self.config = worker_id, jobs, orchestrator, config
         self._clock = clock or (lambda: datetime.now(UTC))
@@ -154,7 +159,7 @@ class WorkerService:
         attempt = job.attempt_count + 1
         policy_reader = getattr(self.orchestrator, "alignment_retry_policy", None)
         alignment_policy = policy_reader(job) if callable(policy_reader) else None
-        immediate, cap, transient_count = alignment_policy if alignment_policy is not None else (False, self.config.max_attempts, attempt)
+        immediate, cap, transient_count = alignment_policy if alignment_policy is not None else (False, self._max_attempts(), attempt)
         exhausted = attempt >= cap
         delay = 0 if immediate else min(self.config.retry_base_seconds * (2 ** (max(1, transient_count) - 1)), self.config.retry_max_seconds)
         result = self.jobs.schedule_retry(job.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=delay), exhausted=exhausted)

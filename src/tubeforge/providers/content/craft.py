@@ -473,7 +473,74 @@ def naturalness_problems(package) -> list[str]:
             if len(later.split()) <= 4 and stems:   # a slogan is short; a five-word sentence that reuses a noun is usually an explanation
                 notes.append(f"scene {index} echoes itself ({later.strip()!r} repeats '{sorted(stems)[0]}' from the sentence before); cut the slogan and spend the words on a fact")
                 break
+    return notes + spoken_craft_problems(package)
+
+
+# --- P5 (script audit): faults found by reading the rate-limit Short aloud, all advisory ---------------------------------
+CONTRAST_SLOGAN = re.compile(r",\s+not\s+(?:a|an|the|\w+)\b", re.I)                      # "a speed bump, not a wall", "soft, not hard"
+CLOSING_FILLER = ("now you know", "now you understand", "so remember", "in conclusion", "to sum up", "to recap", "that's all", "that is all")
+CONTRACTABLE = re.compile(r"\b(?:that|here|there|it|what) is\b(?! not)|\b(?:you|we|they) (?:are|will)\b", re.I)   # "Here is the catch" -> "Here's"
+SUBJECT_WORDS = 4          # the words at the start of a sentence that name what it is about
+SUBJECT_REPEAT_SCENES = 5  # the same subject noun opening sentences in this many scenes reads as a list of definitions (tuned on 8 scripts: advisory)
+
+
+def _sentences(text: str) -> list[str]:
+    return [x for x in re.split(r"(?<=[.!?\u2026])\s+", text.strip()) if x]
+
+
+def spoken_craft_problems(package) -> list[str]:
+    """Advisory notes from the forensic audit of the rate-limit Short (docs/original-script-audit.md). Empty means nothing to flag.
+
+    Each rule is a proxy for something a listener hears: the same slogan frame again and again, one noun starting
+    sentence after sentence (documentation voice), a script with no contractions, 'Here is the catch' where a person
+    says 'Here's', and a closing line that only announces that the lesson is over.
+    """
+    scenes = package.reference_short.scenes
+    notes: list[str] = []
+    slogans = [(i, s) for i, scene in enumerate(scenes, 1) for s in _sentences(scene.vo) if CONTRAST_SLOGAN.search(s)]
+    if len(slogans) >= 3:
+        where = ", ".join(sorted({str(i) for i, _ in slogans}, key=int))
+        notes.append(f"{len(slogans)} sentences use the 'X, not Y' slogan frame (scenes {where}); keep the one that carries the thesis and say the others as plain facts")
+    subjects: dict[str, set[int]] = {}
+    topic_words = {w.strip(".'").casefold() for w in scenes[0].vo.split()}   # the topic's own noun is named in the hook and may recur
+    for i, scene in enumerate(scenes, 1):
+        for sentence in _sentences(scene.vo):
+            for word in {w.strip(".'") for w in _content(" ".join(sentence.split()[:SUBJECT_WORDS]))}:
+                stem = word[:-1] if word.endswith("s") and not word.endswith("ss") else word
+                if len(stem) >= 5 and not stem.isdigit() and stem not in topic_words and word not in topic_words:
+                    subjects.setdefault(stem, set()).add(i)
+    for stem, where in sorted(subjects.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if len(where) >= SUBJECT_REPEAT_SCENES:
+            notes.append(f"'{stem}' starts a sentence in {len(where)} scenes ({', '.join(map(str, sorted(where)))}); it reads like a list of definitions, so make the viewer or an action the subject")
+            break
+    words = sum(len(scene.vo.split()) for scene in scenes)
+    if words >= 100 and not any(CONTRACTION.search(scene.vo) for scene in scenes):
+        notes.append(f"no contraction in {words} words; a person says 'it's', 'that's', 'doesn't' (read it aloud: the voice sounds like a manual)")
+    stiff = [str(i) for i, scene in enumerate(scenes, 1) if CONTRACTABLE.search(scene.vo)]
+    if stiff:
+        notes.append(f"scenes {', '.join(stiff)} say 'that is' / 'here is' / 'you are'; write 'that's', 'here's', 'you're' the way it is spoken")
+    closing = " ".join(scene.vo.casefold() for scene in scenes[-2:])
+    hit = next((phrase for phrase in CLOSING_FILLER if phrase in closing.replace("\u2019", "'")), None)
+    if hit:
+        notes.append(f"the ending says {hit!r}; end on the action or consequence the viewer takes away, not on an announcement that the lesson is over")
     return notes
+
+
+def rewrite_keeps_evidence(original: dict, rewrite: dict) -> list[str]:
+    """A rewrite is only a rewrite if every claim id, source id and figure of the original survives. Both arguments are fixture dicts."""
+    problems: list[str] = []
+    claims = {c for scene in rewrite["scenes"] for c in scene.get("claim_ids", [])}
+    sources = {s for scene in rewrite["scenes"] for s in scene.get("source_ids", [])}
+    for scene in original["scenes"]:
+        problems += [f"claim {c} of {scene['scene_id']} is no longer cited" for c in scene.get("claim_ids", []) if c not in claims]
+    problems += [f"source {s} is no longer used" for s in sorted({s for sc in original["scenes"] for s in sc.get("source_ids", [])}) if s not in sources]
+    spoken = " ".join(scene["narration"] for scene in rewrite["scenes"])
+    for figure in sorted({n for scene in original["scenes"] for n in _numbers(scene["narration"])}):
+        if figure not in _numbers(spoken):
+            problems.append(f"the figure {figure} was dropped")
+    known = {claim["claim_id"] for claim in original["claims"]}
+    problems += [f"claim {c} is not one of the original's claims" for c in sorted(claims - known)]
+    return problems
 
 
 def _rhythm(spoken: list[str]) -> dict:

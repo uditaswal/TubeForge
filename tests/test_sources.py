@@ -24,9 +24,22 @@ def test_ingestor_rejects_non_allowlisted_and_private_sources() -> None:
         ingestor.ingest(SourceReference(source_id="x", url="https://example.invalid/x", title="x"))
 
 
-def test_redirects_are_rejected_before_following_the_target() -> None:
+@pytest.mark.parametrize("target", [
+    "https://other.example/x",            # different host
+    "http://example.org/docs/",           # downgrade to http
+    "https://example.org:8443/docs/",     # custom port
+    "https://user:pw@example.org/docs/",  # credentials
+])
+def test_redirects_that_leave_the_host_or_weaken_the_scheme_are_rejected(target) -> None:
+    from urllib.request import Request
     with pytest.raises(ProviderValidationError, match="redirects"):
-        _RejectRedirects().redirect_request(None, None, 302, "redirect", {}, "https://other.example")
+        _RejectRedirects().redirect_request(Request("https://example.org/docs"), None, 302, "redirect", {}, target)
+
+
+def test_same_host_https_canonicalising_redirect_is_followed() -> None:
+    from urllib.request import Request
+    followed = _RejectRedirects().redirect_request(Request("https://example.org/docs"), None, 301, "moved", {}, "https://example.org/docs/")
+    assert followed is not None and followed.full_url == "https://example.org/docs/"
 
 
 def test_approved_excerpt_snapshot_hashes_exact_captured_text() -> None:

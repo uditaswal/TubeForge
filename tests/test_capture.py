@@ -106,3 +106,58 @@ def test_capture_cleanup_preserves_quote_and_records_controls_in_chromium():
             page.screenshot(path=str(out/'fixture-after.png'))
         finally:
             browser.close()
+
+
+def test_capture_policy_records_the_overlay_and_wrapping_changes():
+    from tubeforge.pipeline.capture import CAPTURE_POLICY, FIND, HIDE_FIXED_OVERLAYS, HIDE_OVERLAYS
+    assert CAPTURE_POLICY == "source-capture-v6-dark-reader-overlays"           # behaviour changed, so the provenance label changed
+    assert "overflow-wrap:anywhere" in HIDE_OVERLAYS and r"\s" in HIDE_FIXED_OVERLAYS and "visibility" in HIDE_FIXED_OVERLAYS
+    assert "window.innerWidth" in FIND                                           # document size is scaled to visual pixels
+
+
+def _browser_page(html):
+    import os
+    import pytest
+    if os.environ.get('TUBEFORGE_CAPTURE_BROWSER') != '1':
+        pytest.skip('opt-in real Chromium source capture check')
+    from playwright.sync_api import sync_playwright
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'])
+    page = browser.new_page(viewport={'width': 540, 'height': 900})
+    page.set_content(html)
+    return page, lambda: (browser.close(), playwright.stop())
+
+
+def test_sticky_banners_are_hidden_but_never_the_element_holding_the_quote_in_chromium():
+    from tubeforge.pipeline.capture import FIND, HIDE_FIXED_OVERLAYS
+    quote = 'The bucket refills at a constant rate over time.'
+    page, close = _browser_page('<style>body{margin:0;font:20px sans-serif}.bar{position:sticky;top:0;background:#fff}#panel{position:fixed;right:0;top:300px}</style>'
+                                '<div class="bar" id="promo">Global Hack Week: Builders workshop</div><div id="panel">Chat with us</div>'
+                                '<article id="a"><p id="claim">' + quote + '</p></article>'
+                                '<aside style="position:sticky;top:0" id="holder">Sticky holder: ' + quote + '</aside>')
+    try:
+        before = page.evaluate(FIND, quote)
+        hidden = page.evaluate(HIDE_FIXED_OVERLAYS, quote)
+        after = page.evaluate(FIND, quote)
+        assert any('Global Hack Week' in label for label in hidden) and any('Chat with us' in label for label in hidden)
+        assert page.locator('#promo').evaluate('el => getComputedStyle(el).visibility') == 'hidden'
+        assert page.locator('#holder').evaluate('el => getComputedStyle(el).visibility') == 'visible'   # holds the quote, so it stays
+        assert page.locator('#claim').evaluate('el => getComputedStyle(el).visibility') == 'visible'
+        assert before['rects'] == after['rects']                                                        # visibility keeps the geometry the clip was planned on
+    finally:
+        close()
+
+
+def test_document_size_is_reported_in_visual_pixels_when_the_zoom_shrinks_a_table_page_in_chromium():
+    from tubeforge.pipeline.capture import FIND
+    quote = "But it still doesn't prevent all cases."
+    body = "Until the next release arrives, version two is out (see https://news.ycombinator.com/item?id=50386031). " + quote + " " + "More text here. " * 40
+    page, close = _browser_page('<html><body style="margin:8px;font:16px sans-serif"><table width="100%"><tr><td><div id="c">' + body + '</div></td></tr></table></body></html>')
+    try:
+        page.evaluate("document.documentElement.style.zoom = '1.5'")
+        assert page.evaluate('document.documentElement.clientWidth') == 360            # the unscaled number that used to cut off the right third
+        found = page.evaluate(FIND, quote)
+        assert found['docWidth'] == 540                                                # now the real viewport width
+        assert found['docHeight'] >= found['block']['y'] + found['block']['h']
+    finally:
+        close()

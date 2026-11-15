@@ -25,6 +25,15 @@ from tubeforge.providers.content.prompts import build_content_prompt, prompt_evi
 from tubeforge.providers.fake import FakeContentProvider
 from tubeforge.scheduling.service import request_from_topic
 
+@pytest.fixture(autouse=True)
+def _no_auto_retry(tmp_path, monkeypatch):
+    """These tests check the first rejection itself; automatic retry has its own tests in test_runtime_settings.py."""
+    from tubeforge.core import runtime_settings
+    store = runtime_settings.RuntimeSettings(tmp_path / "runtime-settings.json")
+    store.path.write_text(json.dumps({"values": {"generation.auto_retry_rejected": False}}))
+    monkeypatch.setattr(runtime_settings, "_shared", store)
+
+
 
 def request():
     return ContentRequest(topic="Review a video", angle="Exact script review", notes=("Hook", "Source check", "Narration", "Scenes"), target_duration_seconds=45,
@@ -168,7 +177,8 @@ def test_remote_preflight_failure_does_not_reserve_or_count(tmp_path):
         calls.append(json.loads(payload)['operation'])
         return HostRunnerResponse(ok=False, failure={'code':'invalid_output','message':'redeploy host', 'invocation_started': False}).model_dump_json().encode()
     provider = HostRunnerContentProvider(CodexProviderConfig(), GenerationCacheRepository(database.session_factory), transport=transport)
-    with pytest.raises(ProviderValidationError, match='redeploy host'):
+    # A structured runner failure keeps the runner's own redacted message; nothing was reserved or counted.
+    with pytest.raises(ProviderValidationError, match='^redeploy host$'):
         provider.generate_package(request())
     with database.session_factory() as session:
         assert session.scalar(select(func.count()).select_from(GenerationCacheRecord)) == 0
@@ -209,9 +219,7 @@ def test_v7_host_boundary_omits_capture_metadata_and_uses_accepted_cache(tmp_pat
     provider = HostRunnerContentProvider(config, cache, transport=transport)
     result = provider.generate_package(captured)
     assert result.request == original
-    # A locally accepted, hash-checked package is reusable without a runner.
-    # This is required for cancellation/review while the host is unavailable.
-    assert operations == []
+    assert operations == []  # an accepted cache hit is served locally without contacting the runner
     assert captured.sources[0].content_sha256 == source.content_sha256
     with database.session_factory() as session:
         record = session.scalar(select(GenerationCacheRecord))

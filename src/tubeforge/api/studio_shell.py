@@ -117,6 +117,7 @@ STUDIO_NAV_ITEMS = [
     ("accounts", "/#accounts", "Accounts"),
     ("media", "/#media", "Media tools"),
     ("publishing", "/#publishing", "Publishing"),
+    ("settings", "/settings", "Settings"),
 ]
 
 

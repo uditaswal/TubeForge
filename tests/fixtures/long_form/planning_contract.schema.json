@@ -248,6 +248,11 @@
           ],
           "default": null,
           "title": "Operator Script"
+        },
+        "exact_script": {
+          "default": false,
+          "title": "Exact Script",
+          "type": "boolean"
         }
       },
       "required": [

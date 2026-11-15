@@ -58,6 +58,8 @@ def compress_pauses(audio, sr, max_pause, threshold=.004, frame_seconds=.01):
 def _delivery_identity(pacing) -> str:
     """Hash input for everything that changes how speech is assembled; "off" keeps pre-existing profile hashes."""
     parts = [pacing.delivery_cues] if pacing.delivery_cues != "off" else []
+    if parts and getattr(pacing, "delivery_whisper", "off") == "on":
+        parts.append("whisper-on")  # "off" (the default) keeps the existing hash
     if getattr(pacing, "acronym_gaps", "off") != "off":
         parts.append(pacing.acronym_gaps + ":" + ",".join(sorted(getattr(pacing, "acronym_gap_terms", ()))))
     return "+".join(parts) or "off"
@@ -67,6 +69,8 @@ def scene_cues(scene, form, pacing):
     """Script cues (when enabled) plus automatic gaps around spelled-out words, for one scene."""
     from . import delivery
     script = tuple(scene.cues) if pacing.delivery_cues != "off" else ()
+    if getattr(pacing, "delivery_whisper", "off") != "on":  # whisper is disabled: those words are spoken plainly
+        script = tuple(cue for cue in script if cue.kind != "whisper")
     gaps = delivery.spelling_gaps(form.applied, scene.vo.split(), getattr(pacing, "acronym_gap_terms", ())) if getattr(pacing, "acronym_gaps", "off") != "off" else ()
     return script + gaps
 
