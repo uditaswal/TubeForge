@@ -19,6 +19,7 @@ from tubeforge.pipeline.script_fit import SECTION_MAX_WORDS, SECTION_MIN_WORDS, 
 from tubeforge.providers.content.prompts import reference_word_budget
 
 MIN_SECONDS, MAX_SECONDS = 30, 90
+_TERMINAL = re.compile(r"[.!?…][\"')\]]*$")
 _SENTENCE = re.compile(r"(?<=[.!?…])\s+")
 _CLAUSE = re.compile(r"(?<=[,;:])\s+|\s+(?=(?:and|but|so|because|though|which|then|while|instead)\b)", re.I)
 
@@ -56,35 +57,74 @@ def _split_long(text: str) -> list[str]:
     return _split_long(before) + _split_long(after)
 
 
-def rechunk(blocks: list[str]) -> list[str]:
-    """Scenes of 8-15 words, in order, using only the operator's own words."""
-    scenes: list[str] = []
+_CONJUNCTIONS = {"and", "but", "so", "because", "though", "which", "then", "while", "instead", "or", "where", "when", "that"}
+
+
+def _cut_cost(token: str, following: str, block_end: bool) -> float:
+    """How bad it is to start a new scene right after ``token``: the operator's own break and sentence ends are free."""
+    if block_end:
+        return 0.0
+    if token.endswith((".", "!", "?", "…", ".\"", "?\"", "!\"")):
+        return .5
+    if token.endswith((",", ";", ":", "—")):
+        return 3.0                                 # inside a sentence: a full stop is added there
+    if following.strip(",;:").lower() in _CONJUNCTIONS:
+        return 3.2
+    return 8.0
+
+
+def _segment(blocks: list[str]) -> tuple[list[str], int]:
+    """Scenes of 8-15 spoken words, in order, using only the operator's own words.
+
+    The whole script is segmented at once (dynamic programming), because a short sentence between two long ones
+    cannot be kept alone or joined to either neighbour; the cheapest cut points win: the operator's own breaks and
+    sentence ends first, then clause breaks, and a mid-clause cut only when nothing else fits."""
+    tokens: list[str] = []
+    block_end: list[bool] = []                     # block_end[k]: a blank-line break follows token k
     for block in blocks:
-        if SECTION_MIN_WORDS <= _words(block) <= SECTION_MAX_WORDS:
-            scenes.append(block)                   # already a good scene: keep the operator's own break
-            continue
-        pending = ""
-        for sentence in (s.strip() for s in _SENTENCE.split(block) if s.strip()):
-            for part in _split_long(sentence):
-                joined = f"{pending} {part}".strip()
-                if pending and _words(joined) > SECTION_MAX_WORDS:
-                    scenes.append(pending)
-                    pending = part
-                else:
-                    pending = joined
-                if _words(pending) >= SECTION_MIN_WORDS and _words(pending) >= 11:
-                    scenes.append(pending)
-                    pending = ""
-        if pending:
-            scenes.append(pending)
-    merged: list[str] = []                         # a scene still under 8 words joins its neighbour when the pair fits
-    for scene in scenes:
-        if merged and (_words(scene) < SECTION_MIN_WORDS or _words(merged[-1]) < SECTION_MIN_WORDS) \
-                and _words(merged[-1]) + _words(scene) <= SECTION_MAX_WORDS:
-            merged[-1] = f"{merged[-1]} {scene}"
-        else:
-            merged.append(scene)
-    return merged
+        parts = block.split()
+        tokens += parts
+        block_end += [False] * (len(parts) - 1) + [True]
+    n = len(tokens)
+    if n == 0:
+        return [], 0
+    infinity = float("inf")
+    best = [infinity] * (n + 1)
+    back = [0] * (n + 1)
+    best[0] = 0.0
+    for end in range(1, n + 1):
+        for start in range(end - 1, max(-1, end - 40), -1):
+            count = _words(" ".join(tokens[start:end]))
+            if count > SECTION_MAX_WORDS:
+                break
+            if count < SECTION_MIN_WORDS or best[start] == infinity:
+                continue
+            cut = 0.0 if start == 0 else _cut_cost(tokens[start - 1], tokens[start], block_end[start - 1])
+            cost = best[start] + cut + abs(count - 11) * .05
+            if cost < best[end]:
+                best[end], back[end] = cost, start
+    if best[n] == infinity:                        # fewer than 8 spoken words in total: nothing to re-cut
+        return [" ".join(tokens)], 0
+    spans: list[tuple[int, int]] = []
+    end = n
+    while end > 0:
+        spans.append((back[end], end))
+        end = back[end]
+    spans.reverse()
+    scenes, adjusted = [], 0
+    for index, (start, stop) in enumerate(spans):
+        parts = tokens[start:stop]
+        if index < len(spans) - 1 and not _TERMINAL.search(parts[-1]) and not block_end[stop - 1]:
+            parts[-1] = parts[-1].rstrip(",;:—") + "."     # the scene validator needs sentence punctuation where a scene ends
+            adjusted += 1
+        scenes.append(" ".join(parts))
+    return scenes, adjusted
+
+
+def rechunk(blocks: list[str]) -> list[str]:
+    return _segment(blocks)[0]
+
+
 
 
 def _value(sentence: str) -> int:
@@ -119,9 +159,11 @@ def fit_exact_script(script: str, length_s: int) -> ExactFit:
         blocks, removed = _trim(blocks, longest["aim_high"])
         notes.append(f"Too long for a {MAX_SECONDS} second video: dropped {len(removed)} lower-value sentence(s) without rewording the rest: "
                      + " | ".join(f"\"{s}\"" for s in removed))
-    scenes = rechunk(blocks)
+    scenes, adjusted = _segment(blocks)
     if scenes != blocks:
         notes.append(f"Re-cut into {len(scenes)} scenes of {SECTION_MIN_WORDS}-{SECTION_MAX_WORDS} words (was {len(original_blocks)} blocks); no words changed.")
+    if adjusted:
+        notes.append(f"{adjusted} scene break(s) fall inside a sentence; a full stop was added there because every scene must end in sentence punctuation (punctuation only, no words).")
     total = sum(_words(s) for s in scenes)
     chosen = max(MIN_SECONDS, min(MAX_SECONDS, length_s))
     budget = reference_word_budget(chosen)

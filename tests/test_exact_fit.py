@@ -95,5 +95,34 @@ def test_random_scripts_keep_every_word_in_order_and_fit_the_layout():
         fitted = fit_exact_script(script, rng.choice([30, 45, 60, 90]))
         scenes = fitted.text.split('\n\n')
         if not any('dropped' in note for note in fitted.notes):
-            assert re.sub(r'\s+', ' ', ' '.join(scenes)).split() == re.sub(r'\s+', ' ', script).split()
-        assert all(spoken_words(scene) <= 15 for scene in scenes) and 30 <= fitted.length_s <= 90
+            strip = lambda text: [re.sub(r'[.,;:!?…—"\')\]]+$', '', t) for t in text.split()]   # punctuation at a cut may change, words may not
+            assert strip(' '.join(scenes)) == strip(script)
+        assert all(re.search(r'[.!?…]["\')\]]*$', scene) for scene in scenes[:-1])   # the scene validator rejects anything else
+        floor = 8 if spoken_words(script) >= 8 else 1          # a script under 8 words in total cannot make an 8-word scene
+        assert all(floor <= spoken_words(scene) <= 15 for scene in scenes) and 30 <= fitted.length_s <= 90   # the layout validator rejects anything else
+
+
+def test_a_short_sentence_between_two_long_ones_is_not_left_as_a_scene_of_its_own():
+    """Found by the first live exact-script run: a 5-word block next to 11- and 12-word neighbours was neither kept
+    nor mergeable, and the layout validator rejected the writer's output twice."""
+    from tubeforge.pipeline.exact_fit import fit_exact_script
+    from tubeforge.pipeline.script_fit import spoken_words
+    script = ("Relational databases keep data in rows and columns, like a spreadsheet.\n\n"
+              "The catch is stale reads.\n\n"
+              "A read can briefly return older data instead of the latest.")
+    scenes = fit_exact_script(script, 60).text.split("\n\n")
+    assert all(8 <= spoken_words(scene) <= 15 for scene in scenes)
+    assert re.sub(r"[.,;:!?]", "", " ".join(scenes)).split() == re.sub(r"[.,;:!?]", "", script).split()
+    assert all(re.search(r"[.!?…]$", scene) for scene in scenes[:-1])
+
+
+def test_a_cut_inside_a_sentence_ends_the_scene_with_a_full_stop_and_says_so():
+    """The second live-run finding: a scene ending on a comma is rejected (sentence punctuation is required)."""
+    from tubeforge.pipeline.exact_fit import fit_exact_script
+    script = ("As social media sites grew, one machine could no longer hold everything, so NoSQL spreads data across "
+              "clusters of machines, which is called horizontal scaling, and it keeps working as traffic grows.")
+    fitted = fit_exact_script(script, 60)
+    scenes = fitted.text.split("\n\n")
+    assert len(scenes) >= 2 and all(scene.endswith(".") for scene in scenes)
+    assert not any(scene.rstrip(".").endswith(",") for scene in scenes)
+    assert any("full stop was added" in note for note in fitted.notes)
