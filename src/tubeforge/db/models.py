@@ -159,6 +159,11 @@ class DestinationDeliveryRecord(Base):
     remote_id: Mapped[str | None] = mapped_column(String(500))
     remote_url: Mapped[str | None] = mapped_column(Text)
     remote_session_id: Mapped[str | None] = mapped_column(Text)
+    remote_session_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remote_container_id: Mapped[str | None] = mapped_column(String(500))
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    youtube_schedule_audited: Mapped[bool] = mapped_column(nullable=False, default=False)
+    paused_from_state: Mapped[str | None] = mapped_column(String(32))
     requested_action: Mapped[str | None] = mapped_column(String(32))
     requested_by: Mapped[str | None] = mapped_column(String(64))
     requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -185,6 +190,17 @@ class DeliveryAttemptRecord(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class YouTubeQuotaChargeRecord(Base):
+    """Conservative per-delivery reservation against a Pacific-time API day."""
+    __tablename__ = "youtube_quota_charges"
+    __table_args__ = (UniqueConstraint("quota_day", "delivery_id", name="uq_youtube_quota_day_delivery"),)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    quota_day: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    delivery_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    units: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class PublisherWorkerHeartbeatRecord(Base):

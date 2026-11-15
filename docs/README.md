@@ -7,6 +7,7 @@ Public documentation. Start with the [project README](../readme.md).
 - [operations/api-workflow.md](operations/api-workflow.md) — reviewing and approving a job through the API
 - [operations/platform-integrations.md](operations/platform-integrations.md) — YouTube, Meta and other platform setup
 - [script-naturalness-plan.md](script-naturalness-plan.md) — plan to make scripts less robotic (review of three outside repos, mapped review points, phases P0–P4)
+- [publishing-plan.md](publishing-plan.md) — YouTube + Instagram upload pipeline: operator credentials, phases P1–P5, Claude/Codex split
 - [batch-plans.md](batch-plans.md) — batch plans: import, queue, day review, staged export, overnight schedule
 - [deploy/](deploy) — systemd units and runtime notes for the Codex and Claude script runners; `scripts/restart_stack.sh` restarts the whole stack
 - [SHORT_FORM_VIDEO_RULEBOOK.md](SHORT_FORM_VIDEO_RULEBOOK.md) — the video quality standard every render is judged against

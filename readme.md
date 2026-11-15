@@ -14,7 +14,7 @@ You brief a topic in the Creator Studio dashboard (or let a schedule pick one). 
 - Local narration (Kokoro, Piper) with Whisper word alignment
 - Final-video quality checks: decodability, loudness (−15…−13 LUFS), true peak (≤ −1.5 dB)
 - Dashboard with login, CSRF protection, audited approvals, topic queue, schedules and activity history
-- Publishing preparation: title, description and thumbnail suggestions; encrypted OAuth credential envelopes; dry-run YouTube upload
+- Publishing preparation: title, description and thumbnail suggestions; encrypted OAuth credentials; a private YouTube delivery queue under local verification
 - Structured, rotating, redacted application logs
 
 ## Engineering Highlights
@@ -44,7 +44,7 @@ Host script runner (Codex / Claude CLI over a Unix socket)
 Local services: Piper TTS server, FFmpeg, headless Chromium for source captures
 ```
 
-Services run under Docker Compose: `web`, `worker`, `scheduler`, `piper-tts`, a one-shot `migrate`, and an optional `publisher-worker`.
+Services run under Docker Compose: `web`, `worker`, `scheduler`, `publisher-worker`, `piper-tts`, and a one-shot `migrate`. The publisher stays idle without a valid account encryption key.
 
 ## Trade-offs
 
@@ -70,7 +70,7 @@ Prerequisites: Docker with Compose, FFmpeg for host-side checks, and operator-su
 git clone https://github.com/uditaswal/TubeForge.git && cd TubeForge
 cp .env.example .env              # fill in values; never commit .env
 docker compose build              # large first build
-docker compose up -d web worker scheduler
+docker compose up -d web worker scheduler publisher-worker
 docker compose exec web python -m tubeforge.cli create-admin --username you
 ```
 
@@ -125,4 +125,4 @@ docs/                       Public documentation
 
 In **Generations → Revise one scene**, direction warnings show the selected scene’s teaching purpose/reveal gaps and similar recent channel angles. These are advisory; saving an edit creates a separate draft that needs fresh exact-script and preview approval. Older videos without saved channel context say so.
 
-Local rendering, review and approval workflows are working. Live YouTube upload is gated behind operator OAuth credentials and dry-run by default; Instagram publishing is not implemented. Operator-facing setup details beyond this page are in the `docs/` guides above.
+In Day review, an approved final can be used to prepare a destination draft; review that draft in Publishing before submitting or choosing an India-time slot. Scheduled pending deliveries can be paused, resumed or cancelled when eligible. YouTube and Instagram connection controls are present; Instagram publication remains unavailable until its adapter and confirmation gate are integrated. Local rendering, review and approval workflows are working. Private YouTube delivery has local fake-service coverage but is not yet verified with a real account; each real upload requires a separate operator go-ahead. Approve the exact final and disclosure in Day review before preparing a YouTube draft. See [platform integrations](docs/operations/platform-integrations.md) for credentials, quota and reconnect details. The Publishing screen reports the audit-pending state; a full scheduling calendar and Instagram publication still need work. Operator-facing setup details beyond this page are in the `docs/` guides above.

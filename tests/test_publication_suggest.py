@@ -61,9 +61,11 @@ def test_youtube_adapter_sets_the_staged_thumbnail_best_effort(tmp_path):
     import httpx
     from tubeforge.providers.publishing.account_youtube import AccountYouTubeAdapter
 
-    digest = "b" * 64
+    import hashlib
+    thumbnail = b"\xff\xd8jpeg"
+    digest = hashlib.sha256(thumbnail).hexdigest()
     (tmp_path / "thumbnails").mkdir()
-    (tmp_path / "thumbnails" / f"{digest}.jpg").write_bytes(b"\xff\xd8jpeg")
+    (tmp_path / "thumbnails" / f"{digest}.jpg").write_bytes(thumbnail)
     seen = []
 
     def handler(request):
@@ -76,6 +78,9 @@ def test_youtube_adapter_sets_the_staged_thumbnail_best_effort(tmp_path):
     adapter._apply_thumbnail("vid123", "token", video, {})  # no thumbnail chosen
     adapter._apply_thumbnail("vid123", "token", video, {"thumbnail_sha256": "d" * 64})  # not staged
     assert seen == [("/upload/youtube/v3/thumbnails/set", "vid123")]
+    (tmp_path / "thumbnails" / f"{digest}.jpg").write_bytes(b"changed")
+    adapter._apply_thumbnail("vid123", "token", video, {"thumbnail_sha256": digest})
+    assert len(seen) == 1
 
     def failing(request):
         raise httpx.ConnectError("down")

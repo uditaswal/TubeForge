@@ -25,7 +25,7 @@ def test_fresh_sqlite_database_upgrades_to_head(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261105_0032"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261111_0035"
             assert connection.execute(text("SELECT mode, preferred_model, actor FROM script_routing_policies LIMIT 0")).keys() == ["mode", "preferred_model", "actor"]
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_connections'")).scalar_one() == "oauth_connections"
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publishing_assets'")).scalar_one() == "publishing_assets"
@@ -36,6 +36,8 @@ def test_fresh_sqlite_database_upgrades_to_head(tmp_path: Path) -> None:
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publisher_worker_heartbeats'")).scalar_one() == "publisher_worker_heartbeats"
             assert connection.execute(text("SELECT reviewed_identity, submitted_at, submitted_by FROM publish_jobs LIMIT 0")).keys() == ["reviewed_identity", "submitted_at", "submitted_by"]
             assert connection.execute(text("SELECT requested_action, requested_by, requested_at FROM destination_deliveries LIMIT 0")).keys() == ["requested_action", "requested_by", "requested_at"]
+            assert connection.execute(text("SELECT scheduled_for, paused_from_state, youtube_schedule_audited, remote_container_id, remote_session_expires_at FROM destination_deliveries LIMIT 0")).keys() == ["scheduled_for", "paused_from_state", "youtube_schedule_audited", "remote_container_id", "remote_session_expires_at"]
+            assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='youtube_quota_charges'")).scalar_one() == "youtube_quota_charges"
             assert connection.execute(text("SELECT invocation_count, failure_json FROM generation_cache LIMIT 0")).keys() == ["invocation_count", "failure_json"]
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='heavy_work_leases'")).scalar_one() == "heavy_work_leases"
             assert connection.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='publication_observations'")).scalar_one() == "publication_observations"

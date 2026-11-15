@@ -3,6 +3,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import date
+import json
 from typing import Literal
 from tubeforge.batch_plans import parse_batch
 from tubeforge.db.batch_plans import BatchPlanRepository
@@ -27,6 +28,12 @@ class BatchReviewRequest(BaseModel):
     disclosure_required: bool | None = None
     action: Literal['approve', 'reject', 'ready', 'regenerate']
     reviewed_identity: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+
+class CrosspostDraftRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    reviewed_identity: str = Field(pattern=r'^[a-f0-9]{64}$')
+    destination_account_ids: list[str] = Field(min_length=2, max_length=20)
 
 
 class BatchAutomationRequest(BaseModel):
@@ -90,6 +97,9 @@ def register_batch_routes(app, runtime, build_request):
         combined = {item['short']['id']: item['short'] for item in repository.list()}
         combined.update(incoming)
         cadence = cadence_report(list(combined.values()), app.state.settings.channel_safety)
+        from tubeforge.pipeline.channel_reports import scope_cadence_to_ids
+        # Only warn about the shorts in this import; older shorts' warnings stay on the Batch plans page.
+        cadence = scope_cadence_to_ids(cadence, [short.id for short in plan.shorts])
         from tubeforge.pipeline.script_fit import analyze_script
         from tubeforge.core import runtime_settings as runtime_values
         from tubeforge.pipeline.exact_fit import fit_exact_script
@@ -184,6 +194,43 @@ def register_batch_routes(app, runtime, build_request):
     @app.get('/api/batch-plans/review', tags=['batch'])
     def day_review(day: date | None = None):
         return reviews.list_day(day.isoformat() if day else None)
+
+    @app.get('/api/batch-plans/{short_id}/post-defaults', tags=['batch'])
+    def crosspost_defaults(short_id: str, reviewed_identity: str, request: Request):
+        if runtime.auth.session(request.cookies.get('tubeforge_session')) is None:
+            raise HTTPException(401, detail='Studio sign-in is required')
+        from tubeforge.pipeline.publication_crosspost import DayReviewCrosspost
+        try:
+            return DayReviewCrosspost(runtime.database.session_factory, reviews, None, None).preview(short_id, reviewed_identity)
+        except KeyError as error:
+            raise HTTPException(404, detail='reviewed short not found') from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, detail=str(error)) from error
+
+    @app.post('/api/batch-plans/{short_id}/prepare-post', status_code=201, tags=['batch'])
+    def prepare_crosspost(short_id: str, value: CrosspostDraftRequest, request: Request):
+        if runtime.auth.session(request.cookies.get('tubeforge_session')) is None:
+            raise HTTPException(401, detail='Studio sign-in is required')
+        from tubeforge.pipeline.manual_publish import ManualPublishService
+        from tubeforge.pipeline.publication_crosspost import DayReviewCrosspost
+        from tubeforge.pipeline.publishing_assets import PublishingAssetRegistry
+        settings = app.state.settings
+        assets = PublishingAssetRegistry(runtime.database.session_factory, runtime.jobs, runtime.artifacts,
+            settings.pipeline.voice.artifact_root, ffprobe=str(settings.pipeline.voice.ffprobe_executable))
+        drafts = ManualPublishService(runtime.database.session_factory, review_repository=reviews)
+        try:
+            post = DayReviewCrosspost(runtime.database.session_factory, reviews, assets, drafts).prepare(
+                short_id, value.reviewed_identity, value.destination_account_ids)
+        except KeyError as error:
+            raise HTTPException(404, detail='reviewed short not found') from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, detail=str(error)) from error
+        return {'id': post.id, 'state': post.state, 'asset_id': post.asset_id,
+                'source_review_identity': value.reviewed_identity,
+                'reviewed_identity': drafts.review_identity(post.id),
+                'destinations': [{'id': item.id, 'account_id': item.account_id, 'platform': item.platform,
+                                  'state': item.state, 'metadata': json.loads(item.metadata_json)}
+                                 for item in drafts.deliveries(post.id)]}
 
     @app.get('/api/batch-plans/safety-report', tags=['batch'])
     def safety_report(day: date | None = None):

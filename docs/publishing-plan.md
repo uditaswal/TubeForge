@@ -1,0 +1,219 @@
+# Publishing plan: YouTube + Instagram upload pipeline
+
+The YouTube backend, publishing UI and Instagram connection code are integrated on `dev`; Instagram publication remains disabled.
+Status: P1 and P3–P5 backend **IMPLEMENTED**; real upload, Instagram integration and end-to-end acceptance are **BLOCKED**.
+Goal: an approved final from Day review or Publishing goes, without manual file handling, to the
+operator's YouTube channel and Instagram professional account. It goes first as private or
+immediate posts, then at scheduled slots. Each post's remote state is verified and shown in Studio.
+
+The operator's only job is to create the platform credentials (section 1) and to review or approve
+in Studio. Claude and Codex do everything else.
+
+## 0. What already exists (on `dev`)
+
+| Piece | File | State |
+|---|---|---|
+| Google OAuth connect (state + PKCE, channel confirm page, encrypted envelope) | `security/google_oauth.py`, `security/oauth_state.py`, `api/app.py` `/api/oauth/youtube/*` | IMPLEMENTED, never run with real creds |
+| Token refresh with fencing | `security/account_credentials.py` (`GoogleCredentialRefresher`, `AccountCredentialManager`) | IMPLEMENTED |
+| Drafts → reviewed identity → submit | `pipeline/manual_publish.py`, `/api/publishing/drafts*` | IMPLEMENTED (YouTube-only gate in `submit`/`actions`) |
+| Durable delivery queue, leases, unknown-outcome reconcile/resume | `pipeline/delivery_queue.py`, `pipeline/delivery_executor.py` | IMPLEMENTED |
+| YouTube resumable upload + thumbnail + inspect | `providers/publishing/account_youtube.py` | IMPLEMENTED, no live upload yet |
+| Publisher worker (default Compose services) | `publishing_worker/main.py` | IMPLEMENTED, registers `youtube` only |
+| Instagram | separate container delivery core | fake-backed core **VERIFIED**; provider integration pending |
+| Scheduling at slots (`publishAt`, Instagram slot submit) | delivery queue and scheduling API | backend **IMPLEMENTED**, live scheduling unverified |
+| Day review → publish hand-off | `pipeline/publication_batch_export.py`, batch publishing API | **IMPLEMENTED**, fake-tested |
+
+P1 status (11 Nov): **IMPLEMENTED**. The requested publishing/delivery/OAuth/account/scheduling regression selection passed (99 passed, 1 opt-in browser skip); the browser check was run separately and passed. Loopback OAuth, reviewed disclosure binding,
+private-only adapter fields, local H.264/AAC 9:16 preflight, a durable estimated daily
+quota reservation and per-platform readiness are implemented. A fake-service test
+runs an approved review through upload and remote metadata verification; the quota
+migration upgraded, downgraded and re-upgraded on a temporary database. The signed-in
+readiness screen passed Chromium checks at 1440, 768 and 390 px; captures are under
+`artifacts/review/publishing-p1-readiness/`. The feature worktree has no `.env`; the original project `.env` now has nonempty encryption and Google OAuth entries, whose validity has not been tested. A real private upload and remote copy inspection are **BLOCKED** until an exact final is approved and the operator authorizes its private upload. Scheduling and the Instagram-shaped delivery core are implemented locally; the real Instagram provider remains unintegrated. The local quota is a conservative estimate of
+TubeForge upload reservations; it cannot see other applications' Google API usage.
+
+## 1. Operator: credentials only (one-time)
+
+All values go in the project `.env` (git-ignored, read by Compose). Never paste them in chat or commit them.
+
+**Shared**
+- `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY`: generate with
+  `.venv-benchmark/bin/python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+  Back it up: losing it means reconnecting every account.
+
+**YouTube (Google Cloud Console)**
+1. Create a project and enable **YouTube Data API v3** (also YouTube Analytics API if you want stats later).
+2. OAuth consent screen: External, Testing mode, and add your Google account as a test user.
+   Scopes: `youtube.upload`, `youtube.readonly`.
+3. Credentials → OAuth client ID → **Web application**. Authorized redirect URI:
+   `http://127.0.0.1:62065/oauth/youtube/callback` (Google allows loopback http; see D1).
+4. Put the values in `.env`: `TUBEFORGE_GOOGLE_OAUTH_CLIENT_ID`, `TUBEFORGE_GOOGLE_OAUTH_CLIENT_SECRET`,
+   `TUBEFORGE_GOOGLE_OAUTH_REDIRECT_URI`.
+5. **Submit the YouTube API Services audit form** (the "Audit and quota extension" form) when you
+   set up the client. Google locks uploads from unaudited projects to **private**, and the audit
+   takes weeks. Private uploads still work for phases P1–P3.
+
+**Instagram (Meta for Developers)**
+1. The Instagram account must be **Professional** (Business or Creator). A Facebook Page is not needed with Instagram Login.
+2. Create an app (type Business) → add product **Instagram → API setup with Instagram login**.
+3. Permissions: `instagram_business_basic`, `instagram_business_content_publish`. App stays in
+   Development mode. Add your Instagram account under App roles → Instagram testers, and accept
+   the invite in the Instagram app (Settings → Website permissions → Apps and websites).
+4. Configure the HTTPS redirect URI required for the Meta app; the local callback setup remains unverified (see D1).
+5. Put the values in `.env`: `TUBEFORGE_INSTAGRAM_APP_ID`, `TUBEFORGE_INSTAGRAM_APP_SECRET`,
+   `TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI`.
+
+After that: `scripts/restart_stack.sh`, open Studio → Accounts → Connect, approve on the platform, and confirm the exact channel or account shown.
+
+## 2. Decisions (recommendation first)
+
+- **D1 OAuth callback over the SSH tunnel (not yet verified against Meta).** *Recommended:* accept `http://127.0.0.1`/`localhost`
+  redirects for Google only (Google permits loopback). Meta requires https, so add an opt-in
+  loopback TLS listener on the same port (self-signed `localhost` certificate, created by a script).
+  The fallback for Instagram is to paste the long-lived token from the Meta dashboard ("Generate
+  token") into a write-only form. Nothing is ever exposed publicly.
+- **D2 Instagram video transfer.** *Recommended:* Graph API **resumable upload**
+  (`upload_type=resumable` → `rupload.facebook.com`), which sends bytes from local disk. The design
+  doc's "serve the asset over public HTTPS" option would expose a port. Not chosen.
+- **D3 Default visibility.** YouTube `private` until the audit passes, then `publishAt` scheduled.
+  Instagram has no private mode: every Instagram publish is public at once, so its submit always
+  needs an explicit per-post confirmation.
+- **D4 Autopublish.** Never by default. Approving in Day review marks a post *ready to schedule*.
+  The operator still clicks Schedule (one click per day is fine). An opt-in "auto-schedule approved
+  posts for plan X" stays off until P5 is VERIFIED.
+
+## 3. Phases
+
+One phase at a time. Each phase needs its acceptance evidence before the next one starts.
+
+### P1: YouTube private upload works end to end. Owner: **Codex** (wrote the delivery core)
+- Outcome: one approved Short is uploaded as **private** to the real channel from Studio, verified
+  `processed`, with its thumbnail. Studio shows the remote link.
+- Work:
+  - D1 loopback redirect for Google.
+  - Send `selfDeclaredMadeForKids=false` (configurable), `containsSyntheticMedia` from
+    `disclosure_record.json`, and the category from config.
+  - Shorts preflight: ≤ 180 s, 9:16, size limit.
+  - Quota ledger (units per day, refuse before the cap).
+  - Publisher worker readiness in `/api/publishing/status`.
+  - Operator runbook in `docs/operations/platform-integrations.md`.
+- Acceptance:
+  - Unit tests with a fake httpx transport for every new field.
+  - One real private upload. Its `videos.list` snapshot matches the reviewed title, description
+    and privacy, and the remote frames are checked against the local final.
+  - Signed-in Studio flow tested in Chromium.
+- Out of scope: Instagram, scheduling, public visibility.
+
+### P2: Instagram connect + Reels publish. Owner: **Claude**
+**Status: connection code IMPLEMENTED and fake-tested; Instagram publication BLOCKED until its adapter supports the durable container protocol. The real connection and publication remain unverified. Review: `docs/instagram-publishing-review.md`.**
+- Outcome: Studio connects the Instagram professional account and publishes one approved Reel
+  through the same drafts → submit → delivery queue. Studio shows the permalink.
+- Work:
+  - `security/instagram_oauth.py`: Instagram Login, code → short-lived → long-lived (60 d) token,
+    `/me` identity check.
+  - `InstagramCredentialRefresher` (refresh when under 10 days remain).
+  - `providers/publishing/account_instagram.py` implementing `DestinationAdapter`:
+    - open session = REELS container with `upload_type=resumable`;
+    - upload = rupload bytes, then poll `status_code`, then `media_publish`;
+    - inspect = `/{media-id}?fields=permalink,caption,owner`;
+    - `inspect_session` = container status.
+  - Container 24 h lifetime and the 100 posts / 24 h limit (`content_publishing_limit`).
+  - Worker leaves `instagram` disabled until the adapter supports the container protocol. API gates `submit`/`actions`/`status` become per-platform
+    instead of YouTube-only.
+  - Studio Connect button, the public-post confirmation (D3), and a caption/hashtag preview
+    (2,200 chars, 30 hashtags).
+- Acceptance:
+  - Adapter tests on a fake transport, covering the publish-twice guard and unknown outcomes.
+  - **Codex reviews** the adapter against the executor's lease and unknown-outcome invariants.
+  - One real Reel publish after the operator confirms that exact post. The permalink is opened
+    and the remote caption matches.
+  - Studio tested at desktop, tablet and mobile widths.
+- Out of scope: Facebook Reels, carousel or story posts, comments.
+
+### P3: Cross-post from one review. Owners: **Claude** (UI) + **Codex** (backend)
+
+Backend **IMPLEMENTED**: authenticated defaults and draft-preparation endpoints bind the current Day-review identity, stage the checksummed final/thumbnail, derive destination-specific metadata, and record explicit Instagram confirmation at service submission. The 17-test focused group and 107-test publishing regression selection passed. Day-review draft preparation UI and connection UI are **IMPLEMENTED**; the integrated public Instagram gate and the real cross-post remain **NOT STARTED**, so P3 is not end-to-end verified. Contract: `docs/HANDOFF.md`.
+- Outcome: in Day review / Publishing, one approved final makes one draft with both destinations,
+  each with its own platform metadata (YouTube title + description + tags; Instagram caption +
+  hashtags), all from `publication_suggest.py`. The operator reviews it once and submits once.
+- Codex: draft creation from a day-review approval (checksum-bound, reusing
+  `publication_batch_export` identity) and per-destination metadata defaults.
+- Claude: Day review "Prepare post" action, destination chips and per-platform editors, and
+  per-destination state chips (queued → uploading → processing → published / needs attention /
+  reconnect).
+- Acceptance: one real final posted to both platforms from one review. The Activity log shows both
+  outcomes, and a forced failure on one destination leaves the other intact.
+
+### P4: Scheduled publishing at slots. Owner: **Codex** (backend) + **Claude** (UI)
+
+Backend **IMPLEMENTED**: per-destination UTC slots, a 30-minute Instagram preparation window and late grace, audited cadence-warning override, and distinct pause/cancel actions. YouTube starts privately; a future `publishAt` requires both the audit flag and an explicit per-schedule future-public confirmation, which is frozen with the delivery. A late audited YouTube slot is refused locally rather than sent as a past `publishAt`. Frozen-clock on-time/late/missed/downtime/IST, override and boundary-fencing tests passed (10 focused); the signed-in audit/readiness check passed at three widths, the 0035 migration round trip passed, and the publishing regression selection passed 117 tests with one separately run browser skip. A private YouTube date-and-slot control and pending actions are **IMPLEMENTED**; a full calendar and any real scheduled post remain unverified. Out of scope: real scheduling without exact-post authorization and public release.
+- Outcome: the operator schedules approved posts to the plan's slots (13:00 / 19:00 IST). Posts
+  go out on time without the operator present.
+- Codex:
+  - `scheduled_for` on deliveries (migration).
+  - YouTube: upload early as private with `status.publishAt` (needs the audit; until then, a
+    clear "audit pending: private only" state).
+  - Instagram: the worker starts the container at slot − 30 min and publishes at the slot.
+  - Late policy: 30 min grace, then missed; never burst-publish after downtime.
+  - Enforce the M-S7 cadence guard at schedule time (warn, operator overrides).
+  - Pause and cancel pending.
+- Claude: Publishing calendar (day/week), drag-free "Schedule to next free slot", and states for
+  missed or paused posts.
+- Acceptance: a frozen-clock test suite, plus one real scheduled private YouTube post and one real
+  scheduled Instagram post landing within 2 min of their slots.
+
+### P5: Operations hardening. Split
+
+Backend **IMPLEMENTED**: default worker startup, idle readiness without a valid encryption key, bounded retry hints and jitter, quota pause/resume, credential fencing and recovery burst protection. Seven simulated days produced 42 successful fake deliveries, zero duplicates and zero losses (`artifacts/review/publishing-backend-soak-20261112/summary.json`). A signed-in three-width readiness check passed. Real-week acceptance and Claude-owned UI/provider work remain unverified.
+- **Claude:**
+  - Alerts in Studio for `auth_required`, token expiring in under 10 days, quota near the cap, and
+    missed slots.
+  - Reconnect flow for both platforms.
+  - Runbook and readme updates.
+  - Remote snapshot verification shown with a "remote differs" warning.
+- **Codex:**
+  - Publisher worker added to `scripts/restart_stack.sh` / Compose default profile.
+  - Backoff with provider hints (`Retry-After`, Instagram `x-app-usage`).
+  - A 7-day dry run with a fake adapter at plan volume, checking no duplicate and no lost post.
+- Acceptance:
+  - 7-day soak (fake adapter) has 0 duplicates and 0 lost posts.
+  - One real week of scheduled private YouTube posts and the operator's chosen Instagram posts.
+  - The operator's sign-off makes publishing **VERIFIED**.
+
+Later (not in this plan): YouTube/Instagram analytics ingestion into channel reports, Facebook Reels, public YouTube once the audit passes (only a config flip if P4 holds).
+
+## Backend execution checkpoints (11 Nov 2026)
+
+Proceed in order; each checkpoint is accepted locally before the next. Live platform actions require separate authorization for the exact post.
+
+| Checkpoint | User-visible outcome | Acceptance test and evidence | Out of scope |
+|---|---|---|---|
+| P1 | Safe private YouTube upload and readiness | Fake-transport field and preflight tests, durable quota tests, signed-in Studio check; real private upload and remote inspection separately authorized | Instagram, schedules, public visibility |
+| Delivery core — **VERIFIED** for fake-backed local scope | Instagram-shaped upload, expiry and separate publication are crash-safe | 8 fake adapter tests; publishing selection 106 passed, 1 opt-in browser skip; container migration round trip passed | Instagram provider and OAuth implementation, real publication |
+| P3 — **IMPLEMENTED** backend | One checksum-bound review creates independent destination drafts | API and isolation tests: 17 focused passed; publishing selection 107 passed, 1 separately run browser skip | Claude's UI and platform gate; real cross-post |
+| P4 — **IMPLEMENTED** backend | Pending posts honor slots, audit restrictions, grace and cadence | 10 frozen-clock tests; migration round trip; three-width signed-in audit check; publishing selection 117 passed, 1 separately run browser skip | Live schedule without exact-post approval; Claude's UI |
+| P5 — **IMPLEMENTED** backend | Worker starts safely and retries respect provider limits | 42 fake deliveries over seven days; zero duplicates or losses; retry tests and signed-in responsive check | Real week or public publication without approval |
+
+## 4. Relay order and hand-offs
+
+1. Operator: section 1 credentials (any time; P1 can start with fakes before they exist).
+2. Codex P1 ∥ Claude P2 (separate files; the only shared edit is the platform gate in `api/app.py`.
+   Claude takes that edit and Codex reviews it).
+3. P3 after P1 and P2 are VERIFIED. Then P4, then P5.
+4. Each agent works on a sub-branch off `feature/publish-pipeline` (`codex/publish-youtube`,
+   `claude/publish-instagram`) and merges back after review.
+   `feature/publish-pipeline` → `dev` → `main` only with the operator's explicit approval each time.
+5. Live calls: every real upload or publish in P1–P4 is a separate operator go-ahead for that exact
+   post. Agents never publish publicly on their own (`AGENTS.md`: "publish anything to YouTube" is
+   forbidden without it).
+
+## 5. Risks
+
+- YouTube audit not passed → no public or scheduled visibility. Private posts are still fine.
+  Mitigation: submit the form on day 1.
+- Meta app in Development mode works only for app-role accounts. That is enough for the operator's
+  own account; publishing to other people's accounts would need App Review. Not planned.
+- Instagram posts cannot be made private, so a wrong post is public at once. Mitigation: the
+  explicit confirmation (D3), and P2's first real test uses a throwaway Professional account if the
+  operator has one.
+- Host load: uploads are I/O only and run in the separate publisher worker, under 768 MB.

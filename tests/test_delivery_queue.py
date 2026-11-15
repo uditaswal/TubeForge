@@ -14,6 +14,11 @@ from tubeforge.pipeline.delivery_queue import DeliveryQueue
 from tubeforge.pipeline.manual_publish import ManualPublishService
 
 
+@pytest.fixture(autouse=True)
+def _reviewed_disclosure_for_queue_tests(monkeypatch):
+    monkeypatch.setattr("tubeforge.pipeline.manual_publish.reviewed_youtube_disclosure", lambda session, asset, reviews: {"contains_synthetic_media": False, "reviewed_identity": "review", "evidence_identity": "evidence", "record_sha256": "record"})
+
+
 def test_delivery_claims_are_fenced_and_parent_waits_for_each_remote_receipt(tmp_path: Path) -> None:
     database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'deliveries.db'}"))
     Base.metadata.create_all(database.engine)

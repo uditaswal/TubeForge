@@ -107,9 +107,25 @@ def test_claude_runner_accepts_the_long_excerpt_prompt_that_the_old_60k_limit_re
     assert 60_000 < len(prompt) <= host_claude_runner.MAX_PROMPT_CHARS
 
 
+def _synthetic_hyperframes_timeline():
+    from test_reference_shorts import topic_data
+    from tubeforge.rendering.shorts.schema import ShortsTopic
+    from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
+    data = topic_data()
+    data['scenes'][-1] = {**data['scenes'][0], 'scene_id': 'closing-loop', 'template': 'loop'}
+    for scene in data['scenes']:
+        scene['caption'] = scene['vo']
+    topic = ShortsTopic.model_validate(data)
+    timings = []
+    for i, scene in enumerate(topic.scenes):
+        step = 3.65 / len(scene.vo.split())
+        words = tuple(Word(i * 4 + j * step, i * 4 + (j + 1) * step) for j in range(len(scene.vo.split())))
+        timings.append(SceneTiming(i * 4, (i + 1) * 4, words, 'synthetic test timing'))
+    return Timeline(topic, tuple(timings))
+
+
 def test_hyperframes_gets_a_writable_home_so_chromium_starts_under_the_worker_uid(tmp_path, monkeypatch):
     """The worker's HOME is '/', unwritable for Chromium's profile; both HyperFrames paths must override it."""
-    from test_hyperframes_evidence_quote import _fixture
     from tubeforge.rendering.shorts import hyperframes_compose, story
     seen = []
     def fake_check(project, **kwargs):
@@ -117,7 +133,7 @@ def test_hyperframes_gets_a_writable_home_so_chromium_starts_under_the_worker_ui
         raise RuntimeError("stop after the first check")
     for module in (story, hyperframes_compose):
         monkeypatch.setattr(module.cli, "check", fake_check)
-    timeline = _fixture()
+    timeline = _synthetic_hyperframes_timeline()
     for module in (story, hyperframes_compose):
         with pytest.raises(RuntimeError, match="stop after"):
             module.render_silent(timeline, tmp_path / "out.mp4", draft=True, plates_directory=None, hyperframes_bin="/bin/true")
@@ -137,12 +153,11 @@ def test_short_scratch_keeps_chromium_profile_socket_paths_under_the_unix_limit(
 
 
 def test_a_hyperframes_failure_fails_the_render_instead_of_crashing_the_worker(tmp_path, monkeypatch):
-    from test_hyperframes_evidence_quote import _fixture
     from tubeforge.core.config import ReferenceShortConfig
     from tubeforge.core.errors import ProviderValidationError
     from tubeforge.pipeline import reference_short
     from tubeforge.rendering.hyperframes_proto.cli import HyperFramesError
-    timeline = _fixture()
+    timeline = _synthetic_hyperframes_timeline()
     def boom(*args, **kwargs):
         raise HyperFramesError("hyperframes check failed: Target closed")
     monkeypatch.setattr(reference_short, "master", boom)

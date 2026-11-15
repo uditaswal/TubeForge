@@ -75,7 +75,7 @@ def plan_template(length_s: int = 60) -> str:
 id: my-short-id            # lowercase letters, digits and dashes; unique
 title: "Up to 100 characters"
 concept: "One sentence: what this Short is about"
-length_s: {length_s}       # 30-90
+length_s: {length_s}               # 30-90
 ending: loop               # loop (last line flows into the hook) or debate (closes on a question)
 channel: engineering       # optional
 publish_at: 2026-11-10T09:00:00+05:30   # optional, metadata only
@@ -92,7 +92,7 @@ sources:                   # optional page URLs; when given, no web research run
 thumbnail: {{text: "Short Words", visual: "What the thumbnail shows"}}
 tags: [tag one, tag two]
 script_mode: assist        # assist (the writer fits and checks your script) or exact (word for word; scenes and length are fitted around your wording)
-script: |                 # optional: your own narration (the name narration works too)
+script: |                  # optional: your own narration (the name narration works too)
   Your own script, {b["aim_low"]}-{b["aim_high"]} words for {length_s} s.
   Short sentences. One idea per line or paragraph, 8-15 spoken words each.
 

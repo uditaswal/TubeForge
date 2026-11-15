@@ -7,6 +7,7 @@ import json
 from typing import Any, Callable
 
 from tubeforge.core.errors import ProviderAuthenticationError
+from tubeforge.security.oauth_redirect import valid_oauth_redirect
 
 SCOPES = (
     "https://www.googleapis.com/auth/youtube.upload",
@@ -29,8 +30,8 @@ class GoogleAccountOAuth:
         *, flow_factory: Callable[..., Any] | None = None,
         build_service: Callable[..., Any] | None = None,
     ) -> None:
-        if not client_id or not client_secret or not redirect_uri.startswith("https://"):
-            raise ValueError("Google OAuth needs a client ID, secret, and HTTPS callback")
+        if not client_id or not client_secret or not valid_oauth_redirect(redirect_uri, platform="youtube"):
+            raise ValueError("Google OAuth needs a client ID, secret, and HTTPS or loopback HTTP callback")
         self.client_id, self.client_secret, self.redirect_uri = client_id, client_secret, redirect_uri
         self._flow_factory, self._build_service = flow_factory, build_service
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
 import httpx
 import pytest
 
@@ -10,7 +12,8 @@ from tubeforge.pipeline.delivery_executor import SafePreflightError
 from tubeforge.providers.publishing.account_youtube import AccountYouTubeAdapter
 
 
-def test_account_youtube_records_session_before_bytes_and_inspects_private_post(tmp_path: Path) -> None:
+def test_account_youtube_records_session_before_bytes_and_inspects_private_post(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tubeforge.providers.publishing.account_youtube.check_youtube_short", lambda *args, **kwargs: None)
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video bytes")
     calls: list[str] = []
@@ -24,7 +27,9 @@ def test_account_youtube_records_session_before_bytes_and_inspects_private_post(
         if request.method == "POST":
             assert request.url.params["uploadType"] == "resumable"
             assert request.headers["X-Upload-Content-Length"] == str(video.stat().st_size)
-            assert b'"privacyStatus":"private"' in request.content
+            body = json.loads(request.content)
+            assert body["snippet"]["categoryId"] == "28"
+            assert body["status"] == {"privacyStatus": "private", "selfDeclaredMadeForKids": True, "containsSyntheticMedia": False}
             return httpx.Response(200, headers={"Location": session})
         if request.method == "PUT":
             assert str(request.url) == session
@@ -35,9 +40,9 @@ def test_account_youtube_records_session_before_bytes_and_inspects_private_post(
         return httpx.Response(200, json={"items": [{"id": "video-id", "snippet": {"channelId": "UC-real", "title": "Title", "description": "Description"}, "status": {"privacyStatus": "private"}, "processingDetails": {"processingStatus": "succeeded"}}]})
 
     client = httpx.Client(transport=httpx.MockTransport(respond), follow_redirects=False)
-    adapter = AccountYouTubeAdapter(client)
+    adapter = AccountYouTubeAdapter(client, category_id="28", self_declared_made_for_kids=True)
     credential = {"token": "scoped-token"}
-    metadata = {"title": "Title", "caption": "Description"}
+    metadata = {"title": "Title", "caption": "Description", "contains_synthetic_media": False}
     opened = adapter.open_session(external_account_id="UC-real", credential=credential, asset_path=video, metadata=metadata)
     assert opened == session and calls == ["GET", "POST"]
     receipt = adapter.upload(session_id=opened, external_account_id="UC-real", credential=credential, asset_path=video, metadata=metadata, heartbeat=lambda: True)
@@ -47,7 +52,8 @@ def test_account_youtube_records_session_before_bytes_and_inspects_private_post(
     client.close()
 
 
-def test_account_youtube_rejects_untrusted_session_url_without_upload(tmp_path: Path) -> None:
+def test_account_youtube_rejects_untrusted_session_url_without_upload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tubeforge.providers.publishing.account_youtube.check_youtube_short", lambda *args, **kwargs: None)
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video bytes")
     calls = 0
@@ -62,12 +68,13 @@ def test_account_youtube_rejects_untrusted_session_url_without_upload(tmp_path: 
     client = httpx.Client(transport=httpx.MockTransport(respond))
     adapter = AccountYouTubeAdapter(client)
     with pytest.raises(ValueError, match="invalid resumable"):
-        adapter.open_session(external_account_id="UC-real", credential={"token": "scoped-token"}, asset_path=video, metadata={"title": "Title", "caption": "Description"})
+        adapter.open_session(external_account_id="UC-real", credential={"token": "scoped-token"}, asset_path=video, metadata={"title": "Title", "caption": "Description", "contains_synthetic_media": True})
     assert calls == 2
     client.close()
 
 
-def test_account_youtube_refuses_different_channel_before_opening_session(tmp_path: Path) -> None:
+def test_account_youtube_refuses_different_channel_before_opening_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tubeforge.providers.publishing.account_youtube.check_youtube_short", lambda *args, **kwargs: None)
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video bytes")
     calls: list[str] = []
@@ -79,7 +86,7 @@ def test_account_youtube_refuses_different_channel_before_opening_session(tmp_pa
     client = httpx.Client(transport=httpx.MockTransport(respond))
     adapter = AccountYouTubeAdapter(client)
     with pytest.raises(SafePreflightError, match="selected channel"):
-        adapter.open_session(external_account_id="UC-real", credential={"token": "scoped-token"}, asset_path=video, metadata={"title": "Title", "caption": "Description"})
+        adapter.open_session(external_account_id="UC-real", credential={"token": "scoped-token"}, asset_path=video, metadata={"title": "Title", "caption": "Description", "contains_synthetic_media": True})
     assert calls == ["GET"]
     client.close()
 

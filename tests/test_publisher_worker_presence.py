@@ -27,3 +27,12 @@ def test_publisher_presence_expires_and_tracks_only_running_adapters(tmp_path: P
         assert presence.live_platforms(now=now + timedelta(seconds=42)) == {"instagram"}
     finally:
         database.dispose()
+
+
+def test_publisher_is_in_default_compose_and_restart_flow():
+    import yaml
+    root = Path(__file__).resolve().parents[1]
+    compose = yaml.safe_load((root / 'compose.yaml').read_text())
+    assert not compose['services']['publisher-worker'].get('profiles')
+    script = (root / 'scripts/restart_stack.sh').read_text()
+    assert 'docker compose up -d web worker scheduler publisher-worker' in script
