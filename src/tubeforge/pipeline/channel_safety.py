@@ -12,6 +12,15 @@ POLICY_URL = 'https://support.google.com/youtube/answer/14328491'
 DISCLOSURE_TEXT = 'This video uses an AI-assisted script and synthetic narration. Sources are listed below.'
 
 
+def _claimless_hook(scene, section):
+    """A hook line may open with a feeling or a scenario and cite nothing, but only when its own script
+    section says it makes no factual claim (no claim ids) and the line carries no figure. Anything else
+    in the video still needs a source; the flag is the writer's statement, so a digit overrides it."""
+    return (scene.get('template') == 'hook' and isinstance(section, dict)
+            and section.get('contains_factual_claims') is False and not section.get('claim_ids')
+            and not any(ch.isdigit() for ch in str(scene.get('vo', ''))))
+
+
 def disclosure_record(package, audio, *, job_id, final_checksum):
     """Reuse the audio licence trail and M-S2 check; missing evidence fails closed."""
     sources = (package.get('request') or {}).get('sources') or []
@@ -19,7 +28,9 @@ def disclosure_record(package, audio, *, job_id, final_checksum):
     missing = []
     if not sources or any(not s.get('url') or not s.get('excerpt') for s in sources):
         missing.append('source URLs and excerpts')
-    if not scenes or any(not s.get('vo') or (not s.get('source_ids') and s.get('template') not in {'loop', 'cta'}) for s in scenes):
+    sections = {x.get('scene_id'): x for x in package.get('script_sections') or [] if isinstance(x, dict)}
+    if not scenes or any(not s.get('vo') or (not s.get('source_ids') and s.get('template') not in {'loop', 'cta'}
+                                              and not _claimless_hook(s, sections.get(s.get('scene_id')))) for s in scenes):
         missing.append('source-grounded scenes')
     licenses = audio.get('audio_licenses') or []
     if not isinstance(licenses, list) or any(not isinstance(entry, dict) for entry in licenses):
