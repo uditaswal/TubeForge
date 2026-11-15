@@ -446,7 +446,7 @@ def main() -> None:
                     evidence = prompt_evidence(prompt)
                     with tempfile.TemporaryDirectory(dir=RUNNER_ROOT) as workspace:
                         bubblewrap_args(Path(workspace))
-                    result = HostRunnerSuccess(package={}, provenance={"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True, "operations": ["ResearchSourcesV1"]})
+                    result = HostRunnerSuccess(package={}, provenance={"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True, "operations": ["ResearchSourcesV1", "ExactScriptV1"]})
                 elif request.operation == "ResearchSourcesV1":
                     result = run_research(request)
                 else:

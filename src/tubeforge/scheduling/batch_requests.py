@@ -34,7 +34,7 @@ def build_batch_request(short, settings):
         angle=short.concept, duration_seconds=short.length_s, preset=preset,
         review_mode='manual', ending=short.ending, channel_identity=short.channel,
         operator_script=(short.narration or '').strip() or None,
-        exact_script=short.script_mode == 'exact',
+        exact_script={'exact': True, 'assist': False}.get(short.script_mode),
         video_style='story',  # the approved look; Classic is the legacy renderer
         music_track=rotated_music_track(short, settings))
     request = None

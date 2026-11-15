@@ -100,6 +100,8 @@ class ContentRequest(DomainModel):
     # Use operator_script word for word: the writer only plans the visuals around it and the writing checks are skipped.
     # Part of generation identity; omitted while False so existing jobs and cache keys are unchanged.
     exact_script: bool = False
+    # What was adapted around an exact script (re-cut scenes, length set, sentences dropped); empty (and omitted) otherwise.
+    script_fit_notes: tuple[str, ...] = ()
 
     @model_serializer(mode="wrap")
     def omit_default_script_fields(self, handler):
@@ -124,6 +126,8 @@ class ContentRequest(DomainModel):
             value.pop("operator_script", None)
         if not self.exact_script:
             value.pop("exact_script", None)
+        if not self.script_fit_notes:
+            value.pop("script_fit_notes", None)
         return value
 
     @model_validator(mode="after")

@@ -14,6 +14,8 @@ class BatchImportRequest(BaseModel):
     markdown: str = Field(max_length=2_000_000)
     commit: bool = False
     plan_id: str = Field(default="default", pattern=r"^[a-z0-9-]{1,80}$")
+    # Applies to shorts that have a script and do not set script_mode themselves.
+    script_mode: Literal["assist", "exact"] | None = None
 
 
 class BatchProduceRequest(BaseModel):
@@ -52,6 +54,7 @@ class ScriptFitRequest(BaseModel):
     text: str | None = Field(default=None, max_length=24_000)
     sections: list[str] | None = Field(default=None, max_length=500)
     length_s: int = Field(default=60, ge=30, le=90)
+    exact: bool = False   # preview the script as exact mode will use it: re-cut, length matched, sentences dropped
 
 
 def register_batch_routes(app, runtime, build_request):
@@ -63,7 +66,13 @@ def register_batch_routes(app, runtime, build_request):
         from tubeforge.pipeline.script_fit import analyze_script
         if value.text is None and value.sections is None:
             raise HTTPException(422, detail='provide text or sections')
-        return analyze_script(value.sections if value.sections is not None else value.text, value.length_s)
+        script = value.sections if value.sections is not None else value.text
+        if value.exact:
+            from tubeforge.pipeline.exact_fit import fit_exact_script
+            fitted = fit_exact_script(script if isinstance(script, str) else "\n\n".join(script), value.length_s)
+            result = analyze_script(fitted.text, fitted.length_s, check_numbers=False)
+            return {**result, "exact_fit": {"notes": list(fitted.notes), "length_s": fitted.length_s, "changed": fitted.changed}}
+        return analyze_script(script, value.length_s)
 
     @app.get('/api/script-guide', tags=['batch'])
     def script_guide(length_s: int = 60, kind: Literal['guide', 'format'] = 'guide'):
@@ -79,6 +88,10 @@ def register_batch_routes(app, runtime, build_request):
         if plan.errors:
             raise HTTPException(422, detail=[error.model_dump() for error in plan.errors])
         from tubeforge.pipeline.channel_reports import cadence_report
+        if value.script_mode:
+            for short in plan.shorts:
+                if short.narration and short.narration.strip() and short.script_mode is None:
+                    short.script_mode = value.script_mode
         results = repository.import_shorts(plan.shorts, commit=value.commit, plan_id=value.plan_id)
         incoming = {r['id']: r['short'] for r in results if r['action'] in {'created', 'updated'}}
         combined = {item['short']['id']: item['short'] for item in repository.list()}
@@ -88,8 +101,20 @@ def register_batch_routes(app, runtime, build_request):
         # Only warn about the shorts in this import; older shorts' warnings stay on the Batch plans page.
         cadence = scope_cadence_to_ids(cadence, [short.id for short in plan.shorts])
         from tubeforge.pipeline.script_fit import analyze_script
-        fits = {s.id: {k: v for k, v in analyze_script(s.narration, s.length_s).items() if k != 'sections'}
-                for s in plan.shorts if s.narration and s.narration.strip()}
+        from tubeforge.core import runtime_settings as runtime_values
+        from tubeforge.pipeline.exact_fit import fit_exact_script
+        by_default = runtime_values.shared().value('script.exact_by_default', False)
+        fits = {}
+        for s in plan.shorts:
+            if not (s.narration and s.narration.strip()):
+                continue
+            if s.script_mode == 'exact' or (s.script_mode is None and by_default):
+                fitted = fit_exact_script(s.narration, s.length_s)
+                entry = {k: v for k, v in analyze_script(fitted.text, fitted.length_s, check_numbers=False).items() if k != 'sections'}
+                entry.update(exact=True, exact_notes=list(fitted.notes))
+            else:
+                entry = {k: v for k, v in analyze_script(s.narration, s.length_s).items() if k != 'sections'}
+            fits[s.id] = entry
         return {'committed': value.commit, 'items': results, 'cadence': cadence, 'script_fit': fits}
 
     @app.get('/api/batch-plans', tags=['batch'])
@@ -158,6 +183,9 @@ def register_batch_routes(app, runtime, build_request):
         for item in items:
             if item['action'] == 'created':
                 runtime.events.append(item['job_id'], 'batch_job_created', short_id=item['id'])
+                notes = runtime.jobs.get(item['job_id']).request.script_fit_notes
+                if notes:
+                    runtime.events.append(item['job_id'], 'script_fitted', notes=list(notes), exact_script=True)
         return {'items': items}
 
     from tubeforge.db.batch_review import BatchReviewRepository

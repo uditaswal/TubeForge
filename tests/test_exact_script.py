@@ -88,17 +88,74 @@ def test_batch_yaml_script_mode_exact_needs_a_script():
     assert not ok.errors and ok.shorts[0].script_mode == "exact"
     bad = parse_batch(base % "script_mode: exact")
     assert bad.errors and "needs a script" in bad.errors[0].message
-    assert parse_batch(base % "narration: Plain assisted text.").shorts[0].script_mode == "assist"
+    assert parse_batch(base % "narration: Plain assisted text.").shorts[0].script_mode is None      # unset: the import choice, then Settings
 
 
-def test_exact_mode_is_refused_for_the_codex_writer_and_can_default_on_from_settings(tmp_path, monkeypatch):
-    from fastapi import HTTPException
+def _settings(tmp_path):
+    from tubeforge.core.config import AppConfig, AuthConfig, DatabaseConfig, Settings
+    return Settings(app=AppConfig(name="t", environment="test"), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 's.db'}"), auth=AuthConfig(enabled=True))
+
+
+def test_exact_mode_works_for_either_writer_and_settings_can_default_it_on(tmp_path, monkeypatch):
     from tubeforge.api.app import VideoBriefRequest, _video_request
     from tubeforge.core import runtime_settings as rs
-    from tubeforge.core.config import AppConfig, AuthConfig, DatabaseConfig, Settings
-    settings = Settings(app=AppConfig(name="t", environment="test"), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 's.db'}"), auth=AuthConfig(enabled=True))
+    settings = _settings(tmp_path)
+    store = rs.RuntimeSettings(tmp_path / "rs.json")
+    monkeypatch.setattr(rs, "_shared", store)
+    brief = dict(title="T", notes=["n"], operator_script=SCRIPT)
+    assert _video_request(VideoBriefRequest(**brief, exact_script=True, script_owner="codex"), settings).exact_script is True      # Codex too
+    assert _video_request(VideoBriefRequest(**brief), settings).exact_script is False                                        # default stays assisted
+    store.update("script.exact_by_default", True, "operator", settings)
+    assert _video_request(VideoBriefRequest(**brief), settings).exact_script is True                                         # Settings default
+    assert _video_request(VideoBriefRequest(**brief, exact_script=False), settings).exact_script is False                    # explicit assist wins
+    assert _video_request(VideoBriefRequest(title="T", notes=["n"], exact_script=True), settings).exact_script is False       # no script: nothing to be exact about
+
+
+def test_exact_request_fits_the_script_and_records_what_it_adapted(tmp_path, monkeypatch):
+    from tubeforge.api.app import VideoBriefRequest, _video_request
+    from tubeforge.core import runtime_settings as rs
     monkeypatch.setattr(rs, "_shared", rs.RuntimeSettings(tmp_path / "rs.json"))
-    brief = dict(title="T", notes=["n"], operator_script=SCRIPT, exact_script=True, script_owner="codex")
-    with pytest.raises(HTTPException) as refused:
-        _video_request(VideoBriefRequest(**brief), settings)
-    assert refused.value.status_code == 422 and "Claude writer" in refused.value.detail
+    twelve = "Twelve plain words fill this line so counting stays really very easy."
+    request = _video_request(VideoBriefRequest(title="T", notes=["n"], operator_script="\n\n".join([twelve] * 20), exact_script=True, duration_seconds=60), _settings(tmp_path))
+    assert request.target_duration_seconds > 60 and request.operator_script.count(twelve) == 20     # longer video, nothing dropped
+    assert any("Video length set to" in note for note in request.script_fit_notes)
+    fits = "\n\n".join([twelve] * 10)         # 120 words in 12-word scenes: fits a 60 second video as written
+    untouched = _video_request(VideoBriefRequest(title="T", notes=["n"], operator_script=fits, exact_script=True), _settings(tmp_path))
+    assert untouched.script_fit_notes == () and "script_fit_notes" not in untouched.model_dump(mode="json")
+
+
+def _host_with(operations, tmp_path):
+    import json as _json
+    from tubeforge.core.config import CodexProviderConfig, DatabaseConfig
+    from tubeforge.db.models import Base
+    from tubeforge.db.repositories import GenerationCacheRepository
+    from tubeforge.db.session import create_database
+    from tubeforge.providers.content.host_runner import HostRunnerContentProvider
+    from tubeforge.providers.content.host_runner_protocol import HostRunnerResponse, HostRunnerSuccess
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path}/cache.db"))
+    Base.metadata.create_all(database.engine)
+    seen = []
+
+    def transport(_path, payload, _timeout):
+        data = _json.loads(payload)
+        seen.append(data)
+        result = HostRunnerSuccess(package={}, provenance={"operations": operations, "resource_hashes": {}})
+        return HostRunnerResponse(ok=True, result=result).model_dump_json().encode()
+
+    return HostRunnerContentProvider(CodexProviderConfig(), GenerationCacheRepository(database.session_factory), transport=transport), seen, database
+
+
+def test_an_older_host_runner_is_refused_for_exact_scripts_with_a_clear_message_and_no_attempt_used(tmp_path):
+    provider, seen, database = _host_with(["ResearchSourcesV1"], tmp_path)          # the installed Codex wheel before this update
+    request = _request(operator_script=SCRIPT, exact_script=True).model_copy(update={"script_owner": "codex"})
+    with pytest.raises(ProviderValidationError, match="does not support exact scripts yet.*codex-runner-runtime"):
+        provider.generate_package(request)
+    assert len(seen) == 1 and "exact_script" not in seen[0]["request"] and "operator_script" not in seen[0]["request"]   # the probe never sends the new fields
+    database.dispose()
+
+
+def test_an_updated_host_runner_passes_the_exact_script_capability_check(tmp_path):
+    provider, seen, database = _host_with(["ResearchSourcesV1", "ExactScriptV1"], tmp_path)
+    provider._require_exact_support(_request(operator_script=SCRIPT, exact_script=True).model_copy(update={"script_owner": "codex"}))
+    assert len(seen) == 1
+    database.dispose()

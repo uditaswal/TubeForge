@@ -107,3 +107,27 @@ def test_automatic_production_settings_and_hold_use_signed_in_api(tmp_path):
         assert client.get('/api/batch-plans/automation/default').json()['hold']
         assert context.eval('setting("holdState").textContent.includes("Hold on")')
     db.dispose()
+
+
+def test_script_mode_choice_is_sent_and_exact_fit_notes_are_shown(tmp_path):
+    """The import's script-mode select reaches the API, and an exact script's adaptation notes show before saving."""
+    from fastapi.testclient import TestClient
+    from tubeforge.api.app import create_app
+    from tubeforge.core.config import AppConfig, AuthConfig, DatabaseConfig, Settings
+    from tubeforge.db.models import Base
+    from tubeforge.db.session import create_database
+    settings = Settings(app=AppConfig(name='test', environment='test'), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'mode.db'}"), auth=AuthConfig(enabled=True))
+    Base.metadata.create_all(create_database(settings.database).engine)
+    script = ' '.join(['Servers answer every single request the moment it arrives, and they never get tired of it.'] * 5)
+    plan = '## One\n```yaml\nid: one\ntitle: One\nconcept: Concept\nlength_s: 60\nbeats: [{t: 0, point: Hook}]\nscript: |\n  ' + script + '\n```\n'
+    with TestClient(create_app(settings)) as client:
+        client.app.state.runtime.auth.create_admin('operator', 'correct-horse-battery-staple')
+        client.post('/login', json={'username': 'operator', 'password': 'correct-horse-battery-staple'})
+        context, run = runtime(client, client.get('/batch').text)
+        context.eval('document.querySelector("#scriptMode").value="exact";document.querySelector("#scriptMode").value')
+        context.eval('input.value=' + json.dumps(plan))
+        run('submit(false)')
+        text = context.eval('document.querySelector("#scriptFit").textContent')
+        assert 'exact mode' in text and 'Re-cut into' in text
+        run('commit.onclick()')
+        assert client.get('/api/batch-plans').json()[0]['short']['script_mode'] == 'exact'

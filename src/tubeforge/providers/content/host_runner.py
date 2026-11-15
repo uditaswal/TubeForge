@@ -98,6 +98,8 @@ class HostRunnerContentProvider:
                 raise
             raise ProviderValidationError(f"the brief and source excerpts are too large for one script prompt: {error}") from error
         host_request = generation_request_content(request)
+        if request.exact_script:
+            self._require_exact_support(request)
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
         from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES
         if request.prompt_version in SKILL_TEMPLATES:
@@ -177,6 +179,21 @@ class HostRunnerContentProvider:
             evaluate(package)
         claims = tuple(claim.model_copy(update={"review_status": ClaimReviewStatus.NEEDS_REVIEW, "human_review_required": True}) if claim.time_sensitive or claim.confidence in {ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM} else claim for claim in package.claims)
         return package.model_copy(update={"claims": claims})
+
+    def _require_exact_support(self, request: ContentRequest) -> None:
+        """An exact-script request needs a host runner that knows the field; an older one would reject it with a confusing error."""
+        probe = generation_request_content(request.model_copy(update={"exact_script": False, "operator_script": None, "script_fit_notes": ()}))
+        try:
+            readiness = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), GenerateShortsScriptRequest(operation="PreflightContentV1", request=probe).model_dump_json().encode(), self.config.socket_timeout_seconds))
+        except (RetryableProviderError, ProviderCancellation):
+            raise
+        except OSError as error:
+            raise RetryableProviderError(f"Script runner is not reachable ({error}); retrying automatically") from error
+        operations = readiness.result.provenance.get("operations", []) if readiness.ok and readiness.result else []
+        if "ExactScriptV1" not in operations:
+            raise ProviderValidationError(
+                f"The {self.script_owner.title()} host runner does not support exact scripts yet. Install the updated runner "
+                "(docs/deploy/codex-runner-runtime.md for Codex; restart scripts/run_claude_runner.sh for Claude) or run this video in assisted mode.")
 
     def _max_prompt_chars(self) -> int:
         """The configured ceiling, or the operator's value from the dashboard Settings page."""
