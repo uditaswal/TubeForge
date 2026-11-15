@@ -452,7 +452,7 @@ def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunne
         prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=MAX_PROMPT_CHARS)
         claude_binary()
         return HostRunnerSuccess(package={}, provenance={"resource_hashes": preflight(template_version=request.request.prompt_version), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
-                                                         "preflight": True, "operations": ["ResearchSourcesV1"], "runner": "claude"})
+                                                         "preflight": True, "operations": ["ResearchSourcesV1", "ExactScriptV1"], "runner": "claude"})
     if request.operation == "ResearchSourcesV1":
         return run_research(request, model=model)
     return run_request(request, model=model)

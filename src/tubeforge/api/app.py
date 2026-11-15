@@ -144,8 +144,8 @@ class VideoBriefRequest(BaseModel):
     video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
     # Optional operator-written narration (see pipeline/script_fit.py); the writer keeps its wording.
     operator_script: str | None = Field(default=None, max_length=12_000)
-    # Use operator_script word for word (Claude writer only): it only plans the visuals, and the writing checks are skipped.
-    exact_script: bool = False
+    # Use operator_script word for word (either writer): it only plans the visuals, and the writing checks are skipped.
+    exact_script: bool | None = None   # None: follow the Settings default
     script_routing_mode: str | None = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
@@ -306,6 +306,15 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     except KeyError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"unknown video preset: {name}") from error
     duration = value.duration_seconds or preset.duration_seconds
+    from tubeforge.core import runtime_settings as runtime_values
+    operator_script = (value.operator_script or "").strip() or None
+    exact_script = bool(operator_script) and (value.exact_script if value.exact_script is not None else runtime_values.shared().value("script.exact_by_default", False))
+    fit_notes: tuple[str, ...] = ()
+    if exact_script:   # the wording is final, so the scenes and the video length adapt to it instead of the script failing
+        from tubeforge.pipeline.exact_fit import fit_exact_script
+        fitted = fit_exact_script(operator_script, duration)
+        operator_script, fit_notes = fitted.text, fitted.notes
+        duration = min(max(fitted.length_s, preset.minimum_duration_seconds), preset.maximum_duration_seconds)
     if not preset.minimum_duration_seconds <= duration <= preset.maximum_duration_seconds:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{name} duration must be between {preset.minimum_duration_seconds} and {preset.maximum_duration_seconds} seconds")
     music = value.music_track if value.music_track is not None else preset.music_track
@@ -357,16 +366,12 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         else:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Claude script writers are not enabled in this TubeForge configuration")
     owner, claude_model = SCRIPT_MODELS[choice]
-    from tubeforge.core import runtime_settings as runtime_values
-    exact_script = bool((value.operator_script or "").strip()) and (value.exact_script or runtime_values.shared().value("script.exact_by_default", False))
-    if exact_script and owner != "claude":
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Using your script exactly needs the Claude writer; choose a Claude script model")
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
     request = ContentRequest(
         script_owner=owner, script_model=claude_model, script_routing_mode=value.script_routing_mode, ending=value.ending, video_style=value.video_style,
-        operator_script=(value.operator_script or "").strip() or None,
-        exact_script=exact_script,
+        operator_script=operator_script,
+        exact_script=exact_script, script_fit_notes=fit_notes,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
@@ -1099,6 +1104,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
+        if job.request.script_fit_notes:
+            runtime.events.append(job.id, "script_fitted", notes=list(job.request.script_fit_notes), exact_script=True)
         return {**_job_payload(job), "video_description": runtime.jobs.video_description(job.id), "destination_intents": runtime.jobs.destination_intents(job.id), "watch_url": f"/api/jobs/{job.id}/artifacts/final"}
 
     @app.post("/api/source-clips", status_code=status.HTTP_201_CREATED, tags=["videos"])
@@ -1444,7 +1451,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           form.before(toggle);
           const mdPanel=document.createElement('div');mdPanel.id='markdownModePanel';mdPanel.hidden=true;
           const mdExample='## Short title\n\n```yaml\nid: my-short-id\ntitle: "Why Amazon Uses DynamoDB for Some Workloads"\nconcept: "SQL vs NoSQL: scalability and schema flexibility"\nlength_s: 60\nending: loop\nhook: "Billions of products load instantly. Is it really one relational database?"\nbeats:\n  - {t: "0-10", point: "Hook: how a product page loads fast at huge scale"}\n  - {t: "10-40", point: "Strict relational schemas get costly at huge read volume; key-value stores trade guarantees for scale"}\n  - {t: "40-60", point: "Use a key-value store for high-scale reads; keep SQL where you need joins and strong consistency"}\ncta: "Full deep-dive coming in the long-form video"\nclaims_to_verify:\n  - "Amazon uses DynamoDB for parts of its catalog and still uses relational databases elsewhere"\nsources: []\nthumbnail: {text: "SQL Dies at Scale?", visual: "SQL logo vs NoSQL logo with a VS badge"}\ntags: [system design, sql, nosql]\n```';
-          mdPanel.innerHTML='<p class="sub">One <code>## Heading</code> plus exactly one fenced <code>```yaml</code> block, same format as Batch plans (<a href="/batch" target="_blank" rel="noopener">docs/batch-plans.md</a>). Required: <code>id, title, concept, beats: [{t, point}]</code>. Optional: <code>length_s</code> (30&ndash;90, default 60), <code>ending</code> (loop/debate), <code>channel</code>, <code>publish_at</code>, <code>hook</code>, <code>cta</code>, <code>claims_to_verify</code>, <code>sources</code>, <code>thumbnail: {text, visual}</code>, <code>tags</code>, <code>script</code> (your own narration; alias <code>narration</code>).</p><label for="studioMarkdownFile">Markdown file</label><input id="studioMarkdownFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="studioMarkdownText">Markdown plan (same format as Batch plans)</label><textarea id="studioMarkdownText" required placeholder="'+mdExample.replace(/"/g,'&quot;')+'"></textarea><button id="studioMarkdownSubmit" type="button">Validate and create video</button><button id="studioMarkdownBack" type="button" class="secondary">Use the structured form instead</button><p id="studioMarkdownStatus" class="notice" role="status" aria-live="polite"></p>';
+          mdPanel.innerHTML='<p class="sub">One <code>## Heading</code> plus exactly one fenced <code>```yaml</code> block, same format as Batch plans (<a href="/batch" target="_blank" rel="noopener">docs/batch-plans.md</a>). Required: <code>id, title, concept, beats: [{t, point}]</code>. Optional: <code>length_s</code> (30&ndash;90, default 60), <code>ending</code> (loop/debate), <code>channel</code>, <code>publish_at</code>, <code>hook</code>, <code>cta</code>, <code>claims_to_verify</code>, <code>sources</code>, <code>thumbnail: {text, visual}</code>, <code>tags</code>, <code>script</code> (your own narration; alias <code>narration</code>), <code>script_mode</code> (<code>exact</code> uses it word for word).</p><label for="studioMarkdownFile">Markdown file</label><input id="studioMarkdownFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="studioScriptMode">Script mode for shorts that have a script</label><select id="studioScriptMode"><option value="">As set in each short (default)</option><option value="assist">Assist: the writer fits and checks my script</option><option value="exact">Exact: use my script word for word</option></select><label for="studioMarkdownText">Markdown plan (same format as Batch plans)</label><textarea id="studioMarkdownText" required placeholder="'+mdExample.replace(/"/g,'&quot;')+'"></textarea><button id="studioMarkdownSubmit" type="button">Validate and create video</button><button id="studioMarkdownBack" type="button" class="secondary">Use the structured form instead</button><p id="studioMarkdownStatus" class="notice" role="status" aria-live="polite"></p>';
           form.after(mdPanel);
           function setMode(markdown){form.hidden=markdown;mdPanel.hidden=!markdown;toggle.hidden=markdown;}
           toggle.onclick=()=>setMode(true);
@@ -1457,7 +1464,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             button.disabled=true;status.textContent='Validating…';
             try{
               const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');
-              const importResponse=await fetch('/api/batch-plans/import',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({markdown,commit:true,plan_id:'studio'})});
+              const importResponse=await fetch('/api/batch-plans/import',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({markdown,commit:true,plan_id:'studio',script_mode:document.querySelector('#studioScriptMode')?.value||null})});
               const importData=await importResponse.json();
               if(!importResponse.ok)throw Error(Array.isArray(importData.detail)?importData.detail.map(e=>`Line ${e.line||'?'}: ${e.message||e.msg}`).join(' / '):importData.detail);
               if(!importData.items.length)throw Error('No shorts were found in this markdown plan.');
