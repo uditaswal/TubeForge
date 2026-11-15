@@ -91,6 +91,57 @@ def test_publishing_readiness_responsive_and_signed_in(tmp_path, monkeypatch):
                     page.get_by_text('Destination moved to pending.', exact=False).wait_for()
                     with runtime.database.session_factory() as session:
                         assert session.get(DestinationDeliveryRecord, 'fake-delivery').state == 'pending'
+                    if name in {'desktop', 'tablet', 'mobile'}:
+                        sample = {'id': 'sample-post', 'state': 'draft', 'asset_sha256': 'a' * 64,
+                                  'video_url': '/sample.mp4', 'reviewed_identity': 'b' * 64,
+                                  'submitted_at': None, 'destinations': [{'id': 'sample-delivery',
+                                  'account_id': 'fake-account', 'platform': 'youtube',
+                                  'external_account_id': 'Example channel', 'state': 'draft',
+                                  'attempt_count': 0, 'metadata': {'title': 'How a small habit changes your day',
+                                  'caption': 'A practical idea, ready for your review.', 'visibility': 'private',
+                                  'contains_synthetic_media': False}, 'attempts': []}]}
+                        received = []
+                        page.route('**/api/publishing/drafts', lambda route: route.fulfill(json=[sample]))
+                        page.route('**/api/publishing/slots?*', lambda route: route.fulfill(json={'timezone': 'Asia/Kolkata', 'slots': ['2030-01-10T13:00:00+05:30', '2030-01-10T19:00:00+05:30']}))
+                        def schedule(route):
+                            received.append(route.request.post_data_json)
+                            if len(received) == 1:
+                                route.fulfill(status=409, json={'detail': {'warnings': ['Two posts are close together']}})
+                            else:
+                                route.fulfill(json={'id': 'sample-post', 'state': 'pending'})
+                        page.route('**/api/publishing/drafts/sample-post/schedule', schedule)
+                        page.get_by_role('button', name='Refresh publishing activity').click()
+                        page.get_by_text('Review exact video, destinations and activity').click()
+                        page.locator('.schedule-box input[type=date]').fill('2030-01-10')
+                        page.wait_for_function("document.querySelector('.schedule-box select').options.length === 2")
+                        page.locator('#publishDraftHistory .event').screenshot(path=str(evidence / f'schedule-sample-{name}.png'))
+                        page.locator('.schedule-box input[type=checkbox]').check()
+                        page.get_by_role('button', name='Schedule private upload').click()
+                        page.get_by_text('Cadence warning:', exact=False).wait_for()
+                        page.get_by_role('button', name='Override warning and schedule').click()
+                        page.get_by_text('Schedule saved. Waiting for the publisher worker.').wait_for()
+                        assert received[0]['reviewed_identity'] == 'b' * 64
+                        assert received[0]['scheduled_for'] == '2030-01-10T13:00:00+05:30'
+                        assert not received[0]['allow_future_public_youtube']
+                        assert not received[0]['cadence_override'] and received[1]['cadence_override']
+                        review_item = {'id': 'sample-short', 'short': {'title': 'How a small habit changes your day', 'hook': 'Start here', 'beats': [], 'cta': ''}, 'state': 'approved', 'decision': 'approved', 'production_state': 'ready', 'available': True, 'qa_ok': True, 'reviewed_identity': 'c' * 64, 'disclosure': {'eligible': True, 'platform_disclosure_required': False}, 'qa': {'output': '[]'}, 'thumbnail_url': None}
+                        page.route('**/api/batch-plans/review*', lambda route: route.fulfill(json=[review_item]))
+                        page.route('**/api/batch-plans/sample-short/post-defaults?*', lambda route: route.fulfill(json={'youtube': {'title': 'How a small habit changes your day', 'caption': 'A practical idea, ready for your review.'}, 'instagram': {'caption': 'A practical idea. #habits'}}))
+                        prepared = []
+                        def prepare(route):
+                            prepared.append(route.request.post_data_json)
+                            route.fulfill(status=201, json={'id': 'sample-post'})
+                        page.route('**/api/batch-plans/sample-short/prepare-post', prepare)
+                        page.goto(base + '/batch/review', wait_until='domcontentloaded')
+                        page.get_by_role('button', name='How a small habit changes your day · approved · ready').click()
+                        page.get_by_role('button', name='Choose destinations').click()
+                        page.get_by_text('youtube · Fake channel').wait_for()
+                        page.locator('#preparePost').screenshot(path=str(evidence / f'prepare-sample-{name}.png'))
+                        assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+                        page.locator('#preparePost input[type=checkbox]').check()
+                        page.get_by_role('button', name='Create draft').click()
+                        page.get_by_text('Draft created. Review its exact details in Publishing before any submission.').wait_for()
+                        assert prepared[0] == {'reviewed_identity': 'c' * 64, 'destination_account_ids': ['fake-account']}
                     assert not errors
                     context.close()
             finally:
