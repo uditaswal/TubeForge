@@ -7,7 +7,7 @@ _MAIN_HTML = '''<main>
 <section class="panel">
 <h2>Import a plan</h2>
 <p class="sub">One markdown file, one short per heading. Re-importing skips identical IDs and reports conflicts.</p>
-<label for="batchPlan">Plan ID</label><input id="batchPlan" value="default" pattern="[a-z0-9-]{1,80}" required>
+<label for="batchPlan">Plan ID</label><input id="batchPlan" value="default" pattern="[a-z0-9\\-]{1,80}" required>
 <form id="batchForm">
 <div id="dropZone" class="dropzone" role="button" tabindex="0" aria-label="Choose or drop a markdown plan file"><strong>Drop a .md plan here</strong><span>or press Enter to choose a file</span></div>
 <label for="batchFile">Markdown file</label><input id="batchFile" type="file" accept=".md,.markdown,text/markdown,text/plain">
@@ -15,7 +15,8 @@ _MAIN_HTML = '''<main>
 <label for="batchText">Markdown plan</label><textarea id="batchText" required></textarea>
 <ol id="importErrors" class="import-errors" role="alert" hidden></ol>
 <p id="scriptFit" class="sub" role="status" aria-live="polite"></p>
-<div class="actions"><button id="validate" type="submit">Validate and preview</button><button id="commit" type="button" class="secondary" disabled>Commit import</button></div>
+<div class="actions"><button id="validate" type="submit">Validate and preview</button><button id="commit" type="button" class="secondary" aria-describedby="commitHint" disabled>Commit import</button></div>
+<p id="commitHint" class="sub">Commit import unlocks after Validate and preview passes with no errors, and locks again if you edit the plan.</p>
 </form>
 </section>
 <section class="panel">
@@ -50,13 +51,16 @@ main{max-width:980px;margin:32px auto;padding:0 20px;display:flex;flex-direction
 .field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:4px 16px;margin-bottom:4px}
 .field-grid label{margin:14px 0 6px}
 .checkbox{display:flex;align-items:center;gap:8px;margin:14px 0;color:#d5e0ee;font-size:12px;font-weight:540}
-.checkbox input{margin:0}
+.checkbox input,input[type=checkbox]{margin:0;width:20px;height:20px;flex:none}.checkbox{min-height:32px}
+fieldset{border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+summary,.sub a{display:inline-block;padding:5px 0}
+.panel p,.panel li{overflow-wrap:anywhere}
 .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;align-items:center}
 a.button-link{display:inline-flex;align-items:center;flex:none;background:#223346;color:#eaf4ff;border:1px solid #3c5067;border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
 a.button-link:hover{background:#2d4258;border-color:#60758c}
 .dropzone{display:flex;flex-direction:column;align-items:center;gap:4px;padding:22px 16px;margin-bottom:6px;border:1.5px dashed #3c5067;border-radius:12px;background:#0f1a28;color:#d5e0ee;cursor:pointer;text-align:center}
 .dropzone span{color:var(--muted);font-size:12px}
-.dropzone:hover,.dropzone:focus-visible,.dropzone.over{border-color:var(--cyan);background:#12263a;outline:none}
+.dropzone:hover,.dropzone:focus-visible,.dropzone.over{border-color:var(--cyan);background:#12263a}
 .import-errors{margin:12px 0 0;padding:10px 12px 10px 30px;border:1px solid #7a3b46;border-radius:10px;background:#2a1519;color:#ffd5db;font-size:13px}
 .import-errors li{margin:4px 0}.import-errors button{background:none;border:0;color:#ffb3bf;text-decoration:underline;padding:0;font:inherit;cursor:pointer}
 .day-group{margin-top:20px}.day-group h3{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:15px}
