@@ -6,9 +6,9 @@ import hashlib
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import text
+from sqlalchemy import select, text
 
-from tubeforge.db.models import JobEventRecord, PipelineJobRecord
+from tubeforge.db.models import JobEventRecord, PipelineJobRecord, ReferenceIntakeEventRecord
 from tubeforge.providers.content.prompts import reject_instruction_spoofing, validate_untrusted_request
 
 CONTEXT_PREFIX = 'REFERENCE_SHORT_CONTEXT_V1:'
@@ -72,14 +72,27 @@ def prepare_short(runtime, settings, routing_policy, intake_id: str, value: Shor
         _reject_retired_format(request, settings)
         validate_untrusted_request(request)
         request_json = request.model_dump_json()
-        job_id = hashlib.sha256(('reference-short-job-v1:' + request_json).encode('utf-8')).hexdigest()
+        brief_key = dict(reference_snapshot_sha256=value.reference_snapshot_sha256,
+            intake_id=intake_id, revision=view.revision, channel=view.request.channel_identity,
+            language=view.request.language, seconds=seconds, topic=value.topic, angle=value.angle,
+            audience=value.audience, visual_observations=value.visual_observations)
+        job_id = hashlib.sha256(('reference-short-job-v1:' + json.dumps(brief_key, ensure_ascii=False,
+            sort_keys=True, separators=(',', ':'))).encode('utf-8')).hexdigest()
         existing = db.get(PipelineJobRecord, job_id)
+        prior = db.scalars(select(ReferenceIntakeEventRecord).where(
+            ReferenceIntakeEventRecord.intake_id == intake_id,
+            ReferenceIntakeEventRecord.revision == view.revision,
+            ReferenceIntakeEventRecord.event == 'short_job_created')).all()
+        recorded = any(json.loads(event.details_json).get('job_id') == job_id for event in prior)
+        if existing is None and recorded:
+            raise ValueError('This exact Short job was deleted; its research allowance cannot be reset automatically.')
         if existing is not None:
             if existing.request_json != request_json:
                 raise ValueError('The existing Short request has changed; inspect it before retrying.')
             state, reused = existing.state, True
         else:
             runtime.jobs.create(job_id, request, transaction=db)
+            repo._event(db, row, 'short_job_created', actor, job_id=job_id)
             db.add(JobEventRecord(job_id=job_id, event_type='reference_short_prepared',
                 details_json=json.dumps(dict(intake_id=intake_id, revision=view.revision,
                     reference_snapshot_sha256=value.reference_snapshot_sha256, actor=actor), sort_keys=True),

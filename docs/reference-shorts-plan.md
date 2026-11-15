@@ -8,7 +8,7 @@ Outcome: the signed-in reference screen accepts Short targets while existing lon
 
 ## Phase 2: Reference-bound Short preparation — IMPLEMENTED
 
-Outcome: a reviewed captured reference can prepare a 9:16 Short request, preserving exact snapshot identity and treating captions as untrusted context. Acceptance: tests for stale revisions, exact identity, source grounding, no inferred approval, provider/attempt limits and normal Short job review. Evidence: 45 fake-backed API/repository/research and signed-in browser checks, plus 5 focused duplicate and browser checks (`/tmp/tubeforge-ref-shorts-phase2-final.log`, `/tmp/tubeforge-ref-shorts-phase2-dedup.log`). Short creation requires an operator-supplied visual description after watching the reference; automatic visual analysis is not implemented. Out of scope: claiming style matched without inspecting visuals or publishing.
+Outcome: a reviewed captured reference can prepare a 9:16 Short request, preserving exact snapshot identity and treating captions as untrusted context. Acceptance: tests for stale revisions, exact identity, source grounding, no inferred approval, provider/attempt limits and normal Short job review. Evidence: 45 fake-backed API/repository/research and signed-in browser checks, plus 5 focused duplicate and browser checks and 6 allowance checks (`/tmp/tubeforge-ref-shorts-phase2-final.log`, `/tmp/tubeforge-ref-shorts-phase2-dedup.log`). Short creation requires an operator-supplied visual description after watching the reference; automatic visual analysis is not implemented. Out of scope: claiming style matched without inspecting visuals or publishing.
 
 ## Phase 3: Visual style and real artifact acceptance — NOT STARTED
 

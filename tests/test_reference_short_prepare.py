@@ -89,3 +89,27 @@ def test_queued_reference_short_fails_closed_if_research_is_later_disabled(setup
     runtime.orchestrator.research_enabled = False
     with pytest.raises(ProviderValidationError, match='independent source research'):
         runtime.orchestrator._effective_content_request(runtime.jobs.get(response.json()['job_id']))
+
+
+def test_deleted_short_does_not_reset_the_exact_brief_allowance(setup):
+    from sqlalchemy import delete
+    from tubeforge.db.models import PipelineJobRecord
+    client, runtime, settings, headers, ready, body = setup
+    path = '/api/reference-intakes/' + ready['intake_id'] + '/short'
+    result = client.post(path, json=body, headers=headers)
+    assert result.status_code == 201
+    with runtime.database.session_factory.begin() as session:
+        session.execute(delete(PipelineJobRecord).where(PipelineJobRecord.id == result.json()['job_id']))
+    repeated = client.post(path, json=body, headers=headers)
+    assert repeated.status_code == 409 and 'allowance cannot be reset' in repeated.json()['detail']
+
+
+def test_changing_writer_configuration_does_not_create_a_fresh_attempt(setup):
+    client, runtime, settings, headers, ready, body = setup
+    path = '/api/reference-intakes/' + ready['intake_id'] + '/short'
+    result = client.post(path, json=body, headers=headers)
+    assert result.status_code == 201
+    settings.pipeline.codex.voice_profiles['default'] = 'A changed saved channel voice.'
+    repeated = client.post(path, json=body, headers=headers)
+    assert repeated.status_code == 409
+    assert len(client.get('/api/jobs').json()) == 1
