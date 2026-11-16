@@ -25,6 +25,12 @@ claims_to_verify:
 sources: []
 thumbnail: {text: "SQL Dies at Scale?", visual: "SQL logo vs NoSQL logo with a VS badge"}
 tags: [system design, sql, nosql, dynamodb]
+# To write the narration yourself, uncomment `script` (same as `narration`). Blank lines separate scenes;
+# the writer keeps your wording and only trims, fixes spoken forms or fills gaps from the cited sources.
+# script: |
+#   Billions of products load instantly. Is it really one relational database?
+#
+#   Not quite. Some parts use a key-value store built for huge read volume.
 ```
 
 ## 2026-11-03 · Short 2 · Caching layer

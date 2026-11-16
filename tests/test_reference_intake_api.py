@@ -104,7 +104,7 @@ def test_reference_intake_accepts_short_and_long_form_targets(api, target):
     assert client.get('/api/jobs').json() == []
 
 
-@pytest.mark.parametrize('target', [24, 91, 599, 901])
+@pytest.mark.parametrize('target', [24, 121, 599, 901])
 def test_reference_intake_rejects_unsupported_duration_gap(api, target):
     client, runtime, headers = api
     assert client.post('/api/reference-intakes', json=dict(reference_url=URL, target_duration_seconds=target), headers=headers).status_code == 422

@@ -79,3 +79,31 @@ def test_reused_final_backfills_disclosure_without_render_or_script_calls(tmp_pa
 def test_malformed_or_incomplete_audio_trail_is_unavailable():
     for licenses in [[{}], ['invalid'], [{'asset':'sfx:key','license':'terms'}]]:
         assert not disclosure_record(evidence(), {'audio_licenses':licenses},job_id='job',final_checksum='abc')['eligible']
+
+
+def _hook_package(vo='Your sale goes live and one machine decides everything.', **section):
+    package = evidence()
+    package['reference_short']['scenes'].insert(0, {'template': 'hook', 'scene_id': 'scene-0', 'vo': vo, 'source_ids': []})
+    package['reference_short']['scenes'][1]['scene_id'] = 'scene-1'
+    package['script_sections'] = [{'scene_id': 'scene-0', 'contains_factual_claims': False, 'claim_ids': [], **section},
+                                  {'scene_id': 'scene-1', 'contains_factual_claims': True, 'claim_ids': ['c1']}]
+    return package
+
+
+AUDIO = {'audio_licenses': [{'asset': 'music', 'mode': 'synthesized'}]}
+
+
+def test_claimless_hook_without_a_source_is_allowed():
+    record = disclosure_record(_hook_package(), AUDIO, job_id='job', final_checksum='abc')
+    assert record['eligible'] and 'source-grounded scenes' not in record['missing']
+
+
+def test_hook_guards_still_demand_a_source():
+    for package in (_hook_package(contains_factual_claims=True, claim_ids=['c1']),      # the writer says it is a claim
+                    _hook_package(claim_ids=['c1']),                                  # claim ids present
+                    _hook_package(vo='Costs fell 40 percent overnight.')):            # a figure is a claim whatever the flag says
+        assert 'source-grounded scenes' in disclosure_record(package, AUDIO, job_id='job', final_checksum='abc')['missing']
+    package = _hook_package(); package.pop('script_sections')                         # no section evidence at all
+    assert 'source-grounded scenes' in disclosure_record(package, AUDIO, job_id='job', final_checksum='abc')['missing']
+    package = _hook_package(); package['reference_short']['scenes'][0]['template'] = 'flow'   # only hooks are exempt
+    assert 'source-grounded scenes' in disclosure_record(package, AUDIO, job_id='job', final_checksum='abc')['missing']

@@ -97,6 +97,11 @@ class ContentRequest(DomainModel):
     # The operator's own narration. The writer keeps its wording and only splits/trims/fills it to fit.
     # Part of generation identity; omitted while unset so existing jobs and cache keys are unchanged.
     operator_script: str | None = Field(default=None, min_length=1, max_length=12_000)
+    # Use operator_script word for word: the writer only plans the visuals around it and the writing checks are skipped.
+    # Part of generation identity; omitted while False so existing jobs and cache keys are unchanged.
+    exact_script: bool = False
+    # What was adapted around an exact script (re-cut scenes, length set, sentences dropped); empty (and omitted) otherwise.
+    script_fit_notes: tuple[str, ...] = ()
 
     @model_serializer(mode="wrap")
     def omit_default_script_fields(self, handler):
@@ -119,7 +124,17 @@ class ContentRequest(DomainModel):
             value.pop("script_model", None)
         if self.operator_script is None:
             value.pop("operator_script", None)
+        if not self.exact_script:
+            value.pop("exact_script", None)
+        if not self.script_fit_notes:
+            value.pop("script_fit_notes", None)
         return value
+
+    @model_validator(mode="after")
+    def require_script_for_exact_mode(self) -> ContentRequest:
+        if self.exact_script and not self.operator_script:
+            raise ValueError("exact_script needs the operator's own script")
+        return self
 
     @model_validator(mode="after")
     def require_unique_source_ids(self) -> ContentRequest:

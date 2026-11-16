@@ -11,7 +11,7 @@
         },
         "target_duration_seconds": {
           "maximum": 900,
-          "minimum": 600,
+          "minimum": 25,
           "title": "Target Duration Seconds",
           "type": "integer"
         },

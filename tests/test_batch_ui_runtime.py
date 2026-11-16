@@ -11,8 +11,14 @@ quickjs = pytest.importorskip('quickjs')
 DOM = r'''
 class Element {
  constructor(tag='div'){this.tagName=tag;this.children=[];this.dataset={};this.value='';this.textContent='';this.disabled=false;this._html='';this.files=[];}
- append(...items){this.children.push(...items);}
- replaceChildren(...items){this.children=[...items];}
+ setAttribute(name,value){this[name]=value;}
+ focus(){}
+ append(...items){for(const it of items){if(it instanceof Element)it.parentNode=this;this.children.push(it);}}
+ replaceChildren(...items){this.children=[];this.append(...items);}
+ get nextSibling(){const p=this.parentNode;return p?(p.children[p.children.indexOf(this)+1]||null):null;}
+ remove(){if(this.parentNode)this.parentNode.removeChild(this);}
+ removeChild(c){this.children=this.children.filter(x=>x!==c);c.parentNode=null;return c;}
+ insertBefore(n,ref){n.parentNode=this;this.children.splice(this.children.indexOf(ref),0,n);return n;}
  set innerHTML(value){this._html=value;}
  get innerHTML(){return this._html;}
  querySelectorAll(selector){let result=[];function walk(el,inside){inside=inside||el.id==='actions';for(const child of el.children){if(!(child instanceof Element))continue;if(selector==='#actions button'&&inside&&child.tagName==='button')result.push(child);walk(child,inside);}}walk(this,false);return result;}
@@ -102,3 +108,27 @@ def test_automatic_production_settings_and_hold_use_signed_in_api(tmp_path):
         assert client.get('/api/batch-plans/automation/default').json()['hold']
         assert context.eval('setting("holdState").textContent.includes("Hold on")')
     db.dispose()
+
+
+def test_script_mode_choice_is_sent_and_exact_fit_notes_are_shown(tmp_path):
+    """The import's script-mode select reaches the API, and an exact script's adaptation notes show before saving."""
+    from fastapi.testclient import TestClient
+    from tubeforge.api.app import create_app
+    from tubeforge.core.config import AppConfig, AuthConfig, DatabaseConfig, Settings
+    from tubeforge.db.models import Base
+    from tubeforge.db.session import create_database
+    settings = Settings(app=AppConfig(name='test', environment='test'), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'mode.db'}"), auth=AuthConfig(enabled=True))
+    Base.metadata.create_all(create_database(settings.database).engine)
+    script = ' '.join(['Servers answer every single request the moment it arrives, and they never get tired of it.'] * 5)
+    plan = '## One\n```yaml\nid: one\ntitle: One\nconcept: Concept\nlength_s: 60\nbeats: [{t: 0, point: Hook}]\nscript: |\n  ' + script + '\n```\n'
+    with TestClient(create_app(settings)) as client:
+        client.app.state.runtime.auth.create_admin('operator', 'correct-horse-battery-staple')
+        client.post('/login', json={'username': 'operator', 'password': 'correct-horse-battery-staple'})
+        context, run = runtime(client, client.get('/batch').text)
+        context.eval('document.querySelector("#scriptMode").value="exact";document.querySelector("#scriptMode").value')
+        context.eval('input.value=' + json.dumps(plan))
+        run('submit(false)')
+        text = context.eval('document.querySelector("#scriptFit").textContent')
+        assert 'exact mode' in text and 'Re-cut into' in text
+        run('commit.onclick()')
+        assert client.get('/api/batch-plans').json()[0]['short']['script_mode'] == 'exact'

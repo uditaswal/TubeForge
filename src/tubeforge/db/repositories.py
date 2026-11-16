@@ -1295,6 +1295,12 @@ class GenerationCacheRepository:
             session.commit()
             return True
 
+    def generation_retryable(self, cache_key: str) -> bool:
+        """True while a failed attempt left the record retryable, i.e. the source packet still has an attempt to use."""
+        with self._session_factory() as session:
+            record = session.scalar(select(GenerationCacheRecord).where(GenerationCacheRecord.cache_key == cache_key))
+            return record is not None and record.state == "retryable"
+
     def release_after_invocation_failure(self, reservation: GenerationCacheReservation, *, maximum: int, failure: dict[str, object], now: datetime) -> bool:
         """Preserve the count across retryable worker/job restarts; never reset it."""
         with self._session_factory.begin() as session:

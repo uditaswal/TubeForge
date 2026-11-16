@@ -369,15 +369,20 @@ def test_stale_reference_host_is_refused_before_any_model_call(tmp_path, operati
         db.dispose()
 
 
-def test_early_rejected_output_is_saved_in_worker_cache(tmp_path):
+@pytest.mark.parametrize('auto_retry', [False, True])
+def test_early_rejected_output_is_saved_in_worker_cache(tmp_path, monkeypatch, auto_retry):
     import hashlib
+    from types import SimpleNamespace
     from test_reference_content import candidate
-    from tubeforge.core.errors import ProviderValidationError
+    from tubeforge.core import runtime_settings
+    from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
     from tubeforge.providers.content.host_runner_protocol import HostRunnerResponse, HostRunnerSuccess
     from tubeforge.providers.content.output import REFERENCE_OUTPUT_CONTRACT_VERSION
     from tubeforge.providers.content.prompts import prompt_evidence
     from tubeforge.providers.content.youtube_skills import preflight
 
+    monkeypatch.setattr(runtime_settings, 'shared', lambda: SimpleNamespace(
+        value=lambda key, default: auto_retry if key == 'generation.auto_retry_rejected' else default))
     request, raw, _ = candidate()
     db = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'rejection.db'}"))
     Base.metadata.create_all(db.engine)
@@ -401,7 +406,7 @@ def test_early_rejected_output_is_saved_in_worker_cache(tmp_path):
             }).model_dump_json().encode()
     try:
         provider = HostRunnerContentProvider(CodexProviderConfig(), GenerationCacheRepository(db.session_factory), transport=transport)
-        with pytest.raises(ProviderValidationError, match='speech echo'):
+        with pytest.raises(RetryableProviderError if auto_retry else ProviderValidationError, match='speech echo'):
             provider.generate_package(request)
         with db.session_factory() as session:
             saved = session.scalar(select(GenerationCacheRecord))

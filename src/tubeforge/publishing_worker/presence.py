@@ -15,7 +15,7 @@ class PublisherWorkerPresence:
         self.session_factory = session_factory
 
     def heartbeat(self, worker_id: str, platforms: set[str], *, now: datetime | None = None) -> None:
-        if not worker_id or not platforms or any(platform not in {"youtube", "instagram"} for platform in platforms):
+        if not worker_id or any(platform not in {"youtube", "instagram"} for platform in platforms):
             raise ValueError("publisher heartbeat requires a worker and supported platforms")
         now = now or datetime.now(UTC)
         with self.session_factory.begin() as session:
@@ -35,6 +35,12 @@ class PublisherWorkerPresence:
         with self.session_factory() as session:
             rows = session.scalars(select(PublisherWorkerHeartbeatRecord).where(PublisherWorkerHeartbeatRecord.last_seen_at >= cutoff)).all()
         return {platform for row in rows for platform in json.loads(row.platforms_json) if platform in {"youtube", "instagram"}}
+
+    def is_online(self, *, now: datetime | None = None, max_age_seconds: int = 30) -> bool:
+        now = now or datetime.now(UTC)
+        cutoff = now - timedelta(seconds=max_age_seconds)
+        with self.session_factory() as session:
+            return session.scalar(select(PublisherWorkerHeartbeatRecord.id).where(PublisherWorkerHeartbeatRecord.last_seen_at >= cutoff).limit(1)) is not None
 
     def stop(self, worker_id: str) -> None:
         with self.session_factory.begin() as session:

@@ -41,6 +41,7 @@ SCRIPT_TOOLS_SCRIPT = r"""<script>
         box.hidden=false;box.className='st-meter '+(d.status==='ok'?'ok':(d.status==='short'?'warn':'bad'));box.replaceChildren();
         const head=document.createElement('div');head.textContent=d.words+' words ≈ '+d.estimated_seconds+' s of speech · aim '+d.aim_low+'–'+d.aim_high+' words, maximum '+d.max_words+' for '+d.length_s+' s · '+d.section_count+' scenes (target '+d.scenes_low+'–'+d.scenes_high+'). '+d.suggestion;
         box.append(head);
+        if(d.exact_fit){const ex=document.createElement('div');ex.textContent='Exact mode: '+(d.exact_fit.notes.length?d.exact_fit.notes.join(' '):'your script is used as written.');box.append(ex);}
         const notes=d.sections.filter(s=>s.note);
         if(notes.length){const ul=document.createElement('ul');notes.slice(0,12).forEach(s=>{const li=document.createElement('li');li.textContent='Scene '+s.index+' ('+s.words+' words): '+s.note;ul.append(li);});if(notes.length>12){const li=document.createElement('li');li.textContent='…and '+(notes.length-12)+' more.';ul.append(li);}box.append(ul);}
       }catch(e){box.hidden=false;box.className='st-meter bad';box.textContent='Could not check the length: '+e.message;}
@@ -55,15 +56,17 @@ SCRIPT_TOOLS_SCRIPT = r"""<script>
     const area=document.createElement('textarea');area.id='operatorScript';area.maxLength=12000;
     area.placeholder='Paste your narration. Blank lines separate scenes. Leave empty to let the AI write it. The writer keeps your wording and only splits, trims or fills it to fit; you review it before anything renders.';
     label.append(area);
+    const exactLabel=document.createElement('label');exactLabel.className='checkbox';const exact=document.createElement('input');exact.type='checkbox';exact.id='exactScript';
+    exactLabel.append(exact,document.createTextNode(' Use my script exactly, word for word (scenes and length are fitted around it; skips rewriting and the writing checks; I vouch for the facts)'));
     const box=meter();
     const lengthOf=()=>Number(form.querySelector('[name=duration_seconds]')?.value)||60;
     const bar=toolbar(lengthOf);
     const submit=form.querySelector('button[type="submit"]');
-    (submit?submit.before.bind(submit):form.append.bind(form))(label,box,bar);
-    const refit=()=>{if(!area.value.trim()){box.hidden=true;return;}fit(box,()=>({text:area.value,length_s:Math.min(90,Math.max(30,lengthOf()))}));};
-    area.addEventListener('input',refit);form.querySelector('[name=duration_seconds]')?.addEventListener('input',refit);
+    (submit?submit.before.bind(submit):form.append.bind(form))(label,exactLabel,box,bar);
+    const refit=()=>{if(!area.value.trim()){box.hidden=true;return;}fit(box,()=>({text:area.value,length_s:Math.min(120,Math.max(30,lengthOf())),exact:exact.checked}));};
+    area.addEventListener('input',refit);exact.addEventListener('change',refit);form.querySelector('[name=duration_seconds]')?.addEventListener('input',refit);
     const previous=window.fetch;
-    window.fetch=(url,init={})=>{if(String(url)==='/api/videos'&&init.body&&area.value.trim()){try{const body=JSON.parse(init.body);body.operator_script=area.value.trim();init={...init,body:JSON.stringify(body)};}catch(_){}}return previous(url,init);};
+    window.fetch=(url,init={})=>{if(String(url)==='/api/videos'&&init.body&&area.value.trim()){try{const body=JSON.parse(init.body);body.operator_script=area.value.trim();if(exact.checked)body.exact_script=true;init={...init,body:JSON.stringify(body)};}catch(_){}}return previous(url,init);};
     form.addEventListener('reset',()=>{setTimeout(()=>{box.hidden=true;},0);});
   }
   const mdPanel=document.querySelector('#markdownModePanel');
@@ -77,7 +80,7 @@ SCRIPT_TOOLS_SCRIPT = r"""<script>
   const sections=document.querySelector('#scriptSections');
   if(sections){
     const box=meter();sections.before(box);
-    const run=()=>{const areas=[...sections.querySelectorAll('.script-narration')];if(!areas.length){box.hidden=true;return;}fit(box,()=>({sections:areas.map(a=>a.value),length_s:Math.min(90,Math.max(30,Number(window.__scriptTargetSeconds)||60))}));};
+    const run=()=>{const areas=[...sections.querySelectorAll('.script-narration')];if(!areas.length){box.hidden=true;return;}fit(box,()=>({sections:areas.map(a=>a.value),length_s:Math.min(120,Math.max(30,Number(window.__scriptTargetSeconds)||60))}));};
     sections.addEventListener('input',run);document.addEventListener('tubeforge:script-loaded',run);
   }
 })();

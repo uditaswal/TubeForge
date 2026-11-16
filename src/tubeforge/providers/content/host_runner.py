@@ -49,7 +49,7 @@ class HostRunnerContentProvider:
         from tubeforge.providers.content.prompts import prompt_evidence
         schema = codex_output_schema(envelope=True, reference=True, keep_lengths=self.script_owner == "claude")
         expected_schema = hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
+        prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self._max_prompt_chars())
         evidence = readiness.provenance
         if (evidence.get("reference_contract_version") != REFERENCE_OUTPUT_CONTRACT_VERSION
                 or evidence.get("reference_schema_sha256") != expected_schema
@@ -115,11 +115,13 @@ class HostRunnerContentProvider:
         preflight_payload = encode_request(GenerateShortsScriptRequest(operation="PreflightContentV1", request=host_request))
         # Reject an unsupported prompt before reserving or charging a model call.
         try:
-            prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self.config.max_prompt_chars)
+            prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self._max_prompt_chars())
         except ValueError as error:  # an oversized request is a brief problem, not a transient failure to retry
             if "max_prompt_chars" not in str(error):
                 raise
             raise ProviderValidationError(f"the brief and source excerpts are too large for one script prompt: {error}") from error
+        if request.exact_script:
+            self._require_exact_support(request)
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
         from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES
         if request.prompt_version in SKILL_TEMPLATES:
@@ -161,9 +163,11 @@ class HostRunnerContentProvider:
             self.cache.release_after_invocation_failure(cached, maximum=0, failure={"message": "shared source-packet allowance exhausted"}, now=self._now())
             raise ProviderValidationError("TubeForge's two-attempt limit for this exact source packet is exhausted; operator review is required")
         response = None
+        failure_code = None
         try:
             response = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), generation_payload, self.config.socket_timeout_seconds))
             if not response.ok or response.failure:
+                failure_code = response.failure.code if response.failure else "invalid_output"
                 self._runner_failure(response)
             if response.result is None:
                 raise ProviderValidationError("host runner omitted its result")
@@ -180,6 +184,8 @@ class HostRunnerContentProvider:
                 # or changing the durable invocation allowance.
                 failure["rejected_result"] = response.result.model_dump(mode="json")
             self.cache.release_after_invocation_failure(cached, maximum=self.config.invocation_limit, failure=failure, now=self._now())
+            if self._retry_rejected_script(error, cached, failure_code):
+                raise RetryableProviderError(f"The writer's script was rejected ({str(error)[:300]}); retrying automatically with the remaining attempt") from error
             raise
         self.last_provenance, self.last_usage = provenance, usage
         return package
@@ -192,10 +198,48 @@ class HostRunnerContentProvider:
             raise ProviderValidationError("host runner output source packet differs from the requested source packet")
         validate_video_package(package, request, provider_name=self.script_owner.title())
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATES, evaluate
-        if request.prompt_version in SKILL_TEMPLATES:
+        if request.prompt_version in SKILL_TEMPLATES and not request.exact_script:
             evaluate(package)
         claims = tuple(claim.model_copy(update={"review_status": ClaimReviewStatus.NEEDS_REVIEW, "human_review_required": True}) if claim.time_sensitive or claim.confidence in {ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM} else claim for claim in package.claims)
         return package.model_copy(update={"claims": claims})
+
+    def _require_exact_support(self, request: ContentRequest) -> None:
+        """An exact-script request needs a host runner that knows the field; an older one would reject it with a confusing error."""
+        probe = generation_request_content(request.model_copy(update={"exact_script": False, "operator_script": None, "script_fit_notes": ()}))
+        try:
+            readiness = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), GenerateShortsScriptRequest(operation="PreflightContentV1", request=probe).model_dump_json().encode(), self.config.socket_timeout_seconds))
+        except (RetryableProviderError, ProviderCancellation):
+            raise
+        except OSError as error:
+            raise RetryableProviderError(f"Script runner is not reachable ({error}); retrying automatically") from error
+        operations = readiness.result.provenance.get("operations", []) if readiness.ok and readiness.result else []
+        if "ExactScriptV1" not in operations:
+            raise ProviderValidationError(
+                f"The {self.script_owner.title()} host runner does not support exact scripts yet. Install the updated runner "
+                "(docs/deploy/codex-runner-runtime.md for Codex; restart scripts/run_claude_runner.sh for Claude) or run this video in assisted mode.")
+
+    def _max_prompt_chars(self) -> int:
+        """The configured ceiling, or the operator's value from the dashboard Settings page."""
+        from tubeforge.core import runtime_settings
+        return runtime_settings.effective_max_prompt_chars(self.script_owner, self.config.max_prompt_chars)
+
+    def _retry_rejected_script(self, error: Exception, reservation, failure_code: str | None = None) -> bool:
+        """A script that failed validation is retried by the worker while the source packet still has an attempt left.
+
+        The two-attempt allowance is never exceeded: the next try is refused by the same cache once it is spent.
+        Quota, authentication, sources and cancellation failures are not script quality problems and are not retried here.
+        """
+        from pydantic import ValidationError
+        from tubeforge.core import runtime_settings
+        if not runtime_settings.shared().value("generation.auto_retry_rejected", True):
+            return False
+        if not (type(error) is ProviderValidationError or isinstance(error, ValidationError)):
+            return False
+        if failure_code not in {None, "invalid_output", "quality_rejected"}:   # source mismatch, runner allowance, quota...: not a retry
+            return False
+        if "failed validation twice" in str(error):   # the writer's own repair pass already used the second attempt
+            return False
+        return self.cache.generation_retryable(reservation.cache_key)
 
     def _now(self) -> datetime:
         value = self._clock()

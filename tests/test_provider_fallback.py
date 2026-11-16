@@ -15,6 +15,15 @@ from tubeforge.providers.content.host_runner import HostRunnerContentProvider
 from tubeforge.providers.content.routing_errors import RunnerFallbackFailure
 from test_codex_content import request as base_request,package as raw_package
 
+@pytest.fixture(autouse=True)
+def _no_auto_retry(tmp_path, monkeypatch):
+    """These tests check the first rejection itself; automatic retry has its own tests in test_runtime_settings.py."""
+    from tubeforge.core import runtime_settings
+    store = runtime_settings.RuntimeSettings(tmp_path / "runtime-settings.json")
+    store.path.write_text(json.dumps({"values": {"generation.auto_retry_rejected": False}}))
+    monkeypatch.setattr(runtime_settings, "_shared", store)
+
+
 
 def request(**updates):
     values={'script_owner':'claude','script_model':'sonnet-medium','script_routing_mode':'automatic',**updates}

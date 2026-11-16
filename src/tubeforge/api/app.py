@@ -50,6 +50,8 @@ from tubeforge.db.repositories import PAUSABLE_STATES
 from tubeforge.db.models import DeliveryAttemptRecord, PublishingAssetRecord, SocialAccountRecord
 from tubeforge.publishing_worker.presence import PublisherWorkerPresence
 from tubeforge.security.google_oauth import GoogleAccountOAuth
+from tubeforge.api.instagram_connect import register_instagram_connection
+from tubeforge.security.instagram_oauth import InstagramAccountOAuth
 from tubeforge.security.oauth_state import OAuthStateStore
 
 
@@ -144,6 +146,8 @@ class VideoBriefRequest(BaseModel):
     video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
     # Optional operator-written narration (see pipeline/script_fit.py); the writer keeps its wording.
     operator_script: str | None = Field(default=None, max_length=12_000)
+    # Use operator_script word for word (either writer): it only plans the visuals, and the writing checks are skipped.
+    exact_script: bool | None = None   # None: follow the Settings default
     script_routing_mode: str | None = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
@@ -277,6 +281,27 @@ def _reject_retired_format(request: ContentRequest, settings: Settings) -> None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"the {request.prompt_version} video format is retired; use a current preset")
 
 
+def _fit_prompt(request: ContentRequest, settings: Settings) -> ContentRequest:
+    """Measure the assembled writer prompt now: shorten long source excerpts to fit, or refuse with the numbers."""
+    from tubeforge.core import runtime_settings as runtime_values
+    from tubeforge.pipeline.prompt_budget import PromptTooLarge, fit_request
+    store = runtime_values.shared()
+    configured = settings.pipeline.claude.max_prompt_chars if request.script_owner == "claude" else settings.pipeline.codex.max_prompt_chars
+    try:
+        fitted, report = fit_request(
+            request, max_chars=runtime_values.effective_max_prompt_chars(request.script_owner, configured),
+            min_per_source=store.value("prompt.min_chars_per_source", 1_500), margin=store.value("prompt.margin_chars", 2_500),
+            auto_trim=store.value("prompt.auto_trim_sources", True))
+    except PromptTooLarge as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    except ValueError:  # a template this check does not know: leave it to the writer's own validation
+        return request
+    if report.changed:
+        import logging
+        logging.getLogger("tubeforge.prompt_budget").info(report.summary())
+    return fitted
+
+
 def _video_request(value: VideoBriefRequest, settings: Settings, *, available_music: set[str] | None = None) -> ContentRequest:
     generation = settings.pipeline.video_generation
     name = value.preset or generation.default_preset
@@ -285,6 +310,15 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     except KeyError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"unknown video preset: {name}") from error
     duration = value.duration_seconds or preset.duration_seconds
+    from tubeforge.core import runtime_settings as runtime_values
+    operator_script = (value.operator_script or "").strip() or None
+    exact_script = bool(operator_script) and (value.exact_script if value.exact_script is not None else runtime_values.shared().value("script.exact_by_default", False))
+    fit_notes: tuple[str, ...] = ()
+    if exact_script:   # the wording is final, so the scenes and the video length adapt to it instead of the script failing
+        from tubeforge.pipeline.exact_fit import fit_exact_script
+        fitted = fit_exact_script(operator_script, duration)
+        operator_script, fit_notes = fitted.text, fitted.notes
+        duration = min(max(fitted.length_s, preset.minimum_duration_seconds), preset.maximum_duration_seconds)
     if not preset.minimum_duration_seconds <= duration <= preset.maximum_duration_seconds:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{name} duration must be between {preset.minimum_duration_seconds} and {preset.maximum_duration_seconds} seconds")
     music = value.music_track if value.music_track is not None else preset.music_track
@@ -338,9 +372,10 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     owner, claude_model = SCRIPT_MODELS[choice]
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
-    return ContentRequest(
+    request = ContentRequest(
         script_owner=owner, script_model=claude_model, script_routing_mode=value.script_routing_mode, ending=value.ending, video_style=value.video_style,
-        operator_script=(value.operator_script or "").strip() or None,
+        operator_script=operator_script,
+        exact_script=exact_script, script_fit_notes=fit_notes,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
@@ -351,6 +386,7 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         music_track=music, visual_style=value.visual_style or preset.visual_style, visual_source=value.visual_source, mcp_servers=tuple(mcp), voice_id=voice_id, voice_speed_scale=voice_speed_scale,
         preset_name=name, aspect_ratio=preset.aspect_ratio,
     )
+    return _fit_prompt(request, settings)
 
 
 def _source_clip_request(value: SourceClipRequest) -> ContentRequest:
@@ -479,7 +515,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application_settings.pipeline.voice.artifact_root,
         ffprobe=str(application_settings.pipeline.voice.ffprobe_executable),
     )
-    manual_posts = ManualPublishService(runtime.database.session_factory)
+    from tubeforge.db.batch_review import BatchReviewRepository
+    manual_posts = ManualPublishService(runtime.database.session_factory, review_repository=BatchReviewRepository(
+        runtime.database.session_factory, runtime.orchestrator.artifact_root, runtime.orchestrator.music_catalog,
+    ))
     delivery_queue = DeliveryQueue(runtime.database.session_factory)
     publisher_presence = PublisherWorkerPresence(runtime.database.session_factory)
 
@@ -495,6 +534,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             google_oauth = GoogleAccountOAuth(*google_oauth_values)
         except ValueError:
             pass
+    instagram_oauth: InstagramAccountOAuth | None = None
+    instagram_oauth_values = tuple(os.environ.get(name, "") for name in (
+        "TUBEFORGE_INSTAGRAM_APP_ID",
+        "TUBEFORGE_INSTAGRAM_APP_SECRET",
+        "TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI",
+    ))
+    if oauth_store and all(instagram_oauth_values):
+        try:
+            instagram_oauth = InstagramAccountOAuth(*instagram_oauth_values)
+        except ValueError:
+            pass
+    register_instagram_connection(app, runtime=runtime, auth_enabled=application_settings.auth.enabled, oauth_store=oauth_store, instagram_oauth=instagram_oauth)
 
     @app.exception_handler(RequestValidationError)
     async def redacted_validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
@@ -635,7 +686,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/oauth/youtube/status", tags=["social accounts"])
     def youtube_oauth_status() -> dict[str, object]:
         configured = application_settings.auth.enabled and google_oauth is not None and oauth_store is not None
-        return {"configured": configured, "reason": None if configured else "Google application, HTTPS callback, account encryption key, and Studio login are required"}
+        return {"configured": configured, "reason": None if configured else "Google application, HTTPS or loopback HTTP callback, account encryption key, and Studio login are required"}
 
     @app.post("/api/oauth/youtube/start", tags=["social accounts"])
     def start_youtube_oauth(value: OAuthStartRequest, request: Request) -> dict[str, str]:
@@ -824,8 +875,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/publishing/status", tags=["publishing"])
     def publishing_worker_status() -> dict[str, object]:
+        from tubeforge.pipeline.youtube_quota import YouTubeQuotaLedger
         platforms = sorted(publisher_presence.live_platforms())
-        return {"worker_online": bool(platforms), "platforms": platforms, "manual_submission_enabled": bool(runtime.token_cipher and "youtube" in platforms)}
+        accounts = runtime.accounts.list()
+        connected = lambda platform: any(
+            item.platform == platform and item.status == "connected" and not item.disabled
+            and item.external_account_id and item.last_validated_at for item in accounts
+        )
+        youtube_quota = YouTubeQuotaLedger(
+            runtime.database.session_factory, daily_units=application_settings.pipeline.youtube.daily_quota_units,
+            upload_units=application_settings.pipeline.youtube.upload_quota_units,
+        ).status()
+        youtube_oauth = bool(application_settings.auth.enabled and google_oauth and oauth_store)
+        youtube_ready = bool("youtube" in platforms and youtube_oauth and connected("youtube")
+                             and youtube_quota["remaining_units"] >= youtube_quota["upload_units"])
+        return {
+            "worker_online": publisher_presence.is_online(), "platforms": platforms,
+            "manual_submission_enabled": youtube_ready,
+            "readiness": {
+                "youtube": {"worker_live": "youtube" in platforms, "oauth_configured": youtube_oauth,
+                            "account_connected": bool(connected("youtube")), "quota": youtube_quota, "ready": youtube_ready,
+                            "youtube_api_audited": application_settings.pipeline.youtube.youtube_api_audited,
+                            "audit_state": "audited" if application_settings.pipeline.youtube.youtube_api_audited else "audit pending: private only"},
+                "instagram": {"worker_live": "instagram" in platforms, "oauth_configured": False,
+                              "account_connected": bool(connected("instagram")), "quota": None, "ready": False},
+            },
+        }
 
     @app.post("/api/publishing/drafts", status_code=status.HTTP_201_CREATED, tags=["publishing"])
     def create_manual_publish_draft(value: ManualPublishDraftRequest) -> dict[str, object]:
@@ -885,18 +960,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "reviewed_identity": manual_posts.review_identity(post.id),
                 "created_at": _as_ist(post.created_at),
                 "submitted_at": _as_ist(post.submitted_at) if post.submitted_at else None,
+                "scheduled_for": _as_ist(post.scheduled_at) if post.scheduled_at else None,
                 "destinations": [{
                     "id": item.id, "account_id": item.account_id, "platform": item.platform,
                     "external_account_id": item.external_account_id, "state": item.state,
                     "metadata": json.loads(item.metadata_json), "attempt_count": item.attempt_count,
                     "error_message": item.error_message, "remote_id": item.remote_id,
                     "remote_url": item.remote_url,
+                    "scheduled_for": _as_ist(item.scheduled_for) if item.scheduled_for else None,
+                    "youtube_schedule_audited": item.youtube_schedule_audited,
+                    "can_pause_pending": item.state in {"pending", "retry_wait", "container_processing", "container_ready"} and not item.claim_owner and not item.remote_id and not (item.platform == "youtube" and item.remote_session_id),
+                    "can_resume_pending": not item.claim_owner and (item.state == "quota_paused" or (item.state == "paused" and not item.remote_id and not (item.platform == "youtube" and item.remote_session_id))),
+                    "can_cancel_pending": item.state in {"pending", "retry_wait", "container_processing", "container_ready", "paused"} and not item.claim_owner and not item.remote_id and not (item.platform == "youtube" and item.remote_session_id),
                     "requested_action": item.requested_action,
                     "requested_by": item.requested_by,
                     "requested_at": _as_ist(item.requested_at) if item.requested_at else None,
                     "attempts": attempts_by_delivery[item.id],
-                    "can_inspect": item.platform == "youtube" and item.state == "unknown_outcome" and bool(item.remote_session_id) and not item.remote_id and not item.requested_action,
-                    "can_resume": item.platform == "youtube" and item.state == "unknown_outcome" and bool(item.remote_session_id) and not item.remote_id and not item.requested_action and bool(item.error_message and item.error_message.startswith("remote upload is incomplete")),
+                    "can_inspect": item.platform in {"youtube", "instagram"} and item.state == "unknown_outcome" and bool(item.remote_session_id) and not item.remote_id and not item.requested_action,
+                    "can_resume": item.platform in {"youtube", "instagram"} and item.state == "unknown_outcome" and bool(item.remote_session_id) and not item.remote_id and not item.requested_action and bool(item.error_message and item.error_message.startswith("remote upload is incomplete")),
                     "can_retry_after_reconnect": item.state == "auth_required" and not item.claim_owner and bool(accounts_by_id.get(item.account_id) and not accounts_by_id[item.account_id].disabled and accounts_by_id[item.account_id].status == "connected" and accounts_by_id[item.account_id].external_account_id == item.external_account_id and accounts_by_id[item.account_id].credential_ciphertext),
                 } for item in deliveries],
             })
@@ -917,9 +998,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         if login_session is None:
             raise HTTPException(status_code=401, detail="Studio sign-in is required")
-        supported = publisher_presence.live_platforms() & {"youtube"} if runtime.token_cipher else set()
+        supported = publisher_presence.live_platforms() & {"youtube", "instagram"} if runtime.token_cipher else set()
         if not supported:
-            raise HTTPException(status_code=503, detail="private YouTube publisher worker is unavailable")
+            raise HTTPException(status_code=503, detail="publisher worker is unavailable")
         try:
             post = manual_posts.submit(post_id, reviewed_identity=value.reviewed_identity, actor=login_session.user_id, supported_platforms=supported)
         except KeyError as error:
@@ -933,8 +1014,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         if login_session is None:
             raise HTTPException(status_code=401, detail="Studio sign-in is required")
-        if not runtime.token_cipher or "youtube" not in publisher_presence.live_platforms():
-            raise HTTPException(status_code=503, detail="YouTube publisher worker is unavailable")
+        if not runtime.token_cipher or not publisher_presence.live_platforms() & {"youtube", "instagram"}:
+            raise HTTPException(status_code=503, detail="publisher worker is unavailable")
         try:
             if value.action == "retry_after_reconnect":
                 resulting_state = delivery_queue.retry_after_reconnect(delivery_id, login_session.user_id)
@@ -1046,6 +1127,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return routing_policy.apply(build_batch_request(short, application_settings))
     runtime.scheduler.batch_request_factory = batch_request
     register_batch_routes(app, runtime, batch_request)
+    from tubeforge.api.publishing_schedule import register_publishing_schedule_routes
+    register_publishing_schedule_routes(app, runtime, publisher_presence, manual_posts, delivery_queue)
+    from tubeforge.api.runtime_settings import register_settings_routes
+    register_settings_routes(app, runtime)
     from tubeforge.api.reference_intake import register_reference_routes
     register_reference_routes(app, runtime, application_settings, routing_policy)
     from tubeforge.api.long_form import register_long_form_routes
@@ -1074,6 +1159,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
+        if job.request.script_fit_notes:
+            runtime.events.append(job.id, "script_fitted", notes=list(job.request.script_fit_notes), exact_script=True)
         return {**_job_payload(job), "video_description": runtime.jobs.video_description(job.id), "destination_intents": runtime.jobs.destination_intents(job.id), "watch_url": f"/api/jobs/{job.id}/artifacts/final"}
 
     @app.post("/api/source-clips", status_code=status.HTTP_201_CREATED, tags=["videos"])
@@ -1186,12 +1273,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const connect=document.createElement('button');connect.type='button';connect.className='small secondary';connect.textContent='Connect YouTube';connect.disabled=true;connect.style.marginTop='12px';
           const connectStatus=document.createElement('div');connectStatus.className='sub';connectStatus.setAttribute('role','status');connectStatus.textContent='Checking YouTube connection setup…';
           const list=document.createElement('div');list.className='muted';list.setAttribute('aria-live','polite');list.textContent='Loading accounts…';
-          panel.append(title,note,profileForm,connect,connectStatus,list);shell.append(panel);
+          const igConnect=document.createElement('button');igConnect.type='button';igConnect.className='small secondary';igConnect.textContent='Connect Instagram';igConnect.disabled=true;igConnect.style.margin='12px 0 0 8px';
+          const igStatus=document.createElement('div');igStatus.className='sub';igStatus.setAttribute('role','status');igStatus.textContent='Checking Instagram connection setup…';
+          panel.append(title,note,profileForm,connect,igConnect,connectStatus,igStatus,list);shell.append(panel);
           let youtubeReady=false;
           fetch('/api/oauth/youtube/status').then(response=>response.json()).then(result=>{youtubeReady=Boolean(result.configured);connect.disabled=!youtubeReady;connectStatus.textContent=youtubeReady?'YouTube authorization is ready. Google will ask you to choose a channel.':result.reason;}).catch(()=>{connectStatus.textContent='Could not check YouTube connection setup.';});
           async function start(accountId){if(!youtubeReady)return;connect.disabled=true;connectStatus.textContent='Starting Google authorization…';try{const response=await fetch('/api/oauth/youtube/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId||null})});if(!response.ok)throw Error(await response.text());const result=await response.json();location.assign(result.authorization_url);}catch(_){connectStatus.textContent='Could not start Google authorization. Check the app configuration and retry.';connect.disabled=false;}}
           connect.onclick=()=>start(null);
-          async function loadAccounts(){try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=await response.json();list.replaceChildren();if(!accounts.length){list.textContent='No account profiles yet.';return;}for(const account of accounts){const row=document.createElement('div');row.className='event';row.style.marginTop='12px';const name=document.createElement('strong');name.textContent=account.display_name+' · '+account.platform+' · '+account.category;const state=document.createElement('div');state.textContent=account.status==='connected'&&account.external_account_id?'Connected · '+account.external_account_id:account.status.replaceAll('_',' ');const edit=document.createElement('button');edit.type='button';edit.className='small secondary';edit.textContent='Edit profile';edit.onclick=()=>{const editor=document.createElement('form');editor.innerHTML='<label>Account name<input name="display_name" maxlength="200" required></label><label>Category<input name="category" maxlength="100" required></label><label>Default video description<textarea name="default_description" maxlength="5000"></textarea></label><button type="submit" class="small secondary">Save changes</button><div role="status"></div>';editor.elements.display_name.value=account.display_name;editor.elements.category.value=account.category;editor.elements.default_description.value=account.default_description;editor.onsubmit=async event=>{event.preventDefault();const button=editor.querySelector('button'),feedback=editor.querySelector('[role="status"]');button.disabled=true;feedback.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/profile',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(editor)))});if(!response.ok)throw Error(await response.text());feedback.textContent='Profile saved.';window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){feedback.textContent='Could not save profile: '+error.message;button.disabled=false;}};row.append(editor);edit.remove();};row.append(name,state,edit);const defaultButton=document.createElement('button');defaultButton.type='button';defaultButton.className='small secondary';defaultButton.textContent=account.is_default?'Default account':'Set as default';defaultButton.disabled=account.is_default||account.disabled;defaultButton.onclick=async()=>{defaultButton.disabled=true;defaultButton.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/default',{method:'PUT'});if(!response.ok)throw Error(await response.text());window.dispatchEvent(new Event('tubeforge:default-changed'));window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){defaultButton.textContent='Could not save default: '+error.message;defaultButton.disabled=false;}};row.append(defaultButton);if(account.platform==='youtube'&&account.external_account_id){const reconnect=document.createElement('button');reconnect.type='button';reconnect.className='small secondary';reconnect.textContent='Reconnect this channel';reconnect.disabled=!youtubeReady;reconnect.onclick=()=>start(account.id);row.append(reconnect);}list.append(row);}}catch(_){if(list.textContent==='Loading accounts…')list.textContent='Could not load account profiles. Reload to retry.';}}
+          let instagramReady=false;
+          fetch('/api/oauth/instagram/status').then(response=>response.json()).then(result=>{instagramReady=Boolean(result.configured);igConnect.disabled=!instagramReady;igStatus.textContent=instagramReady?'Instagram authorization is ready. Use a Professional (Business or Creator) account.':result.reason;}).catch(()=>{igStatus.textContent='Could not check Instagram connection setup.';});
+          async function startInstagram(accountId){if(!instagramReady)return;igConnect.disabled=true;igStatus.textContent='Starting Instagram authorization…';try{const response=await fetch('/api/oauth/instagram/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId||null})});if(!response.ok)throw Error(await response.text());const result=await response.json();location.assign(result.authorization_url);}catch(_){igStatus.textContent='Could not start Instagram authorization. Check the app configuration and retry.';igConnect.disabled=false;}}
+          igConnect.onclick=()=>startInstagram(null);
+          async function loadAccounts(){try{const response=await fetch('/api/social-accounts');if(!response.ok)throw Error();const accounts=await response.json();list.replaceChildren();if(!accounts.length){list.textContent='No account profiles yet.';return;}for(const account of accounts){const row=document.createElement('div');row.className='event';row.style.marginTop='12px';const name=document.createElement('strong');name.textContent=account.display_name+' · '+account.platform+' · '+account.category;const state=document.createElement('div');state.textContent=account.status==='connected'&&account.external_account_id?'Connected · '+account.external_account_id:account.status.replaceAll('_',' ');const edit=document.createElement('button');edit.type='button';edit.className='small secondary';edit.textContent='Edit profile';edit.onclick=()=>{const editor=document.createElement('form');editor.innerHTML='<label>Account name<input name="display_name" maxlength="200" required></label><label>Category<input name="category" maxlength="100" required></label><label>Default video description<textarea name="default_description" maxlength="5000"></textarea></label><button type="submit" class="small secondary">Save changes</button><div role="status"></div>';editor.elements.display_name.value=account.display_name;editor.elements.category.value=account.category;editor.elements.default_description.value=account.default_description;editor.onsubmit=async event=>{event.preventDefault();const button=editor.querySelector('button'),feedback=editor.querySelector('[role="status"]');button.disabled=true;feedback.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/profile',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(editor)))});if(!response.ok)throw Error(await response.text());feedback.textContent='Profile saved.';window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){feedback.textContent='Could not save profile: '+error.message;button.disabled=false;}};row.append(editor);edit.remove();};row.append(name,state,edit);const defaultButton=document.createElement('button');defaultButton.type='button';defaultButton.className='small secondary';defaultButton.textContent=account.is_default?'Default account':'Set as default';defaultButton.disabled=account.is_default||account.disabled;defaultButton.onclick=async()=>{defaultButton.disabled=true;defaultButton.textContent='Saving…';try{const response=await fetch('/api/social-accounts/'+encodeURIComponent(account.id)+'/default',{method:'PUT'});if(!response.ok)throw Error(await response.text());window.dispatchEvent(new Event('tubeforge:default-changed'));window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){defaultButton.textContent='Could not save default: '+error.message;defaultButton.disabled=false;}};row.append(defaultButton);if(account.platform==='youtube'&&account.external_account_id){const reconnect=document.createElement('button');reconnect.type='button';reconnect.className='small secondary';reconnect.textContent='Reconnect this channel';reconnect.disabled=!youtubeReady;reconnect.onclick=()=>start(account.id);row.append(reconnect);}if(account.platform==='instagram'&&account.external_account_id){const igReconnect=document.createElement('button');igReconnect.type='button';igReconnect.className='small secondary';igReconnect.textContent='Reconnect this account';igReconnect.disabled=!instagramReady;igReconnect.onclick=()=>startInstagram(account.id);row.append(igReconnect);}list.append(row);}}catch(_){if(list.textContent==='Loading accounts…')list.textContent='Could not load account profiles. Reload to retry.';}}
           profileForm.onsubmit=async event=>{event.preventDefault();const button=profileForm.querySelector('button[type="submit"]'),feedback=document.querySelector('#accountProfileStatus');button.disabled=true;feedback.textContent='Saving profile…';try{const response=await fetch('/api/social-accounts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(profileForm)))});if(!response.ok)throw Error(await response.text());feedback.textContent='Account profile saved. Connection is still required before online delivery.';profileForm.reset();window.dispatchEvent(new Event('tubeforge:accounts-changed'));await loadAccounts();}catch(error){feedback.textContent='Could not save profile: '+error.message;}finally{button.disabled=false;}};
           loadAccounts();
         })();
@@ -1206,7 +1299,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const videoLabel=document.createElement('label');videoLabel.textContent='Finished video';
           const videoSelect=document.createElement('select');videoSelect.id='publishVideo';videoSelect.disabled=true;videoLabel.append(videoSelect);
           const preview=document.createElement('button');preview.type='button';preview.className='small secondary';preview.textContent='Preview selected video';preview.disabled=true;preview.onclick=()=>{const dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');if(!dialog||!player||!videoSelect.value)return;document.querySelector('#videoTitle').textContent='Publishing preview: '+videoSelect.selectedOptions[0].textContent;player.pause();player.src='/api/jobs/'+encodeURIComponent(videoSelect.value)+'/artifacts/final';player.autoplay=false;dialog.showModal();};
-          const destinationLabel=document.createElement('div');destinationLabel.className='sub';destinationLabel.style.marginTop='14px';destinationLabel.textContent='Destinations and individual post details';
+          const destinationLabel=document.createElement('div');destinationLabel.className='sub';destinationLabel.style.marginTop='14px';destinationLabel.textContent='Destinations and individual post details. YouTube requires an approved Day review and its disclosure decision for this exact final.';
           const planned=document.createElement('div');planned.id='plannedVideoDestinations';planned.className='sub';planned.style.marginTop='10px';planned.setAttribute('role','status');
           const destinations=document.createElement('div');destinations.id='publishDestinations';destinations.textContent='Loading connected accounts…';
           const save=document.createElement('button');save.type='button';save.id='savePublishDraft';save.textContent='Save publishing draft';save.disabled=true;
@@ -1215,7 +1308,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const refreshHistory=document.createElement('button');refreshHistory.type='button';refreshHistory.className='small secondary';refreshHistory.textContent='Refresh publishing activity';refreshHistory.style.marginBottom='12px';
           const history=document.createElement('div');history.id='publishDraftHistory';history.className='muted';history.textContent='Loading drafts…';
           panel.append(heading,help,workerState,videoLabel,preview,destinationLabel,planned,destinations,save,status,historyHeading,refreshHistory,history);shell.append(panel);
-          const rows=new Map(),videosById=new Map(),accountsById=new Map();let workerReady=false;
+          const rows=new Map(),videosById=new Map(),accountsById=new Map();let workerReady=false,workerOnline=false;
 
           const pkgBox=document.createElement('fieldset');pkgBox.style.cssText='border:1px solid #31415f;border-radius:9px;margin-top:14px';
           pkgBox.innerHTML='<legend>Upload-ready package — title, description and thumbnail are prefilled and fully editable</legend><div class="sub" id="pkgStatus" role="status">Select a finished video to prepare its title, two-line description and thumbnail.</div><label>Video title<input id="pkgTitle" maxlength="100"></label><label>Description (two lines)<textarea id="pkgDesc" rows="3" maxlength="5000"></textarea></label><label>Keyword tags, comma separated<input id="pkgTags"></label><div class="actions"><button type="button" class="small secondary" id="pkgCopyTitle">Copy title</button><button type="button" class="small secondary" id="pkgCopyDesc">Copy description</button></div><label class="checkbox" id="pkgGuidesRow" style="display:none"><input type="checkbox" id="pkgGuides"> Show Shorts safe-area guides (review only; not in the file)</label><img id="pkgThumb" alt="Thumbnail preview" style="display:none;width:100%;max-width:480px;border-radius:10px;margin-top:10px;border:1px solid #31415f"><label>Thumbnail text (2–3 punchy words)<input id="pkgText" maxlength="48"></label><label>Video moment<select id="pkgFrame"></select></label><label>Logo badge<select id="pkgLogo"></select></label><label>Title ideas<select id="pkgTitles"></select></label><div class="actions"><button type="button" class="small" id="pkgUpdate">Update thumbnail</button><label class="small secondary" style="display:inline-block;cursor:pointer;padding:8px 12px">Upload my own image<input id="pkgFile" type="file" accept="image/png,image/jpeg" hidden></label><a id="pkgDownload" class="small secondary" style="display:none;padding:8px 12px" download>Download thumbnail</a></div>';
@@ -1239,7 +1332,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           pkg('pkgFile').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const response=await fetch('/api/publishing/jobs/'+encodeURIComponent(videoSelect.value)+'/thumbnail/upload',{method:'POST',headers:{'content-type':file.type||'image/jpeg'},body:file});if(!response.ok)throw Error((await response.json().catch(()=>({}))).detail||response.status);renderThumb(await response.json());pkg('pkgStatus').textContent='Your image is the thumbnail (cropped to 16:9).';}catch(error){pkg('pkgStatus').textContent='Image not used: '+error.message;}event.target.value='';};
           destinations.addEventListener('input',event=>{event.target.dataset.edited='1';});videoSelect.addEventListener('change',()=>{for(const id of ['pkgTitle','pkgDesc','pkgTags'])delete pkg(id).dataset.edited;for(const row of rows.values())for(const f of [row.title,row.caption,row.tags])if(f)delete f.dataset.edited;applySuggestion();});
           function inputField(labelText,kind){const label=document.createElement('label');label.textContent=labelText;const input=document.createElement(kind);input.maxLength=kind==='textarea'?5000:500;label.append(input);return {label,input};}
+          const csrfHeaders=()=>({'content-type':'application/json','x-csrf-token':decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'')});
+          function addScheduleControls(details,draft){
+            const box=document.createElement('section');box.className='schedule-box';box.style.cssText='margin:16px 0;padding:14px;border:1px solid #31415f;border-radius:9px';
+            const heading=document.createElement('h4');heading.textContent='Schedule this reviewed draft';const note=document.createElement('p');note.className='sub';note.textContent='Choose a slot in India time. While the YouTube API audit is pending, the upload stays private and is not scheduled for public release.';
+            const dateLabel=document.createElement('label');dateLabel.textContent='Date';const date=document.createElement('input');date.type='date';dateLabel.append(date);
+            const slotLabel=document.createElement('label');slotLabel.textContent='Available slots · Asia/Kolkata';const slots=document.createElement('select');slots.disabled=true;slotLabel.append(slots);
+            const reviewLabel=document.createElement('label');reviewLabel.className='checkbox';const reviewed=document.createElement('input');reviewed.type='checkbox';reviewLabel.append(reviewed,document.createTextNode(' I reviewed this exact video, destination and post details for this slot.'));
+            const submit=document.createElement('button');submit.type='button';submit.className='small';submit.textContent='Schedule private upload';submit.disabled=true;
+            const message=document.createElement('p');message.className='sub';message.setAttribute('role','status');let override=false,warningButton=null;const clearWarning=()=>{override=false;if(warningButton){warningButton.remove();warningButton=null;}};
+            const update=()=>{submit.disabled=!reviewed.checked||!slots.value||!workerReady;};reviewed.onchange=update;slots.onchange=()=>{clearWarning();message.textContent='';update();};
+            date.onchange=async()=>{clearWarning();slots.replaceChildren();slots.disabled=true;update();if(!date.value)return;message.textContent='Loading slots…';try{const response=await fetch('/api/publishing/slots?day='+encodeURIComponent(date.value));if(!response.ok)throw Error('Could not load slots.');const data=await response.json();for(const time of data.slots){const option=document.createElement('option');option.value=time;option.textContent=new Date(time).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'});slots.append(option);}slots.disabled=!data.slots.length;message.textContent=data.slots.length?'':'No slots available for this date.';update();}catch(e){message.textContent=e.message;}};
+            submit.onclick=async()=>{if(!reviewed.checked||!slots.value)return;submit.disabled=true;message.textContent='Checking and saving schedule…';try{const response=await fetch('/api/publishing/drafts/'+encodeURIComponent(draft.id)+'/schedule',{method:'POST',headers:csrfHeaders(),body:JSON.stringify({reviewed_identity:draft.reviewed_identity,scheduled_for:slots.value,cadence_override:override,confirmed_public_accounts:[],allow_future_public_youtube:false})});const data=await response.json();if(!response.ok){if(response.status===409&&data.detail?.warnings){message.textContent='Cadence warning: '+data.detail.warnings.map(x=>typeof x==='string'?x:JSON.stringify(x)).join('; ');const confirm=document.createElement('button');confirm.type='button';confirm.className='small secondary';confirm.textContent='Override warning and schedule';confirm.onclick=()=>{override=true;confirm.remove();warningButton=null;submit.click();};if(warningButton)warningButton.remove();warningButton=confirm;message.after(confirm);update();return;}throw Error(typeof data.detail==='string'?data.detail:'Could not schedule this draft.');}status.textContent='Schedule saved. Waiting for the publisher worker.';await loadDrafts();}catch(e){message.textContent=e.message;update();}};
+            box.append(heading,note,dateLabel,slotLabel,reviewLabel,submit,message);details.append(box);
+          }
+          function addPendingControls(details,item){
+            for(const [action,label,enabled] of [['pause','Pause pending',item.can_pause_pending],['resume','Resume pending',item.can_resume_pending&&item.state!=='quota_paused'],['cancel','Cancel pending',item.can_cancel_pending]]){if(!enabled)continue;const button=document.createElement('button');button.type='button';button.className='small secondary';button.textContent=label;button.onclick=async()=>{if(action==='cancel'&&!window.confirm('Cancel this pending destination?'))return;button.disabled=true;status.textContent='Saving '+action+'…';try{const response=await fetch('/api/publishing/deliveries/'+encodeURIComponent(item.id)+'/pending-action',{method:'POST',headers:csrfHeaders(),body:JSON.stringify({action})});const data=await response.json();if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Action failed.');status.textContent='Destination moved to '+data.state.replaceAll('_',' ')+'.';await loadDrafts();}catch(e){status.textContent='Could not '+action+': '+e.message;button.disabled=false;}};details.append(button);}
+          }
           async function requestDeliveryAction(item,action,button){if(action==='resume'&&!window.confirm('Continue only this saved remote upload session? No new session will be opened.'))return;button.disabled=true;status.textContent=action==='inspect'?'Requesting read-only remote inspection…':action==='resume'?'Requesting saved-session continuation…':'Checking the reconnected destination…';try{const response=await fetch('/api/publishing/deliveries/'+encodeURIComponent(item.id)+'/actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action})});if(!response.ok)throw Error(await response.text());const result=await response.json();status.textContent=action==='retry_after_reconnect'?'Destination moved to '+result.state.replaceAll('_',' ')+'. Refresh activity for the worker result.':'Action queued. Refresh publishing activity to see the durable result.';await loadDrafts();}catch(error){status.textContent='Could not request action: '+error.message;button.disabled=false;}}
+          async function resumeQuota(item,button){button.disabled=true;status.textContent='Requesting a quota retry…';try{const response=await fetch('/api/publishing/deliveries/'+encodeURIComponent(item.id)+'/pending-action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'resume'})});if(!response.ok)throw Error(await response.text());const result=await response.json();status.textContent='Destination moved to '+result.state.replaceAll('_',' ')+'.';await loadDrafts();}catch(error){status.textContent='Could not resume destination: '+error.message;button.disabled=false;}}
           async function loadDrafts(){try{
             const response=await fetch('/api/publishing/drafts');if(!response.ok)throw Error();const drafts=await response.json();history.replaceChildren();
             if(!drafts.length){history.textContent='No publishing drafts yet.';return;}
@@ -1248,37 +1359,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
               const title=document.createElement('strong');title.textContent='Post '+draft.id.slice(0,8)+' · '+draft.state.replaceAll('_',' ');row.append(title);
               if(draft.submitted_at){const submittedAt=document.createElement('div');submittedAt.className='sub';submittedAt.textContent='Submitted '+draft.submitted_at;row.append(submittedAt);}
               const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Review exact video, destinations and activity';details.append(summary);
-              const video=document.createElement('video');video.controls=true;video.preload='metadata';video.playsInline=true;video.className='video';video.src=draft.video_url;video.style.maxWidth='280px';details.append(video);
-              const identity=document.createElement('p');identity.className='sub';identity.textContent='Video SHA-256: '+draft.asset_sha256;details.append(identity);
+              const video=document.createElement('video');video.controls=true;video.preload='metadata';video.playsInline=true;video.className='video';video.src=draft.video_url;video.style.maxWidth='min(280px, 100%)';details.append(video);
+              const identity=document.createElement('p');identity.className='sub';identity.style.overflowWrap='anywhere';identity.textContent='Video SHA-256: '+draft.asset_sha256;details.append(identity);
               for(const item of draft.destinations){
-                const account=document.createElement('p');account.textContent=item.platform+' · '+item.external_account_id+' · '+item.state.replaceAll('_',' ')+' · '+item.attempt_count+' attempt(s)';details.append(account);
-                const metadata=document.createElement('pre');metadata.style.whiteSpace='pre-wrap';metadata.style.overflowWrap='anywhere';metadata.textContent=JSON.stringify(item.metadata,null,2);details.append(metadata);
-                if(item.error_message){const error=document.createElement('p');error.className='failure';error.textContent=item.error_message;details.append(error);}
+                const account=document.createElement('p');account.style.overflowWrap='anywhere';account.textContent=item.platform+' · '+item.external_account_id+' · '+item.state.replaceAll('_',' ')+' · '+item.attempt_count+' attempt(s)';details.append(account);
+                const metadata=document.createElement('p');metadata.style.whiteSpace='pre-wrap';metadata.style.overflowWrap='anywhere';const m=item.metadata;metadata.textContent=[m.title?'Title: '+m.title:null,'Description: '+m.caption,m.tags?.length?'Tags: '+m.tags.join(', '):null,item.platform==='youtube'?'Synthetic media disclosure: '+(m.contains_synthetic_media===true?'yes':m.contains_synthetic_media===false?'no':'not reviewed'):null].filter(Boolean).join('\\n');details.append(metadata);
+                if(item.error_message){const error=document.createElement('p');error.className='failure';error.style.overflowWrap='anywhere';error.textContent=item.error_message;details.append(error);}
                 if(item.remote_id){const remote=document.createElement('p');remote.className='sub';remote.textContent='Remote ID: '+item.remote_id;details.append(remote);}
                 if(item.remote_url){try{const url=new URL(item.remote_url);if(url.protocol==='https:'){const link=document.createElement('a');link.href=url.href;link.rel='noopener noreferrer';link.target='_blank';link.textContent='View remote post';details.append(link);}}catch(_){}}
                 if(item.attempts.length){const activity=document.createElement('details');const activityLabel=document.createElement('summary');activityLabel.textContent='Destination attempt history ('+item.attempts.length+')';activity.append(activityLabel);for(const attempt of item.attempts){const event=document.createElement('p');event.className='sub';event.textContent=attempt.started_at+' · '+attempt.kind+' · '+attempt.state+(attempt.finished_at?' · ended '+attempt.finished_at:'')+(attempt.error_message?' · '+attempt.error_message:'')+(attempt.remote_id?' · remote '+attempt.remote_id:'');activity.append(event);}details.append(activity);}
                 if(item.requested_action){const pending=document.createElement('p');pending.className='sub';pending.textContent=(item.requested_action==='inspect'?'Remote inspection':'Saved-session continuation')+' requested; waiting for the publisher worker.';details.append(pending);}
-                if(item.can_inspect){const inspect=document.createElement('button');inspect.type='button';inspect.className='small secondary';inspect.textContent='Inspect saved remote session';inspect.dataset.reconcile='true';inspect.disabled=!workerReady;inspect.onclick=()=>requestDeliveryAction(item,'inspect',inspect);details.append(inspect);}
-                if(item.can_resume){const resume=document.createElement('button');resume.type='button';resume.className='small secondary';resume.textContent='Continue saved upload session';resume.dataset.reconcile='true';resume.disabled=!workerReady;resume.onclick=()=>requestDeliveryAction(item,'resume',resume);details.append(resume);}
-                if(item.can_retry_after_reconnect){const retry=document.createElement('button');retry.type='button';retry.className='small secondary';retry.textContent='Resume after account reconnect';retry.dataset.reconcile='true';retry.disabled=!workerReady;retry.onclick=()=>requestDeliveryAction(item,'retry_after_reconnect',retry);details.append(retry);}
+                if(item.scheduled_for){const slot=document.createElement('p');slot.className='sub';slot.textContent='Scheduled: '+item.scheduled_for;details.append(slot);addPendingControls(details,item);}
+                if(item.state==='quota_paused'&&item.can_resume_pending){const quotaResume=document.createElement('button');quotaResume.type='button';quotaResume.className='small secondary';quotaResume.textContent='Resume after quota is available';quotaResume.onclick=()=>resumeQuota(item,quotaResume);details.append(quotaResume);}
+                if(item.can_inspect){const inspect=document.createElement('button');inspect.type='button';inspect.className='small secondary';inspect.textContent='Inspect saved remote session';inspect.dataset.reconcile='true';inspect.disabled=!workerOnline;inspect.onclick=()=>requestDeliveryAction(item,'inspect',inspect);details.append(inspect);}
+                if(item.can_resume){const resume=document.createElement('button');resume.type='button';resume.className='small secondary';resume.textContent='Continue saved upload session';resume.dataset.reconcile='true';resume.disabled=!workerOnline;resume.onclick=()=>requestDeliveryAction(item,'resume',resume);details.append(resume);}
+                if(item.can_retry_after_reconnect){const retry=document.createElement('button');retry.type='button';retry.className='small secondary';retry.textContent='Resume after account reconnect';retry.dataset.reconcile='true';retry.disabled=!workerOnline;retry.onclick=()=>requestDeliveryAction(item,'retry_after_reconnect',retry);details.append(retry);}
                 else if(item.state==='auth_required'){const reconnectNote=document.createElement('p');reconnectNote.className='sub';reconnectNote.textContent='Reconnect this exact account before resuming its destination.';details.append(reconnectNote);}
               }
-              const supported=draft.destinations.length>0&&draft.destinations.every(item=>item.platform==='youtube'&&(item.metadata.visibility||'private')==='private');
+              const supported=draft.destinations.length>0&&draft.destinations.every(item=>(item.platform==='youtube'&&(item.metadata.visibility||'private')==='private')||(item.platform==='instagram'&&item.metadata.confirm_public===true));
               if(draft.state==='draft'&&supported){
                 const reviewLabel=document.createElement('label');reviewLabel.className='checkbox';const reviewed=document.createElement('input');reviewed.type='checkbox';reviewLabel.append(reviewed,document.createTextNode(' I reviewed this exact video and every destination detail'));details.append(reviewLabel);
-                const submit=document.createElement('button');submit.type='button';submit.className='small';submit.textContent='Submit private YouTube post';submit.dataset.submitDraft='true';submit.disabled=true;details.append(submit);
+                const submit=document.createElement('button');submit.type='button';submit.className='small';submit.textContent=draft.destinations.some(item=>item.platform==='instagram')?'Submit (Instagram posts are public)':'Submit private YouTube post';submit.dataset.submitDraft='true';submit.disabled=true;details.append(submit);
                 reviewed.onchange=()=>{submit.dataset.reviewed=reviewed.checked?'true':'false';submit.disabled=!reviewed.checked||!workerReady;};
-                submit.onclick=async()=>{submit.disabled=true;submit.textContent='Submitting…';status.textContent='Queueing the exact reviewed private post…';try{const result=await fetch('/api/publishing/drafts/'+encodeURIComponent(draft.id)+'/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reviewed_identity:draft.reviewed_identity})});if(!result.ok)throw Error(await result.text());status.textContent='Post queued. Waiting for durable destination results.';await loadDrafts();}catch(error){status.textContent='Could not submit post: '+error.message;submit.disabled=!reviewed.checked||!workerReady;}finally{submit.textContent='Submit private YouTube post';}};
+                submit.onclick=async()=>{submit.disabled=true;submit.textContent='Submitting…';status.textContent='Queueing the exact reviewed private post…';try{const result=await fetch('/api/publishing/drafts/'+encodeURIComponent(draft.id)+'/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reviewed_identity:draft.reviewed_identity})});if(!result.ok)throw Error(await result.text());status.textContent='Post queued. Waiting for durable destination results.';await loadDrafts();}catch(error){status.textContent='Could not submit post: '+error.message;submit.disabled=!reviewed.checked||!workerReady;}finally{submit.textContent=draft.destinations.some(item=>item.platform==='instagram')?'Submit (Instagram posts are public)':'Submit private YouTube post';}};
               }else if(draft.state==='draft'){const unavailable=document.createElement('p');unavailable.className='sub';unavailable.textContent='Submission is unavailable for this destination selection.';details.append(unavailable);}
+              if(draft.state==='draft'&&supported)addScheduleControls(details,draft);
               row.append(details);history.append(row);
             }
           }catch(_){if(history.textContent==='Loading drafts…')history.textContent='Could not load publishing drafts.';}}
-          async function loadWorkerState(){try{const response=await fetch('/api/publishing/status');if(!response.ok)throw Error();const result=await response.json();workerReady=Boolean(result.manual_submission_enabled);workerState.textContent=workerReady?'Publisher worker online for private YouTube submission.':'Publisher worker unavailable. Drafts can be saved; submission is disabled.';}catch(_){workerReady=false;workerState.textContent='Publisher worker status is unavailable. Drafts can be saved; submission is disabled.';}for(const button of history.querySelectorAll('[data-submit-draft]'))button.disabled=!workerReady||button.dataset.reviewed!=='true';for(const button of history.querySelectorAll('[data-reconcile]'))button.disabled=!workerReady;}
+          async function loadWorkerState(){try{const response=await fetch('/api/publishing/status');if(!response.ok)throw Error();const result=await response.json();workerReady=Boolean(result.manual_submission_enabled);const yt=result.readiness?.youtube;workerOnline=Boolean(yt?.worker_live);workerState.textContent=yt?`YouTube: worker ${yt.worker_live?'online':result.worker_online?'idle (credentials required)':'offline'} · authorization ${yt.oauth_configured?'configured':'not configured'} · account ${yt.account_connected?'connected':'not connected'} · estimated upload quota ${yt.quota.remaining_units} / ${yt.quota.daily_units} units remaining · ${yt.audit_state}${workerReady?'':' · submission unavailable'}.`:'Publisher status unavailable.';}catch(_){workerReady=false;workerOnline=false;workerState.textContent='Publisher worker status is unavailable. Drafts can be saved; submission is disabled.';}for(const button of history.querySelectorAll('[data-submit-draft]'))button.disabled=!workerReady||button.dataset.reviewed!=='true';for(const button of history.querySelectorAll('[data-reconcile]'))button.disabled=!workerOnline;}
           refreshHistory.onclick=async()=>{refreshHistory.disabled=true;refreshHistory.textContent='Refreshing activity…';await loadDrafts();refreshHistory.disabled=false;refreshHistory.textContent='Refresh publishing activity';};
           function applyVideoIntent(){const video=videosById.get(videoSelect.value);planned.replaceChildren();for(const row of rows.values()){row.check.checked=false;row.caption.value='';if(row.title)row.title.value='';if(row.tags)row.tags.value='';}if(!video)return;const intents=video.destination_intents||[];if(!intents.length){planned.textContent='This video has no saved destination plan. Choose a connected account below to prepare a draft.';for(const row of rows.values()){if(video.video_description&&video.video_description.length<=row.caption.maxLength)row.caption.value=video.video_description;if(row.title)row.title.value=video.title.slice(0,100);}return;}const heading=document.createElement('strong');heading.textContent='Saved creation plan';planned.append(heading);for(const intent of intents){const account=accountsById.get(intent.account_id),row=rows.get(intent.account_id),fits=row&&intent.description.length<=row.caption.maxLength;const line=document.createElement('p');line.textContent=intent.platform+' · '+intent.account_name+' · '+intent.category+(fits?' — ready for draft review':row?' — description exceeds this platform’s limit; shorten it before selecting':' — '+(account?.status||'account unavailable')+'; connection or platform draft support required');planned.append(line);if(row){row.check.checked=Boolean(fits);row.caption.value=fits?intent.description:'';if(row.title)row.title.value=video.title.slice(0,100);}}}
           videoSelect.onchange=applyVideoIntent;
-          async function loadChoices(){try{const [videosResponse,accountsResponse]=await Promise.all([fetch('/api/publishing/ready-videos'),fetch('/api/social-accounts')]);if(!videosResponse.ok||!accountsResponse.ok)throw Error();const videos=await videosResponse.json(),allAccounts=await accountsResponse.json(),accounts=allAccounts.filter(item=>item.status==='connected'&&!item.disabled&&item.external_account_id&&['youtube','instagram'].includes(item.platform));videosById.clear();accountsById.clear();rows.clear();for(const video of videos)videosById.set(video.job_id,video);for(const account of allAccounts)accountsById.set(account.id,account);videoSelect.replaceChildren();if(!videos.length){videoSelect.append(Object.assign(document.createElement('option'),{textContent:'No finished videos available'}));planned.textContent='Saved destination plans appear when a final video is ready.';}else{for(const video of videos)videoSelect.append(Object.assign(document.createElement('option'),{value:video.job_id,textContent:video.title+' · '+video.state.replaceAll('_',' ')}));videoSelect.disabled=false;preview.disabled=false;}destinations.replaceChildren();if(!accounts.length){destinations.textContent='No verified YouTube or Instagram accounts available for a manual publishing draft. Planned accounts remain visible above.';}for(const account of accounts){const card=document.createElement('fieldset');card.style.border='1px solid #31415f';card.style.borderRadius='9px';card.style.marginTop='10px';const legend=document.createElement('legend');const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Publish to '+account.display_name);legend.append(check,document.createTextNode(' '+account.platform+' · '+account.display_name+' · '+account.external_account_id));card.append(legend);const caption=inputField(account.platform==='youtube'?'YouTube description':'Instagram caption','textarea');caption.input.maxLength=account.platform==='youtube'?5000:2200;card.append(caption.label);let title=null,tags=null;if(account.platform==='youtube'){title=inputField('YouTube title','input');title.input.maxLength=100;tags=inputField('YouTube keyword tags, comma separated','input');card.append(title.label,tags.label);}destinations.append(card);rows.set(account.id,{account,check,caption:caption.input,title:title?.input,tags:tags?.input});}save.disabled=!videos.length||!accounts.length;applyVideoIntent();applySuggestion();}catch(_){videoSelect.replaceChildren();destinations.textContent='Could not load videos or accounts. Reload to retry.';preview.disabled=true;save.disabled=true;}}
-          save.onclick=async()=>{const selected=[...rows.values()].filter(row=>row.check.checked);if(!selected.length){status.textContent='Select at least one destination account.';return;}const destinationData={};for(const row of selected){const metadata={caption:row.caption.value.trim()};if(row.account.platform==='youtube'){metadata.title=row.title.value.trim();metadata.tags=row.tags.value.split(',').map(value=>value.trim()).filter(Boolean);if(currentThumb)metadata.thumbnail_sha256=currentThumb.sha256;}destinationData[row.account.id]=metadata;}save.disabled=true;save.textContent='Saving draft…';status.textContent='Validating and copying the selected video…';try{const response=await fetch('/api/publishing/drafts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({job_id:videoSelect.value,destinations:destinationData})});if(!response.ok)throw Error(await response.text());const draft=await response.json();status.textContent='Draft '+draft.id.slice(0,8)+' saved for '+draft.destinations.length+' destination(s). No upload was started.';await loadDrafts();}catch(error){status.textContent='Could not save draft: '+error.message;}finally{save.disabled=false;save.textContent='Save publishing draft';}};
+          async function loadChoices(){try{const [videosResponse,accountsResponse]=await Promise.all([fetch('/api/publishing/ready-videos'),fetch('/api/social-accounts')]);if(!videosResponse.ok||!accountsResponse.ok)throw Error();const videos=await videosResponse.json(),allAccounts=await accountsResponse.json(),accounts=allAccounts.filter(item=>item.status==='connected'&&!item.disabled&&item.external_account_id&&['youtube','instagram'].includes(item.platform));videosById.clear();accountsById.clear();rows.clear();for(const video of videos)videosById.set(video.job_id,video);for(const account of allAccounts)accountsById.set(account.id,account);videoSelect.replaceChildren();if(!videos.length){videoSelect.append(Object.assign(document.createElement('option'),{textContent:'No finished videos available'}));planned.textContent='Saved destination plans appear when a final video is ready.';}else{for(const video of videos)videoSelect.append(Object.assign(document.createElement('option'),{value:video.job_id,textContent:video.title+' · '+video.state.replaceAll('_',' ')}));videoSelect.disabled=false;preview.disabled=false;}destinations.replaceChildren();if(!accounts.length){destinations.textContent='No verified YouTube or Instagram accounts available for a manual publishing draft. Planned accounts remain visible above.';}for(const account of accounts){const card=document.createElement('fieldset');card.style.border='1px solid #31415f';card.style.borderRadius='9px';card.style.marginTop='10px';const legend=document.createElement('legend');const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Publish to '+account.display_name);legend.append(check,document.createTextNode(' '+account.platform+' · '+account.display_name+' · '+account.external_account_id));card.append(legend);const caption=inputField(account.platform==='youtube'?'YouTube description':'Instagram caption','textarea');caption.input.maxLength=account.platform==='youtube'?5000:2200;card.append(caption.label);let title=null,tags=null;if(account.platform==='youtube'){title=inputField('YouTube title','input');title.input.maxLength=100;tags=inputField('YouTube keyword tags, comma separated','input');card.append(title.label,tags.label);}let publicConfirm=null;if(account.platform==='instagram'){const label=document.createElement('label');publicConfirm=document.createElement('input');publicConfirm.type='checkbox';label.append(publicConfirm,document.createTextNode(' I confirm this Instagram post goes public the moment it publishes (Instagram has no private mode).'));card.append(label);}destinations.append(card);rows.set(account.id,{account,check,caption:caption.input,title:title?.input,tags:tags?.input,publicConfirm});}save.disabled=!videos.length||!accounts.length;applyVideoIntent();applySuggestion();}catch(_){videoSelect.replaceChildren();destinations.textContent='Could not load videos or accounts. Reload to retry.';preview.disabled=true;save.disabled=true;}}
+          save.onclick=async()=>{const selected=[...rows.values()].filter(row=>row.check.checked);if(!selected.length){status.textContent='Select at least one destination account.';return;}const destinationData={};for(const row of selected){const metadata={caption:row.caption.value.trim()};if(row.account.platform==='youtube'){metadata.title=row.title.value.trim();metadata.tags=row.tags.value.split(',').map(value=>value.trim()).filter(Boolean);if(currentThumb)metadata.thumbnail_sha256=currentThumb.sha256;}if(row.account.platform==='instagram'&&row.publicConfirm&&row.publicConfirm.checked)metadata.confirm_public=true;destinationData[row.account.id]=metadata;}save.disabled=true;save.textContent='Saving draft…';status.textContent='Validating and copying the selected video…';try{const response=await fetch('/api/publishing/drafts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({job_id:videoSelect.value,destinations:destinationData})});if(!response.ok)throw Error(await response.text());const draft=await response.json();status.textContent='Draft '+draft.id.slice(0,8)+' saved for '+draft.destinations.length+' destination(s). No upload was started.';await loadDrafts();}catch(error){status.textContent='Could not save draft: '+error.message;}finally{save.disabled=false;save.textContent='Save publishing draft';}};
           loadChoices();loadDrafts();loadWorkerState();setInterval(loadWorkerState,20000);
         })();
         </script>"""
@@ -1419,7 +1533,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           form.before(toggle);
           const mdPanel=document.createElement('div');mdPanel.id='markdownModePanel';mdPanel.hidden=true;
           const mdExample='## Short title\n\n```yaml\nid: my-short-id\ntitle: "Why Amazon Uses DynamoDB for Some Workloads"\nconcept: "SQL vs NoSQL: scalability and schema flexibility"\nlength_s: 60\nending: loop\nhook: "Billions of products load instantly. Is it really one relational database?"\nbeats:\n  - {t: "0-10", point: "Hook: how a product page loads fast at huge scale"}\n  - {t: "10-40", point: "Strict relational schemas get costly at huge read volume; key-value stores trade guarantees for scale"}\n  - {t: "40-60", point: "Use a key-value store for high-scale reads; keep SQL where you need joins and strong consistency"}\ncta: "Full deep-dive coming in the long-form video"\nclaims_to_verify:\n  - "Amazon uses DynamoDB for parts of its catalog and still uses relational databases elsewhere"\nsources: []\nthumbnail: {text: "SQL Dies at Scale?", visual: "SQL logo vs NoSQL logo with a VS badge"}\ntags: [system design, sql, nosql]\n```';
-          mdPanel.innerHTML='<p class="sub">One <code>## Heading</code> plus exactly one fenced <code>```yaml</code> block, same format as Batch plans (<a href="/batch" target="_blank" rel="noopener">docs/batch-plans.md</a>). Required: <code>id, title, concept, beats: [{t, point}]</code>. Optional: <code>length_s</code> (30&ndash;90, default 60), <code>ending</code> (loop/debate), <code>channel</code>, <code>publish_at</code>, <code>hook</code>, <code>cta</code>, <code>claims_to_verify</code>, <code>sources</code>, <code>thumbnail: {text, visual}</code>, <code>tags</code>, <code>narration</code>.</p><label for="studioMarkdownFile">Markdown file</label><input id="studioMarkdownFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="studioMarkdownText">Markdown plan (same format as Batch plans)</label><textarea id="studioMarkdownText" required placeholder="'+mdExample.replace(/"/g,'&quot;')+'"></textarea><button id="studioMarkdownSubmit" type="button">Validate and create video</button><button id="studioMarkdownBack" type="button" class="secondary">Use the structured form instead</button><p id="studioMarkdownStatus" class="notice" role="status" aria-live="polite"></p>';
+          mdPanel.innerHTML='<p class="sub">One <code>## Heading</code> plus exactly one fenced <code>```yaml</code> block, same format as Batch plans (<a href="/batch" target="_blank" rel="noopener">docs/batch-plans.md</a>). Required: <code>id, title, concept, beats: [{t, point}]</code>. Optional: <code>length_s</code> (30&ndash;90, default 60), <code>ending</code> (loop/debate), <code>channel</code>, <code>publish_at</code>, <code>hook</code>, <code>cta</code>, <code>claims_to_verify</code>, <code>sources</code>, <code>thumbnail: {text, visual}</code>, <code>tags</code>, <code>script</code> (your own narration; alias <code>narration</code>), <code>script_mode</code> (<code>exact</code> uses it word for word).</p><label for="studioMarkdownFile">Markdown file</label><input id="studioMarkdownFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="studioScriptMode">Script mode for shorts that have a script</label><select id="studioScriptMode"><option value="">As set in each short (default)</option><option value="assist">Assist: the writer fits and checks my script</option><option value="exact">Exact: use my script word for word</option></select><label for="studioMarkdownText">Markdown plan (same format as Batch plans)</label><textarea id="studioMarkdownText" required placeholder="'+mdExample.replace(/"/g,'&quot;')+'"></textarea><button id="studioMarkdownSubmit" type="button">Validate and create video</button><button id="studioMarkdownBack" type="button" class="secondary">Use the structured form instead</button><p id="studioMarkdownStatus" class="notice" role="status" aria-live="polite"></p>';
           form.after(mdPanel);
           function setMode(markdown){form.hidden=markdown;mdPanel.hidden=!markdown;toggle.hidden=markdown;}
           toggle.onclick=()=>setMode(true);
@@ -1432,7 +1546,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             button.disabled=true;status.textContent='Validating…';
             try{
               const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');
-              const importResponse=await fetch('/api/batch-plans/import',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({markdown,commit:true,plan_id:'studio'})});
+              const importResponse=await fetch('/api/batch-plans/import',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({markdown,commit:true,plan_id:'studio',script_mode:document.querySelector('#studioScriptMode')?.value||null})});
               const importData=await importResponse.json();
               if(!importResponse.ok)throw Error(Array.isArray(importData.detail)?importData.detail.map(e=>`Line ${e.line||'?'}: ${e.message||e.msg}`).join(' / '):importData.detail);
               if(!importData.items.length)throw Error('No shorts were found in this markdown plan.');
@@ -1440,7 +1554,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
               status.textContent='Queuing generation…';
               const produceResponse=await fetch('/api/batch-plans/produce',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({ids})});
               if(!produceResponse.ok)throw Error(await produceResponse.text());
-              status.textContent='Generation queued. It will appear below shortly.'+(importData.cadence?.warnings?.length?' Cadence warnings: '+importData.cadence.warnings.map(w=>w.ids.join(', ')+': '+w.code).join(' · '):'');
+              status.textContent='Generation queued. It will appear below shortly.'+(importData.cadence?.warnings?.length?' Cadence warnings: '+importData.cadence.warnings.map(w=>w.ids.join(', ')+': '+w.code).join(' · '):'')+(()=>{const left=(importData.cadence?.scope?.all_warnings||0)-(importData.cadence?.warnings?.length||0);return left>0?' ('+left+' warnings about older shorts are on the Batch plans page.)':'';})();
               mdPanel.querySelector('#studioMarkdownText').value='';
               if(typeof refresh==='function')refresh();
             }catch(error){status.textContent='Could not queue this plan: '+error.message;}
@@ -1560,6 +1674,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detail = "; ".join(f"{'.'.join(str(part) for part in item['loc']) or 'request'}: {item['msg']}" for item in error.errors())
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from error
         _reject_retired_format(new_request, application_settings)
+        new_request = _fit_prompt(new_request, application_settings)   # an oversized retry is trimmed (or refused with numbers) before it is queued
         destinations = tuple(item["account_id"] for item in runtime.jobs.destination_intents(job_id))
         try:
             created = runtime.jobs.create(uuid4().hex, new_request, destination_account_ids=destinations, video_description=runtime.jobs.video_description(job_id))

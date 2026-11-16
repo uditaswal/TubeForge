@@ -473,7 +473,7 @@ def main() -> None:
                     evidence = prompt_evidence(prompt)
                     with tempfile.TemporaryDirectory(dir=RUNNER_ROOT) as workspace:
                         bubblewrap_args(Path(workspace))
-                    provenance = {"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True, "operations": ["ResearchSourcesV1"]}
+                    provenance = {"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True, "operations": ["ResearchSourcesV1", "ExactScriptV1"]}
                     if request.request.prompt_version == "m6-content-v8":
                         from tubeforge.providers.content.output import REFERENCE_OUTPUT_CONTRACT_VERSION
                         schema = codex_output_schema(envelope=True, reference=True)

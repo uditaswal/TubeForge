@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import secrets
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 from sqlalchemy import delete, select, update
@@ -14,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.db.models import OAuthConnectionRecord, SocialAccountRecord
 from tubeforge.security.secrets import TokenCipher
+from tubeforge.security.oauth_redirect import valid_oauth_redirect
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,9 +47,8 @@ class OAuthStateStore:
         code_verifier: str | None = None,
         now: datetime | None = None,
     ) -> str:
-        parsed = urlsplit(redirect_uri)
-        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
-            raise ValueError("OAuth callback must be a configured HTTPS URL")
+        if not valid_oauth_redirect(redirect_uri, platform=platform):
+            raise ValueError("OAuth callback must use HTTPS, or Google loopback HTTP")
         if platform not in {"youtube", "instagram"} or not session_id:
             raise ValueError("invalid OAuth connection context")
         now = now or datetime.now(UTC)

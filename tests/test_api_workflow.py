@@ -404,7 +404,9 @@ def test_voice_preview_is_synthesized_once_then_served_from_persistent_cache(tmp
     _migrate(database_path)
     settings = Settings(app=AppConfig(name="TubeForge test", environment="test"), database=DatabaseConfig(url=f"sqlite:///{database_path}"))
     settings.pipeline.voice_provider = "piper"
-    # This cache test replaces synthesis with FakeVoiceProvider below.
+    # This test replaces the voice provider before synthesis; only startup's
+    # executable-presence check needs an existing executable.
+    import sys
     settings.pipeline.piper.executable = sys.executable
     model = tmp_path / "piper.onnx"
     model.write_bytes(b"test-model")

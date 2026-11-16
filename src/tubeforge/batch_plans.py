@@ -15,8 +15,8 @@ _RANGE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:-|\u2013|to)\s*(\d+(?:\.\d+)?)\s*
 class Beat(BaseModel):
     """One outline beat. ``t`` is the start second; a range such as ``"0-10"`` is accepted and keeps its end."""
     model_config = ConfigDict(extra="forbid")
-    t: float = Field(ge=0, le=90)
-    end: float | None = Field(default=None, ge=0, le=90)
+    t: float = Field(ge=0, le=120)
+    end: float | None = Field(default=None, ge=0, le=120)
     point: str = Field(min_length=1)
 
     @model_validator(mode="before")
@@ -41,7 +41,7 @@ class BatchShort(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     concept: str = Field(min_length=1)
     beats: list[Beat] = Field(min_length=1)
-    length_s: int = Field(default=60, ge=30, le=90, strict=True)
+    length_s: int = Field(default=60, ge=30, le=120, strict=True)
     ending: Literal["loop", "debate"] = "loop"
     channel: str | None = None
     publish_at: datetime | None = None
@@ -52,6 +52,25 @@ class BatchShort(BaseModel):
     thumbnail: Thumbnail = Field(default_factory=Thumbnail)
     tags: list[str] = Field(default_factory=list)
     narration: str | None = Field(default=None, max_length=12_000)
+    # exact = use the script word for word (either writer): no rewriting, no writing checks.
+    script_mode: Literal["assist", "exact"] | None = None   # None: the import's choice, then the Settings default
+
+    @model_validator(mode="after")
+    def exact_needs_a_script(self):
+        if self.script_mode == "exact" and not (self.narration or "").strip():
+            raise ValueError("script_mode: exact needs a script (or narration) in the same block")
+        return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_script_alias(cls, data):
+        """``script:`` is the obvious name for the operator's own narration; it means exactly ``narration:``."""
+        if isinstance(data, dict) and "script" in data:
+            if "narration" in data:
+                raise ValueError("give your script once: use either `script` or `narration`, not both")
+            data = {**data, "narration": data["script"]}
+            del data["script"]
+        return data
 
 
 class BatchError(BaseModel):

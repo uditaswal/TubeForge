@@ -146,6 +146,13 @@ def scope_cadence(report, day, day_ids):
     return {**report, 'warnings': kept, 'scope': {'day': day, 'filtered': True, 'all_warnings': len(report['warnings'])}}
 
 
+def scope_cadence_to_ids(report, ids):
+    """Keep only the warnings that name one of ``ids`` (for example the shorts in one import) and say how many were left out."""
+    wanted = set(ids)
+    kept = [w for w in report['warnings'] if wanted & set(w['ids'])]
+    return {**report, 'warnings': kept, 'scope': {'ids': sorted(wanted), 'filtered': True, 'all_warnings': len(report['warnings'])}}
+
+
 def similar_and_close(repetition, shorts, config):
     """Pairs flagged as similar that are also planned closer together than the channel's minimum spacing.
 

@@ -60,3 +60,16 @@ def test_oauth_state_is_durable_bound_and_single_use(tmp_path: Path) -> None:
             store.begin(platform="youtube", account_id=None, session_id="studio-1", redirect_uri="http://studio.example/callback")
     finally:
         database.dispose()
+
+
+def test_loopback_http_is_allowed_only_for_youtube(tmp_path):
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'loopback.db'}"))
+    Base.metadata.create_all(database.engine)
+    store = OAuthStateStore(database.session_factory, TokenCipher(Fernet.generate_key().decode()))
+    try:
+        state = store.begin(platform="youtube", account_id=None, session_id="session", redirect_uri="http://127.0.0.1:62065/callback")
+        assert store.consume(state, platform="youtube", session_id="session").redirect_uri == "http://127.0.0.1:62065/callback"
+        with pytest.raises(ValueError, match="callback"):
+            store.begin(platform="instagram", account_id=None, session_id="session", redirect_uri="http://localhost:62065/callback")
+    finally:
+        database.dispose()
