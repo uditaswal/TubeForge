@@ -49,7 +49,7 @@ pipeline:
       reference-short:
         duration_seconds: 60
         minimum_duration_seconds: 30
-        maximum_duration_seconds: 90
+        maximum_duration_seconds: 120
         aspect_ratio: "9:16"
         prompt_version: "m6-content-v8"
         captions_enabled: true

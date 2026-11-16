@@ -124,7 +124,7 @@ def master(narration: Path, scene_starts: tuple[float, ...], output: Path, *,
         raise ValueError("templates must name every scene (one per scene_starts entry)")
     voice, sample_rate = sf.read(narration, dtype="float32")
     if sample_rate != SR or voice.ndim != 1 or not REFERENCE_SHORT_MIN_SECONDS <= len(voice) / SR <= REFERENCE_SHORT_MAX_SECONDS or not np.isfinite(voice).all():
-        raise ValueError("mastering requires finite mono 48 kHz narration, 25–90 seconds")
+        raise ValueError(f"mastering requires finite mono 48 kHz narration, {REFERENCE_SHORT_MIN_SECONDS}–{REFERENCE_SHORT_MAX_SECONDS} seconds")
     peak = float(np.max(np.abs(voice)))
     if peak < .001:
         raise ValueError("cannot master silent narration")

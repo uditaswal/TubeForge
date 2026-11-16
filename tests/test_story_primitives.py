@@ -15,6 +15,14 @@ from tubeforge.rendering.shorts.layout import SceneRenderer
 from tubeforge.rendering.shorts.schema import Flow, ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Word
 
+
+def test_story_renderer_is_reported_when_style_selects_it():
+    from tubeforge.core.config import ReferenceShortConfig
+    from tubeforge.pipeline.reference_short import renderer_version
+
+    assert renderer_version(ReferenceShortConfig(renderer='pil'), style='story') == 'reference-short-v1/story-8'
+    assert renderer_version(ReferenceShortConfig(renderer='pil')) != renderer_version(ReferenceShortConfig(renderer='pil'), style='story')
+
 VO = "This synthetic example tests readable graphics and safe caption placement."
 
 
@@ -350,3 +358,27 @@ def test_story_loop_filter_replays_first_frame_without_changing_frame_count():
     assert len(raw)==frames*size
     assert raw[:size]==raw[-size:]
     assert raw[size:2*size]!=raw[:size]
+
+
+def _times(page: str, selector: str) -> list[float]:
+    import re
+    return [float(m) for m in re.findall(r'pop\("#%s",(\d+\.\d+)' % re.escape(selector), page)]
+
+
+def test_stack_flow_arrow_appears_with_the_node_it_leads_to_not_before(tmp_path):
+    late = Flow.model_validate(dict(template="flow", scene_id="f", vo=VO, caption=VO, heading="STEPS",
+                                    nodes=["A", "B", "C"], reveal_words=[0, 4, 8]))
+    page = build([late], tmp_path)
+    for k in (0, 1):
+        arrow = _times(page, f"s0a{k}")
+        node = _times(page, f"s0n{k + 1}")
+        assert arrow and node and arrow[0] <= node[0] and node[0] - arrow[0] <= .15
+
+
+def test_big_stat_figure_stays_hidden_until_its_reveal_word(tmp_path):
+    data = topic_data()["scenes"][1] | {"scene_id": "b", "caption": VO, "vo": VO}
+    assert data["template"] == "big_stat"
+    scene = ShortsTopic.model_validate(topic_data() | {"scenes": topic_data()["scenes"][:1] + [data] + topic_data()["scenes"][2:]}).scenes[1]
+    page = build([scene], tmp_path)
+    assert 'id="s0fig"' in page and "opacity:0" in page.split('id="s0fig"')[1].split(">")[0]
+    assert 'tl.set("#s0fig",{opacity:1}' in page

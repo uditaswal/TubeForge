@@ -949,7 +949,7 @@ class PipelineOrchestrator:
         timeline = reference_short.load_timeline(package.reference_short, directory)
         output = self._artifact_path(job.id, filename)
         self._ensure_ownership(force=True)
-        selected_renderer = reference_short.renderer_version(self.reference_config)
+        selected_renderer = reference_short.renderer_version(self.reference_config, style=reference_short.load_style(directory))
         self.events.append(job.id, "render_started", render=name, renderer=selected_renderer)
         report = reference_short.render(timeline, directory, output, self.reference_config, draft=name == "preview",
                                         cancelled=cancellation_requested or (lambda: False), bed=self._music_bed(music))

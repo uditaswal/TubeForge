@@ -362,7 +362,9 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
             task = (prompt + RULES + "\n\nYour previous output was rejected by validation:\n" + last_error +
                     "\nReturn the complete corrected output, changing only what is needed to fix these errors.")
     if package is None:
-        raise ProviderValidationError("Claude output failed validation twice: " + last_error)
+        raise RejectedContentError("Claude output failed validation twice: " + last_error, HostRunnerSuccess(
+            package={"raw_output": raw}, usage=usage_total,
+            provenance={"provider": "host-claude-runner", "accepted": False}))
     if version == "m6-content-v8" and writers_room_enabled():
         edited, edited_normalizations, room_notes["editor"] = editor_pass(
             request, root, raw, model=model, effort=effort, schema=schema, version=version, usage_total=usage_total)
@@ -452,8 +454,14 @@ def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunne
         from tubeforge.providers.content.youtube_skills import preflight
         prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=MAX_PROMPT_CHARS)
         claude_binary()
-        return HostRunnerSuccess(package={}, provenance={"resource_hashes": preflight(template_version=request.request.prompt_version), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
-                                                         "preflight": True, "operations": ["ResearchSourcesV1"], "runner": "claude"})
+        provenance = {"resource_hashes": preflight(template_version=request.request.prompt_version), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
+                      "preflight": True, "operations": ["ResearchSourcesV1"], "runner": "claude"}
+        if request.request.prompt_version == "m6-content-v8":
+            from tubeforge.providers.content.output import REFERENCE_OUTPUT_CONTRACT_VERSION
+            schema = codex_output_schema(envelope=True, reference=True, keep_lengths=True)
+            provenance["reference_contract_version"] = REFERENCE_OUTPUT_CONTRACT_VERSION
+            provenance["reference_schema_sha256"] = hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return HostRunnerSuccess(package={}, provenance=provenance)
     if request.operation == "ResearchSourcesV1":
         return run_research(request, model=model)
     return run_request(request, model=model)

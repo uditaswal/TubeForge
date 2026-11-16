@@ -110,8 +110,8 @@ class ReferenceIntakeRequest(DomainModel):
     @field_validator('target_duration_seconds')
     @classmethod
     def supported_target_duration(cls, value):
-        if not (25 <= value <= 90 or 600 <= value <= 900):
-            raise ValueError('target must be a 25–90 second Short or a 600–900 second long-form video')
+        if not (25 <= value <= 120 or 600 <= value <= 900):
+            raise ValueError('target must be a 25–120 second Short or a 600–900 second long-form video')
         return value
 
     @field_validator('reference_url')

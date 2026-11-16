@@ -8,7 +8,7 @@ You brief a topic in the Creator Studio dashboard (or let a schedule pick one). 
 
 ## Features
 
-- 30–90 s vertical Shorts with word-timed captions, motion, icons, brand logos, real imagery and licensed background music
+- 30–120 s vertical Shorts with word-timed captions, motion, icons, brand logos, real imagery and licensed background music
 - Script owner chosen per job: Codex CLI or Claude, behind a host-side runner (no API keys in the app)
 - Source-grounded writing with research, hook/craft quality gates and an optional writers' room revision pass
 - Local narration (Kokoro, Piper) with Whisper word alignment

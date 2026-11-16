@@ -14,6 +14,16 @@ from tubeforge.pipeline.long_form_reference import reference_cache_key, referenc
 URL = 'https://www.youtube.com/watch?v=AbCdEfGhI_1'
 
 
+@pytest.mark.parametrize('seconds', [102, 105, 120])
+def test_reference_intake_accepts_extended_short_targets(seconds):
+    assert ReferenceIntakeRequest(reference_url=URL, target_duration_seconds=seconds).target_duration_seconds == seconds
+
+
+def test_reference_intake_still_rejects_duration_between_formats():
+    with pytest.raises(ValidationError):
+        ReferenceIntakeRequest(reference_url=URL, target_duration_seconds=121)
+
+
 def snapshot_data():
     return dict(extractor_version='fixture-v1', reference_url=URL, video_id='AbCdEfGhI_1',
         title='Synthetic explanation', creator='Fixture channel',duration_seconds=600,

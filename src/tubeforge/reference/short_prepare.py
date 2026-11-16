@@ -43,8 +43,8 @@ def prepare_short(runtime, settings, routing_policy, intake_id: str, value: Shor
         if view.state != 'ready' or view.snapshot is None:
             raise ValueError('Capture a usable transcript before preparing a Short.')
         seconds = view.request.target_duration_seconds
-        if not 30 <= seconds <= 90:
-            raise ValueError('Choose a configured 30–90 second Short target.')
+        if not 30 <= seconds <= 120:
+            raise ValueError('Choose a configured 30–120 second Short target.')
         presets = settings.pipeline.video_generation.presets
         preset = next((name for name, candidate in presets.items()
             if candidate.aspect_ratio == '9:16' and candidate.prompt_version == 'm6-content-v8'

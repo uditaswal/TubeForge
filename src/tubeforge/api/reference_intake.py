@@ -62,7 +62,7 @@ def register_reference_routes(app,runtime,settings,routing_policy):
     @app.post('/api/reference-intakes',status_code=201,tags=['references'])
     async def create(request:Request):
         try:value=ReferenceIntakeRequest.model_validate(await bounded_json(request))
-        except ValidationError:raise HTTPException(422,'Use a public YouTube link, a 25–90 second Short or 600–900 second long-form target, a valid language and bounded timestamped transcript.') from None
+        except ValidationError:raise HTTPException(422,'Use a public YouTube link, a 25–120 second Short or 600–900 second long-form target, a valid language and bounded timestamped transcript.') from None
         if value.channel_identity not in channels:raise HTTPException(422,'Choose a configured channel identity.')
         return repo.create(value,actor(request))
 

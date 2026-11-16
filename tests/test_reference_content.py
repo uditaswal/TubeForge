@@ -83,6 +83,7 @@ def test_reference_schema_and_prompt_preserve_legacy_boundary():
     topic.pop("sources")
     for scene in topic["scenes"]:
         scene.pop("vo")
+        scene.pop("source_ids")
         scene["visual"] = None  # strict model output states every field explicitly
         scene["logo"] = None
         if scene['template'] == 'flow':
@@ -135,3 +136,60 @@ def test_engagement_comment_must_be_a_clean_question():
     for bad in ("Rust beats C.", "Rust or C? see https://x.test", "Rust or C? #flame", "Rust or C? @someone"):
         with pytest.raises(ValueError):
             VideoMetadata(**base, engagement_comment=bad)
+
+
+def test_missing_scene_sources_are_derived_from_known_narration_claims():
+    request, raw, _ = candidate()
+    for scene in raw["package"]["reference_short"]["scenes"]:
+        scene.pop("source_ids")
+    package = ContentPackage.model_validate(unwrap_generation(raw, request=request))
+    assert all(tuple(scene.source_ids) == ("fixture",) for scene in package.reference_short.scenes)
+
+
+def test_delivery_cue_only_echo_is_accepted_but_changed_words_are_not():
+    request, raw, _ = candidate()
+    section = raw["package"]["script_sections"][0]
+    scene = raw["package"]["reference_short"]["scenes"][0]
+    scene["vo"] = section["narration"]
+    section["narration"] = "[breath] " + section["narration"]
+    package = ContentPackage.model_validate(unwrap_generation(raw, request=request))
+    assert package.reference_short.scenes[0].vo == scene["vo"]
+    scene["vo"] = "[whisper] " + scene["vo"] + " [/whisper]"
+    with pytest.raises(ProviderValidationError, match="speech echo"):
+        unwrap_generation(raw, request=request)
+    scene["vo"] = "Different words cannot be silently accepted."
+    with pytest.raises(ProviderValidationError, match="speech echo"):
+        unwrap_generation(raw, request=request)
+
+
+def test_derived_sources_never_hide_unknown_claims_or_sources():
+    request, raw, _ = candidate()
+    raw["package"]["reference_short"]["scenes"][0].pop("source_ids")
+    raw["package"]["script_sections"][0]["claim_ids"] = ["missing"]
+    with pytest.raises(ProviderValidationError, match="unknown claim"):
+        unwrap_generation(raw, request=request)
+    request, raw, _ = candidate()
+    raw["package"]["claims"][0]["source_ids"] = ["unknown"]
+    with pytest.raises(ProviderValidationError, match="unknown source"):
+        unwrap_generation(raw, request=request)
+
+
+def test_short_writer_schema_does_not_ask_for_redundant_scene_sources():
+    schema = codex_output_schema(envelope=True, reference=True)
+    for kind in ("Hook", "BigStat", "BeforeAfter", "Flow", "Checklist", "Terminal", "CTA"):
+        assert "source_ids" not in schema["$defs"][kind]["properties"]
+        assert "vo" not in schema["$defs"][kind]["properties"]
+    request, _, _ = candidate()
+    prompt = build_content_prompt(request, template_version="m6-content-v8", max_chars=60000)
+    assert "Python binds each scene" in prompt
+
+
+def test_reference_writer_accepts_102_second_target_and_rejects_over_120():
+    request, _, _ = candidate()
+    raw = request.model_dump(mode='json')
+    raw['target_duration_seconds'] = 102
+    extended = ContentRequest.model_validate(raw)
+    assert '102 seconds' in build_content_prompt(extended, template_version='m6-content-v8', max_chars=90000)
+    raw['target_duration_seconds'] = 121
+    with pytest.raises(ValidationError):
+        ContentRequest.model_validate(raw)

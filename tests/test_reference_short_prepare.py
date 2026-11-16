@@ -69,6 +69,21 @@ def test_short_preparation_requires_confirmation_and_research(setup):
     assert client.get('/api/jobs').json() == []
 
 
+def test_extended_reference_queues_story_short(setup):
+    client, runtime, settings, headers, _, body = setup
+    settings.pipeline.video_generation.presets['short'].maximum_duration_seconds = 120
+    response = client.post('/api/reference-intakes', json={'reference_url': URL, 'target_duration_seconds': 105}, headers=headers)
+    assert response.status_code == 201, response.text
+    intake = response.json()['intake']
+    runtime.reference_intakes.run_once('test-worker-extended')
+    ready = client.get('/api/reference-intakes/' + intake['intake_id']).json()['intake']
+    result = client.post('/api/reference-intakes/' + intake['intake_id'] + '/short', json={**body,
+        'expected_revision': ready['revision'], 'reference_snapshot_sha256': ready['reference_snapshot_sha256']}, headers=headers)
+    assert result.status_code == 201, result.text
+    job = runtime.jobs.get(result.json()['job_id'])
+    assert job.request.target_duration_seconds == 105 and job.request.video_style == 'story'
+
+
 def test_short_preparation_rejects_changed_or_unsafe_reference(setup):
     client, runtime, settings, headers, ready, body = setup
     path = '/api/reference-intakes/' + ready['intake_id'] + '/short'

@@ -10,7 +10,7 @@ from .icons import ICON_NAMES
 from .logos import LOGO_NAMES
 
 REFERENCE_SHORT_MIN_SECONDS = 25
-REFERENCE_SHORT_MAX_SECONDS = 90  # YouTube Shorts allow longer, but retention drops; the preset and gates stop here
+REFERENCE_SHORT_MAX_SECONDS = 120
 IconName = Literal[ICON_NAMES]  # type: ignore[valid-type]
 LogoName = Literal[LOGO_NAMES]  # type: ignore[valid-type]
 
