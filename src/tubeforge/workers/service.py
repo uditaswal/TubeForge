@@ -39,7 +39,7 @@ class WorkerService:
     def run_once(self, *, interrupt_after: JobState | None = None) -> PipelineJob | None:
         """Lease one eligible job then execute without a database transaction open."""
         now = self._now()
-        job = self.jobs.claim_oldest_eligible(self.worker_id, now=now, lease_seconds=self.config.lease_seconds)
+        job = self.jobs.claim_oldest_eligible(self.worker_id, now=now, lease_seconds=self.config.lease_seconds, job_kinds=self.config.job_kinds)
         if job is None:
             return None
         _event("job_claimed", job_id=job.id, worker_id=self.worker_id, state=job.state.value)

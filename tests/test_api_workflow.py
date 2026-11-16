@@ -261,8 +261,7 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert r"split('\n')" in dashboard.text
         assert r"join('\n')" in dashboard.text
         assert "jobsRoot.innerHTML=j.map" not in dashboard.text
-        assert "sourceClipCreate" in dashboard.text
-        assert "/api/source-clips" in dashboard.text
+        assert 'href="/clips"' in dashboard.text and "sourceClipCreate" not in dashboard.text
         assert "/api/voices" in dashboard.text
         assert "Preview voice" in dashboard.text
         assert "Watch video" in dashboard.text

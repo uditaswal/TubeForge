@@ -14,7 +14,7 @@ def test_worker_image_installs_local_voice_runtimes_and_ffmpeg() -> None:
 
     assert "apt-get install -y --no-install-recommends ffmpeg" in dockerfile
     # The dependency layer reads the extras from pyproject.toml, so a source edit does not reinstall them.
-    assert 'wanted = ["dev", "local-media", "kokoro", "alignment", "reference-renderer"]' in dockerfile
+    assert 'wanted = ["dev", "local-media", "kokoro", "alignment", "reference-renderer", "clips"]' in dockerfile
     assert "chromium" in dockerfile  # source-page screenshots for reference Shorts
     assert '"piper-tts>=1.3,<2"' in project
     assert '"kokoro-onnx>=0.3.8,<1"' in project

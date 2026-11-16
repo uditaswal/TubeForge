@@ -117,26 +117,18 @@ class SourceIngestionConfig(BaseModel):
 
 
 class SourceClipConfig(BaseModel):
-    """Local, opt-in acquisition and vertical clip rendering policy."""
+    """Local, opt-in source clipping: a transcript-driven engine picks the moments and renders them."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     ytdlp_executable: str = Field(default="yt-dlp", min_length=1, max_length=4096)
     timeout_seconds: int = Field(default=120, ge=5, le=1_800)
-    ffmpeg_executable: str = Field(default="ffmpeg", min_length=1, max_length=4096)
-    ffprobe_executable: str = Field(default="ffprobe", min_length=1, max_length=4096)
     max_source_duration_seconds: int = Field(default=14_400, ge=30, le=86_400)
-    min_clip_seconds: float = Field(default=15, ge=5, le=600)
     max_clip_seconds: float = Field(default=60, ge=10, le=900)
-    padding_seconds: float = Field(default=3, ge=0, le=30)
-    analysis_window_seconds: float = Field(default=0.5, ge=0.1, le=5)
+    # Transcribe only the windows viewers engaged with (heatmap, comments, chapters), not the whole video.
+    engaging_only: bool = True
 
-    @model_validator(mode="after")
-    def clip_bounds_are_ordered(self) -> "SourceClipConfig":
-        if self.min_clip_seconds > self.max_clip_seconds:
-            raise ValueError("source_clips.min_clip_seconds must not exceed max_clip_seconds")
-        return self
 
 class ChannelVoiceCharacter(BaseModel):
     """One channel's optional acoustic narrator character (M-AU3): a Kokoro voice or
@@ -790,6 +782,8 @@ class WorkerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_active_jobs: int = Field(default=1, ge=1, le=1)
+    # "all" takes every job; "clips" or "shorts" leaves the other kind queued (TUBEFORGE_WORKER_MODES overrides).
+    job_kinds: str = Field(default="all", pattern=r"^(all|clips|shorts)$")
     lease_seconds: int = Field(default=300, ge=10, le=3600)
     heartbeat_seconds: int = Field(default=60, ge=1, le=600)
     max_attempts: int = Field(default=3, ge=1, le=20)

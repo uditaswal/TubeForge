@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import time
 import uuid
@@ -15,6 +16,11 @@ from tubeforge.workers.service import WorkerService
 def main() -> None:
     """Poll conservatively; each expensive operation remains globally leased."""
     settings = load_settings()
+    kinds = os.environ.get("TUBEFORGE_WORKER_MODES", "").strip().lower()
+    if kinds:
+        if kinds not in {"all", "clips", "shorts"}:
+            raise SystemExit("TUBEFORGE_WORKER_MODES must be all, clips or shorts")
+        settings.worker.job_kinds = kinds
     runtime = create_runtime(settings)
     worker = WorkerService(f"worker-{uuid.uuid4().hex}", runtime.jobs, runtime.orchestrator, settings.worker)
     stopping = False

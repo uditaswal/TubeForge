@@ -34,7 +34,7 @@ from tubeforge.host_codex_runner import (
     AllowanceExhaustedError, RejectedContentError, codex_output_schema, consume_invocation,
     encode_failure, normalize_fallback_visuals, MAX_RESPONSE_BYTES,
 )
-from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess, MAX_REQUEST_BYTES
+from tubeforge.providers.content.host_runner_protocol import ClipCompletionRequest, GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess, MAX_REQUEST_BYTES
 from tubeforge.providers.content.prompts import (
     ANGLE_INSTRUCTIONS, CONTENT_ENVELOPE_TEMPLATES, RECIPES, build_content_prompt, normalize_content_request, prompt_evidence,
     reference_word_budget,
@@ -80,7 +80,7 @@ def peer_uid(connection: socket.socket) -> int:
     return struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[1]
 
 
-def receive_request(connection: socket.socket) -> GenerateShortsScriptRequest:
+def receive_request(connection: socket.socket) -> GenerateShortsScriptRequest | ClipCompletionRequest:
     if peer_uid(connection) != os.getuid():
         raise PermissionError("runner accepts only the operator's own UID")
     from tubeforge.providers.content.host_runner_protocol import receive_message
@@ -110,10 +110,10 @@ def build_command(schema: dict, *, model: str, effort: str | None = None, web_se
     return command
 
 
-def call_claude(prompt: str, schema: dict, *, model: str, effort: str | None = None, web_search: bool = False) -> tuple[dict, dict]:
+def call_claude(prompt: str, schema: dict, *, model: str, effort: str | None = None, web_search: bool = False, label: str = "launch") -> tuple[dict, dict]:
     """Run one print-mode call; return (structured output, usage evidence)."""
     BUDGET.check()
-    BUDGET.record(usd=None, label="launch")  # counted before launch so failed or timed-out calls still count
+    BUDGET.record(usd=None, label=label)  # counted before launch so failed or timed-out calls still count
     with tempfile.TemporaryDirectory(prefix="tubeforge-claude-") as cwd:
         try:
             completed = subprocess.run(build_command(schema, model=model, effort=effort, web_search=web_search), input=prompt.encode(),
@@ -446,7 +446,36 @@ def codex_output_schema_for_research(model_class) -> dict:
     return schema
 
 
-def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunnerSuccess:
+CLIP_MODEL = os.environ.get("TUBEFORGE_CLAUDE_CLIP_MODEL", DEFAULT_MODEL)
+CLIP_CALLS_PER_DAY = int(os.environ.get("TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY", "12"))
+CLIP_LABEL = "clips"
+
+
+def clip_calls_used(budget: ClaudeBudget | None = None) -> int:
+    """Calls the clip engine made in the budget window (ledger rows labelled "clips")."""
+    budget = budget or BUDGET
+    return sum(int(row.get("n", 1)) for row in budget._entries(time.time()) if row.get("label") == CLIP_LABEL)
+
+
+def run_clip_completion(request: ClipCompletionRequest, *, model: str | None = None) -> HostRunnerSuccess:
+    """One tool-less completion for clip selection, under the shared limit and the clip sub-limit."""
+    if clip_calls_used() >= CLIP_CALLS_PER_DAY:
+        raise BudgetExceededError(
+            f"Clip selection daily call limit reached ({CLIP_CALLS_PER_DAY} in the last 24 h); "
+            "raise TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY on the runner or wait for the window to roll")
+    BUDGET.check()
+    schema = request.output_schema or {"type": "object", "additionalProperties": True}
+    prompt = (request.system + "\n\n" if request.system else "") + request.prompt
+    started = time.monotonic()
+    structured, usage = call_claude(prompt, schema, model=model or CLIP_MODEL, label=CLIP_LABEL)
+    return HostRunnerSuccess(package=structured, usage=usage, provenance={
+        "provider": "host-claude-clips", "model": model or CLIP_MODEL, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "elapsed_seconds": round(time.monotonic() - started, 3)})
+
+
+def handle(request: GenerateShortsScriptRequest | ClipCompletionRequest, model: str | None) -> HostRunnerSuccess:
+    if isinstance(request, ClipCompletionRequest):
+        return run_clip_completion(request)
     from tubeforge.domain.long_form_writing import LongFormHostRequest
     if isinstance(request,LongFormHostRequest):
         from tubeforge.long_form.host import handle_claude

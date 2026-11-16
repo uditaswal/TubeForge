@@ -117,9 +117,8 @@ pipeline:
     enabled: true
     ytdlp_executable: "yt-dlp"
     timeout_seconds: 45
-    min_clip_seconds: 15
     max_clip_seconds: 60
-    padding_seconds: 3
+    engaging_only: true
   preview:
     audio_normalization_enabled: true
   final:

@@ -12,6 +12,7 @@ You brief a topic in the Creator Studio dashboard (or let a schedule pick one). 
 - Script owner chosen per job: Codex CLI or Claude, behind a host-side runner (no API keys in the app)
 - Source-grounded writing with research, hook/craft quality gates and an optional writers' room revision pass
 - Local narration (Kokoro, Piper) with Whisper word alignment
+- Clips (`/clips`): a long video becomes vertical clips, with transcript-driven moment selection, face-aware 9:16 crop and word-synced captions; each approved clip becomes its own reviewable job
 - Final-video quality checks: decodability, loudness (−15…−13 LUFS), true peak (≤ −1.5 dB)
 - Dashboard with login, CSRF protection, audited approvals, topic queue, schedules and activity history
 - Publishing preparation: title, description and thumbnail suggestions; encrypted OAuth credentials; a private YouTube delivery queue under local verification
@@ -111,6 +112,7 @@ Long-form script preparation is available in the reviewed branch through **Long-
 | Opt-in classic video design tokens (local benchmark option) | [docs/video-design-tokens.md](docs/video-design-tokens.md) |
 | Scene direction review and local benchmark evidence | [docs/video-direction-review.md](docs/video-direction-review.md) |
 | Batch plans: import, queue, disclosure/rights review, staged export | [docs/batch-plans.md](docs/batch-plans.md) |
+| Clips: how clip jobs work, worker modes, limits, what is deferred | [docs/clips.md](docs/clips.md) |
 | Settings page (`/settings`): script prompt size, source trimming, automatic retry of rejected scripts, worker retries; no restart needed | [docs/settings.md](docs/settings.md) |
 | Video quality standard | [docs/SHORT_FORM_VIDEO_RULEBOOK.md](docs/SHORT_FORM_VIDEO_RULEBOOK.md) |
 | Security policy | [SECURITY.md](SECURITY.md) |

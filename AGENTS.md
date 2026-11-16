@@ -54,6 +54,14 @@ The Creator Studio dashboard, login page and HTTP APIs are one operator workflow
 - Add or update focused API/UI tests for changed workflows; update `readme.md` when a flow, login behavior or dashboard URL changes.
 - `http://127.0.0.1:62065` is the sole documented developer dashboard URL; Compose binds it to loopback only. Do not document or reserve other host ports (preview-proxy ports are transient).
 
+## Clips package boundary
+
+`src/tubeforge/clips/` is a self-contained engine: it must import nothing from the rest of TubeForge (enforced by
+`tests/test_clips_boundary.py`, which also checks that importing it loads no SQL, S3, Redis or web-framework code). The
+pipeline reaches it only through `pipeline/clip_runs.py`. It keeps OpenCV below 5 (`opencv-python-headless>=4.8,<5`:
+OpenCV 5 removed the cascade face-detector fallback). Clip AI calls go through the host Claude runner under its own
+daily limit; never add API keys or a direct CLI call to the package. See `docs/clips.md`.
+
 ## Allowed autonomous actions
 
 Without asking: inspect repo files, edit source, add tests, install Python packages in the project environment, run pytest, run Docker Compose and read logs for this project, run FFmpeg/ffprobe, create temporary test artifacts, modify local TubeForge config needed for tests.

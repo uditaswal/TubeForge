@@ -21,7 +21,7 @@ dependencies = [
   "google-auth-oauthlib>=1.2,<2",
   "google-auth-httplib2>=0.2,<1",
   "uvicorn>=0.32,<1",
-  "yt-dlp>=2025.1.15,<2027",
+  "yt-dlp>=2026.10.21,<2027",
   "tiktoken>=0.12,<1",  # LF2 local text/schema measurement, not subscription accounting
 ]
 
@@ -40,6 +40,7 @@ reference-renderer = [
 dev = [
   "httpx>=0.28,<1",
   "pytest>=8.3,<9",
+  "pytest-asyncio>=1.2,<2",
   "jsonschema>=4.23,<5",
 ]
 local-media = [
@@ -50,6 +51,19 @@ local-media = [
 kokoro = [
   # CPU-friendly ONNX runtime; model and voice-pack files stay operator-owned.
   "kokoro-onnx>=0.3.8,<1",
+]
+clips = [
+  # Source clipping: transcript-driven moment selection, face-aware vertical crop, captions.
+  "faster-whisper==1.2.1",
+  "av>=14,<17",  # faster-whisper 1.2.1 opens audio with an option PyAV 17 and later removed
+  "opencv-python-headless>=4.8,<5",
+  "numpy>=2,<3",
+  "pydantic-ai-slim>=1.107.7,<2",
+  "srt>=3.5.3,<4",
+  "srt-equalizer>=0.1.10,<1",
+  "curl-cffi>=0.10,<0.17",
+  "bgutil-ytdlp-pot-provider==2.0.2",
+  "httpx>=0.28,<1",
 ]
 alignment = [
   # Opt-in English audio-grounded timing; model assets remain operator-supplied.
@@ -62,6 +76,8 @@ packages = ["src/tubeforge"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.build.targets.wheel.force-include]
 ".agents/skills" = "tubeforge/content_skills"
