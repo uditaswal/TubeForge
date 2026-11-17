@@ -23,6 +23,8 @@ def main() -> None:
         settings.worker.job_kinds = kinds
     runtime = create_runtime(settings)
     worker = WorkerService(f"worker-{uuid.uuid4().hex}", runtime.jobs, runtime.orchestrator, settings.worker)
+    from tubeforge.core.job_focus import JobFocus, focus_path
+    worker.focus = JobFocus(focus_path(settings.pipeline.voice.artifact_root))
     stopping = False
 
     def stop(_: int, __: object) -> None:

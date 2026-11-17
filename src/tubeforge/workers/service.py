@@ -41,11 +41,30 @@ class WorkerService:
         self.worker_id, self.jobs, self.orchestrator, self.config = worker_id, jobs, orchestrator, config
         self._clock = clock or (lambda: datetime.now(UTC))
         self.heavy_work = heavy_work or HeavyWorkLeaseRepository(jobs._session_factory)
+        self.focus = None  # a JobFocus when the operator can run one job alone (set by the worker entry point)
+
+    def _focused_job(self) -> str | None:
+        """The job the operator chose to run alone, or None. The focus ends by itself once that job has nothing left to run."""
+        if self.focus is None:
+            return None
+        job_id = self.focus.job_id()
+        if job_id is None:
+            return None
+        from tubeforge.core.job_focus import FOCUS_ENDS
+        try:
+            state = self.jobs.get(job_id).state
+        except KeyError:
+            state = None
+        if state is None or state in FOCUS_ENDS:
+            self.focus.clear()
+            _event("job_focus_ended", job_id=job_id, state=getattr(state, "value", "deleted"))
+            return None
+        return job_id
 
     def run_once(self, *, interrupt_after: JobState | None = None) -> PipelineJob | None:
         """Lease one eligible job then execute without a database transaction open."""
         now = self._now()
-        job = self.jobs.claim_oldest_eligible(self.worker_id, now=now, lease_seconds=self.config.lease_seconds, job_kinds=self.config.job_kinds)
+        job = self.jobs.claim_oldest_eligible(self.worker_id, now=now, lease_seconds=self.config.lease_seconds, job_kinds=self.config.job_kinds, only_job_id=self._focused_job())
         if job is None:
             return None
         _event("job_claimed", job_id=job.id, worker_id=self.worker_id, state=job.state.value)

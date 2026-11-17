@@ -46,3 +46,37 @@ GENERATION_CONTROLS = r"""<dialog id="retryJob" aria-labelledby="retryJobTitle">
   window.addEventListener('hashchange',openFocused);setTimeout(openFocused,0);
 })();
 </script>"""
+
+
+JOB_EXTRAS_CSS = r"""
+.job-thumb{display:block;width:100%;max-width:240px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;margin:8px 0;border:1px solid var(--line,#31415f);background:#000}
+.job-thumb[src*="thumbnail"]{max-height:420px}
+.focus-banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 14px;padding:10px 14px;border:1px solid #6c5a1e;border-radius:10px;background:#2a2410;color:#ffe9a6;font-size:13px}
+.focus-banner button{margin:0}
+"""
+
+JOB_EXTRAS_SCRIPT = r"""<script>
+(() => {
+  // One job alone: the worker takes only the chosen job until it rests or the focus is released.
+  window.focusedJobId=null;
+  const csrf=()=>decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');
+  const send=(method,path)=>fetch(path,{method,headers:{'x-csrf-token':csrf(),'content-type':'application/json'}});
+  function banner(state,title){let box=document.querySelector('#focusBanner');const jobs=document.querySelector('#jobs');if(!jobs)return;
+    if(!state.active){if(box)box.remove();return}
+    if(!box){box=document.createElement('div');box.id='focusBanner';box.className='focus-banner';box.setAttribute('role','status');jobs.before(box)}
+    box.replaceChildren();const text=document.createElement('span');text.textContent='Running only '+(title||('job '+String(state.job_id).slice(0,8)))+'. Every other job waits until it finishes or you release this.';
+    const release=document.createElement('button');release.type='button';release.className='small secondary';release.textContent='Run everything again';release.onclick=window.releaseFocus;box.append(text,release)}
+  async function sync(){try{const r=await fetch('/api/job-focus');if(!r.ok)return;const state=await r.json();const changed=window.focusedJobId!==(state.job_id||null);window.focusedJobId=state.job_id||null;
+      let title=null;if(state.active){const card=[...document.querySelectorAll('#jobs .job')].find(c=>c.textContent.includes(String(state.job_id).slice(0,8)));title=card&&card.querySelector('.title')?card.querySelector('.title').textContent:null}
+      banner(state,title);if(changed&&typeof refresh==='function')refresh()}catch(_){}}
+  window.focusJob=async id=>{const r=await send('POST','/api/jobs/'+encodeURIComponent(id)+'/focus');if(!r.ok){let d='';try{d=(await r.json()).detail}catch(_){}window.alert(d||'Could not focus this job.');return}await sync()};
+  window.releaseFocus=async()=>{await send('DELETE','/api/job-focus');await sync()};
+  sync();setInterval(sync,5000);
+  // "Publish…" on a generation opens the Publishing page with that video chosen.
+  function preselect(){let id=null;try{id=sessionStorage.getItem('tubeforge:publish-job')}catch(_){}if(!id||location.hash!=='#publishing')return;
+    let tries=0;const timer=setInterval(()=>{const select=document.querySelector('#publishVideo');tries++;
+      if(select&&[...select.options].some(o=>o.value===id)){select.value=id;select.dispatchEvent(new Event('change'));select.scrollIntoView({block:'center'});try{sessionStorage.removeItem('tubeforge:publish-job')}catch(_){}clearInterval(timer)}
+      else if(tries>40){clearInterval(timer)}},250)}
+  window.addEventListener('hashchange',preselect);setTimeout(preselect,0);
+})();
+</script>"""

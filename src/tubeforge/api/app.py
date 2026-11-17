@@ -31,7 +31,7 @@ from tubeforge.core.app_logging import configure_logging, request_id_var
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.api.scene_ui import SCENE_CONTROLS
 from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_SCRIPT
-from tubeforge.api.generation_ui import GENERATION_CSS, GENERATION_CONTROLS
+from tubeforge.api.generation_ui import GENERATION_CSS, GENERATION_CONTROLS, JOB_EXTRAS_CSS, JOB_EXTRAS_SCRIPT
 from tubeforge.api.scheduling_ui import SCHEDULING_CSS, SCHEDULING_SCRIPT
 from tubeforge.core.runtime import Runtime, create_runtime
 from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, VoiceRequest, video_plan_from_package
@@ -1523,6 +1523,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "actions.append(button('Inputs & script','secondary',()=>window.openStudioRecord(j.id)));if(j.can_retry_as_new)actions.append(button('Retry…','',()=>window.openRetryJob(j.id)));actions.append(button('Copy job ID','secondary',async ev=>{const b=ev.currentTarget;try{await navigator.clipboard.writeText(j.id);b.textContent='Copied '+j.id.slice(0,8);}catch(_){window.prompt('Job ID',j.id);}setTimeout(()=>{b.textContent='Copy job ID'},2500);}));let format=document.createElement('div');format.className='generation-format';const kind=j.format.production_mode==='source_clip'?'Source clips':j.format.aspect_ratio==='9:16'&&j.format.duration_seconds<=120?'Shorts':j.format.aspect_ratio==='9:16'?'Vertical video':'Landscape video';format.textContent=kind+' · '+j.format.preset+' · '+j.format.duration_seconds+'s · '+(j.destinations.length?j.destinations.map(item=>item.platform+' / '+item.account_name+' / '+item.category).join(', '):'No destination selected');card.append(format,actions)}async function refresh()",
         )
         dashboard = dashboard.replace(
+            "card.append(format,actions)}async function refresh()",
+            "if(j.artifacts.includes('final')){const thumb=document.createElement('img');thumb.className='job-thumb';thumb.alt='Thumbnail for '+j.topic;thumb.loading='lazy';thumb.hidden=true;const make=button('Create thumbnail','secondary',async ev=>{const b=ev.currentTarget;b.disabled=true;b.textContent='Creating…';try{const r=await fetch('/api/publishing/jobs/'+j.id+'/thumbnail',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});if(!r.ok)throw Error();thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg?t='+Date.now();}catch(_){b.disabled=false;b.textContent='Create thumbnail (failed, retry)';}});thumb.onload=()=>{thumb.hidden=false;make.remove()};thumb.onerror=()=>{thumb.hidden=true};thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg';card.append(thumb);actions.append(make)}"
+            "if(['final_ready','publication_approval_required','publication_ready'].includes(j.state)&&j.artifacts.includes('final'))actions.append(button('Publish…','',()=>{try{sessionStorage.setItem('tubeforge:publish-job',j.id)}catch(_){}location.hash='#publishing'}));"
+            "if(!['final_ready','script_approval_required','preview_ready','publication_approval_required','publication_ready','published','failed_validation','failed_exhausted','cancelled'].includes(j.state)){if(window.focusedJobId===j.id)actions.append(button('Running alone — release','secondary',()=>window.releaseFocus()));else actions.append(button('Run only this','secondary',()=>window.focusJob(j.id)))}"
+            "card.append(format,actions)}async function refresh()",
+        )
+        dashboard = dashboard.replace(
             "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
             "",
         )
@@ -1567,12 +1574,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_CSS, SCRIPT_TOOLS_SCRIPT
         source_controls = source_controls.replace('/* SCRIPT_ROUTING_CONTROLS */', ROUTING_SCRIPT)
         source_controls = source_controls.replace("join('\n\n')", r"join('\n\n')")
-        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}{ROUTING_CSS}{SCRIPT_TOOLS_CSS}</style></head>")
+        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}{JOB_EXTRAS_CSS}{ROUTING_CSS}{SCRIPT_TOOLS_CSS}</style></head>")
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         username = (runtime.auth.username_for(login_session.user_id) or "") if login_session else ""
         assert dashboard.count('data-username=""') == 1
         dashboard = dashboard.replace('data-username=""', f'data-username="{html.escape(username)}"')
-        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + markdown_mode_controls + SCRIPT_TOOLS_SCRIPT + STUDIO_SCRIPT + "</body>")
+        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + JOB_EXTRAS_SCRIPT + markdown_mode_controls + SCRIPT_TOOLS_SCRIPT + STUDIO_SCRIPT + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -1636,6 +1643,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except (OSError, ValueError, TypeError):
                 pass
         return {"job_id": job_id, "request": job.request.model_dump(mode="json"), "destinations": runtime.jobs.destination_intents(job_id), "video_description": runtime.jobs.video_description(job_id), "codex_commands": commands, "generation": generation, "command_status": "recorded" if commands else "not_recorded"}
+
+    from tubeforge.core.job_focus import FOCUS_ENDS, JobFocus, focus_path
+    job_focus = JobFocus(focus_path(application_settings.pipeline.voice.artifact_root))
+
+    @app.get("/api/job-focus", tags=["jobs"])
+    def get_job_focus() -> dict[str, object]:
+        """Whether one job is running alone (every other job waits) and which."""
+        current = job_focus.current()
+        if current is not None:
+            try:
+                if runtime.jobs.get(str(current["job_id"])).state in FOCUS_ENDS:
+                    job_focus.clear()
+                    current = None
+            except KeyError:
+                job_focus.clear()
+                current = None
+        return {"active": current is not None, "job_id": current["job_id"] if current else None, "since": current["since"] if current else None}
+
+    @app.post("/api/jobs/{job_id}/focus", tags=["jobs"])
+    def focus_job(job_id: str) -> dict[str, object]:
+        """Run only this job: the worker takes nothing else until it reaches a resting state or the focus is released."""
+        try:
+            job = runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        if job.state in FOCUS_ENDS:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This job has nothing left to run, so there is nothing to focus on.")
+        job_focus.set(job_id)
+        runtime.events.append(job_id, "job_focus_started", actor="local-dashboard")
+        return {"active": True, "job_id": job_id}
+
+    @app.delete("/api/job-focus", tags=["jobs"])
+    def release_job_focus() -> dict[str, object]:
+        current = job_focus.current()
+        job_focus.clear()
+        if current:
+            try:
+                runtime.events.append(str(current["job_id"]), "job_focus_released", actor="local-dashboard")
+            except Exception:
+                pass
+        return {"active": False, "job_id": None}
 
     @app.post("/api/jobs/{job_id}/pause", tags=["jobs"])
     def pause_job(job_id: str) -> dict[str, str]:
