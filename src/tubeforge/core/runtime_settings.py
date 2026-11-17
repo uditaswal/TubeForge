@@ -88,8 +88,9 @@ DEFINITIONS: tuple[Definition, ...] = (
                "of the 30-45 it takes to download a 5 GB show). Off: the whole video is downloaded first. If a section download fails the "
                "job falls back to the whole video by itself.", "bool", lambda s: True),
     Definition("clips.download_connections", "Clips", "Download pieces at the same time",
-               "How many pieces of a video are fetched in parallel. More is faster until the connection or YouTube pushes back.",
-               "int", lambda s: 4, 1, 8),
+               "How many pieces of a video are fetched in parallel. Measured on this connection (about 2.4 MB/s) 1 and 4 took the same time, "
+               "so the default is 1; raise it only on a faster connection.",
+               "int", lambda s: 1, 1, 8),
     Definition("clips.max_clip_seconds", "Clips", "Longest clip (seconds)",
                "No clip is cut longer than this. The Clips page asks for a length per job; the shorter of the two applies.",
                "int", lambda s: int(s.pipeline.source_clips.max_clip_seconds), 10, 900),

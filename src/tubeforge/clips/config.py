@@ -96,7 +96,7 @@ class Config:
         self.source_window = None
         # A folder shared by every run, so a retry or a second job on the same video does not download it again.
         self.youtube_source_cache_dir = None
-        self.youtube_fragment_concurrency = self._get_int_env("YOUTUBE_FRAGMENT_CONCURRENCY", 4)
+        self.youtube_fragment_concurrency = self._get_int_env("YOUTUBE_FRAGMENT_CONCURRENCY", 1)
         self.youtube_cookies_file = self._get_optional_env("YOUTUBE_COOKIES_FILE") or "data/config/youtube-cookies.txt"
         self.analysis_window_max_chars = 24_000  # transcript characters per AI call when neighbouring windows are merged
         self.media_storage = "local"

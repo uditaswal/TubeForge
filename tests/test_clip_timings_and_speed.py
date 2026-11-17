@@ -113,9 +113,9 @@ def test_the_two_new_settings_reach_the_engine(tmp_path, monkeypatch):
     runner.source_clips, runner.artifact_root, runner._load_json_artifact = SourceClipConfig(enabled=True), tmp_path / "artifacts", lambda *a: {"duration_seconds": 600.0}
     job = SimpleNamespace(id="j", request=SimpleNamespace(source_url="https://youtu.be/x", clip_count=2, captions_enabled=True, target_duration_seconds=60, notes=(), source_start_seconds=None, source_length_seconds=None))
     plan = runner._clip_params(job)
-    assert plan["direct_sections"] is True and plan["download_connections"] == 4      # on by default
+    assert plan["direct_sections"] is True and plan["download_connections"] == 1      # sections on, one connection by default (4 measured no faster)
     config = build_engine_config(EngineClipRunner.request(tmp_path, plan))
-    assert config.youtube_direct_sections is True and config.youtube_fragment_concurrency == 4
+    assert config.youtube_direct_sections is True and config.youtube_fragment_concurrency == 1
     store.update("clips.direct_sections", False, "test", settings)
     store.update("clips.download_connections", 2, "test", settings)
     config = build_engine_config(EngineClipRunner.request(tmp_path, runner._clip_params(job)))

@@ -86,6 +86,8 @@ issues.md
 *.mp3
 *.m4a
 *.onnx
+# The bundled face-detection model the clip engine needs (a small, licensed file); other .onnx files stay ignored.
+!src/tubeforge/clips/media/face_models/face_detection_yunet_2023mar.onnx
 *.onnx.json
 *.safetensors
 *.gguf
