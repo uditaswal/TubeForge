@@ -176,3 +176,16 @@ def test_the_progress_file_is_written_atomically_and_never_fails_the_job(tmp_pat
     blocked = tmp_path / "file"
     blocked.write_text("not a folder")
     write_progress(blocked / "sub", "render", 1, "x")  # an unwritable location is ignored
+
+
+def test_every_page_has_the_same_sidebar_including_settings_and_clips(tmp_path):
+    from tubeforge.api.studio_shell import STUDIO_NAV_ITEMS, STUDIO_SCRIPT, render_studio_sidebar
+    for _key, _href, label in STUDIO_NAV_ITEMS:
+        assert f">{label}<" in STUDIO_SCRIPT, f"the dashboard sidebar is missing {label}"
+        assert f">{label}<" in render_studio_sidebar("clips")
+    assert "__SPA_NAV__" not in STUDIO_SCRIPT
+    app = _client(tmp_path)
+    with TestClient(app) as client:
+        _login(app, client)
+        dashboard = client.get("/").text
+        assert 'href="/settings">Settings<' in dashboard and 'href="/clips">Clips<' in dashboard
