@@ -264,8 +264,15 @@ class PipelineOrchestrator:
         metadata = self._load_json_artifact(job.id, JobState.SOURCE_INSPECTING, "source_metadata") or {}
         duration = metadata.get("duration_seconds")
         window, trimmed = self._clip_window(job, float(duration) if duration else None, limit)
+        from tubeforge.core import runtime_settings
+        value = runtime_settings.shared().value
         return {"source_url": str(job.request.source_url), "clip_count": job.request.clip_count, "captions": bool(job.request.captions_enabled),
-                "engaging_only": self.source_clips.engaging_only, "max_clip_seconds": min(float(job.request.target_duration_seconds), self.source_clips.max_clip_seconds),
+                "engaging_only": bool(value("clips.engaging_only", self.source_clips.engaging_only)),
+                "max_clip_seconds": min(float(job.request.target_duration_seconds), float(value("clips.max_clip_seconds", self.source_clips.max_clip_seconds))),
+                "signal_windows": value("clips.signal_windows", 8), "signal_window_before": value("clips.signal_window_before", 60),
+                "signal_window_after": value("clips.signal_window_after", 90), "whisper_threads": value("clips.whisper_threads", 4),
+                "max_height": value("clips.max_height", 1080), "cache_days": value("clips.cache_days", 7),
+                "analysis_window_max_chars": value("clips.analysis_window_max_chars", 24_000),
                 "max_source_seconds": limit, "max_download_bytes": download_bytes,
                 "source_window": window, "source_trimmed": trimmed, "cache_dir": str(self.artifact_root.parent / "cache" / "clips-source"), "source_duration_seconds": duration}
 
@@ -309,6 +316,8 @@ class PipelineOrchestrator:
                 self._checkpoint_json(job.id, JobState.SOURCE_INSPECTING, "source_metadata", metadata)
                 self.source_media.save(SourceMedia(job.id, "yt-dlp", str(metadata["url"]), str(metadata.get("id")) if metadata.get("id") else None, str(metadata.get("uploader")) if metadata.get("uploader") else None, str(metadata.get("title")) if metadata.get("title") else None, metadata.get("duration_seconds"), metadata))
             if metadata is None:
+                from tubeforge.core import runtime_settings
+                self.source_provider.timeout_seconds = int(runtime_settings.shared().value("clips.inspect_timeout_seconds", self.source_clips.timeout_seconds))
                 metadata = self.source_provider.inspect(str(job.request.source_url))
                 if metadata.get("duration_seconds") is not None and float(metadata["duration_seconds"]) > 43_200:
                     raise ProviderValidationError("source is longer than 12 hours; pick a part of it on the Clips page")

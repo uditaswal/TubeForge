@@ -119,6 +119,14 @@ class ClipRequest:
     max_download_bytes: Optional[int] = None
     source_window: Optional[tuple[float, float]] = None  # (start, end) seconds of the source to use
     cache_dir: Optional[Path] = None  # shared download cache (same disk as work_dir, so files are linked, not copied)
+    # Operator-tunable limits (Settings page); unset means the engine's own default.
+    signal_windows: Optional[int] = None
+    signal_window_before: Optional[float] = None
+    signal_window_after: Optional[float] = None
+    whisper_threads: Optional[int] = None
+    max_height: Optional[int] = None
+    cache_days: Optional[int] = None
+    analysis_window_max_chars: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not 1 <= self.clip_count <= MAX_CLIPS:
@@ -163,6 +171,13 @@ def build_engine_config(request: ClipRequest, *, whisper_model: Optional[str] = 
         config.max_video_duration = request.max_video_duration
     if request.cache_dir:
         config.youtube_source_cache_dir = str(request.cache_dir)
+    for name, value in (("signal_windows", request.signal_windows), ("signal_window_before", request.signal_window_before),
+                        ("signal_window_after", request.signal_window_after), ("whisper_threads", request.whisper_threads),
+                        ("youtube_max_height", request.max_height), ("analysis_window_max_chars", request.analysis_window_max_chars)):
+        if value:
+            setattr(config, name, value)
+    if request.cache_days:
+        config.youtube_source_cache_ttl_seconds = int(request.cache_days) * 86_400
     if request.max_download_bytes:
         config.youtube_download_max_bytes = request.max_download_bytes
     return config

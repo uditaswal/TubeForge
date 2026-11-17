@@ -62,6 +62,20 @@ pipeline reaches it only through `pipeline/clip_runs.py`. It keeps OpenCV below 
 OpenCV 5 removed the cascade face-detector fallback). Clip AI calls go through the host Claude runner under its own
 daily limit; never add API keys or a direct CLI call to the package. See `docs/clips.md`.
 
+## Settings page upkeep
+
+Every limit, timeout, cap or threshold that can stall or break a run must be visible and, where safe, editable on the
+Settings page (`/settings`, `core/runtime_settings.py`). When you add or change one, in the same change:
+- If it is read when a job or stage starts, add a `Definition` (label, plain-language help, range, config default) and read it
+  with `runtime_settings.shared().value(key, default)` at the point of use, so it applies to the next job without a restart. Wire it
+  for real (a setting nothing reads is a bug) and add a test that the override reaches the code.
+- If it is read once at process start, or is a security, secret, render-geometry or safety-contract value (two-attempt allowance,
+  auth, ports, socket paths), leave it out of the editable list. Config-file values appear automatically in the read-only
+  "Everything else" reference; add a row to `_ENVIRONMENT` in `api/runtime_settings.py` for a new environment variable, and
+  to `_LOCKED` when it must never be edited from the page. State in the help text whether a restart is needed.
+- Never put a secret value on the page (show set / not set). Update `docs/settings.md`.
+- Hard-coded constants that can break execution (window sizes, timeouts, caps) belong in the config or on the page, not buried in code.
+
 ## Allowed autonomous actions
 
 Without asking: inspect repo files, edit source, add tests, install Python packages in the project environment, run pytest, run Docker Compose and read logs for this project, run FFmpeg/ffprobe, create temporary test artifacts, modify local TubeForge config needed for tests.

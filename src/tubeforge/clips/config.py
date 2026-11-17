@@ -96,6 +96,7 @@ class Config:
         self.source_window = None
         # A folder shared by every run, so a retry or a second job on the same video does not download it again.
         self.youtube_source_cache_dir = None
+        self.analysis_window_max_chars = 24_000  # transcript characters per AI call when neighbouring windows are merged
         self.media_storage = "local"
 
         # Redis configuration

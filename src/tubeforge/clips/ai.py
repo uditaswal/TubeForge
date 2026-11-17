@@ -1160,7 +1160,7 @@ def _merge_sparse_windows(windows: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             seen = set(merged[-1]["transcript"].splitlines())
             extra = [line for line in window["transcript"].splitlines() if line not in seen]
             combined = "\n".join([merged[-1]["transcript"], *extra]) if extra else merged[-1]["transcript"]
-            if len(combined) <= ANALYSIS_WINDOW_MAX_CHARS:
+            if len(combined) <= int(getattr(get_config(), "analysis_window_max_chars", ANALYSIS_WINDOW_MAX_CHARS)):
                 merged[-1] = {"start": merged[-1]["start"], "end": window["end"], "transcript": combined}
                 continue
         merged.append(dict(window))
