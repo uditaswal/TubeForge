@@ -7,6 +7,7 @@ import re
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
+from pydantic.json_schema import SkipJsonSchema
 from pydantic import Field, computed_field, field_validator, model_validator
 
 from tubeforge.domain.contracts import DomainModel
@@ -106,6 +107,14 @@ class ReferenceIntakeRequest(DomainModel):
     language: str = Field(default='en', pattern=r'^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$')
 
     supplied_cues: tuple[TranscriptCue, ...] = Field(default=(), max_length=10000)
+    # What the operator wants the writer to focus on in this reference (optional; shapes the Short, never the capture).
+    focus: SkipJsonSchema[str | None] = Field(default=None, max_length=500)
+
+    @field_validator('focus')
+    @classmethod
+    def tidy_focus(cls, value):
+        value = ' '.join((value or '').split())
+        return value or None
 
     @field_validator('target_duration_seconds')
     @classmethod

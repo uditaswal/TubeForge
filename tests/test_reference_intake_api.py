@@ -109,3 +109,14 @@ def test_reference_intake_rejects_unsupported_duration_gap(api, target):
     client, runtime, headers = api
     assert client.post('/api/reference-intakes', json=dict(reference_url=URL, target_duration_seconds=target), headers=headers).status_code == 422
     assert runtime.reference_intakes.extractor.http.calls == []
+
+
+def test_a_focus_is_saved_with_the_reference_and_does_not_change_the_identity_of_one_without(api):
+    client,runtime,headers=api
+    plain=submit(client,headers).json()['intake']
+    focused=submit(client,headers,focus='  the 8x claim and what it costs  ').json()['intake']
+    assert focused['intake_id']!=plain['intake_id']                     # a different focus is a different request
+    assert focused['request']['focus']=='the 8x claim and what it costs'
+    assert submit(client,headers).json()['intake']['intake_id']==plain['intake_id']   # no focus: the same reference is reused
+    assert submit(client,headers,focus='the 8x claim and what it costs').json()['intake']['intake_id']==focused['intake_id']
+    assert 'referenceFocus' in client.get('/references').text and 'referenceFocusNote' in client.get('/references').text

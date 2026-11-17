@@ -17,6 +17,13 @@ from tubeforge.reference.brief import build_reference_brief
 class IntakeConflict(ValueError): pass
 
 
+def request_digest(request):
+    """The identity of an intake request; an unset focus is left out so earlier saved requests keep their identity."""
+    raw=request.model_dump(mode='json')
+    if not raw.get('focus'):raw.pop('focus',None)
+    return digest(raw)
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
 
@@ -31,14 +38,14 @@ class ReferenceIntakeRepository:
 
     def _new(self,request,intake_id,revision,force_refresh=False):
         raw=request.model_dump(mode='json')
-        return Row(row_id=uuid4().hex,intake_id=intake_id,revision=revision,request_key=digest(raw),
+        return Row(row_id=uuid4().hex,intake_id=intake_id,revision=revision,request_key=request_digest(request),
                    capture_key=digest(dict(url=request.reference_url,language=request.language,cues=raw['supplied_cues'],extractor=EXTRACTOR_VERSION)),
                    request_json=request.model_dump_json(),state='pending',force_refresh=force_refresh,cache_hit=False,created_at=self.clock())
 
     def create(self,request,actor):
         with self.sessions() as db:
             db.execute(text('BEGIN IMMEDIATE'))
-            row=db.scalar(select(Row).where(Row.request_key==digest(request.model_dump(mode='json'))).order_by(Row.created_at.desc(),Row.revision.desc()).limit(1))
+            row=db.scalar(select(Row).where(Row.request_key==request_digest(request)).order_by(Row.created_at.desc(),Row.revision.desc()).limit(1))
             if row is None:
                 row=self._new(request,uuid4().hex,1);db.add(row)
                 self._event(db,row,'intake_created',actor)

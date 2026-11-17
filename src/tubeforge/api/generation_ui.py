@@ -51,6 +51,7 @@ GENERATION_CONTROLS = r"""<dialog id="retryJob" aria-labelledby="retryJobTitle">
 JOB_EXTRAS_CSS = r"""
 .job-thumb{display:block;width:100%;max-width:240px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;margin:8px 0;border:1px solid var(--line,#31415f);background:#000}
 .job-thumb[src*="thumbnail"]{max-height:420px}
+.job-thumb{cursor:zoom-in}.thumb-lightbox{border:0;padding:0;background:transparent;max-width:96vw;max-height:96vh}.thumb-lightbox::backdrop{background:rgba(3,7,18,.86)}.thumb-lightbox img{display:block;max-width:96vw;max-height:92vh;border-radius:10px}.thumb-lightbox .caption{color:#e6edf3;font:13px system-ui;text-align:center;margin-top:8px}
 .focus-banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 14px;padding:10px 14px;border:1px solid #6c5a1e;border-radius:10px;background:#2a2410;color:#ffe9a6;font-size:13px}
 .focus-banner button{margin:0}
 """
@@ -72,6 +73,12 @@ JOB_EXTRAS_SCRIPT = r"""<script>
   window.focusJob=async id=>{const r=await send('POST','/api/jobs/'+encodeURIComponent(id)+'/focus');if(!r.ok){let d='';try{d=(await r.json()).detail}catch(_){}window.alert(d||'Could not focus this job.');return}await sync()};
   window.releaseFocus=async()=>{await send('DELETE','/api/job-focus');await sync()};
   sync();setInterval(sync,5000);
+  // Click a thumbnail to see it at full size (Escape or a click closes it).
+  document.addEventListener('click',event=>{const image=event.target.closest&&event.target.closest('.job-thumb');if(!image||!image.src)return;
+    let box=document.querySelector('#thumbLightbox');if(!box){box=document.createElement('dialog');box.id='thumbLightbox';box.className='thumb-lightbox';box.setAttribute('aria-label','Thumbnail at full size');
+      const big=document.createElement('img');big.alt='Thumbnail at full size';const caption=document.createElement('div');caption.className='caption';caption.textContent='Click anywhere or press Escape to close · the picture is the exact thumbnail file';box.append(big,caption);box.onclick=()=>box.close();document.body.append(box)}
+    box.querySelector('img').src=image.src.replace(/\?.*$/,'')+'?full='+Date.now();box.showModal()});
+  document.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){const image=document.activeElement;if(image&&image.classList&&image.classList.contains('job-thumb')){event.preventDefault();image.click()}}});
   // Studio: guidance for the thumbnail, sent with every new brief.
   (function(){const form=document.querySelector('#createForm');if(!form||document.querySelector('#thumbnailGuidance'))return;
     const label=document.createElement('label');label.setAttribute('for','thumbnailGuidance');label.textContent='Thumbnail guidance (optional)';

@@ -169,3 +169,17 @@ def test_thumbnail_guidance_reaches_the_writer_from_a_reference(setup):
     assert result.status_code == 201, result.text
     notes = runtime.jobs.get(result.json()['job_id']).request.notes
     assert any(note.startswith('Thumbnail direction from the operator') and '8x in big yellow type' in note for note in notes)
+
+
+def test_the_references_focus_reaches_the_writer(setup):
+    client, runtime, settings, headers, ready, body = setup
+    repo = runtime.reference_intakes.repository
+    from tubeforge.domain.reference_video import ReferenceIntakeRequest
+    with runtime.database.session_factory.begin() as db:
+        row = repo._row(db, ready['intake_id'])
+        request = ReferenceIntakeRequest.model_validate_json(row.request_json).model_copy(update={'focus': 'the pricing claim, not the benchmark'})
+        row.request_json = request.model_dump_json()
+    result = client.post('/api/reference-intakes/' + ready['intake_id'] + '/short', json=body, headers=headers)
+    assert result.status_code == 201, result.text
+    notes = runtime.jobs.get(result.json()['job_id']).request.notes
+    assert any('focus on this in the reference' in note and 'pricing claim' in note for note in notes)

@@ -81,3 +81,13 @@ def test_studio_brief_carries_thumbnail_guidance_into_the_notes(tmp_path: Path):
         _login(app, client)
         page = client.get("/").text
         assert "thumbnailGuidance" in page and "Thumbnail guidance (optional)" in page
+
+
+def test_the_scene_dialog_names_each_scene_and_thumbnails_open_full_size(tmp_path: Path):
+    app = _client(tmp_path)
+    with TestClient(app) as client:
+        _login(app, client)
+        page = client.get("/").text
+        for needle in ("function sceneName", "function buildTiles", "'Scene '+(packageData.scene_plans.indexOf(item)+1)", "sceneTiles", "Click a scene below",
+                       "thumb-lightbox", "Click to see the full thumbnail", "thumbLightbox"):
+            assert needle in page, needle
