@@ -92,6 +92,8 @@ class Config:
         self.clip_duration = int(os.getenv("CLIP_DURATION", "30"))  # seconds
 
         self.temp_dir = os.getenv("TEMP_DIR", "temp")
+        # (start, end) seconds when only part of the source is used; the engine sets it per run.
+        self.source_window = None
         self.media_storage = "local"
 
         # Redis configuration

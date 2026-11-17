@@ -167,6 +167,8 @@ class SourceClipRequest(BaseModel):
     clip_count: int = Field(default=1, ge=1, le=12)
     max_duration_seconds: int = Field(default=60, ge=10, le=900)
     captions_enabled: bool = False
+    start_seconds: int | None = Field(default=None, ge=0, le=172_800)
+    length_minutes: int | None = Field(default=None, ge=1, le=2_880)
 
 
 class TopicCreateRequest(BaseModel):
@@ -404,6 +406,7 @@ def _source_clip_request(value: SourceClipRequest) -> ContentRequest:
         prompt_version="source-clip-v1", sources=(SourceReference(source_id="source-video", url=source_url, title=title),),
         review_mode="auto", captions_enabled=value.captions_enabled, production_mode="source_clip", source_url=source_url,
         clip_count=value.clip_count,
+        source_start_seconds=value.start_seconds, source_length_seconds=value.length_minutes * 60 if value.length_minutes else None,
     )
 
 

@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
+from tubeforge.core import runtime_settings as runtime_values
 from tubeforge.db.repositories import PAUSABLE_STATES
 from tubeforge.domain.states import JobState
 
@@ -39,6 +40,8 @@ class ClipJobRequest(BaseModel):
     clip_count: int = Field(default=3, ge=1, le=12)
     max_duration_seconds: int = Field(default=60, ge=10, le=900)
     captions_enabled: bool = True
+    start_seconds: int | None = Field(default=None, ge=0, le=172_800)
+    length_minutes: int | None = Field(default=None, ge=1, le=2_880)
 
 
 class ClipApproval(BaseModel):
@@ -77,7 +80,10 @@ _MAIN_HTML = '''<main>
 <div class="row"><label>Clips<input id="clipCount" type="number" min="1" max="12" value="3" required></label>
 <label>Longest clip (seconds)<input id="clipLength" type="number" min="10" max="900" value="60" required></label>
 <label class="checkbox"><input id="clipCaptions" type="checkbox" checked> Captions</label></div>
-<p class="sub">One run uses about six AI calls from a separate daily limit. It needs the Claude runner.</p>
+<div class="row"><label>Start at (optional)<input id="clipStart" type="text" inputmode="numeric" placeholder="1:05:00" pattern="[0-9]+(:[0-5]?[0-9]){0,2}" autocomplete="off"></label>
+<label>Use at most (minutes, optional)<input id="clipMinutes" type="number" min="1" max="2880" placeholder="all"></label></div>
+<p class="sub" id="clipLimitNote">A video longer than the limit is trimmed to its first stretch instead of refused. Pick a start time to use a different part.</p>
+<p class="sub">One run uses about six AI calls from a separate daily limit (a very long video uses more). It needs the Claude runner.</p>
 <div class="row"><button id="clipSubmit" type="submit">Make clips</button><span id="clipState" class="state" role="status" aria-live="polite"></span></div>
 </form></section>
 <section class="panel" aria-labelledby="jobsTitle"><h2 id="jobsTitle">Clip jobs</h2>
@@ -88,7 +94,7 @@ _PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name=
 main{max-width:1000px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
 .panel h2{margin:0 0 12px}
 .engine{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px}.engine .ok{color:#9fd9b6}.engine .bad{color:#ffb3bf}
-.clip-form{display:grid;gap:12px}.clip-form .row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}.clip-form input[type=number]{width:140px}.clip-form input[type=url]{width:100%}
+.clip-form{display:grid;gap:12px}.clip-form .row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}.clip-form input[type=number]{width:140px}.clip-form input[type=text]{width:140px}.clip-form input[type=url]{width:100%}
 .state{font-size:12px;min-height:1.2em}.state.bad{color:#ffb3bf}.state.good{color:#9fd9b6}
 .job{border-top:1px solid var(--line);padding:16px 0;display:grid;gap:10px}.job:first-child{border-top:0;padding-top:0}
 .job-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between}.job-head strong{overflow-wrap:anywhere}
@@ -111,6 +117,7 @@ function renderEngine(e){engine=e;const strip=document.querySelector('#engineStr
   const add=(text,ok)=>strip.append(el('li',text,ok?'ok':'bad'));
   add(e.enabled?'Clipping enabled':'Clipping is turned off in config',e.enabled);
   add(e.runner_reachable?'Claude runner answers':'Claude runner is not reachable',e.runner_reachable);
+  if(e.max_source_minutes){document.querySelector('#clipLimitNote').textContent='A video longer than '+e.max_source_minutes+' minutes is trimmed to its first '+e.max_source_minutes+' minutes instead of refused. Pick a start time to use a different part, or raise the limit in Settings.'}
   if(e.free_ram_mb!==null)strip.append(el('li','Free memory '+e.free_ram_mb+' MB'));
   strip.append(el('li',e.running+' running · '+e.queued+' queued'));
   const submit=document.querySelector('#clipSubmit');submit.disabled=!e.can_create;submit.title=e.can_create?'':e.reason}
@@ -130,6 +137,7 @@ function renderJob(job){const box=el('div',undefined,'job');box.dataset.id=job.i
   const head=el('div',undefined,'job-head');head.append(el('strong',job.title));head.append(el('span',job.stage+(job.failure_message?' — failed':''),'badge '+(job.failure_message?'danger':job.percent>=100?'ready':'pending')));box.append(head);
   const bar=el('div',undefined,'bar');bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuenow',job.percent);bar.setAttribute('aria-valuemin',0);bar.setAttribute('aria-valuemax',100);const fill=el('span');fill.style.width=job.percent+'%';bar.append(fill);box.append(bar);
   box.append(el('div',(job.parent?'Approved clip · ':'')+job.state.replace(/_/g,' ')+' · '+(job.created_at?new Date(job.created_at).toLocaleString():''),'meta'));
+  if(job.note)box.append(el('div',job.note,'meta'));
   if(job.failure_message)box.append(el('div',job.failure_message,'state bad'));
   const actions=el('div',undefined,'actions');
   if(job.can_pause)actions.append(button('Pause','',()=>call('POST','/api/jobs/'+job.id+'/pause')));
@@ -141,9 +149,10 @@ function renderJob(job){const box=el('div',undefined,'job');box.dataset.id=job.i
   if(job.clips.length){const grid=el('div',undefined,'clips');for(const clip of job.clips)grid.append(clipCard(job,clip));box.append(grid)}
   return box}
 async function loadJobs(){try{const data=await call('GET','/api/clip-jobs');const holder=document.querySelector('#clipJobs');holder.replaceChildren(...data.jobs.map(renderJob));document.querySelector('#jobsEmpty').textContent=data.jobs.length?'':'No clip jobs yet.'}catch(error){document.querySelector('#jobsEmpty').textContent='Could not load clip jobs: '+error.message}}
+const parseTime=text=>{text=text.trim();if(!text)return null;const parts=text.split(':').map(Number);if(parts.some(n=>!Number.isFinite(n)||n<0)||parts.length>3)throw new Error('Start time must look like 1:05:00, 12:30 or 90.');return parts.reduce((total,n)=>total*60+n,0)};
 document.querySelector('#clipForm').onsubmit=async event=>{event.preventDefault();const state=document.querySelector('#clipState'),submit=document.querySelector('#clipSubmit');
   submit.disabled=true;state.className='state';state.textContent='Creating…';
-  try{await call('POST','/api/clip-jobs',{source_url:document.querySelector('#clipUrl').value.trim(),clip_count:Number(document.querySelector('#clipCount').value),max_duration_seconds:Number(document.querySelector('#clipLength').value),captions_enabled:document.querySelector('#clipCaptions').checked});state.className='state good';state.textContent='Queued. The worker picks it up next.';document.querySelector('#clipUrl').value='';await loadJobs()}
+  try{await call('POST','/api/clip-jobs',{source_url:document.querySelector('#clipUrl').value.trim(),clip_count:Number(document.querySelector('#clipCount').value),max_duration_seconds:Number(document.querySelector('#clipLength').value),captions_enabled:document.querySelector('#clipCaptions').checked,start_seconds:parseTime(document.querySelector('#clipStart').value),length_minutes:document.querySelector('#clipMinutes').value?Number(document.querySelector('#clipMinutes').value):null});state.className='state good';state.textContent='Queued. The worker picks it up next.';document.querySelector('#clipUrl').value='';document.querySelector('#clipStart').value='';document.querySelector('#clipMinutes').value='';await loadJobs()}
   catch(error){state.className='state bad';state.textContent=error.message}
   await loadEngine()};
 loadEngine();loadJobs();setInterval(()=>{loadEngine();loadJobs()},5000);
@@ -177,6 +186,24 @@ def register_clips_routes(app, runtime, create_clip_job):
             data = {}
         return str(data.get("title") or job.request.topic)
 
+    def hms(seconds) -> str:
+        seconds = int(seconds or 0)
+        return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+    def part_note(job_id: str) -> str | None:
+        artifact = runtime.artifacts.get(job_id, JobState.SOURCE_ACQUIRING, "clip_plan")
+        try:
+            plan = json.loads(Path(artifact.path).read_text(encoding="utf-8")) if artifact else {}
+        except (OSError, ValueError):
+            return None
+        window = plan.get("source_window")
+        if not window:
+            return None
+        text = f"Using {hms(window[0])} to {hms(window[1])}"
+        if plan.get("source_duration_seconds"):
+            text += f" of {hms(plan['source_duration_seconds'])}"
+        return text + (" (the video is longer than the limit, so the first stretch is used)" if plan.get("source_trimmed") else "")
+
     def payload(job, all_jobs):
         children = {item.request.clip_of: item.id for item in all_jobs if item.request.clip_of}
         clips = []
@@ -195,7 +222,7 @@ def register_clips_routes(app, runtime, create_clip_job):
         return {
             "id": job.id, "title": source_title(job), "state": job.state.value, "stage": STAGE_LABEL.get(job.state, job.state.value.replace("_", " ").capitalize()),
             "percent": percent, "failure_message": job.failure_message, "created_at": job.created_at.isoformat() if job.created_at else None,
-            "parent": bool(job.request.clip_of), "clips": clips, "clip_of": job.request.clip_of,
+            "note": part_note(job.id), "parent": bool(job.request.clip_of), "clips": clips, "clip_of": job.request.clip_of,
             "can_pause": job.state in PAUSABLE_STATES and job.cancellation_requested_at is None,
             "can_resume": job.state is JobState.CANCELLED and job.resume_state is not None and job.claim_owner is None,
             "cancellable": job.state in STAGE_PERCENT and job.state is not JobState.FINAL_READY and job.cancellation_requested_at is None,
@@ -214,7 +241,8 @@ def register_clips_routes(app, runtime, create_clip_job):
         queued = sum(1 for job in jobs if job.claim_owner is None and job.state in {JobState.TOPIC_CREATED, JobState.SOURCE_INSPECTING, JobState.SOURCE_ACQUIRING, JobState.SOURCE_ANALYZING, JobState.CLIP_RENDERING})
         reason = "" if enabled and reachable else ("Clipping is turned off in config/production.yaml." if not enabled else "The Claude runner does not answer; start it with scripts/run_claude_runner.sh.")
         return {"enabled": enabled, "runner_reachable": reachable, "free_ram_mb": _meminfo_mb(), "running": running, "queued": queued,
-                "can_create": enabled and reachable, "reason": reason}
+                "can_create": enabled and reachable, "reason": reason,
+                "max_source_minutes": int(runtime_values.shared().value("clips.max_source_minutes", settings.pipeline.source_clips.max_source_duration_seconds // 60))}
 
     @app.get("/api/clip-jobs", tags=["clips"])
     def list_clip_jobs():

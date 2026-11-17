@@ -63,6 +63,7 @@ class EngineClipRunner:
             max_clip_seconds=float(params["max_clip_seconds"]) if params.get("max_clip_seconds") else None,
             max_video_duration=int(params["max_source_seconds"]) if params.get("max_source_seconds") else None,
             max_download_bytes=int(params["max_download_bytes"]) if params.get("max_download_bytes") else None,
+            source_window=tuple(params["source_window"]) if params.get("source_window") else None,
         )
 
     @staticmethod

@@ -30,7 +30,8 @@ The Clips page is `/clips` (sidebar: Clips).
 - Enable: `pipeline.source_clips.enabled: true` (default in `config/production.yaml`), then rebuild the worker image.
 - Worker modes: `scripts/stackctl.sh clips|shorts|all|status` sets `TUBEFORGE_WORKER_MODES`; a worker in `clips` mode
   leaves Shorts queued and vice versa. Default `all`, one job at a time, so memory stays within the 3 GB worker limit.
-- Settings (`config/production.yaml → pipeline.source_clips`): `max_clip_seconds`, `max_source_duration_seconds`, `max_download_bytes` (6 GB, enough for the 4-hour source limit),
+- Long videos: a video longer than the limit is **trimmed to its first stretch instead of refused** (the job card says which part is used). On the Clips page you can set *Start at* (`1:05:00`) and *Use at most N minutes* to use any other part; only that part is read (signals, transcription and moment selection stay inside it). The limits are on the Settings page under Clips: *Longest video a clip job reads* (default 240 min) and *Largest download* (default 6 GB).
+- Config defaults (`config/production.yaml → pipeline.source_clips`): `max_clip_seconds`, `max_source_duration_seconds`, `max_download_bytes` (6 GB, enough for the 4-hour source limit),
   `engaging_only` (transcribe only the windows viewers engaged with: heatmap, timestamped comments, chapters).
 - Needs: the Claude runner (`scripts/run_claude_runner.sh`), ffmpeg, yt-dlp. A YouTube 429 on captions only removes
   one fail-soft signal; downloads still work.

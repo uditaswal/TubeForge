@@ -117,6 +117,7 @@ class ClipRequest:
     max_video_duration: Optional[int] = None
     max_clip_seconds: Optional[float] = None
     max_download_bytes: Optional[int] = None
+    source_window: Optional[tuple[float, float]] = None  # (start, end) seconds of the source to use
 
     def __post_init__(self) -> None:
         if not 1 <= self.clip_count <= MAX_CLIPS:
@@ -136,7 +137,7 @@ class ClipRunResult:
 
 def clip_cache_key(request: ClipRequest) -> str:
     material = json.dumps(
-        [ENGINE_VERSION, request.url, request.source_type, request.clip_length, request.engaging_only],
+        [ENGINE_VERSION, request.url, request.source_type, request.clip_length, request.engaging_only, request.source_window],
         sort_keys=True,
     )
     return hashlib.sha256(material.encode()).hexdigest()
@@ -153,7 +154,11 @@ def build_engine_config(request: ClipRequest, *, whisper_model: Optional[str] = 
     config.llm_fallbacks = []
     if whisper_model:
         config.whisper_model = whisper_model
-    if request.max_video_duration:
+    if request.source_window:
+        # Only the chosen part is read, so the whole video's length is no reason to refuse it.
+        config.source_window = (float(request.source_window[0]), float(request.source_window[1]))
+        config.max_video_duration = max(config.max_video_duration, 86_400)
+    elif request.max_video_duration:
         config.max_video_duration = request.max_video_duration
     if request.max_download_bytes:
         config.youtube_download_max_bytes = request.max_download_bytes
@@ -250,7 +255,7 @@ class ClipEngine:
                 task_id=hashlib.sha256(input_key.encode()).hexdigest()[:16],
                 caption_template=request.caption_template,
                 add_subtitles=request.captions,
-                max_video_duration=request.max_video_duration,
+                max_video_duration=86_400 if request.source_window else request.max_video_duration,
                 cached_transcript=cache.get("transcript_text"),
                 cached_analysis_json=cache.get("analysis_json"),
                 progress_callback=report,

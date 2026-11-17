@@ -75,6 +75,10 @@ class ContentRequest(DomainModel):
     clip_count: int = Field(default=1, ge=1, le=12)
     # A job made from one approved clip of another source-clip job: "<parent job id>:<clip name>:<file sha256>".
     # The approved file's checksum is part of the request, so an edited or replaced file can never ride on it.
+    # Use only part of the source: where to start and how long, in seconds. Omitted when unset (the whole video, or the
+    # first stretch up to the configured limit when the video is longer than that).
+    source_start_seconds: SkipJsonSchema[int | None] = Field(default=None, ge=0, le=172_800)
+    source_length_seconds: SkipJsonSchema[int | None] = Field(default=None, ge=60, le=172_800)
     clip_of: SkipJsonSchema[str | None] = Field(default=None, pattern=r"^[0-9a-f]{32}:clip_[0-9]{3}:[0-9a-f]{64}$")
     preset_name: str = Field(default="default", min_length=1, max_length=100)
     aspect_ratio: str = Field(default="16:9", pattern=r"^(16:9|9:16)$")
@@ -131,6 +135,10 @@ class ContentRequest(DomainModel):
             value.pop("exact_script", None)
         if not self.script_fit_notes:
             value.pop("script_fit_notes", None)
+        if self.source_start_seconds is None:
+            value.pop("source_start_seconds", None)
+        if self.source_length_seconds is None:
+            value.pop("source_length_seconds", None)
         if self.clip_of is None:
             value.pop("clip_of", None)  # omitted unless this job is an approved clip, so existing jobs and keys are unchanged
         return value

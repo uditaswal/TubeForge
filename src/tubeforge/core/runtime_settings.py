@@ -62,6 +62,13 @@ DEFINITIONS: tuple[Definition, ...] = (
                "When the writer's script fails validation and the source packet still has an attempt left, queue the next "
                "attempt by itself instead of stopping. It never exceeds the two-attempt allowance.",
                "bool", lambda s: True),
+    Definition("clips.max_source_minutes", "Clips", "Longest video a clip job reads (minutes)",
+               "A longer video is not refused: the job reads the first stretch of this length (or the part you pick on the Clips page) "
+               "and says so on the job card. Raise it for long shows; the engine only transcribes the busiest parts, but a long video is a big download.",
+               "int", lambda s: s.pipeline.source_clips.max_source_duration_seconds // 60, 10, 720),
+    Definition("clips.max_download_gb", "Clips", "Largest download for one clip job (GB)",
+               "The video is stopped if its download would pass this size. A 4-hour 1080p video is about 6 GB.",
+               "int", lambda s: -(-s.pipeline.source_clips.max_download_bytes // 1_000_000_000), 1, 30),
     Definition("worker.max_attempts", "Retries", "Worker retries for temporary failures",
                "How many times the worker re-runs a stage after a temporary failure (runner down, timeout, "
                "reservation expired) before the job fails.", "int", lambda s: s.worker.max_attempts, 1, 20),

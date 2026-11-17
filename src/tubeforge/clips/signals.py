@@ -163,22 +163,29 @@ def choose_windows(
     before: float = 60.0,
     after: float = 90.0,
     bucket: float = 30.0,
+    window: Optional[tuple[float, float]] = None,
 ) -> list[Window]:
     """The ``count`` best windows (merged when they overlap), in time order.
+
+    With ``window=(start, end)`` only that part of the video is considered: windows are clamped to it and the
+    even spread fills it rather than the whole video.
 
     A peak at ``t`` yields ``[t - before, t + after]``: a reaction comes after the
     moment people point at, but the setup comes before it.
     """
     if duration <= 0 or count <= 0:
         return []
+    low, high = (0.0, duration) if window is None else (max(0.0, window[0]), min(duration, window[1]))
+    if high - low <= 0:
+        return []
 
     ranked = sorted(
-        (b for b in _bucket_scores(duration, signals, bucket) if b[1] > 0),
+        (b for b in _bucket_scores(duration, signals, bucket) if b[1] > 0 and low <= b[0] <= high),
         key=lambda b: -b[1],
     )
     picked: list[Window] = []
     for center, score, reasons in ranked:
-        start, end = max(0.0, center - before), min(duration, center + after)
+        start, end = max(low, center - before), min(high, center + after)
         # Skip a peak whose window mostly repeats one we already have.
         if any(min(end, w.end) - max(start, w.start) > 0.5 * (end - start) for w in picked):
             continue
@@ -191,8 +198,8 @@ def choose_windows(
         slots = count - len(picked)
         span = before + after
         for i in range(slots):
-            center = duration * (i + 0.5) / slots
-            start, end = max(0.0, center - span / 2), min(duration, center + span / 2)
+            center = low + (high - low) * (i + 0.5) / slots
+            start, end = max(low, center - span / 2), min(high, center + span / 2)
             if any(min(end, w.end) - max(start, w.start) > 0.5 * (end - start) for w in picked):
                 continue
             picked.append(Window(start, end, 0.0, "spread"))

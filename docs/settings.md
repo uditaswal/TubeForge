@@ -15,6 +15,8 @@ shared by the web server and the worker. API: `GET /api/runtime-settings`, `PUT`
 | `prompt.margin_chars` | 2500 | Room left under the ceiling for the repair and editor passes. |
 | `script.exact_by_default` | off | Treat every script you provide as exact (see "Exact script" in `docs/batch-plans.md`): wording forced in, writing checks skipped, scenes re-cut and length fitted around your wording. |
 | `generation.auto_retry_rejected` | on | A script that fails validation is retried by the worker while the source packet still has an attempt left. |
+| `clips.max_source_minutes` | `pipeline.source_clips.max_source_duration_seconds` (240 min) | Longest video a clip job reads; a longer video is trimmed to its first stretch instead of refused. |
+| `clips.max_download_gb` | `pipeline.source_clips.max_download_bytes` (6 GB) | Largest download for one clip job. |
 | `worker.max_attempts` | `worker.max_attempts` in config (3) | Worker retries for temporary failures (runner down, timeout) before a job fails. |
 
 **Not a setting:** the two-attempt limit per exact source packet is part of the safety contract (`AGENTS.md`). The

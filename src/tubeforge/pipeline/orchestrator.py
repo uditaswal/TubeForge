@@ -235,10 +235,39 @@ class PipelineOrchestrator:
         candidate = next((item["candidate"] for item in manifest["clips"] if item["name"] == name), {})
         return {"path": artifact.path, "candidate": candidate, "source_metadata": self._required_json(parent_id, JobState.SOURCE_INSPECTING, "source_metadata")}
 
+    def _clip_limits(self) -> tuple[int, int]:
+        """(longest source in seconds, largest download in bytes): the operator's Settings value, else the config default."""
+        from tubeforge.core import runtime_settings
+        values = runtime_settings.shared()
+        minutes = values.value("clips.max_source_minutes", self.source_clips.max_source_duration_seconds // 60)
+        gigabytes = values.value("clips.max_download_gb", -(-self.source_clips.max_download_bytes // 1_000_000_000))
+        return int(minutes) * 60, int(gigabytes) * 1_000_000_000
+
+    def _clip_window(self, job: PipelineJob, duration: float | None, limit: int) -> tuple[list[float] | None, bool]:
+        """Which part of the source to use. A video longer than the limit is trimmed to its first stretch instead of refused."""
+        start = job.request.source_start_seconds
+        length = job.request.source_length_seconds
+        chosen = start is not None or length is not None
+        start = float(start or 0)
+        length = float(min(length or limit, limit))
+        if duration is None:
+            return ([start, start + length] if chosen else None), False
+        if start >= duration:
+            raise ProviderValidationError(f"The start time is after the end of the video ({int(duration // 60)} minutes).")
+        end = min(float(duration), start + length)
+        if not chosen and duration <= limit:
+            return None, False
+        return [start, end], (not chosen and duration > limit)
+
     def _clip_params(self, job: PipelineJob) -> dict[str, object]:
+        limit, download_bytes = self._clip_limits()
+        metadata = self._load_json_artifact(job.id, JobState.SOURCE_INSPECTING, "source_metadata") or {}
+        duration = metadata.get("duration_seconds")
+        window, trimmed = self._clip_window(job, float(duration) if duration else None, limit)
         return {"source_url": str(job.request.source_url), "clip_count": job.request.clip_count, "captions": bool(job.request.captions_enabled),
                 "engaging_only": self.source_clips.engaging_only, "max_clip_seconds": min(float(job.request.target_duration_seconds), self.source_clips.max_clip_seconds),
-                "max_source_seconds": self.source_clips.max_source_duration_seconds, "max_download_bytes": self.source_clips.max_download_bytes}
+                "max_source_seconds": limit, "max_download_bytes": download_bytes,
+                "source_window": window, "source_trimmed": trimmed, "source_duration_seconds": duration}
 
     def _clip_call(self, call, job: PipelineJob, cancellation_requested: Callable[[], bool] | None):
         params = self._required_json(job.id, JobState.SOURCE_ACQUIRING, "clip_plan")
@@ -281,14 +310,17 @@ class PipelineOrchestrator:
                 self.source_media.save(SourceMedia(job.id, "yt-dlp", str(metadata["url"]), str(metadata.get("id")) if metadata.get("id") else None, str(metadata.get("uploader")) if metadata.get("uploader") else None, str(metadata.get("title")) if metadata.get("title") else None, metadata.get("duration_seconds"), metadata))
             if metadata is None:
                 metadata = self.source_provider.inspect(str(job.request.source_url))
-                if metadata.get("duration_seconds") is not None and float(metadata["duration_seconds"]) > self.source_clips.max_source_duration_seconds:
-                    raise ProviderValidationError("source exceeds the configured maximum duration")
+                if metadata.get("duration_seconds") is not None and float(metadata["duration_seconds"]) > 43_200:
+                    raise ProviderValidationError("source is longer than 12 hours; pick a part of it on the Clips page")
                 self._checkpoint_json(job.id, JobState.SOURCE_INSPECTING, "source_metadata", metadata)
                 self.source_media.save(SourceMedia(job.id, "yt-dlp", str(metadata["url"]), str(metadata.get("id")) if metadata.get("id") else None, str(metadata.get("uploader")) if metadata.get("uploader") else None, str(metadata.get("title")) if metadata.get("title") else None, float(metadata["duration_seconds"] or 0), metadata))
             self._transition(job, JobState.SOURCE_ACQUIRING); return
         if job.state is JobState.SOURCE_ACQUIRING:
             if self._load_json_artifact(job.id, JobState.SOURCE_ACQUIRING, "clip_plan") is None:
-                self._checkpoint_json(job.id, JobState.SOURCE_ACQUIRING, "clip_plan", self._clip_params(job))
+                plan = self._clip_params(job)
+                self._checkpoint_json(job.id, JobState.SOURCE_ACQUIRING, "clip_plan", plan)
+                if plan.get("source_window"):
+                    self.events.append(job.id, "source_trimmed" if plan["source_trimmed"] else "source_part_selected", window=plan["source_window"], duration_seconds=plan.get("source_duration_seconds"), limit_seconds=plan["max_source_seconds"])
             self._transition(job, JobState.SOURCE_ANALYZING); return
         if job.state is JobState.SOURCE_ANALYZING:
             if self._load_json_artifact(job.id, JobState.SOURCE_ANALYZING, "highlight_candidates") is None and job.request.clip_of:

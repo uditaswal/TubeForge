@@ -301,7 +301,7 @@ def get_video_transcript(
     provider = runtime_config.transcription_provider
 
     if provider == "whisper":
-        if getattr(runtime_config, "analysis_strategy", "full") == "signals" and source_url:
+        if source_url and (getattr(runtime_config, "analysis_strategy", "full") == "signals" or getattr(runtime_config, "source_window", None)):
             return _get_transcript_with_signals(video_path, source_url, runtime_config)
         return _get_transcript_with_whisper(video_path, runtime_config)
     if provider == "youtube_captions":
@@ -364,6 +364,7 @@ def _get_transcript_with_signals(video_path: Path, source_url: str, runtime_conf
         count=runtime_config.signal_windows,
         before=runtime_config.signal_window_before,
         after=runtime_config.signal_window_after,
+        window=getattr(runtime_config, "source_window", None),
     )
     if not windows:
         logger.warning("No signal windows for %s; transcribing the whole video", video_path)
