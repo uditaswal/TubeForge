@@ -30,7 +30,7 @@ The Clips page is `/clips` (sidebar: Clips).
 - Enable: `pipeline.source_clips.enabled: true` (default in `config/production.yaml`), then rebuild the worker image.
 - Worker modes: `scripts/stackctl.sh clips|shorts|all|status` sets `TUBEFORGE_WORKER_MODES`; a worker in `clips` mode
   leaves Shorts queued and vice versa. Default `all`, one job at a time, so memory stays within the 3 GB worker limit.
-- Settings (`config/production.yaml → pipeline.source_clips`): `max_clip_seconds`, `max_source_duration_seconds`,
+- Settings (`config/production.yaml → pipeline.source_clips`): `max_clip_seconds`, `max_source_duration_seconds`, `max_download_bytes` (6 GB, enough for the 4-hour source limit),
   `engaging_only` (transcribe only the windows viewers engaged with: heatmap, timestamped comments, chapters).
 - Needs: the Claude runner (`scripts/run_claude_runner.sh`), ffmpeg, yt-dlp. A YouTube 429 on captions only removes
   one fail-soft signal; downloads still work.
@@ -65,6 +65,7 @@ Findings from the run:
   were skipped ("Analysis window 13/13 failed", ranking kept first-pass order). Long sources need a higher
   `TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY` or larger windows; a typical 30–60 minute video needs about 6.
 - Clip loudness is not normalized (one clip was 0.7 LUFS under the −15 target).
+- A failure inside the engine (download cap, runner limit, no usable moments) now fails the job with a reason, or retries when it may recover (runner unreachable, timeout); it used to escape as an unclassified error and crash the worker. The lease is renewed by a keepalive poll during long downloads and renders.
 - `/tmp` on this host is a 1.9 GB RAM disk: keep job work folders on the data volume.
 
 ## Later, decide before this work is finalized

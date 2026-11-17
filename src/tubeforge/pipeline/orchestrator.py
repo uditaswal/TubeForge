@@ -238,7 +238,7 @@ class PipelineOrchestrator:
     def _clip_params(self, job: PipelineJob) -> dict[str, object]:
         return {"source_url": str(job.request.source_url), "clip_count": job.request.clip_count, "captions": bool(job.request.captions_enabled),
                 "engaging_only": self.source_clips.engaging_only, "max_clip_seconds": min(float(job.request.target_duration_seconds), self.source_clips.max_clip_seconds),
-                "max_source_seconds": self.source_clips.max_source_duration_seconds}
+                "max_source_seconds": self.source_clips.max_source_duration_seconds, "max_download_bytes": self.source_clips.max_download_bytes}
 
     def _clip_call(self, call, job: PipelineJob, cancellation_requested: Callable[[], bool] | None):
         params = self._required_json(job.id, JobState.SOURCE_ACQUIRING, "clip_plan")
@@ -246,6 +246,23 @@ class PipelineOrchestrator:
             return call(job.id, self._artifact_path(job.id, "clip-work"), params, cancellation_requested)
         except TaskCancelled as error:
             raise PipelineCancellation("cancelled during clip processing") from error
+        except (ProviderValidationError, RetryableProviderError, PipelineCancellation):
+            raise
+        except Exception as error:
+            raise self._clip_failure(error) from error
+
+    @staticmethod
+    def _clip_failure(error: Exception) -> Exception:
+        """An engine failure becomes a job outcome: retry what may recover, fail the job with a reason otherwise.
+        Anything else escaping here would take the whole worker down."""
+        kind, text = type(error).__name__, str(error)[:600]
+        if kind == "DownloadBudgetExceeded":
+            return ProviderValidationError(f"The video is larger than the download limit ({text}). Raise pipeline.source_clips.max_download_bytes or pick a shorter video.")
+        if kind == "RunnerError" and ("not reachable" in text or "quota" not in text and "refused" not in text):
+            return RetryableProviderError(f"The Claude runner is unavailable: {text}")
+        if isinstance(error, (OSError, TimeoutError)):
+            return RetryableProviderError(f"Clip processing hit a temporary problem ({kind}): {text}")
+        return ProviderValidationError(f"Clip processing failed ({kind}): {text}")
 
     def _run_stage(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None = None) -> None:
         if job.request.prompt_version == "m6-content-long-v1":

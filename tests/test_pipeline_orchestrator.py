@@ -1287,3 +1287,32 @@ def test_an_approved_clip_becomes_its_own_job_bound_to_the_approved_file(pipelin
     clip.write_bytes(b"edited later")  # a file that no longer matches the approval must never ride on it
     runner.jobs.create("tampered", request.model_copy(update={"clip_of": f"{parent_id}:clip_002:{digest}", "clip_count": 1}))
     assert runner.run("tampered").state is JobState.FAILED_VALIDATION
+
+
+@pytest.mark.parametrize("error_name,message,expected", [
+    ("DownloadBudgetExceeded", "YouTube download exceeded the 2000000000 byte job limit (5596848904 bytes)", JobState.FAILED_VALIDATION),
+    ("RunnerError", "The Claude runner refused the clip request (quota_exhausted): limit", JobState.FAILED_VALIDATION),
+    ("ValueError", "No usable clip segments were selected for this video.", JobState.FAILED_VALIDATION),
+    ("RunnerError", "The Claude runner is not reachable: ConnectionRefusedError", JobState.FAILED_RETRYABLE),
+    ("TimeoutError", "timed out", JobState.FAILED_RETRYABLE),
+])
+def test_clip_engine_failures_become_job_outcomes_instead_of_crashing_the_worker(pipeline, error_name, message, expected) -> None:
+    runner, *_ = pipeline
+    failure = type(error_name, (TimeoutError if error_name == "TimeoutError" else Exception,), {})(message)
+
+    class Source:
+        def can_handle(self, url: str) -> bool: return True
+        def inspect(self, url: str) -> dict[str, object]:
+            return {"url": url, "id": "video-1", "uploader": "creator", "title": "A source", "duration_seconds": 30.0, "webpage_url": url}
+
+    class Failing:
+        def analyze(self, *args): raise failure
+        render = analyze
+
+    runner.source_provider = Source()  # type: ignore[assignment]
+    runner.clip_runner = Failing()  # type: ignore[assignment]
+    runner.source_clips = SourceClipConfig(enabled=True)
+    request = ContentRequest(topic="A source", angle="clips", target_duration_seconds=30, language="en", audience="general", prompt_version="source-clip-v1", sources=(SourceReference(source_id="source-video", url="https://example.com/video", title="A source"),), review_mode="auto", captions_enabled=False, production_mode="source_clip", source_url="https://example.com/video", clip_count=1)
+    runner.jobs.create("failing-clip", request)
+    job = runner.run("failing-clip")
+    assert job.state is expected and message[:30] in (job.failure_message or "")

@@ -116,6 +116,7 @@ class ClipRequest:
     caption_template: str = "default"
     max_video_duration: Optional[int] = None
     max_clip_seconds: Optional[float] = None
+    max_download_bytes: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not 1 <= self.clip_count <= MAX_CLIPS:
@@ -154,6 +155,8 @@ def build_engine_config(request: ClipRequest, *, whisper_model: Optional[str] = 
         config.whisper_model = whisper_model
     if request.max_video_duration:
         config.max_video_duration = request.max_video_duration
+    if request.max_download_bytes:
+        config.youtube_download_max_bytes = request.max_download_bytes
     return config
 
 
