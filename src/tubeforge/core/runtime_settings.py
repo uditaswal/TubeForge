@@ -53,6 +53,12 @@ DEFINITIONS: tuple[Definition, ...] = (
                "int", lambda s: 1_500, 500, 10_000),
     Definition("prompt.margin_chars", "Script prompt size", "Safety margin (characters)",
                "Room left under the limit for the repair and editor passes.", "int", lambda s: 2_500, 0, 20_000),
+    Definition("script.require_verified_sources", "Your own scripts", "Require verified sources and independent research",
+               "On (the default): a notes-only brief is first researched on the web, every factual claim must trace to a source, and a script is "
+               "refused when the evidence is thin. Off: your notes, script or reference transcript are accepted as the evidence, no web research "
+               "runs, source-card checks are skipped and the writer is told not to refuse for missing sources. Fewer failures and less spend, but "
+               "nothing checks the facts: you vouch for them. Applies to the next job.",
+               "bool", lambda s: True),
     Definition("script.exact_by_default", "Your own scripts", "Use every script I provide word for word",
                "When on, any script you give (Studio box, batch `script`/`narration`) is used exactly: the writer only plans the "
                "visuals around it, your wording is forced back in, and the hook/craft/number checks are skipped. Off means a script is "

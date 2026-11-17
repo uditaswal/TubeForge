@@ -38,8 +38,9 @@ def prepare_short(runtime, settings, routing_policy, intake_id: str, value: Shor
     """Create one durable job bound to the latest intact reference inside a DB transaction."""
     if not value.watched_reference or not value.confirmed_queue:
         raise ValueError('Watch the reference and confirm that this queues research and writing.')
-    if not settings.pipeline.sources.research_enabled:
-        raise ValueError('Independent source research must be enabled before creating this Short.')
+    from tubeforge.core import runtime_settings
+    if not settings.pipeline.sources.research_enabled and runtime_settings.shared().value('script.require_verified_sources', True):
+        raise ValueError('Independent source research must be enabled before creating this Short (or turn off "Require verified sources" in Settings).')
     reject_instruction_spoofing(value.visual_observations, field="visual observations")
     my_take = (value.my_take or '').strip() or None
     if my_take:

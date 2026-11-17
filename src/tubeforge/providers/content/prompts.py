@@ -360,7 +360,9 @@ def validate_video_package(package: ContentPackage, request: ContentRequest, *, 
     if section_scenes != planned_scenes:
         raise ProviderValidationError(f"{provider_name} output must map ordered script sections one-to-one to ordered scene plans")
     claim_sources = {claim.claim_id: claim.source_ids for claim in package.claims}
-    uncited = [
+    from tubeforge.core import runtime_settings
+    require_sources = runtime_settings.shared().value("script.require_verified_sources", True)
+    uncited = [] if not require_sources else [
         scene.scene_id for scene, section in zip(package.scene_plans, package.script_sections, strict=True)
         if scene.visual_type == "source_card" and not any(claim_sources.get(claim_id) for claim_id in section.claim_ids)
     ]

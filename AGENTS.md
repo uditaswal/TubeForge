@@ -38,7 +38,7 @@ Large files and generated trees are fine to use for debugging, but read them by 
 
 ### Script generation
 
-Use Codex CLI or Claude for production scripts; no local LLM for production generation, retries or acceptance without operator approval for that run. Before changing the script provider, report provider, expected cost/tokens, fallback and acceptance test. Accept a script only after reviewing source grounding and creative quality (schema validity alone is insufficient). After two failed attempts or when the agreed budget is reached, stop retries, show rejected scripts and reasons, and ask: Codex CLI, Claude, or a revised brief. Never silently reset an exhausted allowance.
+Use Codex CLI or Claude for production scripts; no local LLM for production generation, retries or acceptance without operator approval for that run. Before changing the script provider, report provider, expected cost/tokens, fallback and acceptance test. Accept a script only after reviewing creative quality (schema validity alone is insufficient), and source grounding while Settings → "Require verified sources and independent research" is on (the default). The operator may turn that off: then their notes, script or reference are the evidence, no web research runs, source-card checks are skipped, and factual accuracy is theirs to vouch for; do not re-impose source verification as a gate or refuse work for thin sources in that mode. After two failed attempts or when the agreed budget is reached, stop retries, show rejected scripts and reasons, and ask: Codex CLI, Claude, or a revised brief. Never silently reset an exhausted allowance.
 
 ## Repository hygiene
 

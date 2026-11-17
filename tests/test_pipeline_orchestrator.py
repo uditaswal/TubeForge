@@ -1316,3 +1316,32 @@ def test_clip_engine_failures_become_job_outcomes_instead_of_crashing_the_worker
     runner.jobs.create("failing-clip", request)
     job = runner.run("failing-clip")
     assert job.state is expected and message[:30] in (job.failure_message or "")
+
+
+def test_turning_off_verified_sources_skips_research_and_tells_the_writer(pipeline, monkeypatch, tmp_path):
+    """The operator can accept their own notes as the evidence: no web research, no refusal for thin sources."""
+    from tubeforge.core import runtime_settings
+    from tubeforge.core.config import AppConfig, DatabaseConfig, Settings
+    from tubeforge.pipeline.orchestrator import RELAXED_ACCURACY_NOTE
+    runner, content, *_ = pipeline
+    runner.research_enabled = True
+    store = runtime_settings.RuntimeSettings(tmp_path / "runtime-settings.json")
+    monkeypatch.setattr(runtime_settings, "shared", lambda: store)
+    request = ContentRequest(topic="Why windows cannot beat mac", angle="Fewer configurations are easier to test",
+        target_duration_seconds=60, language="en", audience="general", aspect_ratio="9:16", prompt_version="m6-content-v8",
+        script_owner="claude", sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes",
+                                                         title="Brief", excerpt="Hypothesis written by the operator"),))
+    calls = []
+    monkeypatch.setattr(content, "research_sources", lambda value: calls.append(value) or {}, raising=False)
+    strict_job = runner.jobs.create("strict-research", request)
+    with pytest.raises(Exception):
+        runner._effective_content_request(strict_job)  # the default still researches (this fake returns nothing usable)
+    assert calls
+    calls.clear()
+    settings = Settings(app=AppConfig(name="t", environment="test"), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 's.db'}"))
+    store.update("script.require_verified_sources", False, "test", settings)
+    relaxed_job = runner.jobs.create("relaxed-research", request)
+    effective = runner._effective_content_request(relaxed_job)
+    assert calls == [] and [s.source_id for s in effective.sources] == ["operator-notes"]
+    assert RELAXED_ACCURACY_NOTE in effective.notes
+    assert any(event.event_type == "sources_unverified_accepted" for event in runner.events.list_for_job("relaxed-research"))

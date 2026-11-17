@@ -51,7 +51,8 @@ def register_reference_routes(app,runtime,settings,routing_policy):
     @app.get('/api/reference-intakes/options',tags=['references'])
     def options():
         presets=settings.pipeline.video_generation.presets.values()
-        short_ready=settings.pipeline.sources.research_enabled and any(p.aspect_ratio=='9:16' and p.prompt_version=='m6-content-v8' for p in presets)
+        from tubeforge.core import runtime_settings as _rs
+        short_ready=(settings.pipeline.sources.research_enabled or not _rs.shared().value('script.require_verified_sources',True)) and any(p.aspect_ratio=='9:16' and p.prompt_version=='m6-content-v8' for p in presets)
         from tubeforge.core import runtime_settings
         default_use='exact' if runtime_settings.shared().value('reference.use_transcript_as_script',False) else 'fresh'
         return dict(default_transcript_use=default_use,channels=channels,target_durations=[30,60,90,600,720,900],maximum_transcript_bytes=1_000_000,

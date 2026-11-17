@@ -55,6 +55,8 @@ class PipelineInterrupted(RuntimeError):
     """Test-only interruption after a durable checkpoint has been written."""
 
 
+RELAXED_ACCURACY_NOTE = ("Accuracy mode set by the operator: the operator's notes, script and reference are the evidence. Do not return insufficient_sources and do not refuse for "
+                         "missing outside sources. Where a fact is uncertain, say it plainly or leave it out, and mark that claim human_review_required.")
 CLIP_PUBLIC_FIELDS = ("start_time", "end_time", "duration", "text", "hook_title", "relevance_score", "reasoning", "virality_score", "hook_score", "engagement_score", "value_score", "shareability_score", "hook_type")
 
 
@@ -1379,7 +1381,9 @@ class PipelineOrchestrator:
         those references before the content adapter receives the request.
         """
         from tubeforge.reference.short_prepare import CONTEXT_PREFIX
-        if any(note.startswith(CONTEXT_PREFIX) for note in job.request.notes) and not self.research_enabled:
+        from tubeforge.core import runtime_settings
+        relaxed = not runtime_settings.shared().value("script.require_verified_sources", True)
+        if any(note.startswith(CONTEXT_PREFIX) for note in job.request.notes) and not self.research_enabled and not relaxed:
             raise ProviderValidationError("Reference Shorts require independent source research before writing")
         existing = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "effective_content_request")
         if existing is None and self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "effective_content_request") is not None:
@@ -1393,7 +1397,12 @@ class PipelineOrchestrator:
             from tubeforge.providers.content.research import needs_research, ResearchResult, fetch_research_packet
             # Reference Shorts (m6-content-v8) research the same way: a notes-only brief has no evidence, and the
             # writer correctly refuses "insufficient_sources" rather than inventing facts for it.
-            if self.research_enabled and job.request.prompt_version in (CONTENT_TEMPLATE_VERSION, "m6-content-v8") and needs_research(job.request):
+            if relaxed and job.request.prompt_version in (CONTENT_TEMPLATE_VERSION, "m6-content-v8"):
+                # The operator accepted unverified facts: their notes are the evidence, so no web research runs.
+                packet = resolve_source_packet(job.request.sources, channel_approved=self.channel_approved_sources.get(job.request.channel_identity, ()),
+                                               ingestor=None, captured_at=job.created_at or datetime.now(UTC))
+                self.events.append(job.id, "sources_unverified_accepted", source_count=len(packet["sources"]), setting="script.require_verified_sources")
+            elif self.research_enabled and job.request.prompt_version in (CONTENT_TEMPLATE_VERSION, "m6-content-v8") and needs_research(job.request):
                 research = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "source_research")
                 if research is None:
                     if self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "source_research") is not None:
@@ -1442,6 +1451,11 @@ class PipelineOrchestrator:
             assessment = "Research assessment (verify against sources): " + str(packet["research_assessment"])
             updates["notes"] = ((*job.request.notes, assessment) if len(job.request.notes) < 30
                                 else (*job.request.notes[:-1], job.request.notes[-1] + "\n" + assessment))
+        if relaxed:
+            # Say it to the writer in the request itself, so it does not refuse for thin sources.
+            note = RELAXED_ACCURACY_NOTE
+            updates["notes"] = ((*updates.get("notes", job.request.notes), note) if len(updates.get("notes", job.request.notes)) < 30
+                                else (*updates.get("notes", job.request.notes)[:-1], updates.get("notes", job.request.notes)[-1] + "\n" + note))
         request = job.request.model_copy(update=updates)
         self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "effective_content_request", request.model_dump(mode="json"))
         return request
