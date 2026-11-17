@@ -147,3 +147,32 @@ def test_clip_creation_is_refused_when_clipping_is_disabled(tmp_path):
         _login(app, client)
         response = client.post("/api/clip-jobs", json={"source_url": "https://www.youtube.com/watch?v=abcdefghijk"})
         assert response.status_code == 409
+
+
+def test_a_running_job_shows_its_stage_percent_and_what_it_has_written(tmp_path):
+    from tubeforge.pipeline.clip_runs import write_progress
+    app = _client(tmp_path)
+    with TestClient(app) as client:
+        _login(app, client)
+        created = client.post("/api/clip-jobs", json={"source_url": "https://www.youtube.com/watch?v=abcdefghijk"}).json()
+        job_id = created["id"]
+        app.state.runtime.jobs.update_state(job_id, JobState.SOURCE_ANALYZING)
+        work = Path(app.state.settings.pipeline.voice.artifact_root) / job_id / "clip-work"
+        write_progress(work, "analyze", 30, "Generating transcript...")
+        (work / "temp").mkdir(exist_ok=True)
+        (work / "temp" / "video.mp4").write_bytes(b"x" * 2048)
+        job = client.get(f"/api/clip-jobs/{job_id}").json()
+        assert job["short_id"] == job_id[:8] and job["percent"] == 30
+        assert job["progress"]["message"] == "Generating transcript..." and job["progress"]["disk_bytes"] >= 2048
+        assert job["progress"]["seconds_since_update"] <= 5
+        page = client.get("/clips").text
+        assert "liveBlock" in page and "On disk" in page and "clip.name" in page
+
+
+def test_the_progress_file_is_written_atomically_and_never_fails_the_job(tmp_path):
+    from tubeforge.pipeline.clip_runs import PROGRESS_FILE, write_progress
+    write_progress(tmp_path / "w", "render", 80, "Creating clip 2/3...")
+    assert json.loads((tmp_path / "w" / PROGRESS_FILE).read_text())["percent"] == 80
+    blocked = tmp_path / "file"
+    blocked.write_text("not a folder")
+    write_progress(blocked / "sub", "render", 1, "x")  # an unwritable location is ignored

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -59,6 +60,21 @@ def _meminfo_mb() -> int | None:
     return None
 
 
+def _disk_bytes(folder: Path) -> int:
+    """Bytes a job has written so far (download, cache and clips); a cheap activity signal for long downloads."""
+    total = 0
+    try:
+        for root, _dirs, files in os.walk(folder):
+            for name in files:
+                try:
+                    total += os.stat(os.path.join(root, name)).st_size
+                except OSError:
+                    continue
+    except OSError:
+        return 0
+    return total
+
+
 def _file_checksum(path: Path) -> str | None:
     try:
         digest = hashlib.sha256()
@@ -102,7 +118,7 @@ main{max-width:1000px;margin:32px auto;padding:0 20px;display:flex;flex-directio
 .meta{color:var(--muted);font-size:12px}.actions{display:flex;flex-wrap:wrap;gap:8px}
 .clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
 .clip{display:grid;gap:8px;align-content:start}.clip video{width:100%;aspect-ratio:9/16;background:#000;border-radius:8px}
-.clip h3{font-size:14px;margin:0;overflow-wrap:anywhere}.clip .meta{display:flex;flex-wrap:wrap;gap:4px 10px}
+.clip h3{font-size:14px;margin:0;overflow-wrap:anywhere}.mono{font-family:ui-monospace,monospace}.live{display:grid;gap:4px;font-size:13px}.live strong{font-weight:600}.warn{color:#ffd58a}.clip .meta{display:flex;flex-wrap:wrap;gap:4px 10px}
 @media(max-width:640px){main{margin:16px auto;padding:0 14px}.clip-form input[type=number]{width:100%}.clips{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}</style>
 '''
 
@@ -125,7 +141,7 @@ async function loadEngine(){try{renderEngine(await call('GET','/api/clips/engine
 function button(label,cls,handler){const b=el('button',label,cls||'secondary');b.type='button';b.onclick=async()=>{b.disabled=true;try{await handler()}catch(error){window.alert(error.message)}b.disabled=false;await loadJobs()};return b}
 function clipCard(job,clip){const card=el('article',undefined,'clip');
   const video=document.createElement('video');video.controls=true;video.preload='none';video.muted=false;video.src=clip.video_url;video.setAttribute('aria-label','Clip '+clip.index);card.append(video);
-  card.append(el('h3',clip.hook_title||('Clip '+clip.index)));
+  card.append(el('h3','Clip '+clip.index+' · '+(clip.hook_title||'Untitled'),'clip-title'));card.append(el('div',clip.name+' · '+job.short_id,'meta mono'));
   const meta=el('div',undefined,'meta');meta.append(el('span',mmss(clip.duration)+' long'));if(clip.virality_score!=null)meta.append(el('span','Score '+clip.virality_score));if(clip.start_time)meta.append(el('span','From '+clip.start_time));card.append(meta);
   const actions=el('div',undefined,'actions');
   const link=el('a','Download');link.href=clip.video_url;link.download='clip-'+clip.index+'.mp4';link.className='button secondary';actions.append(link);
@@ -133,10 +149,22 @@ function clipCard(job,clip){const card=el('article',undefined,'clip');
   else if(clip.approved_job_id){actions.append(el('span','Sent to publishing','badge ready'))}
   else if(clip.can_approve){actions.append(button('Approve for publishing','',async()=>{if(!window.confirm('Approve this exact clip for publishing? It becomes its own job and goes through review.'))return;await call('POST','/api/clip-jobs/'+job.id+'/clips/'+clip.name+'/approve',{checksum_sha256:clip.checksum_sha256})}))}
   card.append(actions);return card}
+const gb=b=>b>=1e9?(b/1e9).toFixed(2)+' GB':Math.round(b/1e6)+' MB';
+const lastSeen={};
+function liveBlock(job){const box=el('div',undefined,'live');
+  const p=job.progress,parts=[el('strong',job.percent+'% · '+job.stage)];
+  if(p&&p.message)parts.push(el('span','Now: '+p.message+(p.seconds_since_update!=null?' (reported '+p.seconds_since_update+' s ago)':'')));
+  if(p&&p.disk_bytes){parts.push(el('span','On disk: '+gb(p.disk_bytes)));
+    const key=job.id,prev=lastSeen[key],now=Date.now();
+    if(!prev||prev.bytes!==p.disk_bytes||prev.message!==p.message)lastSeen[key]={bytes:p.disk_bytes,message:p.message,at:now};
+    else if(now-prev.at>300000&&job.claimed)parts.push(el('span','No change for '+Math.round((now-prev.at)/60000)+' minutes. It may be busy on one long step (a very large download, a copy or a transcription); check the worker log if this keeps growing.','warn'))}
+  if(job.claimed===false&&job.percent<100&&!job.failure_message)parts.push(el('span','Waiting for a worker to pick this up.'));
+  box.append(...parts);return box}
 function renderJob(job){const box=el('div',undefined,'job');box.dataset.id=job.id;
   const head=el('div',undefined,'job-head');head.append(el('strong',job.title));head.append(el('span',job.stage+(job.failure_message?' — failed':''),'badge '+(job.failure_message?'danger':job.percent>=100?'ready':'pending')));box.append(head);
   const bar=el('div',undefined,'bar');bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuenow',job.percent);bar.setAttribute('aria-valuemin',0);bar.setAttribute('aria-valuemax',100);const fill=el('span');fill.style.width=job.percent+'%';bar.append(fill);box.append(bar);
-  box.append(el('div',(job.parent?'Approved clip · ':'')+job.state.replace(/_/g,' ')+' · '+(job.created_at?new Date(job.created_at).toLocaleString():''),'meta'));
+  box.append(el('div',(job.parent?'Approved clip · ':'')+'Job '+job.short_id+' · '+job.state.replace(/_/g,' ')+' · started '+(job.created_at?new Date(job.created_at).toLocaleString():''),'meta'));
+  if(job.progress||job.percent<100){box.append(liveBlock(job))}
   if(job.note)box.append(el('div',job.note,'meta'));
   if(job.failure_message)box.append(el('div',job.failure_message,'state bad'));
   const actions=el('div',undefined,'actions');
@@ -204,6 +232,19 @@ def register_clips_routes(app, runtime, create_clip_job):
             text += f" of {hms(plan['source_duration_seconds'])}"
         return text + (" (the video is longer than the limit, so the first stretch is used)" if plan.get("source_trimmed") else "")
 
+    def live_progress(job):
+        """What the engine reports right now, plus how much the job has written to disk."""
+        work = Path(app.state.settings.pipeline.voice.artifact_root) / job.id / "clip-work"
+        try:
+            info = json.loads((work / "progress.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            info = {}
+        if not info and not work.exists():
+            return None
+        return {"stage": info.get("stage"), "percent": info.get("percent"), "message": info.get("message"),
+                "seconds_since_update": round(time.time() - info["updated_at"]) if info.get("updated_at") else None,
+                "disk_bytes": _disk_bytes(work)}
+
     def payload(job, all_jobs):
         children = {item.request.clip_of: item.id for item in all_jobs if item.request.clip_of}
         clips = []
@@ -219,10 +260,14 @@ def register_clips_routes(app, runtime, create_clip_job):
                 "can_approve": number > 1 and children.get(key) is None and job.state is not JobState.CANCELLED,
             })
         percent = STAGE_PERCENT.get(job.state, 100 if job.state.value.startswith("publication") or job.state is JobState.PUBLISHED else 0)
+        running = job.state in {JobState.SOURCE_ANALYZING, JobState.CLIP_RENDERING}
+        progress = live_progress(job) if running else None
+        if progress and progress.get("percent") is not None:
+            percent = max(percent if job.state is JobState.CLIP_RENDERING else 12, min(int(progress["percent"]), 99))
         return {
             "id": job.id, "title": source_title(job), "state": job.state.value, "stage": STAGE_LABEL.get(job.state, job.state.value.replace("_", " ").capitalize()),
             "percent": percent, "failure_message": job.failure_message, "created_at": job.created_at.isoformat() if job.created_at else None,
-            "note": part_note(job.id), "parent": bool(job.request.clip_of), "clips": clips, "clip_of": job.request.clip_of,
+            "short_id": job.id[:8], "progress": progress, "claimed": job.claim_owner is not None, "note": part_note(job.id), "parent": bool(job.request.clip_of), "clips": clips, "clip_of": job.request.clip_of,
             "can_pause": job.state in PAUSABLE_STATES and job.cancellation_requested_at is None,
             "can_resume": job.state is JobState.CANCELLED and job.resume_state is not None and job.claim_owner is None,
             "cancellable": job.state in STAGE_PERCENT and job.state is not JobState.FINAL_READY and job.cancellation_requested_at is None,

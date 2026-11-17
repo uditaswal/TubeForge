@@ -67,6 +67,7 @@ Findings from the run:
   `TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY` or larger windows; a typical 30–60 minute video needs about 6.
 - Clip loudness is not normalized (one clip was 0.7 LUFS under the −15 target).
 - A failure inside the engine (download cap, runner limit, no usable moments) now fails the job with a reason, or retries when it may recover (runner unreachable, timeout); it used to escape as an unclassified error and crash the worker. The lease is renewed by a keepalive poll during long downloads and renders.
+- After a long download the engine used to copy the whole file into its source cache (5 GB, about 10 minutes on this disk, no CPU use, which looks like a hang); it now hard-links it. The Clips page shows each running job's stage, percent, what it is doing now, how much it has written to disk, and warns if nothing has changed for 5 minutes.
 - `/tmp` on this host is a 1.9 GB RAM disk: keep job work folders on the data volume.
 
 ## Later, decide before this work is finalized

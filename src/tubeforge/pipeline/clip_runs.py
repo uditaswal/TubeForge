@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import os
+import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -19,6 +23,21 @@ class ClipRunner(Protocol):
     def analyze(self, job_id: str, work_dir: Path, params: dict[str, Any], cancelled: Callable[[], bool] | None) -> dict[str, Any]: ...
 
     def render(self, job_id: str, work_dir: Path, params: dict[str, Any], cancelled: Callable[[], bool] | None) -> list[dict[str, Any]]: ...
+
+
+PROGRESS_FILE = "progress.json"
+
+
+def write_progress(work_dir: Path, stage: str, percent: int, message: str) -> None:
+    """Record what the engine is doing right now (read by the Clips page; never part of the job's durable state)."""
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+        handle, temporary = tempfile.mkstemp(dir=str(work_dir), prefix=".progress", suffix=".tmp")
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump({"stage": stage, "percent": int(percent), "message": message, "updated_at": time.time()}, stream)
+        os.replace(temporary, work_dir / PROGRESS_FILE)
+    except OSError:
+        pass  # progress is a convenience; a full disk must not fail the job
 
 
 class EngineClipRunner:
@@ -72,12 +91,20 @@ class EngineClipRunner:
             return bool(cancelled and cancelled())
         return should_cancel
 
+    @staticmethod
+    def _progress(work_dir: Path, stage: str):
+        async def report(percent: int, message: str) -> None:
+            write_progress(work_dir, stage, percent, message)
+        return report
+
     def analyze(self, job_id, work_dir, params, cancelled=None):
+        write_progress(work_dir, "analyze", 5, "Starting")
         with self._keepalive(cancelled):
-            analysis = asyncio.run(self._engine(work_dir).analyze(self.request(work_dir, params), should_cancel=self._cancel(cancelled)))
+            analysis = asyncio.run(self._engine(work_dir).analyze(self.request(work_dir, params), progress=self._progress(work_dir, "analyze"), should_cancel=self._cancel(cancelled)))
         return {"video_path": analysis.video_path, "segments": analysis.segments, "summary": analysis.summary, "key_topics": analysis.key_topics}
 
     def render(self, job_id, work_dir, params, cancelled=None):
+        write_progress(work_dir, "render", 70, "Starting to render")
         with self._keepalive(cancelled):
-            result = asyncio.run(self._engine(work_dir).render(self.request(work_dir, params), should_cancel=self._cancel(cancelled)))
+            result = asyncio.run(self._engine(work_dir).render(self.request(work_dir, params), progress=self._progress(work_dir, "render"), should_cancel=self._cancel(cancelled)))
         return result.clips

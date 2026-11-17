@@ -11,6 +11,7 @@ from __future__ import annotations
 import fcntl
 import json
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -505,6 +506,16 @@ def cache_root(config=None) -> Path:
     return Path(runtime.temp_dir) / CACHE_DIRNAME
 
 
+def _link_or_copy(source: Path, dest: Path) -> None:
+    """Share the file when both paths are on one disk (instant, no second copy of a multi-gigabyte video); copy otherwise."""
+    dest = Path(dest)
+    dest.unlink(missing_ok=True)
+    try:
+        os.link(source, dest)
+    except OSError:
+        shutil.copy2(source, dest)
+
+
 def cache_dir_for(video_id: str, config=None) -> Path:
     return cache_root(config) / video_id
 
@@ -865,7 +876,7 @@ def adopt_full_download(
             kept = None
             dest = directory / f"full-{height}{source.suffix.lower() or '.mp4'}"
             if source.resolve() != dest.resolve():
-                shutil.copy2(source, dest)
+                _link_or_copy(source, dest)
             manifest["full"] = dest.name
             manifest["full_height"] = height
             _save_manifest(directory, manifest)
@@ -1112,7 +1123,7 @@ def assemble_timeline(
     if len(slices) == 1:
         piece, start, end = slices[0]
         if abs(start - piece.start) < .05 and abs(end - piece.end) < .05:
-            shutil.copy2(piece.path, dest)
+            _link_or_copy(piece.path, dest)
             time_map = build_time_map([(start, end)])
             save_time_map(dest, time_map)
             return time_map

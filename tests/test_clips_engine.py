@@ -139,3 +139,14 @@ def test_request_validation():
         ClipRequest(url="https://youtu.be/x", work_dir=Path("/tmp/x"), clip_count=0)
     with pytest.raises(ValueError):
         ClipRequest(url="https://youtu.be/x", work_dir=Path("/tmp/x"), clip_count=13)
+
+
+def test_a_cached_download_shares_the_file_instead_of_copying_it(tmp_path):
+    from tubeforge.clips.youtube_source import _link_or_copy
+    source = tmp_path / "video.mp4"
+    source.write_bytes(b"x" * 1000)
+    dest = tmp_path / "cache" / "full-1080.mp4"
+    dest.parent.mkdir()
+    dest.write_bytes(b"old")
+    _link_or_copy(source, dest)
+    assert dest.read_bytes() == source.read_bytes() and dest.stat().st_ino == source.stat().st_ino
