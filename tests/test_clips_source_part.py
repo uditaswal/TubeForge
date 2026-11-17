@@ -41,6 +41,7 @@ def _request(**extra):
 class _Job:
     def __init__(self, **extra):
         self.request = _request(**extra)
+        self.id = "job"
 
 
 def test_a_video_longer_than_the_limit_is_trimmed_to_its_first_stretch():
@@ -80,3 +81,21 @@ def test_the_clip_request_carries_start_and_length():
     request = _request(source_start_seconds=60, source_length_seconds=600)
     assert (request.source_start_seconds, request.source_length_seconds) == (60, 600)
     assert "source_start_seconds" not in _request().model_dump()  # omitted when unset, so existing jobs are unchanged
+
+
+def test_the_operators_guidance_reaches_the_ai_and_separates_cached_analyses(tmp_path):
+    from tubeforge.clips.engine import ClipRequest, clip_cache_key
+    from tubeforge.pipeline.clip_runs import EngineClipRunner
+    plain = ClipRequest(url="https://youtu.be/x", work_dir=tmp_path)
+    steered = ClipRequest(url="https://youtu.be/x", work_dir=tmp_path, instructions="find scenes about caching")
+    assert clip_cache_key(plain) != clip_cache_key(steered)  # a different request never reuses the other's analysis
+    plan = {"source_url": "https://youtu.be/x", "clip_count": 2, "captions": True, "instructions": "find scenes about caching"}
+    assert EngineClipRunner.request(tmp_path, plan).instructions == "find scenes about caching"
+
+
+def test_the_instructions_are_stored_as_the_jobs_notes_and_passed_in_the_plan(tmp_path):
+    runner = _orchestrator_with()
+    runner.artifact_root = tmp_path
+    runner._load_json_artifact = lambda *args: {"duration_seconds": 600.0}
+    assert runner._clip_params(_Job(notes=("find scenes about caching",)))["instructions"] == "find scenes about caching"
+    assert runner._clip_params(_Job())["instructions"] is None

@@ -274,6 +274,7 @@ class PipelineOrchestrator:
                 "max_height": value("clips.max_height", 1080), "cache_days": value("clips.cache_days", 7),
                 "analysis_window_max_chars": value("clips.analysis_window_max_chars", 24_000),
                 "max_source_seconds": limit, "max_download_bytes": download_bytes,
+                "instructions": " ".join(note.strip() for note in job.request.notes if note.strip())[:1000] or None,
                 "source_window": window, "source_trimmed": trimmed, "cache_dir": str(self.artifact_root.parent / "cache" / "clips-source"), "source_duration_seconds": duration}
 
     def _clip_call(self, call, job: PipelineJob, cancellation_requested: Callable[[], bool] | None):

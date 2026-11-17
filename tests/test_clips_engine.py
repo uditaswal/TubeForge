@@ -192,3 +192,16 @@ def test_downloads_cached_by_earlier_jobs_join_the_shared_cache_without_copying(
     assert not [p for p in shared.iterdir() if p.name.startswith(".adopt-")]  # no staging folder left behind
     (shared / "vidGOOD" / "full-1080.mp4").write_bytes(b"newer")  # an existing shared entry is never replaced
     assert adopt_cache_dirs([good], shared) == []
+
+
+def test_the_steering_text_is_passed_to_the_selection_call(fake_media, tmp_path, monkeypatch):
+    seen = {}
+    original = VideoService.process_video_complete
+
+    async def spy(**kwargs):
+        seen["instructions"] = kwargs.get("instructions")
+        return await original(**kwargs)
+
+    monkeypatch.setattr(VideoService, "process_video_complete", staticmethod(spy))
+    asyncio.run(ClipEngine(FileClipStore(tmp_path / "state")).analyze(ClipRequest(url="https://www.youtube.com/watch?v=abcdefghijk", work_dir=tmp_path / "work", instructions="  find scenes about caching ")))
+    assert seen["instructions"] == "find scenes about caching"

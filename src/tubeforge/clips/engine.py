@@ -126,6 +126,7 @@ class ClipRequest:
     whisper_threads: Optional[int] = None
     max_height: Optional[int] = None
     cache_days: Optional[int] = None
+    instructions: Optional[str] = None  # the operator's steering text for the AI ("find scenes about X"); empty means none
     analysis_window_max_chars: Optional[int] = None
 
     def __post_init__(self) -> None:
@@ -146,7 +147,7 @@ class ClipRunResult:
 
 def clip_cache_key(request: ClipRequest) -> str:
     material = json.dumps(
-        [ENGINE_VERSION, request.url, request.source_type, request.clip_length, request.engaging_only, request.source_window],
+        [ENGINE_VERSION, request.url, request.source_type, request.clip_length, request.engaging_only, request.source_window, (request.instructions or "").strip()],
         sort_keys=True,
     )
     return hashlib.sha256(material.encode()).hexdigest()
@@ -276,6 +277,7 @@ class ClipEngine:
                 max_video_duration=86_400 if request.source_window else request.max_video_duration,
                 cached_transcript=cache.get("transcript_text"),
                 cached_analysis_json=cache.get("analysis_json"),
+                **({"instructions": request.instructions.strip()} if (request.instructions or "").strip() else {}),
                 progress_callback=report,
                 should_cancel=should_cancel,
                 clip_length=request.clip_length,

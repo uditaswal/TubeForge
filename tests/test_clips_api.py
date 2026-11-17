@@ -189,3 +189,13 @@ def test_every_page_has_the_same_sidebar_including_settings_and_clips(tmp_path):
         _login(app, client)
         dashboard = client.get("/").text
         assert 'href="/settings">Settings<' in dashboard and 'href="/clips">Clips<' in dashboard
+
+
+def test_the_guidance_field_is_saved_with_the_job(tmp_path):
+    app = _client(tmp_path)
+    with TestClient(app) as client:
+        _login(app, client)
+        created = client.post("/api/clip-jobs", json={"source_url": "https://www.youtube.com/watch?v=abcdefghijk", "guidance": "  find scenes about caching  "})
+        assert created.status_code == 201
+        assert app.state.runtime.jobs.get(created.json()["id"]).request.notes == ("find scenes about caching",)
+        assert "clipGuidance" in client.get("/clips").text

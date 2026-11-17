@@ -1352,6 +1352,7 @@ class VideoService:
         plan_cache: Optional[PlanCache] = None,
         outline_cache_key: Optional[str] = None,
         cleanup_settings: Optional[Dict[str, Any]] = None,
+        instructions: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Complete video processing pipeline.
@@ -1578,7 +1579,7 @@ class VideoService:
             workflow_final = checkpoint.get("workflow_final") if workflow != "highlights" else None
             final_plan = False
             if workflow == "highlights":
-                instructions = workflow_spec.options.instructions if workflow_spec is not None else ""
+                instructions = (workflow_spec.options.instructions if workflow_spec is not None else "") or (instructions or "")
                 requested_clips = workflow_spec.setting("max_clips") if workflow_spec is not None else None
                 relevant_parts, segments_json, clip_limit, final_plan = await VideoService._select_highlight_segments(
                     video_path=video_path,

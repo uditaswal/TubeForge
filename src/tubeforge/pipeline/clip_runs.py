@@ -84,6 +84,7 @@ class EngineClipRunner:
             max_download_bytes=int(params["max_download_bytes"]) if params.get("max_download_bytes") else None,
             source_window=tuple(params["source_window"]) if params.get("source_window") else None,
             cache_dir=Path(params["cache_dir"]) if params.get("cache_dir") else None,
+            instructions=params.get("instructions") or None,
             **{name: params[name] for name in ("signal_windows", "signal_window_before", "signal_window_after", "whisper_threads", "max_height", "cache_days", "analysis_window_max_chars") if params.get(name)},
         )
 

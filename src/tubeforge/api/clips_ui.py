@@ -43,6 +43,7 @@ class ClipJobRequest(BaseModel):
     captions_enabled: bool = True
     start_seconds: int | None = Field(default=None, ge=0, le=172_800)
     length_minutes: int | None = Field(default=None, ge=1, le=2_880)
+    guidance: str | None = Field(default=None, max_length=1_000)
 
 
 class ClipApproval(BaseModel):
@@ -98,6 +99,7 @@ _MAIN_HTML = '''<main>
 <label class="checkbox"><input id="clipCaptions" type="checkbox" checked> Captions</label></div>
 <div class="row"><label>Start at (optional)<input id="clipStart" type="text" inputmode="numeric" placeholder="1:05:00" pattern="[0-9]+(:[0-5]?[0-9]){0,2}" autocomplete="off"></label>
 <label>Use at most (minutes, optional)<input id="clipMinutes" type="number" min="1" max="2880" placeholder="all"></label></div>
+<label>What should the AI look for? (optional)<textarea id="clipGuidance" rows="2" maxlength="1000" placeholder="e.g. find scenes where the guest explains the argument, skip sponsor reads"></textarea></label>
 <p class="sub" id="clipLimitNote">A video longer than the limit is trimmed to its first stretch instead of refused. Pick a start time to use a different part.</p>
 <p class="sub">One run uses about six AI calls from a separate daily limit (a very long video uses more). It needs the Claude runner.</p>
 <div class="row"><button id="clipSubmit" type="submit">Make clips</button><span id="clipState" class="state" role="status" aria-live="polite"></span></div>
@@ -110,7 +112,7 @@ _PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name=
 main{max-width:1000px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
 .panel h2{margin:0 0 12px}
 .engine{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px}.engine .ok{color:#9fd9b6}.engine .bad{color:#ffb3bf}
-.clip-form{display:grid;gap:12px}.clip-form .row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}.clip-form input[type=number]{width:140px}.clip-form input[type=text]{width:140px}.clip-form input[type=url]{width:100%}
+.clip-form{display:grid;gap:12px}.clip-form .row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}.clip-form input[type=number]{width:140px}.clip-form input[type=text]{width:140px}.clip-form input[type=url]{width:100%}.clip-form textarea{width:100%;min-height:64px;resize:vertical}
 .state{font-size:12px;min-height:1.2em}.state.bad{color:#ffb3bf}.state.good{color:#9fd9b6}
 .job{border-top:1px solid var(--line);padding:16px 0;display:grid;gap:10px}.job:first-child{border-top:0;padding-top:0}
 .job-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between}.job-head strong{overflow-wrap:anywhere}
@@ -180,7 +182,7 @@ async function loadJobs(){try{const data=await call('GET','/api/clip-jobs');cons
 const parseTime=text=>{text=text.trim();if(!text)return null;const parts=text.split(':').map(Number);if(parts.some(n=>!Number.isFinite(n)||n<0)||parts.length>3)throw new Error('Start time must look like 1:05:00, 12:30 or 90.');return parts.reduce((total,n)=>total*60+n,0)};
 document.querySelector('#clipForm').onsubmit=async event=>{event.preventDefault();const state=document.querySelector('#clipState'),submit=document.querySelector('#clipSubmit');
   submit.disabled=true;state.className='state';state.textContent='Creating…';
-  try{await call('POST','/api/clip-jobs',{source_url:document.querySelector('#clipUrl').value.trim(),clip_count:Number(document.querySelector('#clipCount').value),max_duration_seconds:Number(document.querySelector('#clipLength').value),captions_enabled:document.querySelector('#clipCaptions').checked,start_seconds:parseTime(document.querySelector('#clipStart').value),length_minutes:document.querySelector('#clipMinutes').value?Number(document.querySelector('#clipMinutes').value):null});state.className='state good';state.textContent='Queued. The worker picks it up next.';document.querySelector('#clipUrl').value='';document.querySelector('#clipStart').value='';document.querySelector('#clipMinutes').value='';await loadJobs()}
+  try{await call('POST','/api/clip-jobs',{source_url:document.querySelector('#clipUrl').value.trim(),clip_count:Number(document.querySelector('#clipCount').value),max_duration_seconds:Number(document.querySelector('#clipLength').value),captions_enabled:document.querySelector('#clipCaptions').checked,start_seconds:parseTime(document.querySelector('#clipStart').value),length_minutes:document.querySelector('#clipMinutes').value?Number(document.querySelector('#clipMinutes').value):null,guidance:document.querySelector('#clipGuidance').value.trim()||null});state.className='state good';state.textContent='Queued. The worker picks it up next.';document.querySelector('#clipUrl').value='';document.querySelector('#clipStart').value='';document.querySelector('#clipMinutes').value='';document.querySelector('#clipGuidance').value='';await loadJobs()}
   catch(error){state.className='state bad';state.textContent=error.message}
   await loadEngine()};
 loadEngine();loadJobs();setInterval(()=>{loadEngine();loadJobs()},5000);
