@@ -8,7 +8,7 @@ from typing import Literal
 
 from tubeforge.domain.reference_video import ReferenceIntakeRequest
 from tubeforge.db.reference_intake import IntakeConflict
-from tubeforge.reference.service import parse_supplied_transcript
+from tubeforge.reference.service import is_plain_transcript,parse_supplied_transcript
 from tubeforge.reference.extractor import IntakeFailure
 
 
@@ -52,7 +52,9 @@ def register_reference_routes(app,runtime,settings,routing_policy):
     def options():
         presets=settings.pipeline.video_generation.presets.values()
         short_ready=settings.pipeline.sources.research_enabled and any(p.aspect_ratio=='9:16' and p.prompt_version=='m6-content-v8' for p in presets)
-        return dict(channels=channels,target_durations=[30,60,90,600,720,900],maximum_transcript_bytes=1_000_000,
+        from tubeforge.core import runtime_settings
+        default_use='exact' if runtime_settings.shared().value('reference.use_transcript_as_script',False) else 'fresh'
+        return dict(default_transcript_use=default_use,channels=channels,target_durations=[30,60,90,600,720,900],maximum_transcript_bytes=1_000_000,
                     short_preparation_available=short_ready,
                     short_preparation_reason=None if short_ready else 'Enable independent source research and configure a reference-Short preset before preparing a Short.')
 
@@ -77,12 +79,16 @@ def register_reference_routes(app,runtime,settings,routing_policy):
             if value.action=='refresh':
                 if value.transcript_text is not None:raise ValueError('Refresh cannot replace transcript text.')
                 return repo.revise(intake_id,value.expected_revision,actor(request),refresh=True)
-            if value.transcript_text is None:raise ValueError('Supply an SRT, VTT or JSON transcript.')
-            cues=parse_supplied_transcript(value.transcript_text)
+            if value.transcript_text is None:raise ValueError('Supply a transcript (plain text, SRT, VTT or JSON).')
+            duration=None
+            if is_plain_transcript(value.transcript_text):
+                snapshot=repo.get(intake_id,None)['intake'].get('snapshot')
+                duration=snapshot['duration_seconds'] if snapshot else None
+            cues=parse_supplied_transcript(value.transcript_text,duration)
             return repo.revise(intake_id,value.expected_revision,actor(request),supplied_cues=cues)
         except KeyError:raise HTTPException(404,'Reference intake not found.') from None
         except IntakeConflict as error:raise HTTPException(409,str(error)) from error
-        except (ValueError,IntakeFailure):raise HTTPException(422,'Transcript or revision request is invalid. Use ordered SRT/VTT cues inside the video duration, or reload a stale revision.') from None
+        except (ValueError,IntakeFailure):raise HTTPException(422,'Transcript or revision request is invalid. Paste the transcript as plain text (or ordered SRT/VTT cues inside the video length), capture the link first, or reload a stale revision.') from None
 
     @app.post('/api/reference-intakes/{intake_id}/short',status_code=201,tags=['references'])
     async def create_short(intake_id:str,request:Request):

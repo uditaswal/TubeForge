@@ -18,6 +18,7 @@ shared by the web server and the worker. API: `GET /api/runtime-settings`, `PUT`
 | `clips.max_source_minutes` | `pipeline.source_clips.max_source_duration_seconds` (240 min) | Longest video a clip job reads; a longer video is trimmed to its first stretch instead of refused. |
 | `clips.claude_calls_per_day` | `TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY` on the runner (12) | Claude calls per day for clip selection, inside the shared limit; the runner reads it on every request. |
 | `clips.max_download_gb` | `pipeline.source_clips.max_download_bytes` (6 GB) | Largest download for one clip job. |
+| `reference.use_transcript_as_script` | off | Preparing a Short from a reference starts with the transcript used exactly as the script (otherwise fresh AI narration); changeable per Short. |
 | `clips.max_clip_seconds` | `pipeline.source_clips.max_clip_seconds` (60) | No clip is cut longer than this. |
 | `clips.engaging_only` | `pipeline.source_clips.engaging_only` (on) | Transcribe only the busiest parts of a long video. |
 | `clips.signal_windows` / `clips.signal_window_before` / `clips.signal_window_after` | 8 parts, 60 s before, 90 s after | How many busy parts are transcribed and how much is kept around each. |

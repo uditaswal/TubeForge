@@ -62,6 +62,10 @@ DEFINITIONS: tuple[Definition, ...] = (
                "When the writer's script fails validation and the source packet still has an attempt left, queue the next "
                "attempt by itself instead of stopping. It never exceeds the two-attempt allowance.",
                "bool", lambda s: True),
+    Definition("reference.use_transcript_as_script", "Reference videos", "Use the reference transcript word for word by default",
+               "When on, preparing a Short from a reference starts with \"use the transcript exactly as the script\" selected. Off starts with "
+               "fresh AI narration. Either way you can change it for each Short before queueing.",
+               "bool", lambda s: False),
     Definition("clips.max_source_minutes", "Clips", "Longest video a clip job reads (minutes)",
                "A longer video is not refused: the job reads the first stretch of this length (or the part you pick on the Clips page) "
                "and says so on the job card. Raise it for long shows; the engine only transcribes the busiest parts, but a long video is a big download.",
