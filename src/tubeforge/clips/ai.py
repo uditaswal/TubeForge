@@ -1085,8 +1085,12 @@ def split_transcript_into_windows(
     window_seconds: int = ANALYSIS_WINDOW_SECONDS,
     overlap_seconds: int = ANALYSIS_WINDOW_OVERLAP_SECONDS,
     single_window_max_seconds: int = ANALYSIS_SINGLE_WINDOW_MAX_SECONDS,
+    merge_sparse: bool = False,
 ) -> List[Dict[str, Any]]:
     """Split a formatted transcript into overlapping time windows.
+
+    ``merge_sparse`` joins neighbouring windows that fit one call; use it when only the busiest parts of a long
+    video were transcribed, so many windows hold just a few minutes of speech.
 
     Transcripts up to ``single_window_max_seconds`` stay one window holding the
     original text unchanged. A short trailing window is folded into the one
@@ -1137,7 +1141,30 @@ def split_transcript_into_windows(
             windows.append(
                 {"start": window_start, "end": window_end, "transcript": "\n".join(lines)}
             )
-    return windows
+    return _merge_sparse_windows(windows) if merge_sparse else windows
+
+
+# One call holds about this much transcript (the runner accepts 48,000 characters, prompt and schema included).
+ANALYSIS_WINDOW_MAX_CHARS = 24_000
+
+
+def _merge_sparse_windows(windows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Join neighbouring windows while they fit one call.
+
+    When only the busiest parts of a long video were transcribed, many time windows hold a few minutes of speech each;
+    one call per window would spend a day's allowance on a single video. Lines repeated by the overlap are kept once.
+    """
+    merged: List[Dict[str, Any]] = []
+    for window in windows:
+        if merged:
+            seen = set(merged[-1]["transcript"].splitlines())
+            extra = [line for line in window["transcript"].splitlines() if line not in seen]
+            combined = "\n".join([merged[-1]["transcript"], *extra]) if extra else merged[-1]["transcript"]
+            if len(combined) <= ANALYSIS_WINDOW_MAX_CHARS:
+                merged[-1] = {"start": merged[-1]["start"], "end": window["end"], "transcript": combined}
+                continue
+        merged.append(dict(window))
+    return merged
 
 
 def _filter_clip_signals_for_window(
@@ -1590,7 +1617,9 @@ async def get_most_relevant_parts_by_transcript(
         agent = get_transcript_agent(clip_length)
         transcript_lines = _parse_transcript_lines(transcript)
         transcript_spans = _parse_transcript_spans(transcript)
-        windows = split_transcript_into_windows(transcript)
+        windows = split_transcript_into_windows(
+            transcript, merge_sparse=getattr(get_config(), "analysis_strategy", "full") == "signals"
+        )
 
         if len(windows) == 1:
             result = await _run_transcript_analysis(

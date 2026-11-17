@@ -94,6 +94,8 @@ class Config:
         self.temp_dir = os.getenv("TEMP_DIR", "temp")
         # (start, end) seconds when only part of the source is used; the engine sets it per run.
         self.source_window = None
+        # A folder shared by every run, so a retry or a second job on the same video does not download it again.
+        self.youtube_source_cache_dir = None
         self.media_storage = "local"
 
         # Redis configuration

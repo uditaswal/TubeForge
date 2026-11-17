@@ -267,7 +267,7 @@ class PipelineOrchestrator:
         return {"source_url": str(job.request.source_url), "clip_count": job.request.clip_count, "captions": bool(job.request.captions_enabled),
                 "engaging_only": self.source_clips.engaging_only, "max_clip_seconds": min(float(job.request.target_duration_seconds), self.source_clips.max_clip_seconds),
                 "max_source_seconds": limit, "max_download_bytes": download_bytes,
-                "source_window": window, "source_trimmed": trimmed, "source_duration_seconds": duration}
+                "source_window": window, "source_trimmed": trimmed, "cache_dir": str(self.artifact_root.parent / "cache" / "clips-source"), "source_duration_seconds": duration}
 
     def _clip_call(self, call, job: PipelineJob, cancellation_requested: Callable[[], bool] | None):
         params = self._required_json(job.id, JobState.SOURCE_ACQUIRING, "clip_plan")

@@ -447,7 +447,7 @@ def codex_output_schema_for_research(model_class) -> dict:
 
 
 CLIP_MODEL = os.environ.get("TUBEFORGE_CLAUDE_CLIP_MODEL", DEFAULT_MODEL)
-CLIP_CALLS_PER_DAY = int(os.environ.get("TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY", "12"))
+CLIP_CALLS_PER_DAY = int(os.environ.get("TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY", "12"))  # default; the Settings page overrides it
 CLIP_LABEL = "clips"
 
 
@@ -457,12 +457,31 @@ def clip_calls_used(budget: ClaudeBudget | None = None) -> int:
     return sum(int(row.get("n", 1)) for row in budget._entries(time.time()) if row.get("label") == CLIP_LABEL)
 
 
+def clip_call_limit() -> int:
+    """The operator's Settings value when set, else the runner's own default."""
+    try:
+        from tubeforge.core import runtime_settings
+        return int(runtime_settings.shared().value("clips.claude_calls_per_day", CLIP_CALLS_PER_DAY))
+    except Exception:
+        return CLIP_CALLS_PER_DAY
+
+
+def clip_window_frees() -> str:
+    """When the oldest counted clip call leaves the 24-hour window (the allowance starts to come back)."""
+    rows = [row for row in BUDGET._entries(time.time()) if row.get("label") == CLIP_LABEL]
+    if not rows:
+        return ""
+    seconds = max(0, int(min(float(row["at"]) for row in rows) + BUDGET.window - time.time()))
+    return f"the oldest call leaves the window in {seconds // 3600} h {seconds % 3600 // 60} min. "
+
+
 def run_clip_completion(request: ClipCompletionRequest, *, model: str | None = None) -> HostRunnerSuccess:
     """One tool-less completion for clip selection, under the shared limit and the clip sub-limit."""
-    if clip_calls_used() >= CLIP_CALLS_PER_DAY:
+    limit = clip_call_limit()
+    if clip_calls_used() >= limit:
         raise BudgetExceededError(
-            f"Clip selection daily call limit reached ({CLIP_CALLS_PER_DAY} in the last 24 h); "
-            "raise TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY on the runner or wait for the window to roll")
+            f"Clip selection daily call limit reached ({limit} in the last 24 h); {clip_window_frees()}"
+            "Raise it on the Settings page (Clips) or wait.")
     BUDGET.check()
     schema = request.output_schema or {"type": "object", "additionalProperties": True}
     prompt = (request.system + "\n\n" if request.system else "") + request.prompt

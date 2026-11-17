@@ -112,3 +112,19 @@ def test_the_worker_transport_refuses_an_oversized_prompt_and_reports_failures(t
 
     with pytest.raises(RunnerError, match="not reachable"):
         asyncio.run(ClipRunnerTransport(tmp_path / "claude.sock", call=unreachable)("", "p", None))
+
+
+def test_the_settings_page_value_overrides_the_runner_default_and_the_refusal_says_when_it_frees(budget, monkeypatch, tmp_path):
+    from tubeforge.core import runtime_settings
+    from tubeforge.core.config import AppConfig, DatabaseConfig, Settings
+    fake_claude(monkeypatch)
+    store = runtime_settings.RuntimeSettings(tmp_path / "runtime-settings.json")
+    monkeypatch.setattr(runtime_settings, "shared", lambda: store)
+    settings = Settings(app=AppConfig(name="t", environment="test"), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 's.db'}"))
+    for _ in range(2):
+        runner.handle(ClipCompletionRequest(prompt="p"), None)
+    with pytest.raises(BudgetExceededError, match=r"limit reached \(2 in the last 24 h\); the oldest call leaves the window in 23 h"):
+        runner.handle(ClipCompletionRequest(prompt="p"), None)
+    store.update("clips.claude_calls_per_day", 5, "test", settings)
+    runner.handle(ClipCompletionRequest(prompt="p"), None)  # allowed again without restarting the runner
+    assert runner.clip_calls_used() == 3

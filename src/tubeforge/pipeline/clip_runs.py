@@ -83,6 +83,7 @@ class EngineClipRunner:
             max_video_duration=int(params["max_source_seconds"]) if params.get("max_source_seconds") else None,
             max_download_bytes=int(params["max_download_bytes"]) if params.get("max_download_bytes") else None,
             source_window=tuple(params["source_window"]) if params.get("source_window") else None,
+            cache_dir=Path(params["cache_dir"]) if params.get("cache_dir") else None,
         )
 
     @staticmethod

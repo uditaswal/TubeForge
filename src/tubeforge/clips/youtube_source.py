@@ -503,7 +503,8 @@ class CachedPiece:
 
 def cache_root(config=None) -> Path:
     runtime = config or get_config()
-    return Path(runtime.temp_dir) / CACHE_DIRNAME
+    shared = getattr(runtime, "youtube_source_cache_dir", None)
+    return Path(shared) if shared else Path(runtime.temp_dir) / CACHE_DIRNAME
 
 
 def _link_or_copy(source: Path, dest: Path) -> None:

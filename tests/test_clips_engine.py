@@ -6,7 +6,7 @@ import pytest
 
 from tubeforge.clips import engine as engine_module
 from tubeforge.clips.cancellation import TaskCancelled
-from tubeforge.clips.engine import ClipEngine, ClipRequest, FileClipStore
+from tubeforge.clips.engine import ClipEngine, ClipRequest, FileClipStore, build_engine_config
 from tubeforge.clips.services.video_service import VideoService
 
 
@@ -150,3 +150,23 @@ def test_a_cached_download_shares_the_file_instead_of_copying_it(tmp_path):
     dest.write_bytes(b"old")
     _link_or_copy(source, dest)
     assert dest.read_bytes() == source.read_bytes() and dest.stat().st_ino == source.stat().st_ino
+
+
+def test_sparse_windows_of_a_long_video_share_one_call_instead_of_one_each():
+    from tubeforge.clips import ai
+    lines = [f"[{minute:02d}:00 - {minute:02d}:20] " + "word " * 40 for minute in (5, 6, 31, 32, 61, 62, 95, 96)]  # busy parts only
+    windows = ai.split_transcript_into_windows("\n".join(lines), merge_sparse=True)
+    assert windows is not None and len(windows) == 1
+    assert sum(len(w["transcript"].splitlines()) for w in windows) == len(lines)  # nothing dropped or duplicated
+    dense = [f"[{second // 60:02d}:{second % 60:02d} - {second // 60:02d}:{second % 60 + 1:02d}] " + "talk " * 60 for second in range(0, 7200, 2)]
+    assert len(ai.split_transcript_into_windows("\n".join(dense), merge_sparse=True)) > 3  # a long, dense transcript still needs several calls
+    assert len(ai.split_transcript_into_windows("\n".join(lines))) > 1  # without the option, windows stay one per time slice
+
+
+def test_the_download_cache_is_shared_across_jobs(tmp_path):
+    from tubeforge.clips.youtube_source import cache_root
+    shared = tmp_path / "cache" / "clips-source"
+    first = build_engine_config(ClipRequest(url="https://youtu.be/x", work_dir=tmp_path / "job-1", cache_dir=shared))
+    second = build_engine_config(ClipRequest(url="https://youtu.be/x", work_dir=tmp_path / "job-2", cache_dir=shared))
+    assert cache_root(first) == cache_root(second) == shared
+    assert cache_root(build_engine_config(ClipRequest(url="https://youtu.be/x", work_dir=tmp_path / "job-3"))) == tmp_path / "job-3" / "temp" / "youtube-cache"

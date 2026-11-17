@@ -118,6 +118,7 @@ class ClipRequest:
     max_clip_seconds: Optional[float] = None
     max_download_bytes: Optional[int] = None
     source_window: Optional[tuple[float, float]] = None  # (start, end) seconds of the source to use
+    cache_dir: Optional[Path] = None  # shared download cache (same disk as work_dir, so files are linked, not copied)
 
     def __post_init__(self) -> None:
         if not 1 <= self.clip_count <= MAX_CLIPS:
@@ -160,6 +161,8 @@ def build_engine_config(request: ClipRequest, *, whisper_model: Optional[str] = 
         config.max_video_duration = max(config.max_video_duration, 86_400)
     elif request.max_video_duration:
         config.max_video_duration = request.max_video_duration
+    if request.cache_dir:
+        config.youtube_source_cache_dir = str(request.cache_dir)
     if request.max_download_bytes:
         config.youtube_download_max_bytes = request.max_download_bytes
     return config

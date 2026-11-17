@@ -66,6 +66,10 @@ DEFINITIONS: tuple[Definition, ...] = (
                "A longer video is not refused: the job reads the first stretch of this length (or the part you pick on the Clips page) "
                "and says so on the job card. Raise it for long shows; the engine only transcribes the busiest parts, but a long video is a big download.",
                "int", lambda s: s.pipeline.source_clips.max_source_duration_seconds // 60, 10, 720),
+    Definition("clips.claude_calls_per_day", "Clips", "Claude calls per day for clip selection",
+               "A separate daily allowance for clip jobs, inside the shared 40-call limit. One clip job usually needs two to six calls. "
+               "The Claude runner reads this on every request, so a change applies immediately.",
+               "int", lambda s: 12, 1, 40),
     Definition("clips.max_download_gb", "Clips", "Largest download for one clip job (GB)",
                "The video is stopped if its download would pass this size. A 4-hour 1080p video is about 6 GB.",
                "int", lambda s: -(-s.pipeline.source_clips.max_download_bytes // 1_000_000_000), 1, 30),
