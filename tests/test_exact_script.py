@@ -87,7 +87,8 @@ def test_batch_yaml_script_mode_exact_needs_a_script():
     ok = parse_batch(base % "script_mode: exact\nscript: |\n  One two three four five six seven eight.")
     assert not ok.errors and ok.shorts[0].script_mode == "exact"
     bad = parse_batch(base % "script_mode: exact")
-    assert bad.errors and "needs a script" in bad.errors[0].message
+    # Not refused any more: without a script there is nothing to use word for word, so the writer assists and the plan says so.
+    assert not bad.errors and bad.shorts[0].script_mode is None and any("needs a script" in w.message for w in bad.warnings)
     assert parse_batch(base % "narration: Plain assisted text.").shorts[0].script_mode is None      # unset: the import choice, then Settings
 
 

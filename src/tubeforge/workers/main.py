@@ -24,7 +24,10 @@ def main() -> None:
     runtime = create_runtime(settings)
     worker = WorkerService(f"worker-{uuid.uuid4().hex}", runtime.jobs, runtime.orchestrator, settings.worker)
     from tubeforge.core.job_focus import JobFocus, focus_path
-    worker.focus = JobFocus(focus_path(settings.pipeline.voice.artifact_root))
+    try:
+        worker.focus = JobFocus(focus_path(settings.pipeline.voice.artifact_root))
+    except AttributeError:  # a stripped-down settings object (tests); the worker then simply has no focus
+        worker.focus = None
     stopping = False
 
     def stop(_: int, __: object) -> None:
