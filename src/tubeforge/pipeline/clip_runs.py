@@ -98,8 +98,20 @@ class EngineClipRunner:
             write_progress(work_dir, stage, percent, message)
         return report
 
+    @staticmethod
+    def _adopt_earlier_downloads(work_dir: Path, params: dict[str, Any]) -> None:
+        """Videos that earlier jobs downloaded into their own folders join the shared cache, so a retry is not a new download."""
+        if not params.get("cache_dir"):
+            return
+        from tubeforge.clips.youtube_source import adopt_cache_dirs
+
+        artifact_root = work_dir.parent.parent  # <artifacts>/<job>/clip-work
+        folders = [folder for folder in artifact_root.glob("*/clip-work/temp/youtube-cache/*") if folder.is_dir()]
+        adopt_cache_dirs(folders, Path(params["cache_dir"]))
+
     def analyze(self, job_id, work_dir, params, cancelled=None):
         write_progress(work_dir, "analyze", 5, "Starting")
+        self._adopt_earlier_downloads(work_dir, params)
         with self._keepalive(cancelled):
             analysis = asyncio.run(self._engine(work_dir).analyze(self.request(work_dir, params), progress=self._progress(work_dir, "analyze"), should_cancel=self._cancel(cancelled)))
         return {"video_path": analysis.video_path, "segments": analysis.segments, "summary": analysis.summary, "key_topics": analysis.key_topics}

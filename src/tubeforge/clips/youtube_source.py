@@ -517,6 +517,42 @@ def _link_or_copy(source: Path, dest: Path) -> None:
         shutil.copy2(source, dest)
 
 
+def adopt_cache_dirs(folders, shared_root: Path) -> list[str]:
+    """Bring downloads cached by earlier jobs into the shared cache without copying them.
+
+    Each folder holds one video's cache (a manifest plus the media it names). Files are hard-linked, so nothing
+    is duplicated and the earlier job keeps its own copy. A video already in the shared cache, or a folder whose
+    manifest or media is missing, is left alone. Returns the video ids that were adopted.
+    """
+    adopted: list[str] = []
+    shared_root = Path(shared_root)
+    for folder in folders:
+        folder = Path(folder)
+        target = shared_root / folder.name
+        manifest = folder / MANIFEST_NAME
+        try:
+            if target.exists() or not manifest.is_file() or folder.resolve() == target.resolve():
+                continue
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            media = folder / str(data.get("full") or "")
+            if not data.get("full") or not media.is_file() or media.stat().st_size == 0:
+                continue
+            staging = shared_root / f".adopt-{uuid.uuid4().hex}"
+            staging.mkdir(parents=True)
+            try:
+                for item in folder.iterdir():
+                    if item.is_file():
+                        _link_or_copy(item, staging / item.name)
+                os.rename(staging, target)
+            finally:
+                if staging.exists():
+                    shutil.rmtree(staging, ignore_errors=True)
+            adopted.append(folder.name)
+        except (OSError, ValueError):
+            continue
+    return adopted
+
+
 def cache_dir_for(video_id: str, config=None) -> Path:
     return cache_root(config) / video_id
 

@@ -170,3 +170,25 @@ def test_the_download_cache_is_shared_across_jobs(tmp_path):
     second = build_engine_config(ClipRequest(url="https://youtu.be/x", work_dir=tmp_path / "job-2", cache_dir=shared))
     assert cache_root(first) == cache_root(second) == shared
     assert cache_root(build_engine_config(ClipRequest(url="https://youtu.be/x", work_dir=tmp_path / "job-3"))) == tmp_path / "job-3" / "temp" / "youtube-cache"
+
+
+def test_downloads_cached_by_earlier_jobs_join_the_shared_cache_without_copying(tmp_path):
+    import json as _json
+    from tubeforge.clips.youtube_source import MANIFEST_NAME, adopt_cache_dirs
+    old = tmp_path / "artifacts" / "job-1" / "clip-work" / "temp" / "youtube-cache"
+    good, partial, empty = old / "vidGOOD", old / "vidPART", old / "vidEMPTY"
+    for folder in (good, partial, empty):
+        folder.mkdir(parents=True)
+    (good / "full-1080.mp4").write_bytes(b"v" * 5000)
+    (good / MANIFEST_NAME).write_text(_json.dumps({"full": "full-1080.mp4", "full_height": 1080}))
+    (partial / "full-1080.mp4").write_bytes(b"v" * 5000)  # no manifest: the copy never finished
+    (empty / MANIFEST_NAME).write_text(_json.dumps({"full": "full-1080.mp4"}))  # manifest names a file that is not there
+    shared = tmp_path / "cache" / "clips-source"
+    shared.mkdir(parents=True)
+    assert adopt_cache_dirs(sorted(old.iterdir()), shared) == ["vidGOOD"]
+    assert (shared / "vidGOOD" / "full-1080.mp4").stat().st_ino == (good / "full-1080.mp4").stat().st_ino  # linked, not copied
+    assert _json.loads((shared / "vidGOOD" / MANIFEST_NAME).read_text())["full"] == "full-1080.mp4"
+    assert not (shared / "vidPART").exists() and not (shared / "vidEMPTY").exists()
+    assert not [p for p in shared.iterdir() if p.name.startswith(".adopt-")]  # no staging folder left behind
+    (shared / "vidGOOD" / "full-1080.mp4").write_bytes(b"newer")  # an existing shared entry is never replaced
+    assert adopt_cache_dirs([good], shared) == []
