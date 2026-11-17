@@ -279,6 +279,7 @@ class PipelineOrchestrator:
                 "signal_windows": value("clips.signal_windows", 8), "signal_window_before": value("clips.signal_window_before", 60),
                 "signal_window_after": value("clips.signal_window_after", 90), "whisper_threads": value("clips.whisper_threads", 4),
                 "max_height": value("clips.max_height", 1080), "cache_days": value("clips.cache_days", 7),
+                "direct_sections": bool(value("clips.direct_sections", True)), "download_connections": value("clips.download_connections", 4),
                 "analysis_window_max_chars": value("clips.analysis_window_max_chars", 24_000),
                 "max_source_seconds": limit, "max_download_bytes": download_bytes, "cookies_file": str(artifacts_cookies(self.artifact_root)),
                 "instructions": " ".join(note.strip() for note in job.request.notes if note.strip())[:1000] or None,

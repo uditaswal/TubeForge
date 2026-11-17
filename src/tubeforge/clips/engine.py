@@ -126,6 +126,8 @@ class ClipRequest:
     whisper_threads: Optional[int] = None
     max_height: Optional[int] = None
     cache_days: Optional[int] = None
+    direct_sections: Optional[bool] = None  # audio first, then only the chosen sections of the video
+    download_connections: Optional[int] = None  # fragments fetched at once
     cookies_file: Optional[Path] = None  # YouTube cookies (a credential): passed to yt-dlp only
     instructions: Optional[str] = None  # the operator's steering text for the AI ("find scenes about X"); empty means none
     analysis_window_max_chars: Optional[int] = None
@@ -171,6 +173,10 @@ def build_engine_config(request: ClipRequest, *, whisper_model: Optional[str] = 
         config.max_video_duration = max(config.max_video_duration, 86_400)
     elif request.max_video_duration:
         config.max_video_duration = request.max_video_duration
+    if request.direct_sections is not None:
+        config.youtube_direct_sections = bool(request.direct_sections)
+    if request.download_connections:
+        config.youtube_fragment_concurrency = int(request.download_connections)
     if request.cookies_file:
         config.youtube_cookies_file = str(request.cookies_file)
     if request.cache_dir:
