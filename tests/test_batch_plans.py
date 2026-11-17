@@ -78,3 +78,11 @@ def test_shipped_example_plan_parses_cleanly():
     plan = parse_batch((Path(__file__).resolve().parents[1] / "examples" / "batch-plan-example.md").read_text())
     assert not plan.errors and [s.id for s in plan.shorts] == [
         "sd-001-sql-vs-nosql", "sd-002-in-memory-cache", "sd-003-load-balancing"]
+
+
+def test_a_plans_thumbnail_fields_become_guidance_for_the_writer():
+    from tubeforge.scheduling.batch_requests import thumbnail_guidance
+    plan = parse_batch("## A\n```yaml\nid: a\ntitle: A\nconcept: c\nthumbnail: {text: EIGHT TIMES, visual: the host looking shocked}\n```\n")
+    assert thumbnail_guidance(plan.shorts[0]) == 'words on it: EIGHT TIMES; picture: the host looking shocked'
+    plain = parse_batch("## B\n```yaml\nid: b\ntitle: B\nconcept: c\n```\n")
+    assert thumbnail_guidance(plain.shorts[0]) is None

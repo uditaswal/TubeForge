@@ -72,6 +72,13 @@ JOB_EXTRAS_SCRIPT = r"""<script>
   window.focusJob=async id=>{const r=await send('POST','/api/jobs/'+encodeURIComponent(id)+'/focus');if(!r.ok){let d='';try{d=(await r.json()).detail}catch(_){}window.alert(d||'Could not focus this job.');return}await sync()};
   window.releaseFocus=async()=>{await send('DELETE','/api/job-focus');await sync()};
   sync();setInterval(sync,5000);
+  // Studio: guidance for the thumbnail, sent with every new brief.
+  (function(){const form=document.querySelector('#createForm');if(!form||document.querySelector('#thumbnailGuidance'))return;
+    const label=document.createElement('label');label.setAttribute('for','thumbnailGuidance');label.textContent='Thumbnail guidance (optional)';
+    const area=document.createElement('textarea');area.id='thumbnailGuidance';area.maxLength=1000;area.rows=2;area.placeholder='What should the thumbnail say and show? For example: the number 8x in big yellow type, the host looking shocked.';
+    const hint=document.createElement('p');hint.className='sub';hint.textContent='The writer shapes the thumbnail text options and the hook around this. A markdown plan can set it per short with thumbnail: {text, visual}.';
+    const submit=form.querySelector('button[type=submit],button:not([type])');(submit||form.lastElementChild).before(label,area,hint);
+    const original=window.fetch;window.fetch=(url,init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);const value=area.value.trim();if(value)body.thumbnail_guidance=value;init={...init,body:JSON.stringify(body)}}catch(_){}}return original(url,init)}})();
   // "Publish…" on a generation opens the Publishing page with that video chosen.
   function preselect(){let id=null;try{id=sessionStorage.getItem('tubeforge:publish-job')}catch(_){}if(!id||location.hash!=='#publishing')return;
     let tries=0;const timer=setInterval(()=>{const select=document.querySelector('#publishVideo');tries++;

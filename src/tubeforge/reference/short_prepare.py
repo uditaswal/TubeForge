@@ -31,6 +31,7 @@ class ShortPreparation(BaseModel):
     transcript_use: Literal['fresh', 'improve', 'exact'] = 'fresh'
     # The operator's own position, in their words ("the speaker says X, I want to say Y"). It outranks the reference.
     my_take: str | None = Field(default=None, max_length=1500)
+    thumbnail_guidance: str | None = Field(default=None, max_length=1000)
 
 
 def prepare_short(runtime, settings, routing_policy, intake_id: str, value: ShortPreparation, actor: str):
@@ -89,7 +90,8 @@ def prepare_short(runtime, settings, routing_policy, intake_id: str, value: Shor
         extra = dict(operator_script=spoken[:12000], exact_script=value.transcript_use == 'exact') if value.transcript_use != 'fresh' else {}
         brief = VideoBriefRequest(title=value.topic, angle=value.angle, notes=tuple(notes),
             duration_seconds=seconds, preset=preset, channel_identity=view.request.channel_identity,
-            audience=value.audience, review_mode='manual', video_style='story', **extra)
+            audience=value.audience, review_mode='manual', video_style='story',
+            thumbnail_guidance=(value.thumbnail_guidance or '').strip() or None, **extra)
         request = _video_request(brief, settings)
         request = request.model_copy(update={'language': view.request.language})
         request = routing_policy.apply(request, enforce_current=True)
@@ -104,6 +106,8 @@ def prepare_short(runtime, settings, routing_policy, intake_id: str, value: Shor
             brief_key['transcript_use'] = value.transcript_use
         if my_take:
             brief_key['my_take'] = my_take
+        if (value.thumbnail_guidance or '').strip():
+            brief_key['thumbnail_guidance'] = value.thumbnail_guidance.strip()
         job_id = hashlib.sha256(('reference-short-job-v1:' + json.dumps(brief_key, ensure_ascii=False,
             sort_keys=True, separators=(',', ':'))).encode('utf-8')).hexdigest()
         existing = db.get(PipelineJobRecord, job_id)

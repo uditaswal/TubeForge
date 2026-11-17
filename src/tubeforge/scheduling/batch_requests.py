@@ -23,6 +23,17 @@ def rotated_music_track(short, settings):
     return rotation[int.from_bytes(digest[:4], 'big') % len(rotation)]
 
 
+def thumbnail_guidance(short):
+    """The plan's `thumbnail: {text, visual}` as one sentence for the writer; None when the plan gave nothing."""
+    thumb = getattr(short, 'thumbnail', None)
+    parts = []
+    if thumb is not None and (thumb.text or '').strip():
+        parts.append('words on it: ' + thumb.text.strip())
+    if thumb is not None and (thumb.visual or '').strip():
+        parts.append('picture: ' + thumb.visual.strip())
+    return '; '.join(parts)[:1000] or None
+
+
 def build_batch_request(short, settings):
     from tubeforge.api.app import VideoBriefRequest, _video_request, _reject_retired_format
     presets = settings.pipeline.video_generation.presets
@@ -36,7 +47,8 @@ def build_batch_request(short, settings):
         operator_script=(short.narration or '').strip() or None,
         exact_script={'exact': True, 'assist': False}.get(short.script_mode),
         video_style='story',  # the approved look; Classic is the legacy renderer
-        music_track=rotated_music_track(short, settings))
+        music_track=rotated_music_track(short, settings),
+        thumbnail_guidance=thumbnail_guidance(short))
     request = None
     if short.sources:
         # The plan's own sources become the evidence (page text is read at request time), so no web research runs.

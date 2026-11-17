@@ -135,6 +135,9 @@ class VideoBriefRequest(BaseModel):
     channel_identity: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     destination_account_ids: tuple[str, ...] = Field(default=(), max_length=20)
     description: str | None = Field(default=None, min_length=1, max_length=5000)
+    # What the operator wants on the thumbnail (words, picture, mood). It reaches the writer as a note, so every way of
+    # starting a video (Studio, markdown plan, reference) carries it the same way.
+    thumbnail_guidance: str | None = Field(default=None, max_length=1_000)
     source_title: str | None = Field(default=None, max_length=500)
     source_excerpt: str | None = Field(default=None, max_length=24_000)
     show_source_credit: bool = False
@@ -152,6 +155,9 @@ class VideoBriefRequest(BaseModel):
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus|gpt-sol)$")
+
+
+THUMBNAIL_NOTE_PREFIX = "Thumbnail direction from the operator (shape the thumbnail text options and the hook's promise around it): "
 
 
 # id -> (script owner, Claude model choice). Sonnet is the default for testing.
@@ -334,6 +340,8 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     if len(set(mcp)) != len(mcp) or any(not server.strip() for server in mcp):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="mcp_servers must be unique and nonblank")
     notes = tuple(note.strip() for note in value.notes if note.strip())
+    if value.thumbnail_guidance and value.thumbnail_guidance.strip() and notes:
+        notes = (*notes, THUMBNAIL_NOTE_PREFIX + " ".join(value.thumbnail_guidance.split()))
     if not notes:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="at least one nonblank note is required")
     if value.visual_source == "stock" and settings.pipeline.media.provider not in {"wikimedia", "hybrid"}:

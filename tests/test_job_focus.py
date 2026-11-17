@@ -67,3 +67,17 @@ def test_the_generations_cards_show_thumbnails_publish_and_run_only_this(tmp_pat
         page = client.get("/").text
         for needle in ("job-thumb", "Create thumbnail", "Publish…", "Run only this", "window.focusJob", "tubeforge:publish-job", "focusBanner"):
             assert needle in page, needle
+
+
+def test_studio_brief_carries_thumbnail_guidance_into_the_notes(tmp_path: Path):
+    from tubeforge.api.app import THUMBNAIL_NOTE_PREFIX, VideoBriefRequest, _video_request
+    from tubeforge.core.config import load_settings
+    app = _client(tmp_path)
+    request = _video_request(VideoBriefRequest(title="T", notes=("Explain it.",), thumbnail_guidance="  the number 8x   in yellow "), app.state.settings)
+    assert THUMBNAIL_NOTE_PREFIX + "the number 8x in yellow" in request.notes
+    plain = _video_request(VideoBriefRequest(title="T", notes=("Explain it.",)), app.state.settings)
+    assert not any(note.startswith("Thumbnail direction") for note in plain.notes)
+    with TestClient(app) as client:
+        _login(app, client)
+        page = client.get("/").text
+        assert "thumbnailGuidance" in page and "Thumbnail guidance (optional)" in page
