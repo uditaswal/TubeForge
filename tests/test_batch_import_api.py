@@ -40,7 +40,8 @@ def test_signed_in_import_preview_commit_idempotency_and_conflict(tmp_path: Path
             row.status = 'generating'
         assert commit(PLAN) == 'conflict'
         assert client.get('/api/batch-plans').json()[0]['short']['title'] == 'Changed'
-        assert client.post('/api/batch-plans/import', json={'markdown': PLAN.replace('id: one\n', ''), 'commit': True}).status_code == 422
+        missing_id = client.post('/api/batch-plans/import', json={'markdown': PLAN.replace('id: one\n', ''), 'commit': True})
+        assert missing_id.status_code == 200 and any('id set to' in note['message'] for note in missing_id.json()['parse_notes'])  # repaired, not refused
     database.dispose()
 
 

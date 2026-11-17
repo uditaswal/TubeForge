@@ -115,7 +115,8 @@ def register_batch_routes(app, runtime, build_request):
             else:
                 entry = {k: v for k, v in analyze_script(s.narration, s.length_s).items() if k != 'sections'}
             fits[s.id] = entry
-        return {'committed': value.commit, 'items': results, 'cadence': cadence, 'script_fit': fits}
+        return {'committed': value.commit, 'items': results, 'cadence': cadence, 'script_fit': fits,
+                'parse_notes': [note.model_dump() for note in plan.warnings]}
 
     @app.get('/api/batch-plans', tags=['batch'])
     def list_plans(day: date | None = None, plan_id: str | None = None):
