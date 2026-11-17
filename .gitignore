@@ -59,7 +59,7 @@ data/
 *.sock
 *.pid
 
-# --- Logs and agent run state (AUTONOMOUS_PROGRESS.md is a local-only log) ---
+# --- Logs and agent run state (AUTONOMOUS_PROGRESS.md was retired 18 Nov 2026; kept ignored so it is never re-added) ---
 *.log
 nohup.out
 autonomous_logs/
