@@ -135,6 +135,7 @@ function renderEngine(e){engine=e;const strip=document.querySelector('#engineStr
   const add=(text,ok)=>strip.append(el('li',text,ok?'ok':'bad'));
   add(e.enabled?'Clipping enabled':'Clipping is turned off in config',e.enabled);
   add(e.runner_reachable?'Claude runner answers':'Claude runner is not reachable',e.runner_reachable);
+  strip.append(el('li',e.youtube_cookies?'YouTube cookies found':'No YouTube cookies (only needed if YouTube asks to confirm you are not a bot)',e.youtube_cookies?'ok':''));
   if(e.max_source_minutes){document.querySelector('#clipLimitNote').textContent='A video longer than '+e.max_source_minutes+' minutes is trimmed to its first '+e.max_source_minutes+' minutes instead of refused. Pick a start time to use a different part, or raise the limit in Settings.'}
   if(e.free_ram_mb!==null)strip.append(el('li','Free memory '+e.free_ram_mb+' MB'));
   strip.append(el('li',e.running+' running · '+e.queued+' queued'));
@@ -287,7 +288,9 @@ def register_clips_routes(app, runtime, create_clip_job):
         running = sum(1 for job in jobs if job.claim_owner is not None)
         queued = sum(1 for job in jobs if job.claim_owner is None and job.state in {JobState.TOPIC_CREATED, JobState.SOURCE_INSPECTING, JobState.SOURCE_ACQUIRING, JobState.SOURCE_ANALYZING, JobState.CLIP_RENDERING})
         reason = "" if enabled and reachable else ("Clipping is turned off in config/production.yaml." if not enabled else "The Claude runner does not answer; start it with scripts/run_claude_runner.sh.")
-        return {"enabled": enabled, "runner_reachable": reachable, "free_ram_mb": _meminfo_mb(), "running": running, "queued": queued,
+        from tubeforge.pipeline.orchestrator import artifacts_cookies
+        cookies = artifacts_cookies(settings.pipeline.voice.artifact_root).is_file()
+        return {"enabled": enabled, "runner_reachable": reachable, "youtube_cookies": cookies, "free_ram_mb": _meminfo_mb(), "running": running, "queued": queued,
                 "can_create": enabled and reachable, "reason": reason,
                 "max_source_minutes": int(runtime_values.shared().value("clips.max_source_minutes", settings.pipeline.source_clips.max_source_duration_seconds // 60))}
 

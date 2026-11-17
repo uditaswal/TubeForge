@@ -19,6 +19,7 @@ import requests
 import yt_dlp
 
 from .config import get_config
+from .ytdlp_options import cookie_options
 from .download_progress import DownloadRecovery, report_download_recovery
 from .media.ffmpeg import ffprobe_video_size
 from .youtube_proxy import (
@@ -334,7 +335,7 @@ def _fetch_video_info_with_ytdlp(
             ydl_opts["_youtube_deadline"] = deadline
             info = extract_video_info(url, ydl_opts)
         else:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL({**ydl_opts, **cookie_options()}) as ydl:
                 info = ydl.extract_info(url, download=False)
 
     return {
@@ -595,7 +596,7 @@ def _download_youtube_video_with_ytdlp(
                 video_id, int(quality) if quality else None
             )
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL({**ydl_opts, **cookie_options()}) as ydl:
                 ydl.download([url])
 
             logger.info(f"Searching for downloaded file: {video_id}.*")

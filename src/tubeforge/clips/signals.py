@@ -244,6 +244,8 @@ def fetch_youtube_signals(url: str, *, max_comments: int = 300) -> dict[str, Any
         "extractor_args": {"youtube": {"max_comments": [f"{max_comments},all,100,0"], "comment_sort": ["top"]}},
         **_js_runtime_opts(),
     }
+    from .ytdlp_options import cookie_options
+    options.update(cookie_options())
     with yt_dlp.YoutubeDL(options) as ydl:
         info = ydl.extract_info(url, download=False)
     return {

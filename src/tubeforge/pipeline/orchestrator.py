@@ -55,6 +55,11 @@ class PipelineInterrupted(RuntimeError):
     """Test-only interruption after a durable checkpoint has been written."""
 
 
+def artifacts_cookies(artifact_root) -> Path:
+    """data/config/youtube-cookies.txt, next to the artifacts folder."""
+    return Path(artifact_root).parent / "config" / "youtube-cookies.txt"
+
+
 RELAXED_ACCURACY_NOTE = ("Accuracy mode set by the operator: the operator's notes, script and reference are the evidence. Do not return insufficient_sources and do not refuse for "
                          "missing outside sources. Where a fact is uncertain, say it plainly or leave it out, and mark that claim human_review_required.")
 CLIP_PUBLIC_FIELDS = ("start_time", "end_time", "duration", "text", "hook_title", "relevance_score", "reasoning", "virality_score", "hook_score", "engagement_score", "value_score", "shareability_score", "hook_type")
@@ -105,7 +110,7 @@ class PipelineOrchestrator:
         self.source_ingestor = source_ingestor
         self.channel_approved_sources: dict[str, tuple[SourceReference, ...]] = {}
         self.source_clips = source_clips or SourceClipConfig()
-        self.source_provider = source_provider or YtDlpSourceProvider(self.source_clips.ytdlp_executable, self.source_clips.timeout_seconds)
+        self.source_provider = source_provider or YtDlpSourceProvider(self.source_clips.ytdlp_executable, self.source_clips.timeout_seconds, cookies_file=artifacts_cookies(artifact_root))
         self.clip_runner: ClipRunner = clip_runner or EngineClipRunner(self.source_clips)
         self.source_media = source_media or SourceMediaRepository(artifacts._session_factory)
         self.visual_router = VisualRouter()
@@ -275,7 +280,7 @@ class PipelineOrchestrator:
                 "signal_window_after": value("clips.signal_window_after", 90), "whisper_threads": value("clips.whisper_threads", 4),
                 "max_height": value("clips.max_height", 1080), "cache_days": value("clips.cache_days", 7),
                 "analysis_window_max_chars": value("clips.analysis_window_max_chars", 24_000),
-                "max_source_seconds": limit, "max_download_bytes": download_bytes,
+                "max_source_seconds": limit, "max_download_bytes": download_bytes, "cookies_file": str(artifacts_cookies(self.artifact_root)),
                 "instructions": " ".join(note.strip() for note in job.request.notes if note.strip())[:1000] or None,
                 "source_window": window, "source_trimmed": trimmed, "cache_dir": str(self.artifact_root.parent / "cache" / "clips-source"), "source_duration_seconds": duration}
 
@@ -295,6 +300,8 @@ class PipelineOrchestrator:
         """An engine failure becomes a job outcome: retry what may recover, fail the job with a reason otherwise.
         Anything else escaping here would take the whole worker down."""
         kind, text = type(error).__name__, str(error)[:600]
+        if "sign in to confirm" in text.replace("\u2019", "'").lower():
+            return ProviderValidationError("YouTube asked to confirm this is not a bot. Export your YouTube cookies from a logged-in browser as a Netscape cookies.txt file, save it as data/config/youtube-cookies.txt, and retry (see docs/clips.md).")
         if kind == "DownloadBudgetExceeded":
             return ProviderValidationError(f"The video is larger than the download limit ({text}). Raise pipeline.source_clips.max_download_bytes or pick a shorter video.")
         if kind == "RunnerError" and ("not reachable" in text or "quota" not in text and "refused" not in text):

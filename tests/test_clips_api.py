@@ -199,3 +199,15 @@ def test_the_guidance_field_is_saved_with_the_job(tmp_path):
         assert created.status_code == 201
         assert app.state.runtime.jobs.get(created.json()["id"]).request.notes == ("find scenes about caching",)
         assert "clipGuidance" in client.get("/clips").text
+
+
+def test_the_engine_strip_says_whether_youtube_cookies_are_present(tmp_path):
+    from tubeforge.pipeline.orchestrator import artifacts_cookies
+    app = _client(tmp_path)
+    with TestClient(app) as client:
+        _login(app, client)
+        assert client.get("/api/clips/engine/status").json()["youtube_cookies"] is False
+        cookies = artifacts_cookies(app.state.settings.pipeline.voice.artifact_root)
+        cookies.parent.mkdir(parents=True, exist_ok=True)
+        cookies.write_text("# Netscape HTTP Cookie File\n")
+        assert client.get("/api/clips/engine/status").json()["youtube_cookies"] is True

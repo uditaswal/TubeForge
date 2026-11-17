@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Protocol
@@ -39,8 +40,18 @@ def validate_source_url(value: str) -> str:
 class YtDlpSourceProvider:
     """A subprocess adapter so acquisition is auditable and easy to mock."""
 
-    def __init__(self, executable: str = "yt-dlp", timeout_seconds: int = 900) -> None:
+    def __init__(self, executable: str = "yt-dlp", timeout_seconds: int = 900, cookies_file: Path | str | None = None) -> None:
         self.executable, self.timeout_seconds = executable, timeout_seconds
+        self.cookies_file = Path(cookies_file) if cookies_file else None
+
+    def _extra_arguments(self) -> list[str]:
+        """A JavaScript runtime for YouTube's player challenge, and the operator's cookies when they exist."""
+        arguments: list[str] = []
+        if not shutil.which("deno") and shutil.which("node"):
+            arguments += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
+        if self.cookies_file is not None and self.cookies_file.is_file():
+            arguments += ["--cookies", str(self.cookies_file)]
+        return arguments
 
     def can_handle(self, url: str) -> bool:
         try:
@@ -53,7 +64,7 @@ class YtDlpSourceProvider:
         safe_url = validate_source_url(url)
         try:
             completed = subprocess.run(
-                [self.executable, "--dump-single-json", "--no-playlist", "--no-warnings", "--socket-timeout", str(self.timeout_seconds), "--retries", "0", safe_url],
+                [self.executable, "--dump-single-json", "--no-playlist", "--no-warnings", "--socket-timeout", str(self.timeout_seconds), "--retries", "0", *self._extra_arguments(), safe_url],
                 text=True, capture_output=True, timeout=self.timeout_seconds, check=False,
             )
         except FileNotFoundError as error:
@@ -61,6 +72,9 @@ class YtDlpSourceProvider:
         except subprocess.TimeoutExpired as error:
             raise RetryableProviderError("source inspection timed out") from error
         if completed.returncode:
+            if "sign in to confirm" in completed.stderr.replace("\u2019", "'").lower():
+                have = self.cookies_file is not None and self.cookies_file.is_file()
+                raise ProviderValidationError(("YouTube still asked to confirm this is not a bot even with your cookies: they may have expired; export them again. " if have else "YouTube asked to confirm this is not a bot. Export your YouTube cookies from a logged-in browser as a Netscape cookies.txt file, save it as data/config/youtube-cookies.txt, and retry (see docs/clips.md).") )
             raise ProviderValidationError(_diagnostic(completed.stderr, "source inspection failed"))
         try:
             raw = json.loads(completed.stdout)

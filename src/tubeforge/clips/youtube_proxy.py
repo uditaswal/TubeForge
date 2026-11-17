@@ -159,6 +159,7 @@ def _proxy_client(options: dict):
     from yt_dlp.networking import Request
 
     _check_deadline(options)
+    options = {**options, **cookie_options()}
     with yt_dlp.YoutubeDL(options) as client:
         if "_youtube_deadline" in options:
             original_open = client.urlopen
@@ -363,6 +364,9 @@ def log_youtube_attempt(
         logger.warning(message, *args, extra=extra)
         return
     logger.info(message, *args, extra=extra)
+
+
+from .ytdlp_options import cookie_options  # noqa: E402
 
 
 def base_proxy_params(task_id: Optional[str] = None, video_id: Optional[str] = None, config=None,

@@ -126,6 +126,7 @@ class ClipRequest:
     whisper_threads: Optional[int] = None
     max_height: Optional[int] = None
     cache_days: Optional[int] = None
+    cookies_file: Optional[Path] = None  # YouTube cookies (a credential): passed to yt-dlp only
     instructions: Optional[str] = None  # the operator's steering text for the AI ("find scenes about X"); empty means none
     analysis_window_max_chars: Optional[int] = None
 
@@ -170,6 +171,8 @@ def build_engine_config(request: ClipRequest, *, whisper_model: Optional[str] = 
         config.max_video_duration = max(config.max_video_duration, 86_400)
     elif request.max_video_duration:
         config.max_video_duration = request.max_video_duration
+    if request.cookies_file:
+        config.youtube_cookies_file = str(request.cookies_file)
     if request.cache_dir:
         config.youtube_source_cache_dir = str(request.cache_dir)
     for name, value in (("signal_windows", request.signal_windows), ("signal_window_before", request.signal_window_before),

@@ -82,3 +82,16 @@ Findings from the run:
   voiceover, transitions or speed changes), export presets for TikTok/Reels/Shorts and ZIP download.
 - Other workflows (series, recap, topic, trailer), Twitch/Kick, B-roll.
 - Instagram publishing stays parked (see HANDOFF).
+
+## When YouTube says "Sign in to confirm you're not a bot"
+
+YouTube sometimes refuses a download from a server it does not trust. The worker already uses a JavaScript runtime for YouTube's
+player check. If it still refuses, give it your YouTube cookies:
+
+1. In a browser where you are signed in to YouTube, export the cookies for `youtube.com` as a Netscape `cookies.txt` file (a
+   browser extension such as "Get cookies.txt LOCALLY" does this).
+2. Save it as `data/config/youtube-cookies.txt` (the folder is git-ignored). No restart is needed; the Clips page strip shows "YouTube cookies found".
+3. Retry the job.
+
+Use a spare Google account if you can: the cookies are a login for that account, and YouTube can flag an account that is used for
+automated downloads. They are passed to yt-dlp only and are never logged or saved with a job. Cookies expire; export them again if the error returns.
