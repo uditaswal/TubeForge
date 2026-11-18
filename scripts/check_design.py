@@ -4,13 +4,14 @@ Usage:  python scripts/check_design.py           (exit code 0 = all good)
 
 Every failure line says FILE, what is wrong and how to fix it. Checks:
   1. tokens.css and tailwind.config.js define exactly the same tf-* colors.
-  2. No hex/rgb colors outside design/tokens.css (in the guide, its JS, the Tailwind config).
+  2. No hex/rgb colors outside src/tubeforge/assets/ui/tokens.css (in the guide, its JS, the Tailwind config).
   3. Classes in the guide use only allowed colors, sizes and radii (no Tailwind built-in palettes,
      no opacity modifiers like bg-tf-ok/20, no text-2xl, no rounded-xl, no shadows, only listed [arbitrary] values).
   4. Every <section data-component="x"> in guide.html has "### Component: x" in DESIGN.md, and the reverse.
   5. Accessibility basics in guide.html: every button has type=, every field has an id and a label,
      every id is unique, no inline style="" attributes.
-  6. Color contrast of the token pairs listed in CONTRAST_PAIRS (WCAG 2.1 ratios).
+  6. Every link in the guide says 'underline' or 'no-underline'.
+  7. Color contrast of the token pairs listed in CONTRAST_PAIRS (WCAG 2.1 ratios).
 """
 
 from __future__ import annotations
@@ -22,11 +23,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DESIGN = ROOT / "design"
-TOKENS = DESIGN / "tokens.css"
-CONFIG = DESIGN / "tailwind.config.js"
+TOKENS = ROOT / "src" / "tubeforge" / "assets" / "ui" / "tokens.css"
+CONFIG = ROOT / "src" / "tubeforge" / "assets" / "ui" / "tailwind.config.js"
 GUIDE = DESIGN / "guide.html"
 DOC = DESIGN / "DESIGN.md"
-SCANNED_FOR_COLORS = [GUIDE, CONFIG, DESIGN / "guide.js", DESIGN / "tubeforge-ui.js"]
+SCANNED_FOR_COLORS = [GUIDE, CONFIG, DESIGN / "guide.js", ROOT / "src" / "tubeforge" / "assets" / "ui" / "tubeforge-ui.js"]
 
 # Arbitrary Tailwind values allowed in recipes. Add here only with a reason in DESIGN.md.
 ALLOWED_ARBITRARY = {"aspect-[9/16]", "min-w-[480px]", "min-w-[560px]"}
@@ -92,7 +93,7 @@ def check_no_raw_colors() -> None:
             for match in pattern.finditer(line):
                 if match.group(0).startswith("#") and re.search(r'href="#|id="|getAttribute|\.slice', line):
                     continue
-                fail(path, f"line {number}: raw color '{match.group(0)}'. Use a tf-* class, or add a token to design/tokens.css")
+                fail(path, f"line {number}: raw color '{match.group(0)}'. Use a tf-* class, or add a token to src/tubeforge/assets/ui/tokens.css")
 
 
 def check_classes() -> None:
@@ -164,6 +165,16 @@ class A11yParser(HTMLParser):
             self.fields.append((line, a))
 
 
+def check_links() -> None:
+    """Every link says whether it is underlined: 'underline' (text links) or 'no-underline' (buttons, navigation)."""
+    for number, line in enumerate(GUIDE.read_text().splitlines(), 1):
+        for tag in re.findall(r"<a\b[^>]*>", line):
+            cm = re.search(r'class="([^"]*)"', tag)
+            classes = cm.group(1).split() if cm else []
+            if "underline" not in classes and "no-underline" not in classes:
+                fail(GUIDE, f"line {number}: link without 'underline' or 'no-underline': {tag[:80]}")
+
+
 def check_accessibility() -> None:
     parser = A11yParser()
     parser.feed(GUIDE.read_text())
@@ -218,6 +229,7 @@ def main(argv: list[str]) -> int:
     check_classes()
     check_component_sync()
     check_accessibility()
+    check_links()
     check_contrast(tokens, report="--contrast" in argv)
     if errors:
         print(f"Design check FAILED ({len(errors)} problems):")

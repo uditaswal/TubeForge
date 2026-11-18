@@ -3,14 +3,16 @@
     - In a page, load https://cdn.tailwindcss.com/3.4.17 FIRST, then this file (sets window.tailwind.config).
     - With the Tailwind v3.4.17 standalone CLI, as a normal module (module.exports).
 
-  Every color maps to a CSS variable in design/tokens.css. Do not put hex values here.
+  Every color maps to a CSS variable in src/tubeforge/assets/ui/tokens.css. Do not put hex values here.
   The checker (python scripts/check_design.py) fails if a token is missing on either side.
 
   Tailwind's built-in palettes (slate-*, blue-*, gray-* ...) are REMOVED on purpose: only tf-* colors exist,
   so a class like bg-blue-500 does nothing and the checker reports it.
 */
 const tfTailwindConfig = {
-  content: ["./design/**/*.{html,js}", "./src/tubeforge/**/*.{py,html,js}"],
+  content: ["./src/tubeforge/api/**/*.{py,html,js}"],
+  // Preflight (the Tailwind base reset) is off: the dashboard pages already style their own elements.
+  corePlugins: { preflight: false },
   theme: {
     colors: {
       transparent: "transparent",

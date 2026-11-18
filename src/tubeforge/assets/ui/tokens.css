@@ -81,6 +81,9 @@ body {
 dialog::backdrop { background: var(--tf-scrim); }
 .tf-mono { font-family: var(--tf-font-mono); font-variant-numeric: tabular-nums; }
 
+/* Guide only (body.tf-guide): the guide's own text layout. The dashboard pages do not use this class. */
+.tf-guide :is(h1, h2, h3, h4, p, ul, ol, dl, dd, pre, figure) { margin: 0; }
+
 /* App shell: the sidebar is a drawer below 1024px (opened by tubeforge-ui.js), always visible from 1024px. */
 .tf-nav { display: none; }
 .tf-nav[data-open="true"] { display: flex; }

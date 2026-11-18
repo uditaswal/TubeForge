@@ -7,12 +7,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-<script src="tailwind.config.js"></script>
-<link rel="stylesheet" href="tokens.css">
-<script src="tubeforge-ui.js" defer></script>
+<script src="../src/tubeforge/assets/ui/tailwind.config.js"></script>
+<link rel="stylesheet" href="../src/tubeforge/assets/ui/tokens.css">
+<script src="../src/tubeforge/assets/ui/tubeforge-ui.js" defer></script>
 <script src="guide.js" defer></script>
 </head>
-<body class="font-sans">
+<body class="font-sans tf-guide">
 <!--
   HOW THIS FILE WORKS (read DESIGN.md first)
   - Each component is one <section data-component="NAME" id="NAME">. NAME must match "### Component: NAME" in DESIGN.md.
@@ -21,12 +21,12 @@
   - Only tf-* colors, text-xs..text-xl, rounded-sm/md/lg/full. Run: python scripts/check_design.py
 -->
 
-<a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-tf-accent focus:px-4 focus:py-2 focus:text-tf-accent-ink">Skip to content</a>
+<a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-tf-accent focus:px-4 focus:py-2 focus:text-tf-accent-ink no-underline">Skip to content</a>
 
 <button type="button" class="tf-nav-backdrop fixed inset-0 z-30 bg-tf-scrim lg:hidden" data-nav-close aria-label="Close navigation" hidden></button>
 
 <aside data-nav data-open="false" class="tf-nav fixed inset-y-0 left-0 z-40 w-sidebar flex-col gap-6 overflow-y-auto border-r border-tf-line bg-tf-bg px-3 py-5">
-  <a href="#top" class="flex items-center gap-3 px-2">
+  <a href="#top" class="flex items-center gap-3 px-2 no-underline">
     <span class="grid h-8 w-8 place-items-center rounded-md bg-tf-accent text-sm font-semibold text-tf-accent-ink">TF</span>
     <span class="grid leading-tight"><span class="text-md font-semibold text-tf-text">TubeForge</span><span class="text-xs text-tf-muted">Design guide</span></span>
   </a>
@@ -34,36 +34,36 @@
   <nav aria-label="Guide sections" class="grid gap-5">
     <div class="grid gap-1">
       <p class="px-3 text-xs font-medium text-tf-faint">Foundations</p>
-      <a href="#colors" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Colors</a>
-      <a href="#type" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Type</a>
-      <a href="#shape" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Space and shape</a>
+      <a href="#colors" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Colors</a>
+      <a href="#type" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Type</a>
+      <a href="#shape" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Space and shape</a>
     </div>
     <div class="grid gap-1">
       <p class="px-3 text-xs font-medium text-tf-faint">Layout</p>
-      <a href="#app-shell" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">App shell</a>
-      <a href="#page-header" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Page header</a>
-      <a href="#panel" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Panel</a>
+      <a href="#app-shell" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">App shell</a>
+      <a href="#page-header" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Page header</a>
+      <a href="#panel" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Panel</a>
     </div>
     <div class="grid gap-1">
       <p class="px-3 text-xs font-medium text-tf-faint">Controls</p>
-      <a href="#button" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Buttons</a>
-      <a href="#link" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Links</a>
-      <a href="#field" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Form fields</a>
-      <a href="#dialog" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Dialog</a>
+      <a href="#button" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Buttons</a>
+      <a href="#link" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Links</a>
+      <a href="#field" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Form fields</a>
+      <a href="#dialog" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Dialog</a>
     </div>
     <div class="grid gap-1">
       <p class="px-3 text-xs font-medium text-tf-faint">Status</p>
-      <a href="#stage-track" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Stage track</a>
-      <a href="#badge" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Status badge</a>
-      <a href="#notice" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Notice</a>
-      <a href="#empty-loading" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Empty and loading</a>
+      <a href="#stage-track" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Stage track</a>
+      <a href="#badge" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Status badge</a>
+      <a href="#notice" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Notice</a>
+      <a href="#empty-loading" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Empty and loading</a>
     </div>
     <div class="grid gap-1">
       <p class="px-3 text-xs font-medium text-tf-faint">Content</p>
-      <a href="#job-list" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Job list</a>
-      <a href="#meta-list" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Details list</a>
-      <a href="#data-table" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Table</a>
-      <a href="#review-split" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent">Video review</a>
+      <a href="#job-list" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Job list</a>
+      <a href="#meta-list" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Details list</a>
+      <a href="#data-table" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Table</a>
+      <a href="#review-split" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Video review</a>
     </div>
   </nav>
 </aside>
@@ -72,7 +72,7 @@
   <header class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-tf-line bg-tf-bg px-4 lg:px-8">
     <button type="button" class="inline-flex h-8 items-center rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text lg:hidden" data-nav-open aria-expanded="false">Menu</button>
     <nav aria-label="Breadcrumb" class="min-w-0 truncate text-sm text-tf-muted">TubeForge / <span class="font-medium text-tf-text" aria-current="page">Design guide</span></nav>
-    <p class="ml-auto hidden text-sm text-tf-muted sm:block">Tokens: <span class="tf-mono text-tf-text">design/tokens.css</span></p>
+    <p class="ml-auto hidden text-sm text-tf-muted sm:block">Tokens: <span class="tf-mono text-tf-text">src/tubeforge/assets/ui/tokens.css</span></p>
   </header>
 
   <main id="main" class="px-4 py-8 lg:px-8">
@@ -173,7 +173,7 @@
     <p class="max-w-form text-md text-tf-muted">Import a plan of Shorts, then review each video before it's staged for publishing.</p>
   </div>
   <div class="flex flex-wrap gap-2">
-    <a href="/batch/review" class="inline-flex h-9 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted">Open day review</a>
+    <a href="/batch/review" class="inline-flex h-9 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted no-underline">Open day review</a>
   </div>
 </header>
         </div>
@@ -369,7 +369,7 @@
 <div class="grid justify-items-start gap-3 rounded-lg border border-dashed border-tf-line-strong px-6 py-8">
   <h3 class="text-md font-semibold text-tf-text">No generations yet</h3>
   <p class="max-w-form text-base text-tf-muted">Each video you start appears here with its progress, so you can review it when it's ready.</p>
-  <a href="/#studio" class="inline-flex h-9 items-center gap-2 rounded-md bg-tf-accent px-4 text-base font-semibold text-tf-accent-ink hover:brightness-110">Start a video</a>
+  <a href="/#studio" class="inline-flex h-9 items-center gap-2 rounded-md bg-tf-accent px-4 text-base font-semibold text-tf-accent-ink hover:brightness-110 no-underline">Start a video</a>
 </div>
         </div>
       </section>

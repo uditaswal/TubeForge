@@ -10,13 +10,14 @@ Stack: **plain HTML + Tailwind CSS v3.4.17 + plain JavaScript.** No React, no bu
 
 | File | What it is | When you edit it |
 |---|---|---|
-| `design/tokens.css` | Every color, font, radius and width, as CSS variables. **The only place a color value may appear.** | Changing the look (workflow B) |
-| `design/tailwind.config.js` | Maps Tailwind class names (`bg-tf-surface`, `text-md`, `rounded-lg`) to the tokens | Only when you add or remove a token |
+| `src/tubeforge/assets/ui/tokens.css` | Every color, font, radius and width, as CSS variables. **The only place a color value may appear.** Served at `/static/ui/`. | Changing the look (workflow B) |
+| `src/tubeforge/assets/ui/tailwind.config.js` | Maps Tailwind class names (`bg-tf-surface`, `text-md`, `rounded-lg`) to the tokens | Only when you add or remove a token |
 | `design/guide.html` | The living guide: one `<section>` per component, with the exact HTML recipe | Changing or adding a component (workflows C, D) |
-| `design/tubeforge-ui.js` | Shared behaviour switched on by `data-` attributes (nav drawer, dialogs, copy) | Only when a component needs new behaviour |
+| `src/tubeforge/assets/ui/tubeforge-ui.js` | Shared behaviour switched on by `data-` attributes (nav drawer, dialogs, copy) | Only when a component needs new behaviour |
 | `design/guide.js` | Guide-only behaviour (shows recipes, highlights the sidebar) | Almost never |
+| `src/tubeforge/api/design_system.py` | Server side: `design_head()` (load tags), `render_app_shell()` (sidebar, top bar), the `/static/ui` route | Changing the shell or nav |
 | `design/DESIGN.md` | This file: rules, workflows, one `### Component:` section per component | Every time you change a component |
-| `scripts/check_design.py` | Automatic checker. Must pass before you finish | Only to allow a new arbitrary value |
+| `scripts/check_design.py` | Automatic checker (tokens, classes, components, links, contrast). Must pass before you finish | Only to allow a new arbitrary value |
 | `scripts/screenshot_design_guide.py` | Screenshots the guide at 390, 768 and 1440 px | Never |
 
 ## The rules (never break these)
@@ -43,12 +44,12 @@ Stack: **plain HTML + Tailwind CSS v3.4.17 + plain JavaScript.** No React, no bu
 4. Add components top to bottom in the order the operator works (what to do first goes first). Use `grid gap-10` between page sections.
 5. For each component, copy the HTML inside its `<div data-example>`. Change words and IDs only. IDs must be unique on the page.
 6. Pick labels and colors for states from **Job state labels** below.
-7. Load the shared files in the page `<head>` (see **Loading on a page**).
+7. Standalone pages get the design system from `wrap_studio_page(...)`; nothing to add by hand (see **Loading on a page**).
 8. Run workflow E on the page (adapt the screenshot step to the page URL).
 
 ### B. Change a color, font, radius or width
 
-1. Edit the value in `design/tokens.css`. Do not rename tokens.
+1. Edit the value in `src/tubeforge/assets/ui/tokens.css`. Do not rename tokens.
 2. Run `python scripts/check_design.py --contrast`. Every line must say `ok`. If a pair is `LOW`, adjust the value and run again.
 3. Run workflow E.
 
@@ -80,7 +81,7 @@ Adding a **new** color token: add `--tf-name: #rrggbb;` in `tokens.css` with a c
 
 3. Add a sidebar link in the matching group of `<nav aria-label="Guide sections">` (copy a neighbouring `<a>`, change `href="#NAME"` and the text).
 4. Add a `### Component: NAME` section to this file using the same headings as the others (Use for, Don't, Variants, Words).
-5. Build the recipe only from existing tokens and the allowed classes. If it needs behaviour, add a `data-` attribute handler to `design/tubeforge-ui.js` and document the attribute there and in the component section.
+5. Build the recipe only from existing tokens and the allowed classes. If it needs behaviour, add a `data-` attribute handler to `src/tubeforge/assets/ui/tubeforge-ui.js` and document the attribute there and in the component section.
 6. Run workflow E.
 
 ### E. Check your work (required before you finish)
@@ -103,26 +104,48 @@ Adding a **new** color token: add `--tf-name: #rrggbb;` in `tokens.css` with a c
 
 ## Loading on a page
 
-Put this in `<head>`, in this order (paths are relative to where the files are served):
+**Implemented.** Every standalone page gets the design system by calling `wrap_studio_page(...)`
+(`src/tubeforge/api/studio_shell.py`), which emits `design_head()` and the app shell from
+`src/tubeforge/api/design_system.py`. Do not write these tags by hand. `design_head()` loads, in order:
+the IBM Plex fonts, the Tailwind Play CDN (3.4.17), `/static/ui/tailwind.config.js`, `/static/ui/tokens.css`,
+and `/static/ui/tubeforge-ui.js` (deferred). `/static/ui/` is public (no sign-in) because it holds no data.
 
-```html
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<script src="https://cdn.tailwindcss.com/3.4.17"></script>
-<script src="/static/ui/tailwind.config.js"></script>
-<link rel="stylesheet" href="/static/ui/tokens.css">
-<script src="/static/ui/tubeforge-ui.js" defer></script>
-```
+Pages currently using the shell: Batch plans, Day review, Settings, Clips, Reference videos, Long-form scripts.
+The single-page dashboard at `/` still uses `studio_shell.py`'s own chrome (see Migration status).
 
-**Status: the dashboard does not load these yet.** Its pages are still HTML strings inside Python
-(`src/tubeforge/api/app.py`, `studio_shell.py`, `*_ui.py`) with their own CSS. Migration plan:
+Tailwind's preflight is **off** (`corePlugins.preflight: false`). See **Known collisions** for why.
 
-1. Serve `design/` at `/static/ui/` from FastAPI (`StaticFiles`), and move page HTML into `src/tubeforge/api/templates/*.html` (Jinja2; plain HTML with `{{ }}` placeholders).
-2. Migrate one page at a time, starting with Day review, then Generations, Batch plans, Studio, Settings, the rest. Delete the page's old CSS in the same change.
-3. When every page is migrated, replace the Play CDN with a compiled file: download the Tailwind **v3.4.17 standalone CLI** (a single binary, no Node needed) and run `tailwindcss -c design/tailwind.config.js -i design/tailwind.input.css -o design/tubeforge.css --minify`. Commit the output; pages then load `/static/ui/tubeforge.css` instead of the CDN script.
-4. Self-host the two IBM Plex fonts (woff2 in `design/fonts/`) so the dashboard works without internet.
+## Migration status
 
-The Play CDN compiles CSS in the browser. That's fine for a loopback tool and for this guide, but it needs internet and prints a console warning. Step 3 removes both.
+| Area | Status |
+|---|---|
+| Tokens, Tailwind config, shared JS served at `/static/ui/` | Done |
+| App shell (sidebar, drawer, top bar) on the six standalone pages | Done (chrome only) |
+| Page content on those six pages (forms, lists, tables, panels) | Not started: still styled by `STUDIO_CSS` |
+| Single-page dashboard at `/` (Studio, Generations, Scheduling, Accounts, Media, Publishing) | Not started |
+| Compiled Tailwind CSS (standalone CLI) and self-hosted fonts | Not started |
+
+Next step: migrate Day review's content to the recipes (panel, job list, review-split, notice), then Settings.
+Delete each page's old CSS in the same change.
+
+## Known collisions
+
+These are the traps found while wiring the system into the live pages. Read this before writing markup.
+
+1. **Legacy `.grid`.** Settings (and other pages' own CSS) defines a global `.grid` with a two-column template and a
+   19 px gap. Tailwind's `grid` uses the same class name, so `grid` alone can place children side by side.
+   Fix in markup: add `!grid-cols-1` (and `!gap-N` when the gap matters) on any `grid` container on a dashboard page.
+   The shell already does this. Remove the legacy rule when its page is migrated.
+2. **Legacy element rules.** `STUDIO_CSS` underlines every `a` and gives every `button` a cyan fill and radius.
+   The recipes set their own colors, so they win. For links, always write `underline` (text links) or
+   `no-underline` (buttons and navigation). The checker enforces this in `design/guide.html`.
+3. **Preflight is off.** Tailwind's base reset would override the legacy button and input styles, because the
+   Play CDN style is injected after `STUDIO_CSS`. Consequence: headings and paragraphs keep browser margins.
+   The guide's body has `tf-guide`, which zeroes them. A new page that needs predictable margins puts
+   `m-0` on each element that needs it (Tailwind's zero-margin class).
+4. **Old shell classes.** `.studio-sidebar`, `.studio-topbar`, `.studio-main`, `.studio-backdrop` are no longer
+   produced on standalone pages. Navigation is `data-nav`, `data-nav-open` and `data-nav-close`, handled by
+   `tubeforge-ui.js`. The SPA at `/` still uses the old classes until it is migrated.
 
 ## Do you need a framework?
 
@@ -205,7 +228,7 @@ Variants: `max-w-content` for the main column; `max-w-form` for forms and paragr
 ### Component: app-shell
 Use for: every signed-in page. Sidebar (drawer below 1024 px), sticky top bar, main column.
 Don't: build a different top bar for some pages; put actions in the top bar other than Sign out.
-Variants: none. Nav groups, in order: Make (Studio, Batch plans, Reference videos, Long-form scripts, Clips), Review (Generations, Day review), Publish (Publishing, Scheduling, Accounts), System (Media tools, Settings). The connection indicator shows "Connected" with a `tf-ok` dot, or "Reconnecting…" with a `tf-warn` dot.
+Variants: none. Nav groups, in order (`NAV_GROUPS` in `design_system.py`): Make (Studio, Batch plans, Reference videos, Long-form scripts, Clips), Review (Generations), Publish (Publishing, Scheduling, Accounts), System (Media tools, Settings). Day review is reached from Batch plans, not from the nav. The connection indicator shows "Connected" with a `tf-ok` dot, or "Reconnecting…" with a `tf-warn` dot.
 Behaviour: `data-nav-open` / `data-nav-close` (in `tubeforge-ui.js`); Escape closes the drawer.
 
 ### Component: page-header

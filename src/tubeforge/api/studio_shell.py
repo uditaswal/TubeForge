@@ -5,6 +5,8 @@ API-backed controls into navigable sections without replacing their handlers.
 """
 import html
 
+from tubeforge.api.design_system import design_head, render_app_shell, render_sidebar
+
 STUDIO_CSS = r"""
 :root{color-scheme:dark;--bg:#0b111b;--panel:#131d2b;--muted:#a8b8cd;--line:#2b3a4e;--cyan:#a4f0cc;--good:#a4f0cc;--warn:#f3ce87;--bad:#ffa6a6;--studio-input:#101926;--studio-sidebar:#0e1521;--studio-panel-alt:#182434;--studio-purple:#c0b6fa}
 *{box-sizing:border-box}
@@ -123,60 +125,25 @@ STUDIO_NAV_ITEMS = [
 
 
 def render_studio_sidebar(active: str) -> str:
-    """Static sidebar markup for standalone pages (Batch plans, Day review) that
-    don't run the SPA hash-router in STUDIO_SCRIPT."""
-    links = "".join(
-        f'<a href="{href}"{" aria-current=\"page\"" if key == active else ""}>{label}</a>'
-        for key, href, label in STUDIO_NAV_ITEMS
-    )
-    return (
-        '<aside id="studioSidebar" class="studio-sidebar" aria-label="Workspace navigation">'
-        '<div class="studio-brand"><span class="studio-brand-mark">TF</span>'
-        "<span>TubeForge<small>Creator Studio</small></span></div>"
-        '<div class="studio-workspace">Local workspace</div>'
-        '<p class="studio-nav-label">Workspace</p>'
-        f'<nav class="studio-nav" aria-label="Studio sections">{links}</nav>'
-        '<p class="studio-sidebar-foot">Account plans remain local until a destination is verified and a separate draft is reviewed.</p>'
-        "</aside>"
-    )
-
-
-def render_studio_auth(username: str | None) -> str:
-    if username:
-        return (
-            f'<span class="studio-auth-name">Signed in as {html.escape(username)}</span>'
-            '<button type="button" id="signOutButton" class="small secondary">Sign out</button>'
-        )
-    return '<span class="studio-auth-name">Local access</span>'
-
-
-def render_studio_topbar(breadcrumb: str, username: str | None) -> str:
-    return (
-        '<header class="studio-topbar">'
-        '<button type="button" class="studio-menu" id="studioMenuToggle" aria-controls="studioSidebar" aria-expanded="false">Menu</button>'
-        f'<div class="studio-crumb"><strong>{html.escape(breadcrumb)}</strong></div>'
-        f'<div class="studio-auth">{render_studio_auth(username)}</div>'
-        "</header>"
-    )
+    """Sidebar for standalone pages (Batch plans, Day review, ...). Shared with the design system."""
+    return render_sidebar(active, STUDIO_NAV_ITEMS)
 
 
 def wrap_studio_page(active: str, username: str | None, breadcrumb: str, main_html: str) -> str:
-    """Static sidebar/topbar chrome for standalone pages (Batch plans, Day
-    review) that don't run the SPA hash-router in STUDIO_SCRIPT."""
+    """Design-system chrome (sidebar, top bar) around a standalone page's main content.
+
+    Design tags come first so the stylesheet and Tailwind load before the page's own markup.
+    The page's existing STUDIO_CSS still styles its content.
+    """
     return (
-        render_studio_sidebar(active)
-        + '<button type="button" class="studio-backdrop" aria-label="Close navigation" hidden></button>'
-        + '<div class="studio-main">'
-        + render_studio_topbar(breadcrumb, username)
+        design_head()
+        + render_app_shell(active, STUDIO_NAV_ITEMS, breadcrumb, username)
         + main_html
-        + "</div>"
+        + "</div></div>"
     )
 
 
-# Appended inline into a page's single existing <script> block (not a separate
-# <script> tag) so DOM-runtime tests that extract exactly one <script> still work.
 STUDIO_STATIC_MENU_SCRIPT = r"""
-(()=>{const menuButton=document.querySelector('#studioMenuToggle'),sidebar=document.querySelector('.studio-sidebar'),backdrop=document.querySelector('.studio-backdrop');if(!menuButton||!sidebar||!backdrop)return;function closeMenu(){sidebar.classList.remove('open');backdrop.classList.remove('open');backdrop.hidden=true;menuButton.setAttribute('aria-expanded','false');}menuButton.onclick=()=>{const open=!sidebar.classList.contains('open');sidebar.classList.toggle('open',open);backdrop.classList.toggle('open',open);backdrop.hidden=!open;menuButton.setAttribute('aria-expanded',String(open));};backdrop.onclick=closeMenu;if(typeof document.addEventListener==='function')document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMenu();});})();
 document.querySelectorAll('#signOutButton').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;try{const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');await fetch('/logout',{method:'POST',headers:{'x-csrf-token':csrf}});}catch(_){}finally{location.assign('/login');}}));
 """
 

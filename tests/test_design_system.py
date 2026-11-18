@@ -52,3 +52,37 @@ def test_contrast_math_matches_wcag_reference():
     checker = _checker()
     assert round(checker.contrast("#000000", "#ffffff"), 1) == 21.0
     assert round(checker.contrast("#777777", "#ffffff"), 2) == 4.48
+
+
+def test_shared_design_files_are_public_and_the_shell_uses_them(tmp_path):
+    """/static/ui is served without sign-in, and the standalone pages load the design system and its shell."""
+    from fastapi.testclient import TestClient
+
+    from tubeforge.api.app import create_app
+    from tubeforge.core.config import AppConfig, AuthConfig, DatabaseConfig, Settings
+    from tubeforge.db.models import Base
+    from tubeforge.db.session import create_database
+
+    settings = Settings(
+        app=AppConfig(name="test", environment="test"),
+        database=DatabaseConfig(url=f"sqlite:///{tmp_path / 'design.db'}"),
+        auth=AuthConfig(enabled=True),
+    )
+    Base.metadata.create_all(create_database(settings.database).engine)
+    with TestClient(create_app(settings)) as client:
+        tokens = client.get("/static/ui/tokens.css")
+        assert tokens.status_code == 200 and "--tf-bg:" in tokens.text
+        assert client.get("/static/ui/tubeforge-ui.js").status_code == 200
+        # Encoded traversal must not leave the static folder (the test client would normalise a plain "../").
+        escaped = client.get("/static/ui/%2e%2e/%2e%2e/config/production.yaml", follow_redirects=False)
+        assert escaped.status_code == 404 and "auth" not in escaped.text.lower()
+        assert client.get("/batch", follow_redirects=False).status_code == 303  # pages stay private
+
+        client.app.state.runtime.auth.create_admin("design-test", "design-test-password-123")
+        client.post("/login", json={"username": "design-test", "password": "design-test-password-123"})
+        page = client.get("/settings").text
+        assert "/static/ui/tokens.css" in page and "cdn.tailwindcss.com/3.4.17" in page
+        assert 'class="tf-nav ' in page and 'data-nav-open' in page
+        assert "!grid-cols-1" in page, "legacy .grid collision guard missing from the shell"
+        assert 'no-underline' in page
+        assert 'id="signOutButton"' in page
