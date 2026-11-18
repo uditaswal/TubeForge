@@ -506,6 +506,8 @@ const logPanel=el('details','act-panel act-log');if(!report||report.failure_reas
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Create the HTTP application using explicit settings when supplied."""
+    from tubeforge.core.tempdir import ensure_tempdir
+    ensure_tempdir()
     application_settings = settings or load_settings()
     validate_selected_provider(application_settings)
     runtime: Runtime = create_runtime(application_settings)

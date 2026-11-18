@@ -24,6 +24,8 @@ PLATFORMS = {"youtube", "instagram"}
 
 def main() -> None:
     # Publishing has no dependency on the rendering models or writer process.
+    from tubeforge.core.tempdir import ensure_tempdir
+    ensure_tempdir()
     settings = load_settings(validate_providers=False)
     encryption_key = os.environ.get("TUBEFORGE_ACCOUNT_ENCRYPTION_KEY")
     database = create_database(settings.database)

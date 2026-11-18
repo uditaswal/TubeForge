@@ -76,6 +76,10 @@ Settings page (`/settings`, `core/runtime_settings.py`). When you add or change 
 - Never put a secret value on the page (show set / not set). Update `docs/settings.md`.
 - Hard-coded constants that can break execution (window sizes, timeouts, caps) belong in the config or on the page, not buried in code.
 
+## Scratch space
+
+The host `/tmp` is a small RAM-backed tmpfs. Containers run with `TMPDIR=/app/data/tmp` (compose.yaml; `core/tempdir.py` creates it and sweeps day-old leftovers). On the host, run builds, tests and installs through `scripts/with_disk_tmp.sh <command>` (or `export TMPDIR=$HOME/tmp`); `restart_stack.sh` and `stackctl.sh` already do. Never put large downloads or renders in `/tmp`.
+
 ## Allowed autonomous actions
 
 Without asking: inspect repo files, edit source, add tests, install Python packages in the project environment, run pytest, run Docker Compose and read logs for this project, run FFmpeg/ffprobe, create temporary test artifacts, modify local TubeForge config needed for tests.

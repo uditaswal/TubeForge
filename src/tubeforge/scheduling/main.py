@@ -12,6 +12,8 @@ from tubeforge.scheduling.service import SchedulerService
 
 
 def main() -> None:
+    from tubeforge.core.tempdir import ensure_tempdir
+    ensure_tempdir()
     settings = load_settings(); runtime = create_runtime(settings)
     scheduler = SchedulerService(runtime.schedules, runtime.topics, scheduler_id=f"scheduler-{uuid.uuid4().hex}", reservation_seconds=settings.scheduler.topic_reservation_seconds, codex_config=settings.pipeline.codex)
     stopping = False

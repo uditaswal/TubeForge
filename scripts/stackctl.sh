@@ -8,6 +8,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Scratch files go to the data disk, not a RAM-backed /tmp (docker compose build writes metadata there).
+export TMPDIR="${TUBEFORGE_TMPDIR:-$HOME/tmp}"; mkdir -p "$TMPDIR"
 mode="${1:-status}"
 case "$mode" in
   clips|shorts|all)
