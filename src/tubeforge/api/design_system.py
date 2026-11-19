@@ -171,3 +171,29 @@ def standalone_style(components: str = "") -> str:
     block = '<style type="text/tailwindcss">@layer base{' + _STANDALONE_BASE + "}"
     block += "@layer components{" + _STANDALONE_SHARED + components + "}"
     return block + "</style>"
+
+
+def spa_shell_open(items: list[tuple[str, str, str]]) -> str:
+    """Opening markup of the single-page dashboard (served at /): tags, sidebar, top bar.
+
+    The page keeps <main class="shell"> inside; spa_shell_close() closes the wrappers after it.
+    The top bar keeps the ids the dashboard script uses: studioBreadcrumb, authInfo, connection.
+    """
+    topbar = (
+        '<header id="spaTopbar" class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-tf-line bg-tf-bg px-4 lg:px-8">'
+        '<button type="button" class="inline-flex h-8 items-center rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text lg:hidden" data-nav-open aria-expanded="false" aria-controls="studioSidebar">Menu</button>'
+        '<nav id="studioBreadcrumb" aria-label="Breadcrumb" class="min-w-0 truncate text-sm text-tf-muted">Workspace / <strong class="font-semibold text-tf-text">Studio</strong></nav>'
+        '<div class="ml-auto flex items-center gap-3">'
+        '<span id="connection" class="hidden text-sm text-tf-muted sm:inline" role="status">Connecting…</span>'
+        '<span id="authInfo" class="flex items-center gap-3 whitespace-nowrap text-sm text-tf-muted" data-username=""></span>'
+        "</div></header>"
+    )
+    return (
+        design_head()
+        + render_sidebar("studio", items)
+        + '<div class="lg:pl-sidebar min-w-0">' + topbar + '<div class="min-w-0 px-4 py-8 lg:px-8">'
+    )
+
+
+def spa_shell_close() -> str:
+    return "</div></div>"

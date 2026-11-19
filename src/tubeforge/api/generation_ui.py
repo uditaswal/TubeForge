@@ -1,18 +1,5 @@
 """Saved generation details and truthful copy controls for Studio."""
 
-GENERATION_CSS = r"""
-#generationRecord .record-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-#generationRecord textarea{width:100%;min-height:180px;resize:vertical;font:12px/1.5 ui-monospace,monospace}
-#generationRecord .record-wide{grid-column:1/-1}
-#generationRecord .record-copy{width:auto;margin-top:8px}
-#generationRecord .record-state{min-height:20px;margin:8px 0;color:var(--cyan);font-size:12px}
-#generationRecord .record-audio{white-space:pre-wrap;line-height:1.5}
-#retryJob textarea{width:100%;min-height:340px;resize:vertical;font:12px/1.5 ui-monospace,monospace}
-#retryJob .retry-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-#retryJob .retry-state{min-height:20px;margin:8px 0;font-size:12px;color:var(--cyan);white-space:pre-wrap}
-#retryJob .retry-state.error{color:#fda4af}
-@media(max-width:680px){#generationRecord .record-grid{grid-template-columns:1fr}#generationRecord .record-wide{grid-column:auto}}
-"""
 
 GENERATION_CONTROLS = r"""<dialog id="retryJob" aria-labelledby="retryJobTitle"><div class="modal-head"><h2 id="retryJobTitle">Retry generation</h2><button class="close" type="button" id="retryJobClose" aria-label="Close retry">×</button></div><div class="modal-body"><p class="sub">Starts a new job with the same destinations. The failed job and its script-attempt allowance stay as they are. Edit the request JSON below, or leave it unchanged; an identical request reuses the same allowance and may fail the same way.</p><div id="retryJobState" class="retry-state" role="status"></div><textarea id="retryJobJson" spellcheck="false" aria-label="Request JSON" disabled></textarea><div class="retry-actions"><button id="retryJobReset" class="secondary" type="button" disabled>Reset to saved</button><button id="retryJobSubmit" type="button" disabled>Start new job</button></div></div></dialog><script>
 (() => {
@@ -48,13 +35,6 @@ GENERATION_CONTROLS = r"""<dialog id="retryJob" aria-labelledby="retryJobTitle">
 </script>"""
 
 
-JOB_EXTRAS_CSS = r"""
-.job-thumb{display:block;width:100%;max-width:240px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;margin:8px 0;border:1px solid var(--line,#31415f);background:#000}
-.job-thumb[src*="thumbnail"]{max-height:420px}
-.job-thumb{cursor:zoom-in}.thumb-lightbox{border:0;padding:0;background:transparent;max-width:96vw;max-height:96vh}.thumb-lightbox::backdrop{background:rgba(3,7,18,.86)}.thumb-lightbox img{display:block;max-width:96vw;max-height:92vh;border-radius:10px}.thumb-lightbox .caption{color:#e6edf3;font:13px system-ui;text-align:center;margin-top:8px}
-.focus-banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 14px;padding:10px 14px;border:1px solid #6c5a1e;border-radius:10px;background:#2a2410;color:#ffe9a6;font-size:13px}
-.focus-banner button{margin:0}
-"""
 
 JOB_EXTRAS_SCRIPT = r"""<script>
 (() => {

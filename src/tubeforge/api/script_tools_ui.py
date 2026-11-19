@@ -3,11 +3,6 @@
 The script is raw JavaScript (never an f-string); every control calls a real API (`/api/script-guide`, `/api/script-fit`).
 """
 
-SCRIPT_TOOLS_CSS = """
-.st-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}.st-bar select{width:auto;margin:0;padding:7px}
-.st-bar button{width:auto;margin:0;padding:7px 10px;font-size:12px}.st-meter{margin:8px 0;padding:9px 11px;border-radius:9px;border:1px solid #31415f;background:#0a1222;font-size:13px}
-.st-meter.ok{border-color:#2f6b52}.st-meter.warn{border-color:#8a6d2b}.st-meter.bad{border-color:#864454}.st-meter ul{margin:6px 0 0 18px;padding:0;color:#cbd7eb}
-"""
 
 SCRIPT_TOOLS_SCRIPT = r"""<script>
 (() => {
