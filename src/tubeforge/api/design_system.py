@@ -120,3 +120,36 @@ def render_app_shell(active: str, items: list[tuple[str, str, str]], breadcrumb:
     )
     # The content wrapper leaves room for the fixed sidebar from 1024 px. Close with '</div></div>'.
     return render_sidebar(active, items) + '<div class="lg:pl-sidebar min-w-0">' + topbar + '<div class="min-w-0 px-4 py-8 lg:px-8">'
+
+
+# Element styles for standalone pages, written with Tailwind @apply so every value comes from the tokens.
+# Pages add their own hook-class rules through standalone_style(components).
+_STANDALONE_BASE = """
+  [hidden]{display:none !important;}
+  main{@apply mx-auto grid max-w-content gap-6 py-2;}
+  h1{@apply m-0 text-xl font-semibold text-tf-text;}
+  h2{@apply m-0 text-lg font-semibold text-tf-text;}
+  h3{@apply m-0 text-md font-semibold text-tf-text;}
+  p{@apply m-0 text-base text-tf-text;}
+  ul,ol{@apply m-0 grid gap-2 pl-5 text-base;}
+  pre{@apply m-0 overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3 font-mono text-xs text-tf-muted;}
+  button{@apply inline-flex h-9 items-center justify-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted disabled:cursor-not-allowed disabled:text-tf-faint;}
+  button[data-action=approve],button[data-action=ready],button[data-confirm],#validate,#produce{@apply border-transparent bg-tf-accent font-semibold text-tf-accent-ink hover:brightness-110 disabled:bg-tf-raised disabled:text-tf-faint;}
+  input:not([type=checkbox]),select{@apply h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text;}
+  input[type=checkbox]{@apply h-4 w-4 accent-tf-accent;}
+  textarea{@apply block w-full rounded-md border border-tf-line-strong bg-tf-input p-3 font-mono text-xs text-tf-text;}
+  fieldset{@apply grid gap-3 rounded-lg border border-tf-line p-4;}
+  label{@apply text-sm font-medium text-tf-text;}
+  a{@apply text-tf-text underline decoration-tf-line-strong underline-offset-4 hover:decoration-tf-accent;}
+  summary{@apply cursor-pointer text-sm text-tf-muted hover:text-tf-text;}
+  video{@apply block w-full max-h-[65vh] rounded-md bg-tf-input;}
+  img{@apply max-w-full rounded-md;}
+"""
+
+
+def standalone_style(components: str = "") -> str:
+    """The <style> block for a standalone page: base element rules plus the page's own component rules."""
+    block = '<style type="text/tailwindcss">@layer base{' + _STANDALONE_BASE + "}"
+    if components:
+        block += "@layer components{" + components + "}"
+    return block + "</style>"

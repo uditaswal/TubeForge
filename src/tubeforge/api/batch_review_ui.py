@@ -1,4 +1,5 @@
 """Local review surface. Preserve the open player during silent refresh."""
+from tubeforge.api.design_system import standalone_style
 from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
 _MAIN_HTML = r'''<main class="mx-auto grid max-w-content gap-6">
@@ -14,26 +15,7 @@ _MAIN_HTML = r'''<main class="mx-auto grid max-w-content gap-6">
 </div>
 </main>'''
 
-_PAGE_HEAD = r'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Day review — TubeForge</title><style type="text/tailwindcss">
-@layer base {
-  button{@apply inline-flex h-9 items-center justify-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted disabled:cursor-not-allowed disabled:text-tf-faint;}
-  button[data-action=approve],button[data-action=ready],button[data-confirm]{@apply border-transparent bg-tf-accent font-semibold text-tf-accent-ink hover:brightness-110 disabled:bg-tf-raised disabled:text-tf-faint;}
-  input:not([type=checkbox]),select{@apply h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text;}
-  input[type=checkbox]{@apply h-4 w-4 accent-tf-accent;}
-  label{@apply text-sm font-medium text-tf-text;}
-  a{@apply text-tf-text underline decoration-tf-line-strong underline-offset-4 hover:decoration-tf-accent;}
-  h1{@apply m-0 text-xl font-semibold text-tf-text;}
-  h2{@apply m-0 text-lg font-semibold text-tf-text;}
-  h3{@apply m-0 text-md font-semibold text-tf-text;}
-  p{@apply m-0 text-base text-tf-text;}
-  ul,ol{@apply m-0 grid gap-2 pl-5 text-base;}
-  pre{@apply m-0 overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3 font-mono text-xs text-tf-muted;}
-  details summary{@apply cursor-pointer text-sm text-tf-muted hover:text-tf-text;}
-  video{@apply block w-full max-h-[65vh] rounded-md bg-tf-input;}
-  img{@apply w-full max-w-60 rounded-md;}
-}
-</style>
-'''
+_PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Day review — TubeForge</title>' + standalone_style() + '\n')
 
 
 def render_review_html(username: str | None = None) -> str:

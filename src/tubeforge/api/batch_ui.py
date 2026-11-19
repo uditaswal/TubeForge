@@ -1,6 +1,7 @@
 """Batch intake surface; shares Studio tokens and operator authentication."""
-from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_CSS, SCRIPT_TOOLS_SCRIPT
-from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
+from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_SCRIPT
+from tubeforge.api.design_system import standalone_style
+from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
 _MAIN_HTML = '''<main>
 <div class="studio-page-head"><div><h1>Batch plans</h1><p class="sub">Import shorts for review. Publish dates are metadata only.</p></div><a href="/batch/review" class="button-link">Day review queue</a></div>
@@ -46,48 +47,74 @@ _MAIN_HTML = '''<main>
 </section>
 </main>'''
 
-_PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batch plans — TubeForge</title><style>''' + STUDIO_CSS + SCRIPT_TOOLS_CSS + '''
-main{max-width:980px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
-.panel h2{margin:0 0 4px}
-.panel>p.sub{margin:0 0 18px}
-.field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:4px 16px;margin-bottom:4px}
-.field-grid label{margin:14px 0 6px}
-.checkbox{display:flex;align-items:center;gap:8px;margin:14px 0;color:#d5e0ee;font-size:12px;font-weight:540}
-.checkbox input,input[type=checkbox]{margin:0;width:20px;height:20px;flex:none}.checkbox{min-height:32px}
-fieldset{border:1px solid var(--line);border-radius:10px;padding:12px 14px}
-summary,.sub a{display:inline-block;padding:5px 0}
-.panel p,.panel li{overflow-wrap:anywhere}
-.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;align-items:center}
-a.button-link{display:inline-flex;align-items:center;flex:none;background:#223346;color:#eaf4ff;border:1px solid #3c5067;border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
-a.button-link:hover{background:#2d4258;border-color:#60758c}
-.planbox{border:1.5px dashed #3c5067;border-radius:12px;background:#0f1a28;padding:10px}.planbox:focus-within,.planbox.over{border-color:var(--cyan);background:#12263a}.planbox textarea{width:100%;min-height:220px;border:0;background:transparent;resize:vertical;font:12px/1.5 ui-monospace,monospace;color:#e6edf3;outline:none}.planbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}.planbar .inline{display:flex;align-items:center;gap:8px;margin:0;font-size:12px}.planbar .inline input{width:140px;margin:0}.planbar .inline select{margin:0;max-width:260px}.import-notes{margin:10px 0 0;padding:8px 12px;border:1px solid #6c5a1e;border-radius:10px;background:#2a2410;color:#ffe9a6;font-size:12px}.import-notes ul{margin:6px 0 0;padding-left:18px}.dropzone{display:flex;flex-direction:column;align-items:center;gap:4px;padding:22px 16px;margin-bottom:6px;border:1.5px dashed #3c5067;border-radius:12px;background:#0f1a28;color:#d5e0ee;cursor:pointer;text-align:center}
-.dropzone span{color:var(--muted);font-size:12px}
-.dropzone:hover,.dropzone:focus-visible,.dropzone.over{border-color:var(--cyan);background:#12263a}
-.import-errors{margin:12px 0 0;padding:10px 12px 10px 30px;border:1px solid #7a3b46;border-radius:10px;background:#2a1519;color:#ffd5db;font-size:13px}
-.import-errors li{margin:4px 0}.import-errors button{background:none;border:0;color:#ffb3bf;text-decoration:underline;padding:0;font:inherit;cursor:pointer}
-.day-group{margin-top:20px}.day-group h3{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:15px}
-.day-group h3 .count{color:var(--muted);font-size:12px;font-weight:500}.day-group h3 label{margin:0 0 0 auto;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--muted)}
-.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.short-card{display:flex;flex-direction:row;border:1px solid var(--line);border-radius:14px;background:#0f1a28;overflow:hidden}
-.short-card .thumb{flex:none;align-self:flex-start;width:84px;aspect-ratio:9/16;background:#162538;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;overflow:hidden}
-.short-card .thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.short-card .body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
-.short-card .pick{display:flex;gap:8px;align-items:flex-start;margin:0;font-weight:600;color:#eaf4ff}
-.short-card .meta{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
-.stages{display:flex;flex-wrap:wrap;gap:4px;margin:0;padding:0;list-style:none}
-.stages li{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
-.stages li.done{color:#9fd9b6;border-color:#2c5a43}.stages li.current{background:#1d4a6d;border-color:var(--cyan);color:#eaf4ff;font-weight:600}
-.stages li.attention{background:#4a1d26;border-color:#a8505e;color:#ffd5db;font-weight:600}
-.safety-box{margin:0 0 14px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:#0f1a28}.safety-box summary{cursor:pointer;color:#f1d9a6;font-size:13px}.safety-warnings{margin:8px 0 0;padding-left:18px;color:#f1d9a6;font-size:13px;max-height:240px;overflow:auto}.safety-warnings li.info{color:var(--muted)}
-.short-card a{font-size:12px}
-@media(max-width:640px){.card-grid{grid-template-columns:1fr}}
-textarea{display:block;width:100%;min-height:200px}
-label{display:block;margin:14px 0 6px}
-#day{display:inline-block;width:auto;margin-right:8px}
-.day-row{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:14px}
-.day-row label{margin:0}
-</style>
-'''
+_BATCH_COMPONENTS = """
+  .studio-page-head{@apply flex flex-wrap items-end justify-between gap-4 border-b border-tf-line pb-5;}
+  .studio-page-head>div:first-child{@apply grid gap-1;}
+  .studio-page-head .sub{@apply max-w-form text-md text-tf-muted;}
+  .sub{@apply text-sm text-tf-muted;}
+  .panel{@apply grid min-w-0 gap-4 rounded-lg border border-tf-line bg-tf-surface p-5;}
+  .panel h2{@apply m-0;}
+  a.button-link{@apply inline-flex h-9 items-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text no-underline whitespace-nowrap hover:border-tf-muted;}
+  .planbox{@apply rounded-lg border border-dashed border-tf-line-strong bg-tf-input p-2.5;}
+  .planbox:focus-within,.planbox.over{@apply border-tf-accent bg-tf-accent-soft;}
+  .planbox textarea{@apply min-h-56 w-full resize-y border-0 bg-transparent p-0 text-tf-text outline-none;}
+  .dropzone{@apply flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-tf-line-strong bg-tf-input px-4 py-5 text-center text-tf-text;}
+  .dropzone span{@apply text-xs text-tf-muted;}
+  .dropzone:hover,.dropzone:focus-visible,.dropzone.over{@apply border-tf-accent bg-tf-accent-soft;}
+  .planbar{@apply mt-2 flex flex-wrap items-center gap-x-4 gap-y-2.5 border-t border-tf-line pt-2;}
+  .planbar .inline{@apply flex items-center gap-2 text-xs font-medium text-tf-muted;}
+  .planbar .inline input{@apply w-36;}
+  .planbar .inline select{@apply max-w-[260px];}
+  .import-notes{@apply mt-2.5 rounded-md border border-tf-warn-soft bg-tf-warn-soft px-3 py-2 text-xs text-tf-warn;}
+  .import-notes ul{@apply mt-1.5 pl-4;}
+  .import-errors{@apply mt-3 grid gap-1 rounded-md border border-tf-bad bg-tf-bad-soft py-2.5 pl-7 pr-3 text-sm text-tf-bad;}
+  .import-errors button{@apply h-auto border-0 bg-transparent p-0 font-normal text-tf-bad underline;}
+  .checkbox{@apply flex min-h-8 items-center gap-2 py-1 text-base text-tf-text;}
+  .field-grid{@apply grid gap-x-4 sm:grid-cols-3;}
+  .field-grid label{@apply mb-1 mt-0 block;}
+  .field-grid input{@apply w-full;}
+  .actions{@apply mt-4 flex flex-wrap items-center gap-2.5;}
+  .day-row{@apply flex flex-wrap items-end gap-3;}
+  .day-row label{@apply m-0;}
+  #day{@apply mr-2 inline-block w-auto;}
+  .day-groups{@apply grid gap-6;}
+  .day-group{@apply mt-0 grid gap-3;}
+  .day-group h3{@apply flex items-center gap-2.5 text-md font-semibold;}
+  .day-group h3 .count{@apply text-xs font-normal text-tf-muted;}
+  .day-group h3 label{@apply ml-auto flex items-center gap-1.5 text-xs font-normal text-tf-muted;}
+  .card-grid{@apply grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(300px,1fr))];}
+  .short-card{@apply flex overflow-hidden rounded-lg border border-tf-line bg-tf-surface;}
+  .short-card .thumb{@apply flex w-[84px] aspect-[9/16] shrink-0 items-center justify-center self-start overflow-hidden bg-tf-raised text-center text-xs text-tf-muted;}
+  .short-card .thumb img{@apply block h-full w-full object-cover;}
+  .short-card .body{@apply flex min-w-0 flex-1 flex-col gap-2 px-3.5 pb-3.5 pt-3;}
+  .short-card .pick{@apply m-0 flex items-start gap-2 font-semibold text-tf-text;}
+  .short-card .meta{@apply break-words text-xs text-tf-muted;}
+  .short-card a{@apply text-xs;}
+  .stages{@apply m-0 flex list-none flex-wrap gap-1 p-0;}
+  .stages li{@apply rounded-full border border-tf-line px-2 py-0.5 text-xs text-tf-muted;}
+  .stages li.done{@apply border-tf-ok-soft text-tf-ok;}
+  .stages li.current{@apply border-tf-accent bg-tf-accent-soft font-semibold text-tf-accent;}
+  .stages li.attention{@apply border-tf-bad bg-tf-bad-soft font-semibold text-tf-bad;}
+  .badge{@apply inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-semibold;}
+  .badge.ready{@apply bg-tf-ok-soft text-tf-ok;}
+  .badge.failed{@apply bg-tf-bad-soft text-tf-bad;}
+  .badge.pending{@apply bg-tf-warn-soft text-tf-warn;}
+  .safety-box{@apply rounded-lg border border-tf-line bg-tf-input px-3 py-2;}
+  .safety-box summary{@apply cursor-pointer text-sm text-tf-warn;}
+  .safety-warnings{@apply mt-2 max-h-60 overflow-auto pl-4 text-sm text-tf-warn;}
+  .safety-warnings li.info{@apply text-tf-muted;}
+  .st-bar{@apply my-2.5 flex flex-wrap items-center gap-2;}
+  .st-bar select{@apply w-auto m-0 p-2;}
+  .st-bar button{@apply h-8 px-3 text-sm;}
+  .st-meter{@apply my-2 rounded-md border border-tf-line bg-tf-input px-3 py-2 text-sm;}
+  .st-meter.ok{@apply border-tf-ok;}
+  .st-meter.warn{@apply border-tf-warn;}
+  .st-meter.bad{@apply border-tf-bad;}
+  .st-meter ul{@apply m-0 mt-1.5 pl-5 text-tf-muted;}
+"""
+
+_PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batch plans — TubeForge</title>'
+              + standalone_style(_BATCH_COMPONENTS) + '\n')
 
 
 def render_batch_html(username: str | None = None) -> str:
