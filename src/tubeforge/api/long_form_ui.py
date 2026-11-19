@@ -1,42 +1,45 @@
 """Long-form script review in the existing Creator Studio shell."""
-from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
+from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
 
-CSS = """
-body{margin:0}
+# Layout stays plain CSS: no Tailwind utility can override grid placement or the breakpoints.
+LAYOUT_CSS = """
 .lf-grid{display:grid;grid-template-columns:minmax(250px,320px) minmax(0,1fr);align-items:start;gap:20px}
 .lf-sidebar{display:grid;align-items:start;gap:20px;min-width:0}
-.lf-grid h2,.lf-grid h3{margin:0 0 8px}
-.lf-grid form label{display:block;margin:12px 0 4px}
-.lf-grid input:not([type=checkbox]),.lf-grid select,.lf-grid textarea{width:100%;min-height:44px}
-.lf-grid textarea{resize:vertical;min-height:88px}
-.lf-grid button,.lf-dialog button{min-height:44px}
-.lf-grid a{color:var(--cyan)}
-.lf-muted{color:var(--muted);font-size:13px}
-.lf-error{color:var(--bad)}
-.lf-grid p,.lf-grid li,.lf-grid code,.lf-dialog p{overflow-wrap:anywhere}
-.lf-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
-.lf-list{list-style:none;margin:12px 0;padding:0}
-.lf-list button{display:block;text-align:left;width:100%;background:transparent;color:inherit;border-color:var(--line);margin-bottom:6px}
-.lf-list button:hover:not(:disabled),.lf-list button[aria-current=true]{background:var(--studio-panel-alt);color:inherit}
-.lf-list span{display:block}
-.lf-state{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:3px 8px;color:var(--muted);margin-bottom:10px}
-.lf-state[data-state=awaiting_review],.lf-state[data-state=approved]{color:var(--good)}
-.lf-state[data-state=blocked],.lf-state[data-state=exhausted],.lf-state[data-state=rejected]{color:var(--warn)}
-.lf-section{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
-.lf-section summary,.lf-item summary{min-height:32px}
-.lf-item{border-bottom:1px solid var(--line);padding:10px 0}
-.lf-grid blockquote{border-left:2px solid var(--line);padding-left:12px;margin:10px 0;color:var(--muted)}
-.lf-script{white-space:pre-wrap;max-width:75ch}
-.lf-raw{max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--studio-input);padding:12px}
-.lf-check{display:flex;align-items:flex-start;gap:8px;margin:14px 0}
-.lf-check input{margin-top:4px}
-.lf-check label{font-size:14px}
-.lf-dialog{width:min(440px,calc(100vw - 28px));padding:22px}
-.lf-grid [hidden]{display:none}
+.lf-grid [hidden]{display:none !important}
 @media(max-width:1050px){.lf-grid{grid-template-columns:1fr}.lf-sidebar{grid-template-columns:1fr 1fr}}
 @media(max-width:650px){.lf-sidebar{grid-template-columns:1fr}}
 @media(max-width:420px){main.shell{padding-inline:16px}}
+"""
+
+# Element and component styling, read through the design tokens.
+COMPONENTS = """
+  .lf-grid h2,.lf-grid h3{@apply mb-2 mt-0;}
+  .lf-grid form label{@apply mb-1 mt-3 block;}
+  .lf-grid input:not([type=checkbox]),.lf-grid select,.lf-grid textarea{@apply min-h-11 w-full;}
+  .lf-grid textarea{@apply min-h-[88px] resize-y;}
+  .lf-grid button,.lf-dialog button{@apply min-h-11;}
+  .lf-muted{@apply text-sm text-tf-muted;}
+  .lf-error{@apply text-tf-bad;}
+  .lf-grid p,.lf-grid li,.lf-grid code,.lf-dialog p{@apply break-words;}
+  .lf-actions{@apply mt-3.5 flex flex-wrap items-center gap-2.5;}
+  .lf-list{@apply m-0 my-3 grid list-none gap-1.5 p-0;}
+  .lf-list button{@apply mb-1.5 flex w-full justify-start border-tf-line bg-transparent text-left font-normal;}
+  .lf-list button:hover:not(:disabled),.lf-list button[aria-current=true]{@apply bg-tf-raised;}
+  .lf-list span{@apply block;}
+  .lf-state{@apply mb-2.5 inline-block rounded-md border border-tf-line px-2 py-0.5 text-sm text-tf-muted;}
+  .lf-state[data-state=awaiting_review],.lf-state[data-state=approved]{@apply text-tf-ok;}
+  .lf-state[data-state=blocked],.lf-state[data-state=exhausted],.lf-state[data-state=rejected]{@apply text-tf-warn;}
+  .lf-section{@apply mt-4 border-t border-tf-line pt-3.5;}
+  .lf-section summary,.lf-item summary{@apply min-h-8;}
+  .lf-item{@apply border-b border-tf-line py-2.5;}
+  .lf-grid blockquote{@apply my-2.5 border-l-2 border-tf-line pl-3 text-tf-muted;}
+  .lf-script{@apply max-w-[75ch] whitespace-pre-wrap;}
+  .lf-raw{@apply max-h-[300px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3;}
+  .lf-check{@apply my-3.5 flex items-start gap-2;}
+  .lf-check input{@apply mt-1;}
+  .lf-check label{@apply text-base;}
+  .lf-dialog{@apply w-[min(440px,calc(100vw-28px))] p-5;}
 """
 
 MAIN = """
@@ -564,8 +567,8 @@ SCRIPT = r"""
 
 
 def render_long_form_html(username=None):
-    content = wrap_studio_page('long-form', username, 'Long-form scripts', MAIN)
+    content = wrap_studio_page('long-form', username, 'Long-form scripts', MAIN, COMPONENTS)
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            '<title>Long-form scripts · TubeForge</title><style>' + STUDIO_CSS + CSS + '</style></head>'
+            '<title>Long-form scripts · TubeForge</title><style>' + LAYOUT_CSS + '</style></head>'
             '<body>' + content + '<script>' + SCRIPT + STUDIO_STATIC_MENU_SCRIPT + '</script></body></html>')
