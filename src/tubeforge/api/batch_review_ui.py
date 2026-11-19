@@ -1,5 +1,4 @@
 """Local review surface. Preserve the open player during silent refresh."""
-from tubeforge.api.design_system import standalone_style
 from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
 _MAIN_HTML = r'''<main class="mx-auto grid max-w-content gap-6">
@@ -15,7 +14,7 @@ _MAIN_HTML = r'''<main class="mx-auto grid max-w-content gap-6">
 </div>
 </main>'''
 
-_PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Day review — TubeForge</title>' + standalone_style() + '\n')
+_PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Day review — TubeForge</title>' + '\n')
 
 
 def render_review_html(username: str | None = None) -> str:

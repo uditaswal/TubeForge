@@ -1,6 +1,5 @@
 """Batch intake surface; shares Studio tokens and operator authentication."""
 from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_SCRIPT
-from tubeforge.api.design_system import standalone_style
 from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
 _MAIN_HTML = '''<main>
@@ -101,13 +100,13 @@ _BATCH_COMPONENTS = """
 """
 
 _PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batch plans — TubeForge</title>'
-              + standalone_style(_BATCH_COMPONENTS) + '\n')
+              + '\n')
 
 
 def render_batch_html(username: str | None = None) -> str:
     return (
         _PAGE_HEAD
-        + wrap_studio_page('batch', username, 'Workspace / Batch plans', _MAIN_HTML)
+        + wrap_studio_page('batch', username, 'Workspace / Batch plans', _MAIN_HTML, _BATCH_COMPONENTS)
         + '''
 <script>
 const form=document.querySelector('#batchForm'),input=document.querySelector('#batchText'),file=document.querySelector('#batchFile'),commit=document.querySelector('#commit'),result=document.querySelector('#result'),rows=document.querySelector('#rows');

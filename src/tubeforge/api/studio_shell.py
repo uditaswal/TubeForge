@@ -5,7 +5,7 @@ API-backed controls into navigable sections without replacing their handlers.
 """
 import html
 
-from tubeforge.api.design_system import design_head, render_app_shell, render_sidebar
+from tubeforge.api.design_system import design_head, render_app_shell, render_sidebar, standalone_style
 
 STUDIO_CSS = r"""
 :root{color-scheme:dark;--bg:#0b111b;--panel:#131d2b;--muted:#a8b8cd;--line:#2b3a4e;--cyan:#a4f0cc;--good:#a4f0cc;--warn:#f3ce87;--bad:#ffa6a6;--studio-input:#101926;--studio-sidebar:#0e1521;--studio-panel-alt:#182434;--studio-purple:#c0b6fa}
@@ -129,14 +129,15 @@ def render_studio_sidebar(active: str) -> str:
     return render_sidebar(active, STUDIO_NAV_ITEMS)
 
 
-def wrap_studio_page(active: str, username: str | None, breadcrumb: str, main_html: str) -> str:
+def wrap_studio_page(active: str, username: str | None, breadcrumb: str, main_html: str, components: str = "") -> str:
     """Design-system chrome (sidebar, top bar) around a standalone page's main content.
 
-    Design tags come first so the stylesheet and Tailwind load before the page's own markup.
-    The page's existing STUDIO_CSS still styles its content.
+    Design tags come first. The page's component styles follow the config: Tailwind's Play CDN only
+    applies @apply rules that are inside the body after the config script (a head style is read too early).
     """
     return (
         design_head()
+        + standalone_style(components)
         + render_app_shell(active, STUDIO_NAV_ITEMS, breadcrumb, username)
         + main_html
         + "</div></div>"

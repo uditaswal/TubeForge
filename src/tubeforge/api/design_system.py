@@ -126,14 +126,14 @@ def render_app_shell(active: str, items: list[tuple[str, str, str]], breadcrumb:
 # Pages add their own hook-class rules through standalone_style(components).
 _STANDALONE_BASE = """
   [hidden]{display:none !important;}
-  main{@apply mx-auto grid max-w-content gap-6 py-2;}
-  h1{@apply m-0 text-xl font-semibold text-tf-text;}
-  h2{@apply m-0 text-lg font-semibold text-tf-text;}
-  h3{@apply m-0 text-md font-semibold text-tf-text;}
-  p{@apply m-0 text-base text-tf-text;}
+  main{@apply mx-auto grid max-w-[1200px] gap-6 py-2;}
+  h1{@apply m-0 text-xl font-semibold;}
+  h2{@apply m-0 text-lg font-semibold;}
+  h3{@apply m-0 text-md font-semibold;}
+  p{@apply m-0 text-base;}
   ul,ol{@apply m-0 grid gap-2 pl-5 text-base;}
   pre{@apply m-0 overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3 font-mono text-xs text-tf-muted;}
-  button{@apply inline-flex h-9 items-center justify-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted disabled:cursor-not-allowed disabled:text-tf-faint;}
+  button{@apply inline-flex h-9 items-center justify-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium hover:border-tf-muted disabled:cursor-not-allowed disabled:text-tf-faint;}
   button[data-action=approve],button[data-action=ready],button[data-confirm],#validate,#produce{@apply border-transparent bg-tf-accent font-semibold text-tf-accent-ink hover:brightness-110 disabled:bg-tf-raised disabled:text-tf-faint;}
   input:not([type=checkbox]),select,textarea{@apply box-border h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text;}
   input[type=checkbox]{@apply h-4 w-4 accent-tf-accent;}
@@ -152,7 +152,7 @@ _STANDALONE_BASE = """
 _STANDALONE_SHARED = """
   .studio-page-head{@apply flex flex-wrap items-end justify-between gap-4 border-b border-tf-line pb-5;}
   .studio-page-head>div:first-child{@apply grid gap-1;}
-  .studio-page-head .sub{@apply max-w-form text-md text-tf-muted;}
+  .studio-page-head .sub{@apply max-w-[720px] text-md text-tf-muted;}
   .sub{@apply text-sm text-tf-muted;}
   .panel{@apply grid min-w-0 gap-4 rounded-lg border border-tf-line bg-tf-surface p-5;}
   .panel h2{@apply m-0;}

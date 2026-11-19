@@ -8,7 +8,6 @@ from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict
 
-from tubeforge.api.design_system import standalone_style
 from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 from tubeforge.core import runtime_settings as store_module
 
@@ -44,7 +43,7 @@ _SETTINGS_COMPONENTS = """
 """
 
 _PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings — TubeForge</title>'
-              + standalone_style(_SETTINGS_COMPONENTS) + '\n')
+              + '\n')
 
 _SCRIPT = r'''
 <script>
@@ -169,7 +168,7 @@ class SettingValue(BaseModel):
 
 
 def render_settings_html(username: str | None = None) -> str:
-    return _PAGE_HEAD + wrap_studio_page("settings", username, "Workspace / Settings", _MAIN_HTML) + _SCRIPT + "</html>"
+    return _PAGE_HEAD + wrap_studio_page("settings", username, "Workspace / Settings", _MAIN_HTML, _SETTINGS_COMPONENTS) + _SCRIPT + "</html>"
 
 
 def register_settings_routes(app, runtime):

@@ -18,7 +18,6 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from tubeforge.api.design_system import standalone_style
 from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 from tubeforge.core import runtime_settings as runtime_values
 from tubeforge.db.repositories import PAUSABLE_STATES
@@ -142,7 +141,7 @@ _CLIPS_COMPONENTS = """
 """
 
 _PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clips — TubeForge</title>'
-              + standalone_style(_CLIPS_COMPONENTS) + '\n')
+              + '\n')
 
 
 _SCRIPT = r'''
@@ -213,7 +212,7 @@ loadEngine();loadJobs();setInterval(()=>{loadEngine();loadJobs()},5000);
 
 
 def render_clips_html(username: str | None = None) -> str:
-    return _PAGE_HEAD + wrap_studio_page("clips", username, "Workspace / Clips", _MAIN_HTML) + _SCRIPT + "</html>"
+    return _PAGE_HEAD + wrap_studio_page("clips", username, "Workspace / Clips", _MAIN_HTML, _CLIPS_COMPONENTS) + _SCRIPT + "</html>"
 
 
 def register_clips_routes(app, runtime, create_clip_job):

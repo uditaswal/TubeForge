@@ -109,8 +109,8 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
                     assert runtime.reference_intakes.repository.get(key,2)['intake']['reference_snapshot_sha256']==identity
                     page.reload();expect(page.locator('#referenceState')).to_have_text('Context captured')
                     if width<=760:
-                        page.locator('#studioMenuToggle').click();expect(page.locator('.studio-sidebar')).to_have_class(__import__('re').compile('open'))
-                        page.keyboard.press('Escape');expect(page.locator('#studioMenuToggle')).to_have_attribute('aria-expanded','false')
+                        page.locator('[data-nav-open]').click();expect(page.locator('aside[data-nav]')).to_have_attribute('data-open','true')
+                        page.keyboard.press('Escape');expect(page.locator('[data-nav-open]')).to_have_attribute('aria-expanded','false')
                     assert not page.evaluate('document.documentElement.scrollWidth>innerWidth')
                     assert not errors,errors
                     page.locator('#referenceBrief summary').click();expect(page.locator('#briefProposals')).to_contain_text('Source excerpt:')
