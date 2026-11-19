@@ -107,3 +107,7 @@ player check. If it still refuses, give it your YouTube cookies:
 
 Use a spare Google account if you can: the cookies are a login for that account, and YouTube can flag an account that is used for
 automated downloads. They are passed to yt-dlp only and are never logged or saved with a job. Cookies expire; export them again if the error returns.
+
+## Decision log
+
+Each clip job writes `decisions.jsonl` in its `clip-work` folder (`clips/decisions.py`) and the Clips page shows it as "Why these clips". It records which viewer signals existed (most-replayed heatmap, chapters, auto-captions, timestamp comments), which parts of the video were transcribed and why, every AI pick with its reasoning and scores, what was dropped or left out afterwards, and per clip whether faces were found or the default crop was used and whether captions were burned in or skipped (with the reason). Logging never changes a result.

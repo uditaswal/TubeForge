@@ -26,6 +26,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 
+from . import decisions
 from .cancellation import TaskCancelled
 from .config import Config, get_config, set_config_override
 from .runner_model import Transport, set_transport
@@ -221,9 +222,11 @@ class ClipEngine:
         if self.transport is not None:
             set_transport(self.transport)
         set_config_override(build_engine_config(request, whisper_model=self.whisper_model))
+        decisions.begin(request.work_dir)
         try:
             yield
         finally:
+            decisions.end()
             set_config_override(None)
             if self.transport is not None:
                 set_transport(None)
@@ -358,6 +361,7 @@ class ClipEngine:
                         result.resumed_clips += 1
                         continue
                     await report(70 + int(((index + 1) / total) * 25), f"Creating clip {index + 1}/{total}...")
+                    decisions.set_clip(index + 1)
                     render_segment = localize_segment(segment, time_map) if time_map else segment
                     max_seconds = request.max_clip_seconds or (
                         float(segment["max_seconds"]) if segment.get("max_seconds") else 60.0
@@ -372,6 +376,9 @@ class ClipEngine:
                         max_clip_seconds=max_seconds,
                     )
                     await check_cancelled()
+                    if info is not None:
+                        decisions.record("render", "done", "", seconds=info.get("duration"))
+                    decisions.set_clip(None)
                     if info is None:
                         raise ValueError(f"Could not render clip {index + 1}. Retry to create the missing clips.")
                     if time_map:
