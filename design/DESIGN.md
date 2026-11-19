@@ -110,8 +110,8 @@ Adding a **new** color token: add `--tf-name: #rrggbb;` in `tokens.css` with a c
 the IBM Plex fonts, the Tailwind Play CDN (3.4.17), `/static/ui/tailwind.config.js`, `/static/ui/tokens.css`,
 and `/static/ui/tubeforge-ui.js` (deferred). `/static/ui/` is public (no sign-in) because it holds no data.
 
-Pages currently using the shell: Batch plans, Day review, Settings, Clips, Reference videos, Long-form scripts.
-The single-page dashboard at `/` still uses `studio_shell.py`'s own chrome (see Migration status).
+Every page uses the shell: the standalone pages through `wrap_studio_page`, and the single-page dashboard at `/`
+through `spa_shell_open` (`design_system.py`). The dashboard's styles are in `src/tubeforge/assets/ui/dashboard.css`.
 
 Tailwind's preflight is **off** (`corePlugins.preflight: false`). See **Known collisions** for why.
 
@@ -119,14 +119,26 @@ Tailwind's preflight is **off** (`corePlugins.preflight: false`). See **Known co
 
 | Area | Status |
 |---|---|
-| Tokens, Tailwind config, shared JS served at `/static/ui/` | Done |
-| App shell (sidebar, drawer, top bar) on the six standalone pages | Done (chrome only) |
-| Page content on those six pages (forms, lists, tables, panels) | Not started: still styled by `STUDIO_CSS` |
-| Single-page dashboard at `/` (Studio, Generations, Scheduling, Accounts, Media, Publishing) | Not started |
-| Compiled Tailwind CSS (standalone CLI) and self-hosted fonts | Not started |
+| Tokens, Tailwind config, shared JS and `dashboard.css` served at `/static/ui/` | Done |
+| Shell (sidebar, drawer, top bar) on every page, including the single-page dashboard at `/` | Done |
+| Standalone pages: Batch plans, Day review, Settings, Clips, Reference videos, Long-form scripts | Done |
+| Single-page dashboard at `/` (Studio, Generations, Scheduling, Accounts, Media tools, Publishing) | Done: styles in `dashboard.css` |
+| Compiled Tailwind CSS (standalone CLI) and self-hosted fonts | Not started (the Play CDN is still used) |
 
-Next step: migrate Day review's content to the recipes (panel, job list, review-split, notice), then Settings.
-Delete each page's old CSS in the same change.
+Rules that came out of the migration (read these before changing a page):
+
+1. **Load order.** Tailwind's Play CDN reads a `text/tailwindcss` style only after the config is applied. Page
+   component styles therefore go in the body, after `design_head()`: `wrap_studio_page(..., components)` does
+   this. A style placed in the head silently drops `@apply` rules that use tokens or custom sizes.
+2. **Layout is plain CSS.** Grid columns and breakpoints must not be utility classes, because a utility of the same
+   specificity can override them (this broke the phone layout once). Use `dashboard.css` or a page's plain
+   `<style>` for layout.
+3. **Colours and sizes from tokens.** `dashboard.css` and the page component rules read `var(--tf-*)` or the
+   config tokens. No gradients, no shadows, no all-caps labels, links underlined.
+4. **Box sizing.** Preflight is off, so form controls get `border-box` from the page styles (set in
+   `dashboard.css` and the standalone base).
+5. **Hook classes stay.** Pages keep their hook class names (`panel`, `job`, `badge`, `channel-*`, `act-*`, ...),
+   because the runtime scripts and tests use them. Their styling lives in one place per page.
 
 ## Known collisions
 
@@ -143,9 +155,9 @@ These are the traps found while wiring the system into the live pages. Read this
    Play CDN style is injected after `STUDIO_CSS`. Consequence: headings and paragraphs keep browser margins.
    The guide's body has `tf-guide`, which zeroes them. A new page that needs predictable margins puts
    `m-0` on each element that needs it (Tailwind's zero-margin class).
-4. **Old shell classes.** `.studio-sidebar`, `.studio-topbar`, `.studio-main`, `.studio-backdrop` are no longer
-   produced on standalone pages. Navigation is `data-nav`, `data-nav-open` and `data-nav-close`, handled by
-   `tubeforge-ui.js`. The SPA at `/` still uses the old classes until it is migrated.
+4. **Old shell classes.** `.studio-sidebar`, `.studio-topbar`, `.studio-main`, `.studio-backdrop`, `.studio-nav` are gone.
+   Navigation is `data-nav`, `data-nav-open` and `data-nav-close`, handled by `tubeforge-ui.js`. The dashboard's
+   layout container is `.studio-grid` (not `.grid`).
 
 ## Do you need a framework?
 

@@ -48,17 +48,6 @@ document.querySelectorAll('#signOutButton').forEach(button=>button.addEventListe
 """
 
 
-def spa_nav_html() -> str:
-    """The dashboard's sidebar links, built from STUDIO_NAV_ITEMS so every page shows the same entries (Settings included)."""
-    parts = []
-    for key, href, label in STUDIO_NAV_ITEMS:
-        if href.startswith("/#"):
-            parts.append(f'<button type="button" data-studio-nav="{key}">{label}</button>')
-        else:
-            parts.append(f'<a href="{href}">{label}</a>')
-    return "".join(parts)
-
-
 STUDIO_SCRIPT = r"""<script>
 (() => {
   const shell=document.querySelector('.shell'), grid=shell?.querySelector('.studio-grid');
@@ -100,4 +89,4 @@ STUDIO_SCRIPT = r"""<script>
   backdrop.addEventListener('click',()=>closeMenu(true));
   window.addEventListener('hashchange',showPage);showPage();
 })();
-</script>""".replace("__SPA_NAV__", spa_nav_html())
+</script>"""
