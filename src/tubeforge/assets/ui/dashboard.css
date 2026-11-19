@@ -273,3 +273,5 @@ fieldset.sources legend { color: var(--tf-text); font-size: 13px; font-weight: 6
 }
 @media (prefers-reduced-motion: reduce) { button { transition: none !important; } }
 fieldset legend { padding: 0 6px; color: var(--tf-text); font-size: 13px; font-weight: 600; }
+input[type=file] { padding: 8px; }
+input[type=file]::file-selector-button { margin-right: 12px; padding: 7px 12px; border: 1px solid var(--tf-line-strong); border-radius: 8px; background: var(--tf-raised); color: var(--tf-text); font: inherit; cursor: pointer; }
