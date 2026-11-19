@@ -20,27 +20,6 @@ _MAIN_HTML = '''<main>
 <section class="panel"><h2>Not editable here</h2><p class="sub">The two-attempt limit per source packet is part of the safety contract and is not a setting: a rejected script is retried automatically using the remaining attempt, and a revised brief or new sources starts a fresh packet.</p></section>
 </main>'''
 
-_SETTINGS_COMPONENTS = """
-  .setting{@apply grid gap-2.5 border-t border-tf-line py-3.5 first-of-type:border-t-0 first-of-type:pt-0;}
-  .setting-head{@apply mb-1 flex flex-wrap items-center gap-2.5;}
-  .setting-head strong{@apply text-base font-semibold text-tf-text;}
-  .setting .help{@apply m-0 mb-2.5 text-sm text-tf-muted;}
-  .setting-row{@apply flex flex-wrap items-center gap-2.5;}
-  .setting input[type=number]{@apply w-40;}
-  .setting .default{@apply text-xs text-tf-muted;}
-  .setting .state{@apply mt-1.5 min-h-5 text-xs;}
-  .state.bad{@apply text-tf-bad;}
-  .state.good{@apply text-tf-ok;}
-  .audit{@apply m-0 grid list-none gap-1.5 p-0 text-xs text-tf-muted;}
-  .ref{@apply border-t border-tf-line py-2;}
-  .ref summary{@apply cursor-pointer font-semibold text-tf-text;}
-  .ref-table{@apply mt-2 w-full border-collapse text-xs;}
-  .ref-table td{@apply break-words border-t border-tf-line px-2 py-1.5 align-top;}
-  .ref-table td:first-child{@apply w-[34%] font-mono;}
-  .ref-table tr.here td{@apply text-tf-ok;}
-  .ref-table tr.locked td{@apply text-tf-muted;}
-  @media (max-width:640px){.setting input[type=number]{width:100%}.ref-table td{display:block;width:auto!important;border-top:0}.ref-table tr{display:block;border-top:1px solid var(--tf-line);padding:6px 0}}
-"""
 
 _PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings — TubeForge</title>'
               + '\n')
@@ -168,7 +147,7 @@ class SettingValue(BaseModel):
 
 
 def render_settings_html(username: str | None = None) -> str:
-    return _PAGE_HEAD + wrap_studio_page("settings", username, "Workspace / Settings", _MAIN_HTML, _SETTINGS_COMPONENTS) + _SCRIPT + "</html>"
+    return _PAGE_HEAD + wrap_studio_page("settings", username, "Workspace / Settings", _MAIN_HTML) + _SCRIPT + "</html>"
 
 
 def register_settings_routes(app, runtime):

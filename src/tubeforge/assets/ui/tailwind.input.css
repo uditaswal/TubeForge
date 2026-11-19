@@ -1,0 +1,205 @@
+/* TubeForge design system: Tailwind input. Built with scripts/build_design_css.sh into
+   src/tubeforge/assets/ui/tubeforge.css (committed). Colours and sizes come from tailwind.config.js (the tokens).
+   Every page's component rules live here, so the build sees all of them. Layout stays plain CSS in each page. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Standalone base: element styles shared by every standalone page */
+  [hidden]{display:none !important;}
+  main{@apply mx-auto grid max-w-[1200px] gap-6 py-2;}
+  h1{@apply m-0 text-xl font-semibold;}
+  h2{@apply m-0 text-lg font-semibold;}
+  h3{@apply m-0 text-md font-semibold;}
+  p{@apply m-0 text-base;}
+  ul,ol{@apply m-0 grid gap-2 pl-5 text-base;}
+  pre{@apply m-0 overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3 font-mono text-xs text-tf-muted;}
+  button{@apply inline-flex h-9 items-center justify-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium hover:border-tf-muted disabled:cursor-not-allowed disabled:text-tf-faint;}
+  button[data-action=approve],button[data-action=ready],button[data-confirm],#validate,#produce{@apply border-transparent bg-tf-accent font-semibold text-tf-accent-ink hover:brightness-110 disabled:bg-tf-raised disabled:text-tf-faint;}
+  input:not([type=checkbox]),select,textarea{@apply box-border h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text;}
+  input[type=checkbox]{@apply h-4 w-4 accent-tf-accent;}
+  textarea{@apply block w-full rounded-md border border-tf-line-strong bg-tf-input p-3 font-mono text-xs text-tf-text;}
+  fieldset{@apply grid gap-3 rounded-lg border border-tf-line p-4;}
+  label{@apply text-sm font-medium text-tf-text;}
+  a{@apply text-tf-text underline decoration-tf-line-strong underline-offset-4 hover:decoration-tf-accent;}
+  summary{@apply cursor-pointer text-sm text-tf-muted hover:text-tf-text;}
+  video{@apply block w-full max-h-[65vh] rounded-md bg-tf-input;}
+  img{@apply max-w-full rounded-md;}
+  code{@apply rounded-sm bg-tf-raised px-1 font-mono text-xs text-tf-text;}
+}
+
+@layer components {
+  /* Shared hook classes used by more than one page */
+  .studio-page-head{@apply flex flex-wrap items-end justify-between gap-4 border-b border-tf-line pb-5;}
+  .studio-page-head>div:first-child{@apply grid gap-1;}
+  .studio-page-head .sub{@apply max-w-[720px] text-md text-tf-muted;}
+  .sub{@apply text-sm text-tf-muted;}
+  .panel{@apply grid min-w-0 gap-4 rounded-lg border border-tf-line bg-tf-surface p-5;}
+  .panel h2{@apply m-0;}
+  a.button-link{@apply inline-flex h-9 items-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text no-underline whitespace-nowrap hover:border-tf-muted;}
+  .checkbox{@apply flex min-h-8 items-center gap-2 py-1 text-base text-tf-text;}
+  .actions{@apply mt-4 flex flex-wrap items-center gap-2.5;}
+  .badge{@apply inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-semibold;}
+  .badge.ready{@apply bg-tf-ok-soft text-tf-ok;}
+  .badge.failed{@apply bg-tf-bad-soft text-tf-bad;}
+  .badge.pending{@apply bg-tf-warn-soft text-tf-warn;}
+  /* Batch plans */
+  .planbox{@apply rounded-lg border border-dashed border-tf-line-strong bg-tf-input p-2.5;}
+  .planbox:focus-within,.planbox.over{@apply border-tf-accent bg-tf-accent-soft;}
+  .planbox textarea{@apply min-h-56 w-full resize-y border-0 bg-transparent p-0 text-tf-text outline-none;}
+  .dropzone{@apply flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-tf-line-strong bg-tf-input px-4 py-5 text-center text-tf-text;}
+  .dropzone span{@apply text-xs text-tf-muted;}
+  .dropzone:hover,.dropzone:focus-visible,.dropzone.over{@apply border-tf-accent bg-tf-accent-soft;}
+  .planbar{@apply mt-2 flex flex-wrap items-center gap-x-4 gap-y-2.5 border-t border-tf-line pt-2;}
+  .planbar .inline{@apply flex items-center gap-2 text-xs font-medium text-tf-muted;}
+  .planbar .inline input{@apply w-36;}
+  .planbar .inline select{@apply max-w-[260px];}
+  .import-notes{@apply mt-2.5 rounded-md border border-tf-warn-soft bg-tf-warn-soft px-3 py-2 text-xs text-tf-warn;}
+  .import-notes ul{@apply mt-1.5 pl-4;}
+  .import-errors{@apply mt-3 grid gap-1 rounded-md border border-tf-bad bg-tf-bad-soft py-2.5 pl-7 pr-3 text-sm text-tf-bad;}
+  .import-errors button{@apply h-auto border-0 bg-transparent p-0 font-normal text-tf-bad underline;}
+  .field-grid{@apply grid gap-x-4 sm:grid-cols-3;}
+  .field-grid label{@apply mb-1 mt-0 block;}
+  .field-grid input{@apply w-full;}
+  .day-row{@apply flex flex-wrap items-end gap-3;}
+  .day-row label{@apply m-0;}
+  #day{@apply mr-2 inline-block w-auto;}
+  .day-groups{@apply grid gap-6;}
+  .day-group{@apply mt-0 grid gap-3;}
+  .day-group h3{@apply flex items-center gap-2.5 text-md font-semibold;}
+  .day-group h3 .count{@apply text-xs font-normal text-tf-muted;}
+  .day-group h3 label{@apply ml-auto flex items-center gap-1.5 text-xs font-normal text-tf-muted;}
+  .card-grid{@apply grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(300px,1fr))];}
+  .short-card{@apply flex overflow-hidden rounded-lg border border-tf-line bg-tf-surface;}
+  .short-card .thumb{@apply flex w-[84px] aspect-[9/16] shrink-0 items-center justify-center self-start overflow-hidden bg-tf-raised text-center text-xs text-tf-muted;}
+  .short-card .thumb img{@apply block h-full w-full object-cover;}
+  .short-card .body{@apply flex min-w-0 flex-1 flex-col gap-2 px-3.5 pb-3.5 pt-3;}
+  .short-card .pick{@apply m-0 flex items-start gap-2 font-semibold text-tf-text;}
+  .short-card .meta{@apply break-words text-xs text-tf-muted;}
+  .short-card a{@apply text-xs;}
+  .stages{@apply m-0 flex list-none flex-wrap gap-1 p-0;}
+  .stages li{@apply rounded-full border border-tf-line px-2 py-0.5 text-xs text-tf-muted;}
+  .stages li.done{@apply border-tf-ok-soft text-tf-ok;}
+  .stages li.current{@apply border-tf-accent bg-tf-accent-soft font-semibold text-tf-accent;}
+  .stages li.attention{@apply border-tf-bad bg-tf-bad-soft font-semibold text-tf-bad;}
+  .safety-box{@apply rounded-lg border border-tf-line bg-tf-input px-3 py-2;}
+  .safety-box summary{@apply cursor-pointer text-sm text-tf-warn;}
+  .safety-warnings{@apply mt-2 max-h-60 overflow-auto pl-4 text-sm text-tf-warn;}
+  .safety-warnings li.info{@apply text-tf-muted;}
+  .st-bar{@apply my-2.5 flex flex-wrap items-center gap-2;}
+  .st-bar select{@apply w-auto m-0 p-2;}
+  .st-bar button{@apply h-8 px-3 text-sm;}
+  .st-meter{@apply my-2 rounded-md border border-tf-line bg-tf-input px-3 py-2 text-sm;}
+  .st-meter.ok{@apply border-tf-ok;}
+  .st-meter.warn{@apply border-tf-warn;}
+  .st-meter.bad{@apply border-tf-bad;}
+  .st-meter ul{@apply m-0 mt-1.5 pl-5 text-tf-muted;}
+  /* Settings */
+  .setting{@apply grid gap-2.5 border-t border-tf-line py-3.5 first-of-type:border-t-0 first-of-type:pt-0;}
+  .setting-head{@apply mb-1 flex flex-wrap items-center gap-2.5;}
+  .setting-head strong{@apply text-base font-semibold text-tf-text;}
+  .setting .help{@apply m-0 mb-2.5 text-sm text-tf-muted;}
+  .setting-row{@apply flex flex-wrap items-center gap-2.5;}
+  .setting input[type=number]{@apply w-40;}
+  .setting .default{@apply text-xs text-tf-muted;}
+  .setting .state{@apply mt-1.5 min-h-5 text-xs;}
+  .state.bad{@apply text-tf-bad;}
+  .state.good{@apply text-tf-ok;}
+  .audit{@apply m-0 grid list-none gap-1.5 p-0 text-xs text-tf-muted;}
+  .ref{@apply border-t border-tf-line py-2;}
+  .ref summary{@apply cursor-pointer font-semibold text-tf-text;}
+  .ref-table{@apply mt-2 w-full border-collapse text-xs;}
+  .ref-table td{@apply break-words border-t border-tf-line px-2 py-1.5 align-top;}
+  .ref-table td:first-child{@apply w-[34%] font-mono;}
+  .ref-table tr.here td{@apply text-tf-ok;}
+  .ref-table tr.locked td{@apply text-tf-muted;}
+  @media (max-width:640px){.setting input[type=number]{width:100%}.ref-table td{display:block;width:auto!important;border-top:0}.ref-table tr{display:block;border-top:1px solid var(--tf-line);padding:6px 0}}
+  /* Clips */
+  .engine{@apply m-0 flex list-none flex-wrap gap-x-4 gap-y-2 p-0 text-sm;}
+  .engine .ok{@apply text-tf-ok;}
+  .engine .bad{@apply text-tf-bad;}
+  .clip-form{@apply grid gap-3;}
+  .clip-form .row{@apply flex flex-wrap items-end gap-3;}
+  .clip-form input[type=number],.clip-form input[type=text]{@apply w-36;}
+  .clip-form input[type=url]{@apply w-full;}
+  .clip-form textarea{@apply w-full resize-y;}
+  .state{@apply min-h-5 text-xs;}
+  .state.bad{@apply text-tf-bad;}
+  .state.good{@apply text-tf-ok;}
+  .job{@apply grid gap-2.5 border-t border-tf-line py-4 first-of-type:border-t-0 first-of-type:pt-0;}
+  .job-head{@apply flex flex-wrap items-center justify-between gap-2 gap-x-3;}
+  .job-head strong{@apply break-words text-base font-semibold text-tf-text;}
+  .bar{@apply h-2 overflow-hidden rounded-full bg-tf-line;}
+  .bar span{@apply block h-full bg-tf-accent;}
+  .meta{@apply text-xs text-tf-muted;}
+  .actions{@apply flex flex-wrap gap-2;}
+  a.button{@apply inline-flex h-8 items-center rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text no-underline hover:border-tf-muted;}
+  .clips{@apply grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(190px,1fr))];}
+  .clip{@apply grid content-start gap-2;}
+  .clip video{@apply aspect-[9/16] w-full rounded-md bg-tf-bg;}
+  .clip h3{@apply m-0 break-words text-md font-semibold;}
+  .clip .meta{@apply flex flex-wrap gap-x-2.5 gap-y-1;}
+  .mono{@apply font-mono;}
+  .live{@apply grid gap-1 text-sm;}
+  .live strong{@apply font-semibold;}
+  .warn{@apply text-tf-warn;}
+  @media (max-width:640px){.clip-form input[type=number],.clip-form input[type=text]{width:100%}.clips{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
+  /* Reference videos */
+  .reference-grid .panel{@apply p-5;}
+  .reference-grid label{@apply mb-1.5 mt-3 block;}
+  .reference-grid input,.reference-grid select,.reference-grid textarea{@apply min-h-11 w-full;}
+  .reference-grid input[type=checkbox]{@apply min-h-0 w-auto;}
+  .reference-fields{@apply grid grid-cols-2 gap-3;}
+  .reference-grid .actions{@apply mt-4 gap-2.5;}
+  .reference-grid button{@apply min-h-11;}
+  .reference-state{@apply inline-block rounded-sm border border-tf-line px-2 py-1 text-xs text-tf-muted;}
+  .reference-state[data-state=ready]{@apply text-tf-ok;}
+  .reference-state[data-state=needs_input]{@apply text-tf-warn;}
+  .reference-state[data-state=failed]{@apply text-tf-bad;}
+  .reference-meta{@apply break-words text-sm text-tf-muted;}
+  .reference-title{@apply break-words text-lg leading-snug;}
+  .reference-list{@apply m-0 grid list-none gap-0 p-0;}
+  .reference-list li{@apply border-t border-tf-line py-2.5;}
+  .reference-list button{@apply w-full justify-start border-transparent bg-transparent p-2 text-left font-normal;}
+  .reference-list button[aria-current=true]{@apply border-tf-line bg-tf-input;}
+  .reference-list strong,.reference-list span{@apply block break-words;}
+  .reference-transcript{@apply mt-3 max-h-[420px] overflow-auto border-t border-tf-line;}
+  .reference-cue{@apply m-0 grid grid-cols-[64px_1fr] gap-3 border-b border-tf-line py-2.5;}
+  .reference-cue time{@apply text-xs text-tf-muted;}
+  .reference-cue span{@apply whitespace-pre-wrap break-words;}
+  .reference-grid details{@apply mt-4 border-t border-tf-line pt-3;}
+  .reference-grid summary{@apply min-h-8 cursor-pointer;}
+  .reference-grid textarea{@apply min-h-[170px] resize-y font-mono text-sm;}
+  .reference-error{@apply break-words text-tf-bad;}
+  .reference-limitations{@apply pl-5 text-tf-muted;}
+  .reference-activity{@apply pl-5 text-sm text-tf-muted;}
+  .reference-activity li{@apply mt-1.5;}
+  /* Long-form scripts */
+  .lf-grid h2,.lf-grid h3{@apply mb-2 mt-0;}
+  .lf-grid form label{@apply mb-1 mt-3 block;}
+  .lf-grid input:not([type=checkbox]),.lf-grid select,.lf-grid textarea{@apply min-h-11 w-full;}
+  .lf-grid textarea{@apply min-h-[88px] resize-y;}
+  .lf-grid button,.lf-dialog button{@apply min-h-11;}
+  .lf-muted{@apply text-sm text-tf-muted;}
+  .lf-error{@apply text-tf-bad;}
+  .lf-grid p,.lf-grid li,.lf-grid code,.lf-dialog p{@apply break-words;}
+  .lf-actions{@apply mt-3.5 flex flex-wrap items-center gap-2.5;}
+  .lf-list{@apply m-0 my-3 grid list-none gap-1.5 p-0;}
+  .lf-list button{@apply mb-1.5 flex w-full justify-start border-tf-line bg-transparent text-left font-normal;}
+  .lf-list button:hover:not(:disabled),.lf-list button[aria-current=true]{@apply bg-tf-raised;}
+  .lf-list span{@apply block;}
+  .lf-state{@apply mb-2.5 inline-block rounded-md border border-tf-line px-2 py-0.5 text-sm text-tf-muted;}
+  .lf-state[data-state=awaiting_review],.lf-state[data-state=approved]{@apply text-tf-ok;}
+  .lf-state[data-state=blocked],.lf-state[data-state=exhausted],.lf-state[data-state=rejected]{@apply text-tf-warn;}
+  .lf-section{@apply mt-4 border-t border-tf-line pt-3.5;}
+  .lf-section summary,.lf-item summary{@apply min-h-8;}
+  .lf-item{@apply border-b border-tf-line py-2.5;}
+  .lf-grid blockquote{@apply my-2.5 border-l-2 border-tf-line pl-3 text-tf-muted;}
+  .lf-script{@apply max-w-[75ch] whitespace-pre-wrap;}
+  .lf-raw{@apply max-h-[300px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3;}
+  .lf-check{@apply my-3.5 flex items-start gap-2;}
+  .lf-check input{@apply mt-1;}
+  .lf-check label{@apply text-base;}
+  .lf-dialog{@apply w-[min(440px,calc(100vw-28px))] p-5;}
+}

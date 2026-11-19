@@ -115,3 +115,6 @@ logs/
 
 # --- Internal-only documentation (plans, handoff, reviews, evidence); never published ---
 doc-internal/
+
+# Dashboard build tooling (design/): node_modules is rebuilt by scripts/build_design_css.sh
+design/node_modules/

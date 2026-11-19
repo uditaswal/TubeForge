@@ -108,37 +108,6 @@ _MAIN_HTML = '''<main>
 <p id="jobsEmpty" class="sub">Loading…</p><div id="clipJobs"></div></section>
 </main>'''
 
-_CLIPS_COMPONENTS = """
-  .engine{@apply m-0 flex list-none flex-wrap gap-x-4 gap-y-2 p-0 text-sm;}
-  .engine .ok{@apply text-tf-ok;}
-  .engine .bad{@apply text-tf-bad;}
-  .clip-form{@apply grid gap-3;}
-  .clip-form .row{@apply flex flex-wrap items-end gap-3;}
-  .clip-form input[type=number],.clip-form input[type=text]{@apply w-36;}
-  .clip-form input[type=url]{@apply w-full;}
-  .clip-form textarea{@apply w-full resize-y;}
-  .state{@apply min-h-5 text-xs;}
-  .state.bad{@apply text-tf-bad;}
-  .state.good{@apply text-tf-ok;}
-  .job{@apply grid gap-2.5 border-t border-tf-line py-4 first-of-type:border-t-0 first-of-type:pt-0;}
-  .job-head{@apply flex flex-wrap items-center justify-between gap-2 gap-x-3;}
-  .job-head strong{@apply break-words text-base font-semibold text-tf-text;}
-  .bar{@apply h-2 overflow-hidden rounded-full bg-tf-line;}
-  .bar span{@apply block h-full bg-tf-accent;}
-  .meta{@apply text-xs text-tf-muted;}
-  .actions{@apply flex flex-wrap gap-2;}
-  a.button{@apply inline-flex h-8 items-center rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text no-underline hover:border-tf-muted;}
-  .clips{@apply grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(190px,1fr))];}
-  .clip{@apply grid content-start gap-2;}
-  .clip video{@apply aspect-[9/16] w-full rounded-md bg-black;}
-  .clip h3{@apply m-0 break-words text-md font-semibold;}
-  .clip .meta{@apply flex flex-wrap gap-x-2.5 gap-y-1;}
-  .mono{@apply font-mono;}
-  .live{@apply grid gap-1 text-sm;}
-  .live strong{@apply font-semibold;}
-  .warn{@apply text-tf-warn;}
-  @media (max-width:640px){.clip-form input[type=number],.clip-form input[type=text]{width:100%}.clips{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
-"""
 
 _PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clips — TubeForge</title>'
               + '\n')
@@ -212,7 +181,7 @@ loadEngine();loadJobs();setInterval(()=>{loadEngine();loadJobs()},5000);
 
 
 def render_clips_html(username: str | None = None) -> str:
-    return _PAGE_HEAD + wrap_studio_page("clips", username, "Workspace / Clips", _MAIN_HTML, _CLIPS_COMPONENTS) + _SCRIPT + "</html>"
+    return _PAGE_HEAD + wrap_studio_page("clips", username, "Workspace / Clips", _MAIN_HTML) + _SCRIPT + "</html>"
 
 
 def register_clips_routes(app, runtime, create_clip_job):

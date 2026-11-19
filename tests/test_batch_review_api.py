@@ -353,7 +353,9 @@ def test_batch_page_pattern_is_valid_under_the_unicode_sets_flag_and_commit_expl
     page = render_batch_html(None)
     assert 'pattern="[a-z0-9\\-]{1,80}"' in page          # an unescaped trailing hyphen is a SyntaxError in Chromium's /v mode
     assert 'aria-describedby="commitHint"' in page and 'id="commitHint"' in page
-    assert 'outline:none' not in page.split('.dropzone:hover')[1].split('}')[0]
+    from tubeforge.api.design_system import UI_DIR
+    css = (UI_DIR / 'tubeforge.css').read_text()
+    assert 'outline:none' not in css.split('.dropzone:hover')[1].split('}')[0]  # the focus outline is not removed
 
 
 def test_selected_short_missing_from_a_new_list_is_not_reported_as_a_changed_artifact(review):

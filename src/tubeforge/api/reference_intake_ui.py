@@ -1,37 +1,6 @@
 """Reference context workflow in the existing Studio shell."""
 from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT,wrap_studio_page
 
-_REFERENCE_COMPONENTS = """
-  .reference-grid .panel{@apply p-5;}
-  .reference-grid label{@apply mb-1.5 mt-3 block;}
-  .reference-grid input,.reference-grid select,.reference-grid textarea{@apply min-h-11 w-full;}
-  .reference-grid input[type=checkbox]{@apply min-h-0 w-auto;}
-  .reference-fields{@apply grid grid-cols-2 gap-3;}
-  .reference-grid .actions{@apply mt-4 gap-2.5;}
-  .reference-grid button{@apply min-h-11;}
-  .reference-state{@apply inline-block rounded-sm border border-tf-line px-2 py-1 text-xs text-tf-muted;}
-  .reference-state[data-state=ready]{@apply text-tf-ok;}
-  .reference-state[data-state=needs_input]{@apply text-tf-warn;}
-  .reference-state[data-state=failed]{@apply text-tf-bad;}
-  .reference-meta{@apply break-words text-sm text-tf-muted;}
-  .reference-title{@apply break-words text-lg leading-snug;}
-  .reference-list{@apply m-0 grid list-none gap-0 p-0;}
-  .reference-list li{@apply border-t border-tf-line py-2.5;}
-  .reference-list button{@apply w-full justify-start border-transparent bg-transparent p-2 text-left font-normal;}
-  .reference-list button[aria-current=true]{@apply border-tf-line bg-tf-input;}
-  .reference-list strong,.reference-list span{@apply block break-words;}
-  .reference-transcript{@apply mt-3 max-h-[420px] overflow-auto border-t border-tf-line;}
-  .reference-cue{@apply m-0 grid grid-cols-[64px_1fr] gap-3 border-b border-tf-line py-2.5;}
-  .reference-cue time{@apply text-xs text-tf-muted;}
-  .reference-cue span{@apply whitespace-pre-wrap break-words;}
-  .reference-grid details{@apply mt-4 border-t border-tf-line pt-3;}
-  .reference-grid summary{@apply min-h-8 cursor-pointer;}
-  .reference-grid textarea{@apply min-h-[170px] resize-y font-mono text-sm;}
-  .reference-error{@apply break-words text-tf-bad;}
-  .reference-limitations{@apply pl-5 text-tf-muted;}
-  .reference-activity{@apply pl-5 text-sm text-tf-muted;}
-  .reference-activity li{@apply mt-1.5;}
-"""
 MAIN='''<main class="shell"><div class="studio-page-head"><div><h1>Reference videos</h1><p>Capture a video's context for an original Short or long-form video. This step does not copy footage, verify claims or generate a script.</p></div></div>
 <div class="reference-grid">
 <section class="panel reference-form"><h2>Capture a reference</h2>
@@ -95,5 +64,5 @@ loadHistory();setInterval(()=>{if(!document.hidden){loadHistory();loadDetail();}
 
 
 def render_reference_html(username=None):
-    content=wrap_studio_page('references',username,'Reference videos',MAIN,_REFERENCE_COMPONENTS)
+    content=wrap_studio_page('references',username,'Reference videos',MAIN)
     return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Reference videos · TubeForge</title><style>.reference-grid{display:grid;align-items:start;gap:20px;grid-template-columns:minmax(280px,340px) minmax(0,1fr)}.reference-form{grid-column:1;grid-row:1}.reference-history{grid-column:1;grid-row:2}.reference-detail{grid-column:2;grid-row:1/3}@media (max-width:1000px){.reference-grid{grid-template-columns:1fr}.reference-form,.reference-history,.reference-detail{grid-column:auto;grid-row:auto}.reference-form{order:1}.reference-detail{order:2}.reference-history{order:3}}</style></head><body>'+content+'<script>'+SCRIPT+STUDIO_STATIC_MENU_SCRIPT+'</script></body></html>'

@@ -1,16 +1,12 @@
 /*
-  Tailwind config for the TubeForge dashboard. Works two ways:
-    - In a page, load https://cdn.tailwindcss.com/3.4.17 FIRST, then this file (sets window.tailwind.config).
-    - With the Tailwind v3.4.17 standalone CLI, as a normal module (module.exports).
+  Tailwind build config (Tailwind 3.4.17). Used only by scripts/build_design_css.sh, which writes
+  tubeforge.css. Nothing loads this file in the browser any more.
 
   Every color maps to a CSS variable in src/tubeforge/assets/ui/tokens.css. Do not put hex values here.
-  The checker (python scripts/check_design.py) fails if a token is missing on either side.
-
-  Tailwind's built-in palettes (slate-*, blue-*, gray-* ...) are REMOVED on purpose: only tf-* colors exist,
-  so a class like bg-blue-500 does nothing and the checker reports it.
+  Tailwind's built-in palettes are removed on purpose: only tf-* colors exist.
 */
 const tfTailwindConfig = {
-  content: ["./src/tubeforge/api/**/*.{py,html,js}"],
+  content: ["./src/tubeforge/api/**/*.{py,html,js}", "./src/tubeforge/assets/ui/*.js", "./design/*.{html,js}"],
   // Preflight (the Tailwind base reset) is off: the dashboard pages already style their own elements.
   corePlugins: { preflight: false },
   theme: {
@@ -77,4 +73,3 @@ const tfTailwindConfig = {
 };
 
 if (typeof module !== "undefined" && module.exports) module.exports = tfTailwindConfig;
-if (typeof window !== "undefined" && window.tailwind) window.tailwind.config = tfTailwindConfig;

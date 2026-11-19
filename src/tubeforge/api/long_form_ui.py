@@ -13,34 +13,6 @@ LAYOUT_CSS = """
 """
 
 # Element and component styling, read through the design tokens.
-COMPONENTS = """
-  .lf-grid h2,.lf-grid h3{@apply mb-2 mt-0;}
-  .lf-grid form label{@apply mb-1 mt-3 block;}
-  .lf-grid input:not([type=checkbox]),.lf-grid select,.lf-grid textarea{@apply min-h-11 w-full;}
-  .lf-grid textarea{@apply min-h-[88px] resize-y;}
-  .lf-grid button,.lf-dialog button{@apply min-h-11;}
-  .lf-muted{@apply text-sm text-tf-muted;}
-  .lf-error{@apply text-tf-bad;}
-  .lf-grid p,.lf-grid li,.lf-grid code,.lf-dialog p{@apply break-words;}
-  .lf-actions{@apply mt-3.5 flex flex-wrap items-center gap-2.5;}
-  .lf-list{@apply m-0 my-3 grid list-none gap-1.5 p-0;}
-  .lf-list button{@apply mb-1.5 flex w-full justify-start border-tf-line bg-transparent text-left font-normal;}
-  .lf-list button:hover:not(:disabled),.lf-list button[aria-current=true]{@apply bg-tf-raised;}
-  .lf-list span{@apply block;}
-  .lf-state{@apply mb-2.5 inline-block rounded-md border border-tf-line px-2 py-0.5 text-sm text-tf-muted;}
-  .lf-state[data-state=awaiting_review],.lf-state[data-state=approved]{@apply text-tf-ok;}
-  .lf-state[data-state=blocked],.lf-state[data-state=exhausted],.lf-state[data-state=rejected]{@apply text-tf-warn;}
-  .lf-section{@apply mt-4 border-t border-tf-line pt-3.5;}
-  .lf-section summary,.lf-item summary{@apply min-h-8;}
-  .lf-item{@apply border-b border-tf-line py-2.5;}
-  .lf-grid blockquote{@apply my-2.5 border-l-2 border-tf-line pl-3 text-tf-muted;}
-  .lf-script{@apply max-w-[75ch] whitespace-pre-wrap;}
-  .lf-raw{@apply max-h-[300px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3;}
-  .lf-check{@apply my-3.5 flex items-start gap-2;}
-  .lf-check input{@apply mt-1;}
-  .lf-check label{@apply text-base;}
-  .lf-dialog{@apply w-[min(440px,calc(100vw-28px))] p-5;}
-"""
 
 MAIN = """
 <main class="shell">
@@ -567,7 +539,7 @@ SCRIPT = r"""
 
 
 def render_long_form_html(username=None):
-    content = wrap_studio_page('long-form', username, 'Long-form scripts', MAIN, COMPONENTS)
+    content = wrap_studio_page('long-form', username, 'Long-form scripts', MAIN)
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<title>Long-form scripts · TubeForge</title><style>' + LAYOUT_CSS + '</style></head>'

@@ -32,7 +32,7 @@ def main(argv: list[str]) -> int:
             page.on("console", lambda m: problems.append(f"{name}: console {m.type}: {m.text}") if m.type == "error" else None)
             page.on("pageerror", lambda e: problems.append(f"{name}: page error: {e}"))
             page.goto(GUIDE.as_uri())
-            page.wait_for_load_state("networkidle")
+            page.wait_for_load_state("load")
             page.evaluate("document.fonts.ready")
             overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
             if overflow > 0:

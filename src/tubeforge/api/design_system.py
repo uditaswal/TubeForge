@@ -46,14 +46,15 @@ def register_design_assets(app) -> None:
 
 
 def design_head() -> str:
-    """Tags for <head>, in load order. Put after the page's viewport meta; do not duplicate the viewport."""
+    """Stylesheets and script for a page, in load order. Place in the body: stylesheets there apply in order too.
+
+    Everything is served from /static/ui: the compiled Tailwind stylesheet (built by scripts/build_design_css.sh),
+    the tokens, the local IBM Plex fonts and the shared behaviour script. No CDN, no Google Fonts at run time.
+    """
     return (
-        '<link rel="preconnect" href="https://fonts.googleapis.com">'
-        '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500'
-        '&family=IBM+Plex+Sans:wght@400;500;600&display=swap">'
-        '<script src="https://cdn.tailwindcss.com/3.4.17"></script>'
-        f'<script src="{STATIC_PREFIX}/tailwind.config.js"></script>'
+        f'<link rel="stylesheet" href="{STATIC_PREFIX}/fonts.css">'
         f'<link rel="stylesheet" href="{STATIC_PREFIX}/tokens.css">'
+        f'<link rel="stylesheet" href="{STATIC_PREFIX}/tubeforge.css">'
         f'<script src="{STATIC_PREFIX}/tubeforge-ui.js" defer></script>'
     )
 
@@ -121,56 +122,6 @@ def render_app_shell(active: str, items: list[tuple[str, str, str]], breadcrumb:
     # The content wrapper leaves room for the fixed sidebar from 1024 px. Close with '</div></div>'.
     return render_sidebar(active, items) + '<div class="lg:pl-sidebar min-w-0">' + topbar + '<div class="min-w-0 px-4 py-8 lg:px-8">'
 
-
-# Element styles for standalone pages, written with Tailwind @apply so every value comes from the tokens.
-# Pages add their own hook-class rules through standalone_style(components).
-_STANDALONE_BASE = """
-  [hidden]{display:none !important;}
-  main{@apply mx-auto grid max-w-[1200px] gap-6 py-2;}
-  h1{@apply m-0 text-xl font-semibold;}
-  h2{@apply m-0 text-lg font-semibold;}
-  h3{@apply m-0 text-md font-semibold;}
-  p{@apply m-0 text-base;}
-  ul,ol{@apply m-0 grid gap-2 pl-5 text-base;}
-  pre{@apply m-0 overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3 font-mono text-xs text-tf-muted;}
-  button{@apply inline-flex h-9 items-center justify-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium hover:border-tf-muted disabled:cursor-not-allowed disabled:text-tf-faint;}
-  button[data-action=approve],button[data-action=ready],button[data-confirm],#validate,#produce{@apply border-transparent bg-tf-accent font-semibold text-tf-accent-ink hover:brightness-110 disabled:bg-tf-raised disabled:text-tf-faint;}
-  input:not([type=checkbox]),select,textarea{@apply box-border h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text;}
-  input[type=checkbox]{@apply h-4 w-4 accent-tf-accent;}
-  textarea{@apply block w-full rounded-md border border-tf-line-strong bg-tf-input p-3 font-mono text-xs text-tf-text;}
-  fieldset{@apply grid gap-3 rounded-lg border border-tf-line p-4;}
-  label{@apply text-sm font-medium text-tf-text;}
-  a{@apply text-tf-text underline decoration-tf-line-strong underline-offset-4 hover:decoration-tf-accent;}
-  summary{@apply cursor-pointer text-sm text-tf-muted hover:text-tf-text;}
-  video{@apply block w-full max-h-[65vh] rounded-md bg-tf-input;}
-  img{@apply max-w-full rounded-md;}
-  code{@apply rounded-sm bg-tf-raised px-1 font-mono text-xs text-tf-text;}
-"""
-
-
-# Hook classes used by more than one standalone page (headers, panels, badges, checkboxes, actions).
-_STANDALONE_SHARED = """
-  .studio-page-head{@apply flex flex-wrap items-end justify-between gap-4 border-b border-tf-line pb-5;}
-  .studio-page-head>div:first-child{@apply grid gap-1;}
-  .studio-page-head .sub{@apply max-w-[720px] text-md text-tf-muted;}
-  .sub{@apply text-sm text-tf-muted;}
-  .panel{@apply grid min-w-0 gap-4 rounded-lg border border-tf-line bg-tf-surface p-5;}
-  .panel h2{@apply m-0;}
-  a.button-link{@apply inline-flex h-9 items-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text no-underline whitespace-nowrap hover:border-tf-muted;}
-  .checkbox{@apply flex min-h-8 items-center gap-2 py-1 text-base text-tf-text;}
-  .actions{@apply mt-4 flex flex-wrap items-center gap-2.5;}
-  .badge{@apply inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-semibold;}
-  .badge.ready{@apply bg-tf-ok-soft text-tf-ok;}
-  .badge.failed{@apply bg-tf-bad-soft text-tf-bad;}
-  .badge.pending{@apply bg-tf-warn-soft text-tf-warn;}
-"""
-
-
-def standalone_style(components: str = "") -> str:
-    """The <style> block for a standalone page: base element rules plus the page's own component rules."""
-    block = '<style type="text/tailwindcss">@layer base{' + _STANDALONE_BASE + "}"
-    block += "@layer components{" + _STANDALONE_SHARED + components + "}"
-    return block + "</style>"
 
 
 def spa_shell_open(items: list[tuple[str, str, str]]) -> str:

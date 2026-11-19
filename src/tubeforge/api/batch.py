@@ -307,9 +307,9 @@ def register_batch_routes(app, runtime, build_request):
             raise HTTPException(404, detail=str(error)) from error
         except (ValueError, OSError) as error:
             raise HTTPException(409, detail=str(error)) from error
-        from tubeforge.api.design_system import design_head, standalone_style
+        from tubeforge.api.design_system import design_head
         base = '/api/batch-plans/' + quote(short_id, safe='') + '/export/'
-        return '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local staged export</title>' + design_head() + standalone_style() + '<main class="mx-auto grid max-w-[720px] gap-4 px-5 py-8"><h1>Local staged export: ' + html.escape(short_id) + '</h1><p>Reviewed local files. No publication has occurred.</p><ul>' + ''.join('<li><a href="' + base + name + '">' + name + '</a></li>' for name in ['final.mp4', 'thumbnail.jpg', 'package.json']) + '</ul><a href="/batch/review">Return to review</a></main></html>'
+        return '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local staged export</title>' + design_head() + '<main class="mx-auto grid max-w-[720px] gap-4 px-5 py-8"><h1>Local staged export: ' + html.escape(short_id) + '</h1><p>Reviewed local files. No publication has occurred.</p><ul>' + ''.join('<li><a href="' + base + name + '">' + name + '</a></li>' for name in ['final.mp4', 'thumbnail.jpg', 'package.json']) + '</ul><a href="/batch/review">Return to review</a></main></html>'
 
     @app.get('/api/batch-plans/{short_id}/export/{name}', tags=['batch'])
     def download_export(short_id: str, name: str):

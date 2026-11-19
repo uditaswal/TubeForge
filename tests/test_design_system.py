@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,8 +82,22 @@ def test_shared_design_files_are_public_and_the_shell_uses_them(tmp_path):
         client.app.state.runtime.auth.create_admin("design-test", "design-test-password-123")
         client.post("/login", json={"username": "design-test", "password": "design-test-password-123"})
         page = client.get("/settings").text
-        assert "/static/ui/tokens.css" in page and "cdn.tailwindcss.com/3.4.17" in page
+        assert "/static/ui/tubeforge.css" in page and "/static/ui/fonts.css" in page
+        assert "cdn.tailwindcss.com" not in page and "fonts.googleapis" not in page  # no run-time CDN or Google fonts
         assert 'class="tf-nav ' in page and 'data-nav-open' in page
         assert "!grid-cols-1" in page, "legacy .grid collision guard missing from the shell"
         assert 'no-underline' in page
         assert 'id="signOutButton"' in page
+
+
+def test_built_stylesheet_and_local_fonts_are_present_and_committed():
+    """The compiled Tailwind stylesheet has the token utilities, and the IBM Plex faces point at files we ship."""
+    from tubeforge.api.design_system import UI_DIR
+    css = (UI_DIR / "tubeforge.css").read_text()
+    for needle in (".bg-tf-surface{", ".text-tf-muted{", ".studio-page-head{", ".short-card{", ".dropzone:hover"):
+        assert needle in css, needle
+    fonts = (UI_DIR / "fonts.css").read_text()
+    faces = re.findall(r"url\('fonts/([^']+)'\)", fonts)
+    assert faces, "no font faces declared"
+    for name in faces:
+        assert (UI_DIR / "fonts" / name).is_file(), name

@@ -5,7 +5,7 @@ API-backed controls into navigable sections without replacing their handlers.
 """
 import html
 
-from tubeforge.api.design_system import design_head, render_app_shell, render_sidebar, standalone_style
+from tubeforge.api.design_system import design_head, render_app_shell, render_sidebar
 
 
 STUDIO_NAV_ITEMS = [
@@ -28,7 +28,7 @@ def render_studio_sidebar(active: str) -> str:
     return render_sidebar(active, STUDIO_NAV_ITEMS)
 
 
-def wrap_studio_page(active: str, username: str | None, breadcrumb: str, main_html: str, components: str = "") -> str:
+def wrap_studio_page(active: str, username: str | None, breadcrumb: str, main_html: str) -> str:
     """Design-system chrome (sidebar, top bar) around a standalone page's main content.
 
     Design tags come first. The page's component styles follow the config: Tailwind's Play CDN only
@@ -36,7 +36,6 @@ def wrap_studio_page(active: str, username: str | None, breadcrumb: str, main_ht
     """
     return (
         design_head()
-        + standalone_style(components)
         + render_app_shell(active, STUDIO_NAV_ITEMS, breadcrumb, username)
         + main_html
         + "</div></div>"
