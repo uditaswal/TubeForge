@@ -135,7 +135,7 @@ _STANDALONE_BASE = """
   pre{@apply m-0 overflow-auto whitespace-pre-wrap break-words rounded-md border border-tf-line bg-tf-input p-3 font-mono text-xs text-tf-muted;}
   button{@apply inline-flex h-9 items-center justify-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted disabled:cursor-not-allowed disabled:text-tf-faint;}
   button[data-action=approve],button[data-action=ready],button[data-confirm],#validate,#produce{@apply border-transparent bg-tf-accent font-semibold text-tf-accent-ink hover:brightness-110 disabled:bg-tf-raised disabled:text-tf-faint;}
-  input:not([type=checkbox]),select{@apply h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text;}
+  input:not([type=checkbox]),select,textarea{@apply box-border h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text;}
   input[type=checkbox]{@apply h-4 w-4 accent-tf-accent;}
   textarea{@apply block w-full rounded-md border border-tf-line-strong bg-tf-input p-3 font-mono text-xs text-tf-text;}
   fieldset{@apply grid gap-3 rounded-lg border border-tf-line p-4;}

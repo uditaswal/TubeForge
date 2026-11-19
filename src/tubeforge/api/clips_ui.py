@@ -18,7 +18,8 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
+from tubeforge.api.design_system import standalone_style
+from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 from tubeforge.core import runtime_settings as runtime_values
 from tubeforge.db.repositories import PAUSABLE_STATES
 from tubeforge.domain.states import JobState
@@ -108,21 +109,41 @@ _MAIN_HTML = '''<main>
 <p id="jobsEmpty" class="sub">Loading…</p><div id="clipJobs"></div></section>
 </main>'''
 
-_PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clips — TubeForge</title><style>''' + STUDIO_CSS + '''
-main{max-width:1000px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
-.panel h2{margin:0 0 12px}
-.engine{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px}.engine .ok{color:#9fd9b6}.engine .bad{color:#ffb3bf}
-.clip-form{display:grid;gap:12px}.clip-form .row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}.clip-form input[type=number]{width:140px}.clip-form input[type=text]{width:140px}.clip-form input[type=url]{width:100%}.clip-form textarea{width:100%;min-height:64px;resize:vertical}
-.state{font-size:12px;min-height:1.2em}.state.bad{color:#ffb3bf}.state.good{color:#9fd9b6}
-.job{border-top:1px solid var(--line);padding:16px 0;display:grid;gap:10px}.job:first-child{border-top:0;padding-top:0}
-.job-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between}.job-head strong{overflow-wrap:anywhere}
-.bar{height:8px;border-radius:99px;background:rgba(255,255,255,.1);overflow:hidden}.bar span{display:block;height:100%;background:#38bdf8}
-.meta{color:var(--muted);font-size:12px}.actions{display:flex;flex-wrap:wrap;gap:8px}
-.clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
-.clip{display:grid;gap:8px;align-content:start}.clip video{width:100%;aspect-ratio:9/16;background:#000;border-radius:8px}
-.clip h3{font-size:14px;margin:0;overflow-wrap:anywhere}.mono{font-family:ui-monospace,monospace}.live{display:grid;gap:4px;font-size:13px}.live strong{font-weight:600}.warn{color:#ffd58a}.clip .meta{display:flex;flex-wrap:wrap;gap:4px 10px}
-@media(max-width:640px){main{margin:16px auto;padding:0 14px}.clip-form input[type=number]{width:100%}.clips{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}</style>
-'''
+_CLIPS_COMPONENTS = """
+  .engine{@apply m-0 flex list-none flex-wrap gap-x-4 gap-y-2 p-0 text-sm;}
+  .engine .ok{@apply text-tf-ok;}
+  .engine .bad{@apply text-tf-bad;}
+  .clip-form{@apply grid gap-3;}
+  .clip-form .row{@apply flex flex-wrap items-end gap-3;}
+  .clip-form input[type=number],.clip-form input[type=text]{@apply w-36;}
+  .clip-form input[type=url]{@apply w-full;}
+  .clip-form textarea{@apply w-full resize-y;}
+  .state{@apply min-h-5 text-xs;}
+  .state.bad{@apply text-tf-bad;}
+  .state.good{@apply text-tf-ok;}
+  .job{@apply grid gap-2.5 border-t border-tf-line py-4 first-of-type:border-t-0 first-of-type:pt-0;}
+  .job-head{@apply flex flex-wrap items-center justify-between gap-2 gap-x-3;}
+  .job-head strong{@apply break-words text-base font-semibold text-tf-text;}
+  .bar{@apply h-2 overflow-hidden rounded-full bg-tf-line;}
+  .bar span{@apply block h-full bg-tf-accent;}
+  .meta{@apply text-xs text-tf-muted;}
+  .actions{@apply flex flex-wrap gap-2;}
+  a.button{@apply inline-flex h-8 items-center rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text no-underline hover:border-tf-muted;}
+  .clips{@apply grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(190px,1fr))];}
+  .clip{@apply grid content-start gap-2;}
+  .clip video{@apply aspect-[9/16] w-full rounded-md bg-black;}
+  .clip h3{@apply m-0 break-words text-md font-semibold;}
+  .clip .meta{@apply flex flex-wrap gap-x-2.5 gap-y-1;}
+  .mono{@apply font-mono;}
+  .live{@apply grid gap-1 text-sm;}
+  .live strong{@apply font-semibold;}
+  .warn{@apply text-tf-warn;}
+  @media (max-width:640px){.clip-form input[type=number],.clip-form input[type=text]{width:100%}.clips{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
+"""
+
+_PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clips — TubeForge</title>'
+              + standalone_style(_CLIPS_COMPONENTS) + '\n')
+
 
 _SCRIPT = r'''
 <script>
