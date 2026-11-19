@@ -31,7 +31,7 @@ _NAV_LINK = (
     "hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent"
 )
 _BUTTON_SMALL_SECONDARY = (
-    "inline-flex h-8 items-center rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm "
+    "inline-flex h-8 items-center whitespace-nowrap rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm "
     "font-medium text-tf-text hover:border-tf-muted"
 )
 _BUTTON_QUIET = (
