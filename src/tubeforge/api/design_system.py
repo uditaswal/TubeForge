@@ -144,12 +144,30 @@ _STANDALONE_BASE = """
   summary{@apply cursor-pointer text-sm text-tf-muted hover:text-tf-text;}
   video{@apply block w-full max-h-[65vh] rounded-md bg-tf-input;}
   img{@apply max-w-full rounded-md;}
+  code{@apply rounded-sm bg-tf-raised px-1 font-mono text-xs text-tf-text;}
+"""
+
+
+# Hook classes used by more than one standalone page (headers, panels, badges, checkboxes, actions).
+_STANDALONE_SHARED = """
+  .studio-page-head{@apply flex flex-wrap items-end justify-between gap-4 border-b border-tf-line pb-5;}
+  .studio-page-head>div:first-child{@apply grid gap-1;}
+  .studio-page-head .sub{@apply max-w-form text-md text-tf-muted;}
+  .sub{@apply text-sm text-tf-muted;}
+  .panel{@apply grid min-w-0 gap-4 rounded-lg border border-tf-line bg-tf-surface p-5;}
+  .panel h2{@apply m-0;}
+  a.button-link{@apply inline-flex h-9 items-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text no-underline whitespace-nowrap hover:border-tf-muted;}
+  .checkbox{@apply flex min-h-8 items-center gap-2 py-1 text-base text-tf-text;}
+  .actions{@apply mt-4 flex flex-wrap items-center gap-2.5;}
+  .badge{@apply inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-semibold;}
+  .badge.ready{@apply bg-tf-ok-soft text-tf-ok;}
+  .badge.failed{@apply bg-tf-bad-soft text-tf-bad;}
+  .badge.pending{@apply bg-tf-warn-soft text-tf-warn;}
 """
 
 
 def standalone_style(components: str = "") -> str:
     """The <style> block for a standalone page: base element rules plus the page's own component rules."""
     block = '<style type="text/tailwindcss">@layer base{' + _STANDALONE_BASE + "}"
-    if components:
-        block += "@layer components{" + components + "}"
+    block += "@layer components{" + _STANDALONE_SHARED + components + "}"
     return block + "</style>"

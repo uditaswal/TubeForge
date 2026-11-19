@@ -48,13 +48,6 @@ _MAIN_HTML = '''<main>
 </main>'''
 
 _BATCH_COMPONENTS = """
-  .studio-page-head{@apply flex flex-wrap items-end justify-between gap-4 border-b border-tf-line pb-5;}
-  .studio-page-head>div:first-child{@apply grid gap-1;}
-  .studio-page-head .sub{@apply max-w-form text-md text-tf-muted;}
-  .sub{@apply text-sm text-tf-muted;}
-  .panel{@apply grid min-w-0 gap-4 rounded-lg border border-tf-line bg-tf-surface p-5;}
-  .panel h2{@apply m-0;}
-  a.button-link{@apply inline-flex h-9 items-center rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text no-underline whitespace-nowrap hover:border-tf-muted;}
   .planbox{@apply rounded-lg border border-dashed border-tf-line-strong bg-tf-input p-2.5;}
   .planbox:focus-within,.planbox.over{@apply border-tf-accent bg-tf-accent-soft;}
   .planbox textarea{@apply min-h-56 w-full resize-y border-0 bg-transparent p-0 text-tf-text outline-none;}
@@ -69,11 +62,9 @@ _BATCH_COMPONENTS = """
   .import-notes ul{@apply mt-1.5 pl-4;}
   .import-errors{@apply mt-3 grid gap-1 rounded-md border border-tf-bad bg-tf-bad-soft py-2.5 pl-7 pr-3 text-sm text-tf-bad;}
   .import-errors button{@apply h-auto border-0 bg-transparent p-0 font-normal text-tf-bad underline;}
-  .checkbox{@apply flex min-h-8 items-center gap-2 py-1 text-base text-tf-text;}
   .field-grid{@apply grid gap-x-4 sm:grid-cols-3;}
   .field-grid label{@apply mb-1 mt-0 block;}
   .field-grid input{@apply w-full;}
-  .actions{@apply mt-4 flex flex-wrap items-center gap-2.5;}
   .day-row{@apply flex flex-wrap items-end gap-3;}
   .day-row label{@apply m-0;}
   #day{@apply mr-2 inline-block w-auto;}
@@ -95,10 +86,6 @@ _BATCH_COMPONENTS = """
   .stages li.done{@apply border-tf-ok-soft text-tf-ok;}
   .stages li.current{@apply border-tf-accent bg-tf-accent-soft font-semibold text-tf-accent;}
   .stages li.attention{@apply border-tf-bad bg-tf-bad-soft font-semibold text-tf-bad;}
-  .badge{@apply inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-semibold;}
-  .badge.ready{@apply bg-tf-ok-soft text-tf-ok;}
-  .badge.failed{@apply bg-tf-bad-soft text-tf-bad;}
-  .badge.pending{@apply bg-tf-warn-soft text-tf-warn;}
   .safety-box{@apply rounded-lg border border-tf-line bg-tf-input px-3 py-2;}
   .safety-box summary{@apply cursor-pointer text-sm text-tf-warn;}
   .safety-warnings{@apply mt-2 max-h-60 overflow-auto pl-4 text-sm text-tf-warn;}

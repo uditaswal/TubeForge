@@ -8,7 +8,8 @@ from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict
 
-from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
+from tubeforge.api.design_system import standalone_style
+from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 from tubeforge.core import runtime_settings as store_module
 
 _MAIN_HTML = '''<main>
@@ -20,21 +21,30 @@ _MAIN_HTML = '''<main>
 <section class="panel"><h2>Not editable here</h2><p class="sub">The two-attempt limit per source packet is part of the safety contract and is not a setting: a rejected script is retried automatically using the remaining attempt, and a revised brief or new sources starts a fresh packet.</p></section>
 </main>'''
 
-_PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings — TubeForge</title><style>''' + STUDIO_CSS + '''
-main{max-width:900px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
-.panel h2{margin:0 0 12px}
-.setting{padding:14px 0;border-top:1px solid var(--line)}.setting:first-of-type{border-top:0;padding-top:0}
-.setting-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:4px}.setting-head strong{font-size:14px}
-.setting .help{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.5}
-.setting-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
-.setting input[type=number]{width:160px}.setting .default{color:var(--muted);font-size:12px}
-.setting .state{font-size:12px;min-height:1.2em;margin-top:6px}.state.bad{color:#ffb3bf}.state.good{color:#9fd9b6}
-.audit{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:12px;color:var(--muted)}
-.checkbox{display:flex;align-items:center;gap:8px;margin:0;font-weight:540}.checkbox input{margin:0}
-.ref{border-top:1px solid var(--line);padding:8px 0}.ref summary{cursor:pointer;font-weight:600}.ref-table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
-.ref-table td{padding:5px 8px;border-top:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}.ref-table td:first-child{font-family:ui-monospace,monospace;width:34%}.ref-table tr.here td{color:#9fd9b6}.ref-table tr.locked td{color:var(--muted)}
-@media(max-width:640px){main{margin:16px auto;padding:0 14px}.setting input[type=number]{width:100%}.ref-table td{display:block;width:auto!important;border-top:0}.ref-table tr{display:block;border-top:1px solid var(--line);padding:6px 0}}</style>
-'''
+_SETTINGS_COMPONENTS = """
+  .setting{@apply grid gap-2.5 border-t border-tf-line py-3.5 first-of-type:border-t-0 first-of-type:pt-0;}
+  .setting-head{@apply mb-1 flex flex-wrap items-center gap-2.5;}
+  .setting-head strong{@apply text-base font-semibold text-tf-text;}
+  .setting .help{@apply m-0 mb-2.5 text-sm text-tf-muted;}
+  .setting-row{@apply flex flex-wrap items-center gap-2.5;}
+  .setting input[type=number]{@apply w-40;}
+  .setting .default{@apply text-xs text-tf-muted;}
+  .setting .state{@apply mt-1.5 min-h-5 text-xs;}
+  .state.bad{@apply text-tf-bad;}
+  .state.good{@apply text-tf-ok;}
+  .audit{@apply m-0 grid list-none gap-1.5 p-0 text-xs text-tf-muted;}
+  .ref{@apply border-t border-tf-line py-2;}
+  .ref summary{@apply cursor-pointer font-semibold text-tf-text;}
+  .ref-table{@apply mt-2 w-full border-collapse text-xs;}
+  .ref-table td{@apply break-words border-t border-tf-line px-2 py-1.5 align-top;}
+  .ref-table td:first-child{@apply w-[34%] font-mono;}
+  .ref-table tr.here td{@apply text-tf-ok;}
+  .ref-table tr.locked td{@apply text-tf-muted;}
+  @media (max-width:640px){.setting input[type=number]{width:100%}.ref-table td{display:block;width:auto!important;border-top:0}.ref-table tr{display:block;border-top:1px solid var(--tf-line);padding:6px 0}}
+"""
+
+_PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings — TubeForge</title>'
+              + standalone_style(_SETTINGS_COMPONENTS) + '\n')
 
 _SCRIPT = r'''
 <script>
