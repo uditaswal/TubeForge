@@ -366,7 +366,7 @@ def log_youtube_attempt(
     logger.info(message, *args, extra=extra)
 
 
-from .ytdlp_options import cookie_options  # noqa: E402
+from .ytdlp_options import cookie_options, speed_options  # noqa: E402
 
 
 def base_proxy_params(task_id: Optional[str] = None, video_id: Optional[str] = None, config=None,
@@ -417,6 +417,7 @@ def base_proxy_params(task_id: Optional[str] = None, video_id: Optional[str] = N
         # No deno (a native, non-Docker install): node plus yt-dlp's solver script works too.
         params["js_runtimes"] = {"node": {}}
         params["remote_components"] = ["ejs:github"]
+    params.update(speed_options(runtime))
     return params
 
 

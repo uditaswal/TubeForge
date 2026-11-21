@@ -22,6 +22,16 @@ def is_bot_check(message: str) -> bool:
     return "confirm you're not a bot" in text or "sign in to confirm" in text
 
 
+def speed_options(config=None) -> dict:
+    """Download several fragments of a video at once (YouTube serves it in many small pieces; one at a time is slow)."""
+    count = getattr(config or get_config(), "youtube_fragment_concurrency", 1)
+    try:
+        count = max(1, min(8, int(count)))
+    except (TypeError, ValueError):
+        count = 1
+    return {"concurrent_fragment_downloads": count}
+
+
 def cookie_options(config=None) -> dict:
     """``{"cookiefile": path}`` when the cookies file exists, else nothing."""
     path = getattr(config or get_config(), "youtube_cookies_file", None)

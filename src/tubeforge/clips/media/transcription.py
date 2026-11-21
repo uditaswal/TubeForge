@@ -5,6 +5,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from pathlib import Path
+from .. import decisions
 from ..config import get_config
 import httpx
 import json
@@ -318,6 +319,7 @@ def get_video_transcript(
 def _get_transcript_with_whisper(video_path: Path, runtime_config) -> str:
     """Get transcript using local Whisper with word-level timestamps."""
     model_name = runtime_config.whisper_model
+    decisions.record("windows", "whole-video", "the whole video is transcribed", model=model_name)
     logger.info("Starting Whisper transcription with model: %s", model_name)
     whisper_result = transcribe_with_whisper(
         video_path, model_name, runtime_config.transcription_language or None
@@ -367,11 +369,24 @@ def _get_transcript_with_signals(video_path: Path, source_url: str, runtime_conf
         after=runtime_config.signal_window_after,
         window=getattr(runtime_config, "source_window", None),
     )
+    counts = {name: len(signals.get(name) or []) for name in ("heatmap", "chapters", "caption_cues", "comments")}
+    decisions.record(
+        "signals", "read", "most-replayed heatmap: " + ("yes" if counts["heatmap"] else "none (live streams and small videos have none)"),
+        source_seconds=round(duration), **counts,
+    )
     if not windows:
+        decisions.record("windows", "whole-video", "no busy parts were found, so everything is transcribed")
         logger.warning("No signal windows for %s; transcribing the whole video", video_path)
         return _get_transcript_with_whisper(video_path, runtime_config)
 
     covered = sum(w.end - w.start for w in windows)
+    for window in windows:
+        decisions.record(
+            "windows", "transcribe", f"picked from: {window.reason}" if window.score else "evenly spread, there was no stronger evidence",
+            start=round(window.start), end=round(window.end), score=round(window.score, 2),
+        )
+    decisions.record("windows", "coverage", "the AI only reads what was transcribed, so it can only pick from these parts",
+                     seconds=round(covered), of_seconds=round(duration), percent=round(100 * covered / max(duration, 1), 1))
     logger.info(
         "Signals strategy: %d windows, %.0f of %.0f s (%.0f%%): %s",
         len(windows), covered, duration, 100 * covered / max(duration, 1),

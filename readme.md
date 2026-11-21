@@ -95,6 +95,18 @@ Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment
 
 Long-form script preparation is available in the reviewed branch through **Long-form scripts**. It takes an exact ready reference revision through drafting and operator review. You can supply two or three public primary pages for local capture before drafting, saving the writer research call. Landscape rendering is a separate phase. See the [Studio workflow](docs/operations/long-form-scripts.md) and [LF2 plan](docs/long-form-lf2-plan.md). The declared `tiktoken` dependency measures local plain text/schema only. The setup command above primes its public vocabulary once. Docker primes a readable `/opt/tubeforge/tokenizer-cache` at build time; host runners need their own explicit cache setup ([deployment instructions](docs/deploy/codex-runner-runtime.md#long-form-preparation)). Runtime preflight checks the vocabulary hash and fails closed when it is missing or corrupt rather than downloading implicitly. These measurements do not reveal remaining Codex/Claude subscription allowance. LF2 limits Claude CLI turns and requests one structured-output attempt for drafting, review and repair. Those stages use low effort with Sonnet. Research uses the CLI defaults for turns and structured output under the shared Claude guard. The LF2 draft writer supplies ordered teaching directions. TubeForge assigns scene IDs and derives initial asset hints before canonical validation. Invalid optional engagement comments are omitted and recorded in activity. Claude reports aggregate usage after a call, and the worker stops further dispatch when that usage exhausts the preparation budget.
 
+## Logs and troubleshooting
+
+TubeForge writes its own persistent JSON-lines logs to `data/logs/` in the dev checkout (mounted as `/app/data/logs` in containers). Check these files when investigating an issue after it happens:
+
+- `web.log` contains dashboard and API activity, including YouTube connection diagnostics.
+- `worker.log` contains pipeline and clipping activity.
+- `scheduler.log`, `publisher.log` and `claude-runner.log` contain their respective service activity.
+
+Each service rotates its log at 10 MiB by default, naming older files `web.1.log`, `web.2.log`, and so on. Rotated files older than five days are removed during startup or rotation. `TUBEFORGE_LOG_DIR`, `TUBEFORGE_LOG_MAX_MB`, `TUBEFORGE_LOG_RETENTION_DAYS` and `TUBEFORGE_LOG_LEVEL` configure logging for each process. Logs include job and request IDs where available and apply secret redaction.
+
+Use `tail -n 100 data/logs/web.log` for recent web activity or `tail -n 100 data/logs/worker.log` for pipeline activity. Look in rotated files when the event is older. Job state and events also live in `data/tubeforge.db`. Clip jobs have per-job `timings.json`, `progress.json` and `decisions.jsonl` under `data/artifacts/<job-id>/clip-work/`. When reporting an issue, include the approximate time and job ID so the relevant entries can be located.
+
 ## Documentation
 
 | Topic | Where |

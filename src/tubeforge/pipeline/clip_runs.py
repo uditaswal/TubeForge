@@ -85,6 +85,7 @@ class EngineClipRunner:
             source_window=tuple(params["source_window"]) if params.get("source_window") else None,
             cache_dir=Path(params["cache_dir"]) if params.get("cache_dir") else None,
             instructions=params.get("instructions") or None,
+            direct_sections=params.get("direct_sections"), download_connections=params.get("download_connections"),
             cookies_file=Path(params["cookies_file"]) if params.get("cookies_file") else None,
             **{name: params[name] for name in ("signal_windows", "signal_window_before", "signal_window_after", "whisper_threads", "max_height", "cache_days", "analysis_window_max_chars") if params.get(name)},
         )
@@ -97,9 +98,19 @@ class EngineClipRunner:
 
     @staticmethod
     def _progress(work_dir: Path, stage: str):
+        from tubeforge.clips.stage_clock import StageClock, TIMINGS_FILE
+        clock = StageClock(work_dir / TIMINGS_FILE)
+
         async def report(percent: int, message: str) -> None:
             write_progress(work_dir, stage, percent, message)
+            clock.tick(message)
         return report
+
+    @staticmethod
+    def _close_timings(work_dir: Path) -> None:
+        """This part of the run ended (or failed): the stage that was open stops counting here."""
+        from tubeforge.clips.stage_clock import StageClock, TIMINGS_FILE
+        StageClock(work_dir / TIMINGS_FILE).close()
 
     @staticmethod
     def _adopt_earlier_downloads(work_dir: Path, params: dict[str, Any]) -> None:
@@ -115,12 +126,18 @@ class EngineClipRunner:
     def analyze(self, job_id, work_dir, params, cancelled=None):
         write_progress(work_dir, "analyze", 5, "Starting")
         self._adopt_earlier_downloads(work_dir, params)
-        with self._keepalive(cancelled):
-            analysis = asyncio.run(self._engine(work_dir).analyze(self.request(work_dir, params), progress=self._progress(work_dir, "analyze"), should_cancel=self._cancel(cancelled)))
+        try:
+            with self._keepalive(cancelled):
+                analysis = asyncio.run(self._engine(work_dir).analyze(self.request(work_dir, params), progress=self._progress(work_dir, "analyze"), should_cancel=self._cancel(cancelled)))
+        finally:
+            self._close_timings(work_dir)
         return {"video_path": analysis.video_path, "segments": analysis.segments, "summary": analysis.summary, "key_topics": analysis.key_topics}
 
     def render(self, job_id, work_dir, params, cancelled=None):
         write_progress(work_dir, "render", 70, "Starting to render")
-        with self._keepalive(cancelled):
-            result = asyncio.run(self._engine(work_dir).render(self.request(work_dir, params), progress=self._progress(work_dir, "render"), should_cancel=self._cancel(cancelled)))
+        try:
+            with self._keepalive(cancelled):
+                result = asyncio.run(self._engine(work_dir).render(self.request(work_dir, params), progress=self._progress(work_dir, "render"), should_cancel=self._cancel(cancelled)))
+        finally:
+            self._close_timings(work_dir)
         return result.clips

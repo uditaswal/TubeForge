@@ -52,7 +52,7 @@ async function load(){try{const data=await call('GET','/api/runtime-settings');g
 async function loadReference(){const holder=document.querySelector('#referenceGroups');try{const data=await call('GET','/api/runtime-settings/reference');holder.replaceChildren();
   for(const group of data.groups){const box=document.createElement('details');box.className='ref';const sum=document.createElement('summary');sum.textContent=group.name+' ('+group.rows.length+')';box.append(sum);
     const table=document.createElement('table');table.className='ref-table';for(const row of group.rows){const tr=document.createElement('tr');if(row.editable_here)tr.className='here';else if(row.locked)tr.className='locked';
-      const k=document.createElement('td');k.textContent=row.key;const v=document.createElement('td');v.textContent=String(row.value);const h=document.createElement('td');h.textContent=row.how;tr.append(k,v,h);table.append(tr)}box.append(table);holder.append(box)}
+      const k=document.createElement('td');k.textContent=row.key;const v=document.createElement('td');v.textContent=String(row.value);const h=document.createElement('td');h.textContent=row.how;if(row.setting_key){const go=document.createElement('button');go.type='button';go.className='secondary';go.textContent='Change it';go.onclick=()=>{const t=document.querySelector('.setting[data-key="'+row.setting_key+'"]');if(t){t.scrollIntoView({block:'center'});const i=t.querySelector('input');if(i)i.focus()}};h.append(' ',go)}tr.append(k,v,h);table.append(tr)}box.append(table);holder.append(box)}
   const env=document.createElement('details');env.className='ref';const s2=document.createElement('summary');s2.textContent='Environment variables ('+data.environment.length+')';env.append(s2);
   const t2=document.createElement('table');t2.className='ref-table';for(const row of data.environment){const tr=document.createElement('tr');const a=document.createElement('td');a.textContent=row.names;const b=document.createElement('td');b.textContent=row.process;const c=document.createElement('td');c.textContent=row.effect+(row.restart?' (needs a restart)':'');tr.append(a,b,c);t2.append(tr)}env.append(t2);holder.append(env)}catch(error){holder.textContent='Could not load the reference: '+error.message}}
 loadReference();
@@ -130,7 +130,7 @@ def configuration_reference(settings, store) -> dict:
             how = "Not editable from here. " + locked
         else:
             how = "Edit config/production.yaml and restart the worker (and the web server if it is a web value)."
-        rows.append({"key": path, "value": value, "how": how, "editable_here": bool(page_key), "locked": bool(locked and not page_key)})
+        rows.append({"key": path, "value": value, "how": how, "editable_here": bool(page_key), "setting_key": page_key, "locked": bool(locked and not page_key)})
     groups: dict[str, list] = {}
     for row in rows:
         parts = row["key"].split(".")

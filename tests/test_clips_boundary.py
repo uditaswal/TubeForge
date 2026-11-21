@@ -61,3 +61,11 @@ def test_a_worker_without_the_clip_dependencies_still_starts():
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0 and result.stdout.strip() == "ok", result.stderr[-800:]
+
+
+def test_the_bundled_face_model_exists_and_git_does_not_ignore_it():
+    """A `*.onnx` ignore rule once kept this file out of version control, so deployments silently used the weaker fallback detector."""
+    model = PACKAGE / "media" / "face_models" / "face_detection_yunet_2023mar.onnx"
+    assert model.is_file() and model.stat().st_size > 100_000
+    ignored = subprocess.run(["git", "check-ignore", "-q", str(model)], cwd=PACKAGE, capture_output=True)
+    assert ignored.returncode in (1, 128), "git would ignore the face model; add it to the .gitignore exceptions"  # 128: not a git checkout

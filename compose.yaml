@@ -43,6 +43,8 @@ services:
       - ./data:/app/data
       - ./models:/app/models:ro
     environment:
+      # Scratch files (downloads, audio, renders) go to the data disk, not a RAM-backed /tmp.
+      TMPDIR: /app/data/tmp
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
       TUBEFORGE_PIPER_SERVER_URL: http://piper-tts:5000
@@ -75,6 +77,8 @@ services:
       - ./models:/app/models:ro
       - /run/tubeforge-codex:/run/tubeforge-codex
     environment:
+      # Scratch files (downloads, audio, renders) go to the data disk, not a RAM-backed /tmp.
+      TMPDIR: /app/data/tmp
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
       TUBEFORGE_PIPER_SERVER_URL: http://piper-tts:5000
@@ -124,6 +128,8 @@ services:
       - ./data:/app/data
       - ./models:/app/models:ro
     environment:
+      # Scratch files (downloads, audio, renders) go to the data disk, not a RAM-backed /tmp.
+      TMPDIR: /app/data/tmp
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
       TUBEFORGE_ACCOUNT_ENCRYPTION_KEY: ${TUBEFORGE_ACCOUNT_ENCRYPTION_KEY:-}

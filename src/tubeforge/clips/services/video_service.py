@@ -68,6 +68,7 @@ from ..clip_source_map import (
 from ..ai import get_most_relevant_parts_by_transcript, max_final_clips_for_duration
 from ..clip_openings import OPENING_HOOK_PENALTY, opening_text_issue, review_opening
 from ..clip_duration import clip_duration
+from .. import decisions
 from ..config import get_config
 from ..workflows.contracts import PlanCache, PlanContext, WorkflowResult, WorkflowSpec
 from ..workflows.durations import workflow_budget
@@ -301,6 +302,10 @@ class VideoService:
                     review.skipped_text,
                     new_start,
                 )
+                decisions.record(
+                    "candidates", "start-moved", f"the opening was {issue}; the clip starts at the next clean sentence",
+                    was=segment.get("start_time"), now=new_start, skipped_words=str(review.skipped_text)[:120],
+                )
                 segment["start_time"] = new_start
                 kept_words = VideoService._segment_words(
                     transcript_data, review.first_word_start or review.start, end
@@ -322,6 +327,10 @@ class VideoService:
                     0, int(segment.get("virality_score") or 0) - (hook_score - reduced)
                 )
                 penalised = True
+                decisions.record(
+                    "candidates", "opening-penalised", f"the opening still leans on missing context ({issue}), so its hook score drops",
+                    start=segment.get("start_time"), end=segment.get("end_time"), hook_before=hook_score, hook_after=reduced,
+                )
                 logger.info(
                     "Opening of %s-%s still depends on missing context (%s); hook score %d -> %d",
                     segment.get("start_time"),
@@ -402,6 +411,10 @@ class VideoService:
                     segment.get("start_time"),
                     segment.get("end_time"),
                     (fraction or 0.0) * 100,
+                )
+                decisions.record(
+                    "candidates", "dropped", "one still picture covers most of it (a card, placeholder or black screen)",
+                    start=segment.get("start_time"), end=segment.get("end_time"), still_percent=round((fraction or 0.0) * 100),
                 )
                 continue
             kept.append(segment)
@@ -1242,6 +1255,12 @@ class VideoService:
                 **({"instructions": instructions} if instructions else {}),
             )
 
+        decisions.record(
+            "candidates", "model-analysis", "the AI read the transcript and returned its picks",
+            picks=len(relevant_parts.most_relevant_segments or []), steering="your instructions" if instructions else "none (no instructions given)",
+            audience_history="used" if performance_context else "not used",
+            reused_earlier_answer=bool(cached_analysis_json),
+        )
         await save_checkpoint({"analysis": {
             "summary": relevant_parts.summary,
             "key_topics": relevant_parts.key_topics,
@@ -1299,6 +1318,13 @@ class VideoService:
             # A heuristic must never fail the task; keep the AI's openings.
             logger.exception("Opening review failed; keeping the selected openings")
 
+        for segment in segments_json:
+            decisions.record(
+                "candidates", "ranked", str(segment.get("reasoning") or "")[:300],
+                start=segment.get("start_time"), end=segment.get("end_time"), title=segment.get("hook_title"),
+                virality=segment.get("virality_score"), hook=segment.get("hook_score"), engagement=segment.get("engagement_score"),
+                value=segment.get("value_score"), shareability=segment.get("shareability_score"), relevance=segment.get("relevance_score"),
+            )
         clip_limit = max_final_clips_for_duration(file_duration, runtime_config.max_clips)
         if processing_mode == "fast":
             clip_limit = min(clip_limit, runtime_config.fast_mode_max_clips)
@@ -1314,6 +1340,7 @@ class VideoService:
             logger.warning(
                 "AI analysis selected no segments; using fallback clip window"
             )
+            decisions.record("candidates", "fallback-window", "the AI picked nothing usable, so a plain window from the transcript is used instead")
             segments_json = [
                 VideoService._build_fallback_segment(
                     file_duration,
@@ -1721,7 +1748,17 @@ class VideoService:
                         logger.exception("Visual suitability check failed; keeping every segment")
 
                 if not final_plan:
+                    for cut in segments_json[max(1, clip_limit):]:
+                        decisions.record(
+                            "candidates", "left-out", f"only {max(1, clip_limit)} clip(s) were asked for and this ranked lower",
+                            start=cut.get("start_time"), end=cut.get("end_time"), title=cut.get("hook_title"),
+                        )
                     segments_json = segments_json[:max(1, clip_limit)]
+                    for number, kept in enumerate(segments_json, 1):
+                        decisions.record(
+                            "candidates", "chosen", "kept for rendering", clip=number, start=kept.get("start_time"),
+                            end=kept.get("end_time"), title=kept.get("hook_title"), virality=kept.get("virality_score"),
+                        )
                 if not segments_json:
                     raise ValueError("No usable footage remains after excluding interruption notices.")
             elif final_plan:

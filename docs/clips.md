@@ -83,6 +83,18 @@ Findings from the run:
 - Other workflows (series, recap, topic, trailer), Twitch/Kick, B-roll.
 - Instagram publishing stays parked (see HANDOFF).
 
+## Speed
+
+- **Where the time went.** Each clip job card on the Clips page has a "Where the time went" list: download, preparing, transcription,
+  AI, the chosen-sections download, and every clip's render, each with its duration. It is read from `jobs/<id>/clip-work/timings.json`
+  and survives restarts. Use it before tuning anything.
+- **Sections only (default on, Settings → "Download only the parts the clips need").** The audio is downloaded first, the AI picks the
+  moments, and only those sections of the video are fetched. Measured on the 175-minute podcast from this machine (about 2.4 MB/s): audio
+  170 MB in 79 s, then two padded sections (35 MB) in 178 s, about 4.5 minutes and 213 MB in total, against 30-45 minutes and 2.8-5.3 GB
+  for the whole video. If a section download fails the job falls back to the whole video by itself.
+- **Parallel pieces (Settings → "Download pieces at the same time", default 1).** Measured: the audio took 69 s with 1 connection and
+  79 s with 4, so on this connection it does not help (the bandwidth is the limit). Raise it only on a faster line.
+
 ## When YouTube says "Sign in to confirm you're not a bot"
 
 YouTube sometimes refuses a download from a server it does not trust. The worker already uses a JavaScript runtime for YouTube's
@@ -95,3 +107,7 @@ player check. If it still refuses, give it your YouTube cookies:
 
 Use a spare Google account if you can: the cookies are a login for that account, and YouTube can flag an account that is used for
 automated downloads. They are passed to yt-dlp only and are never logged or saved with a job. Cookies expire; export them again if the error returns.
+
+## Decision log
+
+Each clip job writes `decisions.jsonl` in its `clip-work` folder (`clips/decisions.py`) and the Clips page shows it as "Why these clips". It records which viewer signals existed (most-replayed heatmap, chapters, auto-captions, timestamp comments), which parts of the video were transcribed and why, every AI pick with its reasoning and scores, what was dropped or left out afterwards, and per clip whether faces were found or the default crop was used and whether captions were burned in or skipped (with the reason). Logging never changes a result.

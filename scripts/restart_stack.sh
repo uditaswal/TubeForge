@@ -9,6 +9,8 @@ cd "$ROOT"
 [ "$(basename "$ROOT")" = "tubeforge-dev" ] || { echo "run this from the dev worktree (tubeforge-dev), not $ROOT" >&2; exit 1; }
 git status --short | head -5
 echo "commit: $(git log -1 --oneline)"
+# Scratch files go to the data disk, not a RAM-backed /tmp (docker compose build writes metadata there).
+export TMPDIR="${TUBEFORGE_TMPDIR:-$HOME/tmp}"; mkdir -p "$TMPDIR"
 if [ "${1:-}" != "--no-build" ]; then docker compose build web; fi
 docker compose run --rm migrate
 docker compose up -d web worker scheduler publisher-worker

@@ -1,5 +1,6 @@
 """Video utils helpers for the video pipeline."""
 
+from . import decisions
 from .clip_source_map import save_clip_broll, save_clip_caption_settings, save_clip_vertical_layout
 from .media.common import (
     Any,
@@ -419,6 +420,7 @@ def create_optimized_clip(
                         )
                     except Exception as exc:
                         logger.warning("Speaker turn extraction failed: %s", exc)
+                        decisions.record("faces", "speaker-cuts-skipped", "who is talking could not be worked out, so no cutting between speakers", error=str(exc)[:160])
                 try:
                     video_filter, mode, caption_y = build_vertical_filter_plan(
                         source_clip_path, src_w, src_h, speaker_turns, speaker_words,
@@ -427,6 +429,7 @@ def create_optimized_clip(
                     vertical_plan = (video_filter, mode)
                 except Exception as exc:
                     logger.warning("Vertical layout planning failed: %s", exc)
+                    decisions.record("layout", "default-centre", "the layout planner crashed, so the plain centre crop is used", error=str(exc)[:160])
                     caption_y = None
             if layout_report is not None and caption_y is not None:
                 layout_report["caption_y"] = caption_y
@@ -461,6 +464,8 @@ def create_optimized_clip(
                     source_caption_band = None
             if layout_report is not None and source_caption_band is not None:
                 layout_report["source_caption_band"] = source_caption_band
+            if source_caption_band is not None:
+                decisions.record("captions", "source-has-captions", "the video already shows burned-in captions, so ours sit clear of them", band=source_caption_band)
 
             burn_ass_path: Optional[Path] = None
             fonts_dir: Optional[Path] = None
@@ -493,6 +498,15 @@ def create_optimized_clip(
                 fonts_dir = ass_fonts_dir(
                     font_family or get_template(caption_template)["font_family"]
                 )
+                decisions.record(
+                    "captions", "burned" if add_subtitles else "title-only",
+                    f"word-synced captions in the '{caption_template}' style" if add_subtitles else "captions were turned off; only the headline is shown",
+                    headline=bool(hook_title),
+                )
+            elif add_subtitles:
+                decisions.record("captions", "skipped", "no timed words exist for this part of the video, so it has no captions")
+            else:
+                decisions.record("captions", "off", "captions were turned off for this run")
 
             def render(overlays):
                 return render_reframed_clip_ffmpeg(

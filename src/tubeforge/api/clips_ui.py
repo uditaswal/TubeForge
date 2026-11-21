@@ -152,6 +152,24 @@ function liveBlock(job){const box=el('div',undefined,'live');
     else if(now-prev.at>300000&&job.claimed)parts.push(el('span','No change for '+Math.round((now-prev.at)/60000)+' minutes. It may be busy on one long step (a very large download, a copy or a transcription); check the worker log if this keeps growing.','warn'))}
   if(job.claimed===false&&job.percent<100&&!job.failure_message)parts.push(el('span','Waiting for a worker to pick this up.'));
   box.append(...parts);return box}
+const clock=s=>{s=Math.round(s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const openTimings=new Set();
+function timingsBlock(t,id){const box=document.createElement('details');box.className='timings';box.open=openTimings.has(id);box.ontoggle=()=>{if(box.open)openTimings.add(id);else openTimings.delete(id)};const sum=document.createElement('summary');sum.textContent='Where the time went · '+clock(t.total_seconds)+' total';box.append(sum);
+  const table=document.createElement('table');const longest=Math.max(...t.rows.map(r=>r.seconds),1);
+  for(const row of t.rows){const tr=document.createElement('tr');const name=document.createElement('td');name.textContent=row.label+(row.running?' (running)':'');
+    const bar=document.createElement('td');bar.style.width='38%';const fill=document.createElement('div');fill.className='bar2';fill.style.width=Math.max(2,Math.round(100*row.seconds/longest))+'%';bar.append(fill);
+    const time=document.createElement('td');time.className='t';time.textContent=clock(row.seconds);tr.append(name,bar,time);table.append(tr)}
+  box.append(table);return box}
+const openWhy=new Set();
+const WHY_AREAS=[['signals','What viewers and captions told us'],['windows','Parts that were listened to'],['candidates','How the moments were picked'],['faces','Faces'],['layout','Framing'],['captions','Captions'],['render','Render']];
+const WHY_BAD=new Set(['none-found','analysis-failed','captions-missing','unavailable','skipped','dropped','default-centre','default-crop','whole-video','fallback-window','speaker-cuts-skipped','opening-penalised','left-out']);
+function whyLine(d){const f=d.facts||{};const bits=Object.entries(f).filter(([k,v])=>v!==null&&v!==''&&typeof v!=='object').map(([k,v])=>k.replace(/_/g,' ')+' '+v);
+  const li=document.createElement('li');li.className=WHY_BAD.has(d.outcome)?'no':'';const head=document.createElement('strong');head.textContent=(d.clip?'Clip '+d.clip+' · ':'')+d.outcome.replace(/-/g,' ');li.append(head);
+  if(d.reason)li.append(' — '+d.reason);if(bits.length)li.append(document.createTextNode(' ('+bits.join(', ')+')'));return li}
+function whyBlock(list,id){const box=document.createElement('details');box.className='why';box.open=openWhy.has(id);box.ontoggle=()=>{if(box.open)openWhy.add(id);else openWhy.delete(id)};
+  const sum=document.createElement('summary');sum.textContent='Why these clips · '+list.length+' decisions';box.append(sum);
+  for(const [area,label] of WHY_AREAS){const rows=list.filter(d=>d.area===area);if(!rows.length)continue;const h=document.createElement('h4');h.textContent=label;const ul=document.createElement('ul');for(const d of rows)ul.append(whyLine(d));box.append(h,ul)}
+  return box}
 function renderJob(job){const box=el('div',undefined,'job');box.dataset.id=job.id;
   const head=el('div',undefined,'job-head');head.append(el('strong',job.title));head.append(el('span',job.stage+(job.failure_message?' — failed':''),'badge '+(job.failure_message?'danger':job.percent>=100?'ready':'pending')));box.append(head);
   const bar=el('div',undefined,'bar');bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuenow',job.percent);bar.setAttribute('aria-valuemin',0);bar.setAttribute('aria-valuemax',100);const fill=el('span');fill.style.width=job.percent+'%';bar.append(fill);box.append(bar);
@@ -166,6 +184,8 @@ function renderJob(job){const box=el('div',undefined,'job');box.dataset.id=job.i
   if(job.cancellable)actions.append(button('Cancel','',async()=>{if(window.confirm('Cancel this job? Finished clips are kept.'))await call('POST','/api/jobs/'+job.id+'/pause')}));
   if(job.deletable)actions.append(button('Delete','danger',async()=>{if(window.confirm('Delete this job and its files?'))await call('DELETE','/api/jobs/'+job.id)}));
   box.append(actions);
+  if(job.timings&&job.timings.rows.length)box.append(timingsBlock(job.timings,job.id));
+  if(job.decisions&&job.decisions.length)box.append(whyBlock(job.decisions,job.id));
   if(job.clips.length){const grid=el('div',undefined,'clips');for(const clip of job.clips)grid.append(clipCard(job,clip));box.append(grid)}
   return box}
 async function loadJobs(){try{const data=await call('GET','/api/clip-jobs');const holder=document.querySelector('#clipJobs');holder.replaceChildren(...data.jobs.map(renderJob));document.querySelector('#jobsEmpty').textContent=data.jobs.length?'':'No clip jobs yet.'}catch(error){document.querySelector('#jobsEmpty').textContent='Could not load clip jobs: '+error.message}}
@@ -237,6 +257,18 @@ def register_clips_routes(app, runtime, create_clip_job):
                 "seconds_since_update": round(time.time() - info["updated_at"]) if info.get("updated_at") else None,
                 "disk_bytes": _disk_bytes(work)}
 
+    def timings(job):
+        """Where this job's time went, stage by stage (a running stage counts up to now)."""
+        from tubeforge.clips.stage_clock import StageClock, TIMINGS_FILE, summarize
+        path = Path(app.state.settings.pipeline.voice.artifact_root) / job.id / "clip-work" / TIMINGS_FILE
+        stages = StageClock(path).stages
+        return summarize(stages) if stages else None
+
+    def decision_log(job):
+        """Why the clips were picked and how each was framed and captioned (a short, plain-language audit)."""
+        from tubeforge.clips import decisions
+        return decisions.read(Path(app.state.settings.pipeline.voice.artifact_root) / job.id / "clip-work")[-400:]
+
     def payload(job, all_jobs):
         children = {item.request.clip_of: item.id for item in all_jobs if item.request.clip_of}
         clips = []
@@ -259,7 +291,7 @@ def register_clips_routes(app, runtime, create_clip_job):
         return {
             "id": job.id, "title": source_title(job), "state": job.state.value, "stage": STAGE_LABEL.get(job.state, job.state.value.replace("_", " ").capitalize()),
             "percent": percent, "failure_message": job.failure_message, "created_at": job.created_at.isoformat() if job.created_at else None,
-            "short_id": job.id[:8], "progress": progress, "claimed": job.claim_owner is not None, "note": part_note(job.id), "parent": bool(job.request.clip_of), "clips": clips, "clip_of": job.request.clip_of,
+            "short_id": job.id[:8], "progress": progress, "timings": timings(job), "decisions": decision_log(job), "claimed": job.claim_owner is not None, "note": part_note(job.id), "parent": bool(job.request.clip_of), "clips": clips, "clip_of": job.request.clip_of,
             "can_pause": job.state in PAUSABLE_STATES and job.cancellation_requested_at is None,
             "can_resume": job.state is JobState.CANCELLED and job.resume_state is not None and job.claim_owner is None,
             "cancellable": job.state in STAGE_PERCENT and job.state is not JobState.FINAL_READY and job.cancellation_requested_at is None,

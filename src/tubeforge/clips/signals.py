@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from . import decisions
+
 logger = logging.getLogger(__name__)
 
 _TIMESTAMP = re.compile(r"(?<![\d:])(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?![\d:])")
@@ -99,6 +101,7 @@ def _fetch_caption_cues(info: dict[str, Any]) -> list[dict[str, Any]]:
     language = next((k for k in tracks if k == "en" or k.startswith("en")), None)
     entry = next((f for f in tracks.get(language or "", []) if f.get("ext") == "json3"), None)
     if not entry:
+        decisions.record("signals", "captions-missing", "this video has no English auto-captions to read the pace of speech from")
         return []
     try:
         request = urllib.request.Request(entry["url"], headers={"User-Agent": "Mozilla/5.0"})
@@ -106,6 +109,7 @@ def _fetch_caption_cues(info: dict[str, Any]) -> list[dict[str, Any]]:
             return parse_json3_captions(json.load(response))
     except Exception as error:
         logger.info("Auto-captions unavailable (%s); using comments, heatmap and chapters only", error)
+        decisions.record("signals", "captions-missing", "the auto-captions could not be downloaded (often a rate limit)", error=str(error)[:160])
         return []
 
 
@@ -274,6 +278,7 @@ def load_or_fetch_signals(url: str, cache_file: Path) -> Optional[dict[str, Any]
         signals = fetch_youtube_signals(url)
     except Exception as error:  # network, rate limit, extractor change: never fail the task
         logger.warning("Could not fetch engagement signals (%s); falling back to spread windows", error)
+        decisions.record("signals", "unavailable", "viewer signals could not be fetched, so parts are spread evenly instead", error=str(error)[:160])
         return None
     try:
         cache_file.write_text(json.dumps(signals))

@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from .. import decisions
 from .common import (
     FACE_PRESENCE_MIN_AREA,
     FACE_PRESENCE_RATE,
@@ -1426,6 +1427,18 @@ def build_vertical_compositor_filter(
     )
 
 
+_LAYOUT_NOTES = {
+    "crop": "one person: a 9:16 crop that follows the face",
+    "fit": "slides, graphics or a wide scene: the whole frame is shown",
+    "compositor": "faces and graphics mixed: each shot gets the crop that suits it",
+    "reaction": "a reactor shown above the video they are reacting to",
+    "interview": "two people: stacked, or cut per shot",
+    "speaker": "several people: the picture follows whoever is talking",
+    "overlap": "two people speaking at once: shown together",
+    "stack": "video-call tiles stacked",
+}
+
+
 def _described(
     kind: str, video_filter: str, mode: str, caption_y: Optional[float]
 ) -> Dict[str, Any]:
@@ -1457,6 +1470,7 @@ def build_vertical_filter_plan(
     )
     if report is not None:
         report["kind"] = described["kind"]
+        decisions.record("layout", described["kind"], _LAYOUT_NOTES.get(described["kind"], ""))
         if described.get("hook_center_y") is not None:
             report["hook_center_y"] = described["hook_center_y"]
     return described["video_filter"], described["mode"], described["caption_y"]
@@ -1504,6 +1518,7 @@ def describe_vertical_layout(
     # Narrow/portrait source: no horizontal room to crop — static fit, with a
     # slow punch-in so the frame still breathes.
     if crop_w >= width:
+        decisions.record("faces", "not-used", "the source is already narrow, so there is no room to follow a face; it is fitted to the frame")
         sx, sy, sw, sh = detect_optimal_crop_region(input_path, 0, min(duration, 12.0))
         tail = kenburns_zoom_fragment(duration) or VERTICAL_SCALE_CHAIN
         return _described("crop", f"crop={sw}:{sh}:{sx}:{sy},{tail}", "vf", None)
@@ -1513,10 +1528,17 @@ def describe_vertical_layout(
         analyzed = analyze_vertical_clip(input_path)
     except Exception as exc:
         logger.warning("Clip analysis failed (%s); preserving full frame", exc)
+        decisions.record("faces", "analysis-failed", "the face and scene analysis crashed, so the default framing is used", error=str(exc)[:200])
         analyzed = ([], [], [])
     track, scene_cuts = analyzed[0], analyzed[1]
     face_samples = analyzed[2] if len(analyzed) > 2 else []
     context = analyzed[3] if len(analyzed) > 3 else []
+    with_faces = sum(1 for _, boxes in face_samples if boxes)
+    decisions.record(
+        "faces", "found" if with_faces else "none-found",
+        "" if with_faces else "no face was seen in the sampled frames, so the default crop is used",
+        sampled_frames=len(face_samples), frames_with_a_face=with_faces, tracked_points=len(track), scene_cuts=len(scene_cuts),
+    )
     plan = (
         build_context_layout_plan(context, scene_cuts, duration, crop_w / width)
         if context else build_layout_plan(track, scene_cuts, duration)
@@ -1652,6 +1674,7 @@ def describe_vertical_layout(
         else:
             sx, _, _, _ = detect_optimal_crop_region(input_path, 0, min(duration, 12.0))
             static_x = clamp_even(sx, 0, max(0, width - crop_w))
+            decisions.record("faces", "default-crop", "no face track to follow; the crop sits on the most active part of the first seconds", crop_x=static_x)
         crop_chain = f"crop={crop_w}:{crop_h}:{static_x}:0,{VERTICAL_SCALE_CHAIN}"
 
     if not fit_intervals:

@@ -15,6 +15,8 @@ from tubeforge.workers.service import WorkerService
 
 def main() -> None:
     """Poll conservatively; each expensive operation remains globally leased."""
+    from tubeforge.core.tempdir import ensure_tempdir
+    ensure_tempdir()
     settings = load_settings()
     kinds = os.environ.get("TUBEFORGE_WORKER_MODES", "").strip().lower()
     if kinds:

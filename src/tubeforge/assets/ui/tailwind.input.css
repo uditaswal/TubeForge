@@ -144,6 +144,17 @@
   .live{@apply grid gap-1 text-sm;}
   .live strong{@apply font-semibold;}
   .warn{@apply text-tf-warn;}
+  .timings,.why{@apply text-xs;}
+  .timings summary,.why summary{@apply cursor-pointer text-tf-muted;}
+  .timings table{@apply mt-1.5 w-full border-collapse;}
+  .timings td{@apply border-t border-tf-line px-1.5 py-0.5;}
+  .timings td.t{@apply whitespace-nowrap text-right tabular-nums;}
+  .timings .bar2{@apply h-1.5 min-w-[2px] rounded-full bg-tf-accent;}
+  .why h4{@apply mb-0.5 mt-2 text-xs font-semibold;}
+  .why ul{@apply m-0 pl-4;}
+  .why li{@apply my-0.5;}
+  .why .no{@apply text-tf-warn;}
+  .why .ok{@apply text-tf-ok;}
   @media (max-width:640px){.clip-form input[type=number],.clip-form input[type=text]{width:100%}.clips{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
   /* Reference videos */
   .reference-grid .panel{@apply p-5;}

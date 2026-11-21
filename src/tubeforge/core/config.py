@@ -127,7 +127,7 @@ class SourceClipConfig(BaseModel):
     max_source_duration_seconds: int = Field(default=14_400, ge=30, le=86_400)
     max_clip_seconds: float = Field(default=60, ge=10, le=900)
     # Per-job download cap. A 1080p source runs up to about 0.4 MB/s, so 6 GB covers the 4-hour source limit.
-    max_download_bytes: int = Field(default=6_000_000_000, ge=100_000_000, le=50_000_000_000)
+    max_download_bytes: int = Field(default=6_000_000_000, ge=100_000_000, le=500_000_000_000)
     # Transcribe only the windows viewers engaged with (heatmap, comments, chapters), not the whole video.
     engaging_only: bool = True
 

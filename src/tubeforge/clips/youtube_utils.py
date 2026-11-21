@@ -19,7 +19,7 @@ import requests
 import yt_dlp
 
 from .config import get_config
-from .ytdlp_options import cookie_options
+from .ytdlp_options import cookie_options, speed_options
 from .download_progress import DownloadRecovery, report_download_recovery
 from .media.ffmpeg import ffprobe_video_size
 from .youtube_proxy import (
@@ -596,7 +596,7 @@ def _download_youtube_video_with_ytdlp(
                 video_id, int(quality) if quality else None
             )
 
-            with yt_dlp.YoutubeDL({**ydl_opts, **cookie_options()}) as ydl:
+            with yt_dlp.YoutubeDL({**ydl_opts, **cookie_options(), **speed_options()}) as ydl:
                 ydl.download([url])
 
             logger.info(f"Searching for downloaded file: {video_id}.*")
