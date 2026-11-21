@@ -415,8 +415,8 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             if template == "big_stat":  # keep the figure; the real capture backs it up underneath
                 top = 940
                 fmt = "0" if float(scene.after).is_integer() else "1"
-                extra = (f'<div style="position:absolute;left:60px;top:400px;font:400 340px/1 Anton;color:{AMBER};white-space:nowrap"><span id="{sid}v">{scene.before:.{fmt}f}</span><span style="font-size:200px">{html.escape(scene.unit)}</span></div>')
-                anim += (f'var o={{v:{scene.before}}};tl.to(o,{{v:{scene.after},duration:.8,ease:"power3.out",onUpdate:function(){{document.querySelector("#{sid}v").textContent=o.v.toFixed({fmt})}}}},{reveal[-1]:.3f});')
+                extra = (f'<div id="{sid}fig" style="position:absolute;left:60px;top:400px;font:400 340px/1 Anton;color:{AMBER};white-space:nowrap;opacity:0"><span id="{sid}v">{scene.before:.{fmt}f}</span><span style="font-size:200px">{html.escape(scene.unit)}</span></div>')
+                anim += (f'tl.set("#{sid}fig",{{opacity:1}},{reveal[-1]:.3f});var o={{v:{scene.before}}};tl.to(o,{{v:{scene.after},duration:.8,ease:"power3.out",onUpdate:function(){{document.querySelector("#{sid}v").textContent=o.v.toFixed({fmt})}}}},{reveal[-1]:.3f});')
             body = (_heading(head, accent) + extra
                     + f'<div class="card" id="{sid}card" style="left:{round(490 - width / 2)}px;top:{top}px;width:{width}px;height:{height}px;overflow:hidden;border:3px solid rgba(83,224,239,.55)">'
                     f'<div id="{sid}zoom" style="position:absolute;inset:0"><div style="position:absolute;inset:0;background:url(assets/hero-{i}.png) 0 0/100% 100%"></div>'
@@ -467,7 +467,7 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
                     body += f'<div id="{sid}a{k}" class="mono" style="position:absolute;left:440px;top:{676 + k * 200}px;font-size:44px;color:{MUTED}">▼</div>'
             span = b - a
             anim = ("".join(f'pop("#{sid}n{k}",{reveal[min(k, len(reveal) - 1)] if len(reveal) > 1 else a + .3 + k * span * .22:.3f},{{x:-60,y:0}});' for k in range(len(nodes)))
-                    + "".join(f'pop("#{sid}a{k}",{a + .5 + k * span * .22:.3f},{{y:-10}});' for k in range(len(nodes) - 1)))
+                    + "".join(f'pop("#{sid}a{k}",{max(a + .1, (reveal[min(k + 1, len(reveal) - 1)] if len(reveal) > 1 else a + .3 + (k + 1) * span * .22) - .1):.3f},{{y:-10}});' for k in range(len(nodes) - 1)))
         elif template == "checklist":
             body = _heading(scene.heading, accent)
             top = 540
@@ -503,9 +503,9 @@ def build_story(timeline, out: Path, *, plates_directory: Path | None, manifest:
             unit = html.escape(scene.unit)
             fmt = "0" if float(scene.after).is_integer() else "1"
             body = _heading(scene.heading, accent)
-            body += (f'<div style="position:absolute;left:60px;top:470px;font:400 380px/1 Anton;color:{AMBER};white-space:nowrap"><span id="{sid}v">{scene.before:.{fmt}f}</span><span style="font-size:220px">{unit}</span></div>'
+            body += (f'<div id="{sid}fig" style="position:absolute;left:60px;top:470px;opacity:0;font:400 380px/1 Anton;color:{AMBER};white-space:nowrap"><span id="{sid}v">{scene.before:.{fmt}f}</span><span style="font-size:220px">{unit}</span></div>'
                      f'<div id="{sid}l" style="position:absolute;left:60px;top:930px;font:800 44px/1.2 Inter;color:{INK}">{html.escape(scene.after_label)}</div>')
-            anim = (f'var o={{v:{scene.before}}};tl.to(o,{{v:{scene.after},duration:.8,ease:"power3.out",onUpdate:function(){{document.querySelector("#{sid}v").textContent=o.v.toFixed({fmt})}}}},{reveal[-1]:.3f});'
+            anim = (f'tl.set("#{sid}fig",{{opacity:1}},{reveal[-1]:.3f});var o={{v:{scene.before}}};tl.to(o,{{v:{scene.after},duration:.8,ease:"power3.out",onUpdate:function(){{document.querySelector("#{sid}v").textContent=o.v.toFixed({fmt})}}}},{reveal[-1]:.3f});'
                     f'pop("#{sid}l",{reveal[-1] + .3:.3f});')
         else:  # cta or anything new: heading plus its chips, never a crash
             heading = getattr(scene, "heading", None) or " ".join(getattr(scene, "headline", ())) or scene.caption

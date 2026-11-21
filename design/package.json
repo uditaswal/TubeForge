@@ -1,0 +1,8 @@
+{
+  "name": "tubeforge-design-build",
+  "private": true,
+  "description": "Builds the dashboard stylesheet (src/tubeforge/assets/ui/tubeforge.css). Run scripts/build_design_css.sh; do not ship this folder's node_modules.",
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}

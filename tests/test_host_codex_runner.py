@@ -309,3 +309,111 @@ def test_layout_instructions_apply_to_both_formats(aspect_ratio: str) -> None:
     prompt = build_content_prompt(request, template_version="m6-content-v7", max_chars=60_000)
     assert "visual_type is a renderer ID, never a prose description" in prompt
     assert "Set unused motion cue fields to null" in prompt
+
+
+def test_early_invalid_reference_draft_is_returned_for_review_without_retry(monkeypatch, tmp_path):
+    from test_reference_content import candidate
+    from tubeforge.core.errors import ProviderValidationError
+
+    content_request, raw, _ = candidate()
+    raw["package"]["reference_short"]["scenes"][0]["vo"] = "Different words cannot be silently accepted."
+    request = GenerateShortsScriptRequest(request=content_request)
+    launches = []
+    monkeypatch.setattr(runner, "bubblewrap_args", lambda _workspace: ["fixed-codex-command"])
+
+    def fake_run(command, **_kwargs):
+        launches.append(command)
+        output = next((tmp_path / "outputs").glob("*/content-package.schema.json")).with_name("content-package.json")
+        output.write_text(json.dumps(raw), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, b'{"usage":{"input_tokens":17}}\n', b"")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    with pytest.raises(runner.RejectedContentError, match="speech echo") as caught:
+        runner.run_request(request, root=tmp_path)
+    assert caught.value.result.package["raw_output"] == raw
+    assert caught.value.result.usage == {"input_tokens": 17}
+    assert caught.value.result.provenance["accepted"] is False
+    assert len(launches) == 1
+    assert not list((tmp_path / "outputs").iterdir())
+
+
+@pytest.mark.parametrize('operation', ['generate', 'research'])
+def test_stale_reference_host_is_refused_before_any_model_call(tmp_path, operation):
+    from test_reference_content import candidate
+    from tubeforge.core.errors import ProviderValidationError
+    from tubeforge.providers.content.host_runner_protocol import HostRunnerResponse, HostRunnerSuccess
+    from tubeforge.providers.content.prompts import prompt_evidence
+    from tubeforge.providers.content.youtube_skills import preflight
+
+    request, _, _ = candidate()
+    db = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'preflight.db'}"))
+    Base.metadata.create_all(db.engine)
+    calls = []
+    def transport(_path, payload, _timeout):
+        message = GenerateShortsScriptRequest.model_validate_json(payload)
+        calls.append(message.operation)
+        prompt = build_content_prompt(message.request, template_version='m6-content-v8', max_chars=75000)
+        return HostRunnerResponse(ok=True, result=HostRunnerSuccess(package={}, provenance={
+            'resource_hashes': preflight(template_version='m6-content-v8'),
+            'prompt_sha256': prompt_evidence(prompt)['prompt_sha256'],
+            'operations': ['ResearchSourcesV1'],
+        })).model_dump_json().encode()
+    try:
+        provider = HostRunnerContentProvider(CodexProviderConfig(), GenerationCacheRepository(db.session_factory), transport=transport)
+        with pytest.raises(ProviderValidationError, match='reference output contract differs'):
+            provider.research_sources(request) if operation == 'research' else provider.generate_package(request)
+        assert calls == ['PreflightContentV1']
+        with db.session_factory() as session:
+            assert session.scalar(select(func.count()).select_from(GenerationCacheRecord)) == 0
+    finally:
+        db.dispose()
+
+
+@pytest.mark.parametrize('auto_retry', [False, True])
+def test_early_rejected_output_is_saved_in_worker_cache(tmp_path, monkeypatch, auto_retry):
+    import hashlib
+    from types import SimpleNamespace
+    from test_reference_content import candidate
+    from tubeforge.core import runtime_settings
+    from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
+    from tubeforge.providers.content.host_runner_protocol import HostRunnerResponse, HostRunnerSuccess
+    from tubeforge.providers.content.output import REFERENCE_OUTPUT_CONTRACT_VERSION
+    from tubeforge.providers.content.prompts import prompt_evidence
+    from tubeforge.providers.content.youtube_skills import preflight
+
+    monkeypatch.setattr(runtime_settings, 'shared', lambda: SimpleNamespace(
+        value=lambda key, default: auto_retry if key == 'generation.auto_retry_rejected' else default))
+    request, raw, _ = candidate()
+    db = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'rejection.db'}"))
+    Base.metadata.create_all(db.engine)
+    calls = []
+    def transport(_path, payload, _timeout):
+        message = GenerateShortsScriptRequest.model_validate_json(payload)
+        calls.append(message.operation)
+        if message.operation == 'PreflightContentV1':
+            prompt = build_content_prompt(message.request, template_version='m6-content-v8', max_chars=75000)
+            schema = runner.codex_output_schema(envelope=True, reference=True)
+            result = HostRunnerSuccess(package={}, provenance={
+                'resource_hashes': preflight(template_version='m6-content-v8'),
+                'prompt_sha256': prompt_evidence(prompt)['prompt_sha256'],
+                'reference_contract_version': REFERENCE_OUTPUT_CONTRACT_VERSION,
+                'reference_schema_sha256': hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+            })
+            return HostRunnerResponse(ok=True, result=result).model_dump_json().encode()
+        return HostRunnerResponse(ok=False, result=HostRunnerSuccess(package={'raw_output': raw},
+            usage={'input_tokens': 17}, provenance={'accepted': False}), failure={
+                'code': 'quality_rejected', 'message': 'reference speech echo conflicts', 'invocation_started': True,
+            }).model_dump_json().encode()
+    try:
+        provider = HostRunnerContentProvider(CodexProviderConfig(), GenerationCacheRepository(db.session_factory), transport=transport)
+        with pytest.raises(RetryableProviderError if auto_retry else ProviderValidationError, match='speech echo'):
+            provider.generate_package(request)
+        with db.session_factory() as session:
+            saved = session.scalar(select(GenerationCacheRecord))
+            failure = json.loads(saved.failure_json)
+            assert saved.invocation_count == 1 and saved.accepted_at is None
+            assert failure['rejected_result']['package']['raw_output'] == raw
+            assert failure['rejected_result']['usage']['input_tokens'] == 17
+        assert calls == ['PreflightContentV1', 'GenerateShortsScriptV1']
+    finally:
+        db.dispose()

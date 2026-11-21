@@ -49,6 +49,7 @@ def unwrap_generation(raw: object, *, request: ContentRequest | None = None) -> 
     return result.package.model_dump(mode="json")
 
 
+REFERENCE_OUTPUT_CONTRACT_VERSION = "reference-output-v2"
 MAX_WHISPERS_PER_VIDEO = 2
 
 
@@ -77,13 +78,39 @@ def bind_reference_output(package: dict, request: ContentRequest) -> dict:
     scenes = topic.get("scenes")
     if not isinstance(scenes, list) or len(scenes) != len(sections):
         raise ProviderValidationError("reference scene count differs from narration")
+    claims = package.get("claims", [])
+    if not isinstance(claims, list):
+        raise ProviderValidationError("reference output requires cited claims")
+    claim_sources = {}
+    trusted_sources = {source.source_id for source in request.sources}
+    for claim in claims:
+        if not isinstance(claim, dict) or not isinstance(claim.get("claim_id"), str) or not isinstance(claim.get("source_ids"), (list, tuple)):
+            raise ProviderValidationError("reference claims require explicit source identities")
+        claim_id = claim["claim_id"]
+        source_ids = claim["source_ids"]
+        if claim_id in claim_sources or any(not isinstance(source, str) or source not in trusted_sources for source in source_ids):
+            raise ProviderValidationError("reference claims contain duplicate or unknown source identities")
+        claim_sources[claim_id] = set(source_ids)
+    sections = list(sections)
     bound = []
     for index, (scene, section) in enumerate(zip(scenes, sections, strict=True)):
         if not isinstance(scene, dict) or not isinstance(section, dict) or scene.get("scene_id") != section.get("scene_id"):
             raise ProviderValidationError("reference scenes are not in narration order")
-        if "vo" in scene and scene["vo"] != section.get("narration"):
-            raise ProviderValidationError("reference speech echo conflicts with canonical narration")
         clean, cue_list = split_delivery_cues(section.get("narration", ""))
+        if "vo" in scene:
+            if scene["vo"] not in (section.get("narration"), clean):
+                raise ProviderValidationError("reference speech echo conflicts with canonical narration")
+        claim_ids = section.get("claim_ids", [])
+        if not isinstance(claim_ids, (list, tuple)) or any(not isinstance(claim, str) or claim not in claim_sources for claim in claim_ids):
+            raise ProviderValidationError("reference section cites an unknown claim")
+        cited = set().union(*(claim_sources[claim] for claim in claim_ids))
+        if "source_ids" in scene:
+            echoed_sources = scene["source_ids"]
+            if not isinstance(echoed_sources, (list, tuple)) or any(not isinstance(source, str) for source in echoed_sources) or set(echoed_sources) != cited:
+                raise ProviderValidationError("reference visual sources differ from narrated claims")
+        if len(cited) > 3:
+            raise ProviderValidationError("reference scene cites more sources than the renderer supports")
+        scene = {**scene, "source_ids": [source.source_id for source in request.sources if source.source_id in cited]}
         sections[index] = {**section, "narration": clean}
         scene = {key: value for key, value in scene.items() if key != "cues"}
         bound.append({**scene, "vo": clean, **({"cues": cue_list} if cue_list else {})})
@@ -122,7 +149,7 @@ def bind_reference_output(package: dict, request: ContentRequest) -> dict:
                       "composition": template, "visual_elements": elements})
     if "scene_plans" in package and package["scene_plans"] != plans:
         raise ProviderValidationError("legacy scene echo conflicts with reference projection")
-    return {**package, "reference_short": topic, "scene_plans": plans}
+    return {**package, "script_sections": sections, "reference_short": topic, "scene_plans": plans}
 
 
 def require_source_excerpts(request: ContentRequest) -> None:

@@ -43,6 +43,8 @@ services:
       - ./data:/app/data
       - ./models:/app/models:ro
     environment:
+      # Scratch files (downloads, audio, renders) go to the data disk, not a RAM-backed /tmp.
+      TMPDIR: /app/data/tmp
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
       TUBEFORGE_PIPER_SERVER_URL: http://piper-tts:5000
@@ -75,11 +77,15 @@ services:
       - ./models:/app/models:ro
       - /run/tubeforge-codex:/run/tubeforge-codex
     environment:
+      # Scratch files (downloads, audio, renders) go to the data disk, not a RAM-backed /tmp.
+      TMPDIR: /app/data/tmp
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
       TUBEFORGE_PIPER_SERVER_URL: http://piper-tts:5000
       # Optional stock B-roll for reference Shorts; unset disables Pixabay.
       TUBEFORGE_PIXABAY_API_KEY: ${TUBEFORGE_PIXABAY_API_KEY:-}
+      # all | clips | shorts: which kind of job this worker takes (scripts/stackctl.sh sets it).
+      TUBEFORGE_WORKER_MODES: ${TUBEFORGE_WORKER_MODES:-all}
     restart: unless-stopped
     # Reference Shorts run Kokoro, Whisper alignment and the encoder sequentially.
     mem_limit: 3g
@@ -122,6 +128,8 @@ services:
       - ./data:/app/data
       - ./models:/app/models:ro
     environment:
+      # Scratch files (downloads, audio, renders) go to the data disk, not a RAM-backed /tmp.
+      TMPDIR: /app/data/tmp
       TUBEFORGE_CONFIG: /app/config/production.yaml
       PYTHONPATH: /app/src
       TUBEFORGE_ACCOUNT_ENCRYPTION_KEY: ${TUBEFORGE_ACCOUNT_ENCRYPTION_KEY:-}

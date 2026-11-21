@@ -73,6 +73,13 @@ class ContentRequest(DomainModel):
     production_mode: str = Field(default="generated", pattern=r"^(generated|source_clip)$")
     source_url: HttpUrl | None = None
     clip_count: int = Field(default=1, ge=1, le=12)
+    # A job made from one approved clip of another source-clip job: "<parent job id>:<clip name>:<file sha256>".
+    # The approved file's checksum is part of the request, so an edited or replaced file can never ride on it.
+    # Use only part of the source: where to start and how long, in seconds. Omitted when unset (the whole video, or the
+    # first stretch up to the configured limit when the video is longer than that).
+    source_start_seconds: SkipJsonSchema[int | None] = Field(default=None, ge=0, le=172_800)
+    source_length_seconds: SkipJsonSchema[int | None] = Field(default=None, ge=60, le=172_800)
+    clip_of: SkipJsonSchema[str | None] = Field(default=None, pattern=r"^[0-9a-f]{32}:clip_[0-9]{3}:[0-9a-f]{64}$")
     preset_name: str = Field(default="default", min_length=1, max_length=100)
     aspect_ratio: str = Field(default="16:9", pattern=r"^(16:9|9:16)$")
     # Which AI writes the script for this job. The default is omitted from the
@@ -100,6 +107,8 @@ class ContentRequest(DomainModel):
     # Use operator_script word for word: the writer only plans the visuals around it and the writing checks are skipped.
     # Part of generation identity; omitted while False so existing jobs and cache keys are unchanged.
     exact_script: bool = False
+    # What was adapted around an exact script (re-cut scenes, length set, sentences dropped); empty (and omitted) otherwise.
+    script_fit_notes: tuple[str, ...] = ()
 
     @model_serializer(mode="wrap")
     def omit_default_script_fields(self, handler):
@@ -124,6 +133,14 @@ class ContentRequest(DomainModel):
             value.pop("operator_script", None)
         if not self.exact_script:
             value.pop("exact_script", None)
+        if not self.script_fit_notes:
+            value.pop("script_fit_notes", None)
+        if self.source_start_seconds is None:
+            value.pop("source_start_seconds", None)
+        if self.source_length_seconds is None:
+            value.pop("source_length_seconds", None)
+        if self.clip_of is None:
+            value.pop("clip_of", None)  # omitted unless this job is an approved clip, so existing jobs and keys are unchanged
         return value
 
     @model_validator(mode="after")
@@ -150,6 +167,8 @@ class ContentRequest(DomainModel):
             raise ValueError("mcp_servers must be unique and nonblank")
         if self.production_mode == "source_clip" and self.source_url is None:
             raise ValueError("source_clip requests require source_url")
+        if self.clip_of is not None and self.production_mode != "source_clip":
+            raise ValueError("clip_of requires a source_clip request")
         if self.production_mode == "generated" and self.source_url is not None:
             raise ValueError("generated requests must not include source_url")
         return self

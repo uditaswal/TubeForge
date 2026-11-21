@@ -26,6 +26,12 @@ def _event(event: str, **fields: object) -> None:
 class WorkerService:
     """Claim and run at most one job; all database work brackets orchestration."""
 
+    def _retry_waits(self) -> tuple[int, int]:
+        """(first wait, longest wait) in seconds: the operator's Settings values, else the config."""
+        from tubeforge.core import runtime_settings
+        values = runtime_settings.shared()
+        return values.value("worker.retry_base_seconds", self.config.retry_base_seconds), values.value("worker.retry_max_seconds", self.config.retry_max_seconds)
+
     def _max_attempts(self) -> int:
         """Worker retries for temporary failures: the configured value, or the operator's from the Settings page."""
         from tubeforge.core import runtime_settings
@@ -35,11 +41,30 @@ class WorkerService:
         self.worker_id, self.jobs, self.orchestrator, self.config = worker_id, jobs, orchestrator, config
         self._clock = clock or (lambda: datetime.now(UTC))
         self.heavy_work = heavy_work or HeavyWorkLeaseRepository(jobs._session_factory)
+        self.focus = None  # a JobFocus when the operator can run one job alone (set by the worker entry point)
+
+    def _focused_job(self) -> str | None:
+        """The job the operator chose to run alone, or None. The focus ends by itself once that job has nothing left to run."""
+        if self.focus is None:
+            return None
+        job_id = self.focus.job_id()
+        if job_id is None:
+            return None
+        from tubeforge.core.job_focus import FOCUS_ENDS
+        try:
+            state = self.jobs.get(job_id).state
+        except KeyError:
+            state = None
+        if state is None or state in FOCUS_ENDS:
+            self.focus.clear()
+            _event("job_focus_ended", job_id=job_id, state=getattr(state, "value", "deleted"))
+            return None
+        return job_id
 
     def run_once(self, *, interrupt_after: JobState | None = None) -> PipelineJob | None:
         """Lease one eligible job then execute without a database transaction open."""
         now = self._now()
-        job = self.jobs.claim_oldest_eligible(self.worker_id, now=now, lease_seconds=self.config.lease_seconds)
+        job = self.jobs.claim_oldest_eligible(self.worker_id, now=now, lease_seconds=self.config.lease_seconds, job_kinds=self.config.job_kinds, only_job_id=self._focused_job())
         if job is None:
             return None
         _event("job_claimed", job_id=job.id, worker_id=self.worker_id, state=job.state.value)
@@ -161,7 +186,8 @@ class WorkerService:
         alignment_policy = policy_reader(job) if callable(policy_reader) else None
         immediate, cap, transient_count = alignment_policy if alignment_policy is not None else (False, self._max_attempts(), attempt)
         exhausted = attempt >= cap
-        delay = 0 if immediate else min(self.config.retry_base_seconds * (2 ** (max(1, transient_count) - 1)), self.config.retry_max_seconds)
+        base, longest = self._retry_waits()
+        delay = 0 if immediate else min(base * (2 ** (max(1, transient_count) - 1)), longest)
         result = self.jobs.schedule_retry(job.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=delay), exhausted=exhausted)
         _event("job_retry_scheduled", job_id=job.id, attempt=attempt, delay_seconds=delay, exhausted=exhausted)
         self._record(job.id, "job_retry_scheduled", attempt=attempt, delay_seconds=delay, exhausted=exhausted)

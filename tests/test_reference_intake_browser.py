@@ -21,7 +21,11 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
     from test_api_workflow import _migrate
     from test_reference_intake_extractor import FixtureHTTP,player,URL
     database=tmp_path/'browser.db';_migrate(database)
-    app=create_app(Settings(app=AppConfig(name='TubeForge LF1 browser',environment='test'),database=DatabaseConfig(url=f'sqlite:///{database}'),auth=AuthConfig(enabled=True)))
+    from tubeforge.core.config import VideoPresetConfig
+    settings=Settings(app=AppConfig(name='TubeForge LF1 browser',environment='test'),database=DatabaseConfig(url=f'sqlite:///{database}'),auth=AuthConfig(enabled=True))
+    settings.pipeline.sources.research_enabled=True
+    settings.pipeline.video_generation.presets['short']=VideoPresetConfig(aspect_ratio='9:16',prompt_version='m6-content-v8',minimum_duration_seconds=30,maximum_duration_seconds=120,duration_seconds=60)
+    app=create_app(settings)
     runtime=app.state.runtime;runtime.auth.create_admin('intake-reviewer','test-only-browser-intake-password')
     raw=player();raw['captions']={};runtime.reference_intakes.extractor=YoutubeReferenceExtractor(FixtureHTTP(raw))
     listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen()
@@ -35,14 +39,14 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
         with sync_playwright() as pw:
             browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
             try:
-                for name,width,height,target in [('desktop',1440,1000,'600'),('tablet',820,1180,'720'),('mobile',390,844,'900')]:
+                for name,width,height,target in [('desktop',1440,1000,'105'),('tablet',820,1180,'720'),('mobile',390,844,'900')]:
                     context=browser.new_context(viewport=dict(width=width,height=height));page=context.new_page();errors=[]
                     page.on('pageerror',lambda error:errors.append(str(error)))
                     page.goto(base+'/login');page.locator('[name=username]').fill('intake-reviewer');page.locator('[name=password]').fill('test-only-browser-intake-password');page.locator('button[type=submit]').click();page.wait_for_url(base+'/')
-                    if width<=760:page.locator('.studio-menu').click()
+                    if width<1024:page.locator('[data-nav-open]').click()
                     page.get_by_role('link',name='Reference videos',exact=True).click();page.wait_for_url(base+'/references')
                     expect(page.get_by_text('Signed in as intake-reviewer',exact=True)).to_have_count(1)
-                    video_id='AbCdEfGhI_'+{'600':'1','720':'2','900':'3'}[target]
+                    video_id='AbCdEfGhI_'+{'105':'1','720':'2','900':'3'}[target]
                     raw=player(video_id=video_id);raw['captions']={}
                     runtime.reference_intakes.extractor=YoutubeReferenceExtractor(FixtureHTTP(raw))
                     page.locator('#referenceUrl').fill(URL.replace('AbCdEfGhI_1',video_id));page.locator('#referenceTarget').select_option(target);page.locator('#captureReference').click()
@@ -66,6 +70,25 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
                     runtime.reference_intakes.run_once('browser-worker')
                     expect(page.locator('#referenceState')).to_have_text('Context captured',timeout=10000)
                     expect(page.locator('#referenceTranscript')).to_contain_text('Operator-supplied fixture transcript.')
+                    if target=='105':
+                        expect(page.locator('#prepareLongForm')).to_be_hidden()
+                        expect(page.locator('#referenceList')).to_contain_text('105 sec target')
+                        received=[]
+                        def fake_short(route):
+                            received.append(route.request.post_data_json)
+                            route.fulfill(status=201,json={'job_id':'fake-short','state':'topic_created'})
+                        page.route('**/api/reference-intakes/*/short',fake_short)
+                        page.locator('#prepareShort summary').click()
+                        page.locator('#shortTopic').fill('Original example')
+                        page.locator('#shortAngle').fill('A fresh explanation')
+                        page.locator('#shortStyle').fill('Fast cuts and large captions')
+                        page.locator('#shortWatched').check();page.locator('#shortConfirm').check()
+                        page.locator('#createShort').click()
+                        expect(page.locator('#shortNotice')).to_contain_text('Short job created')
+                        assert received[0]['reference_snapshot_sha256']==runtime.reference_intakes.repository.get(key)['intake']['reference_snapshot_sha256']
+                        assert received[0]['watched_reference'] and received[0]['confirmed_queue']
+                        page.unroute('**/api/reference-intakes/*/short')
+
                     assert len(runtime.reference_intakes.extractor.http.calls)==1
                     detail=runtime.reference_intakes.repository.get(key);identity=detail['intake']['reference_snapshot_sha256']
                     exported=context.request.get(base+f'/api/reference-intakes/{key}/snapshot')
@@ -85,9 +108,10 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
                     expect(page.locator('#referenceTranscript')).to_contain_text('First fixture cue.')
                     assert runtime.reference_intakes.repository.get(key,2)['intake']['reference_snapshot_sha256']==identity
                     page.reload();expect(page.locator('#referenceState')).to_have_text('Context captured')
-                    if width<=760:
-                        page.locator('#studioMenuToggle').click();expect(page.locator('.studio-sidebar')).to_have_class(__import__('re').compile('open'))
-                        page.keyboard.press('Escape');expect(page.locator('#studioMenuToggle')).to_have_attribute('aria-expanded','false')
+                    if width<1024:
+                        page.locator('[data-nav-open]').click();expect(page.locator('aside[data-nav]')).to_have_attribute('data-open','true')
+                        page.keyboard.press('Escape');expect(page.locator('[data-nav-open]')).to_have_attribute('aria-expanded','false')
+                        expect(page.locator('[data-nav-open]')).to_be_focused()
                     assert not page.evaluate('document.documentElement.scrollWidth>innerWidth')
                     assert not errors,errors
                     page.locator('#referenceBrief summary').click();expect(page.locator('#briefProposals')).to_contain_text('Source excerpt:')

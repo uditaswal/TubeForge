@@ -202,43 +202,44 @@ def test_diagnostics_survive_worker_restart_and_cancel_without_lease_leak(pipeli
     assert content.calls == 1
 
 
-def test_source_clip_pipeline_reuses_source_checkpoint_and_prepares_publication(pipeline, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_source_clip_pipeline_runs_the_engine_once_and_prepares_publication(pipeline, tmp_path: Path) -> None:
     runner, *_ = pipeline
 
     class Source:
         inspect_calls = 0
-        acquire_calls = 0
         def can_handle(self, url: str) -> bool: return True
         def inspect(self, url: str) -> dict[str, object]:
             self.inspect_calls += 1
-            return {"url": url, "id": "video-1", "uploader": "creator", "title": "A source", "duration_seconds": None, "webpage_url": url}
-        def acquire(self, url: str, destination: Path, *, captions: bool = False) -> Path:
-            self.acquire_calls += 1; destination.mkdir(parents=True, exist_ok=True)
-            output = destination / "source.mp4"; output.write_bytes(b"source-media"); return output
+            return {"url": url, "id": "video-1", "uploader": "creator", "title": "A source", "duration_seconds": 30.0, "webpage_url": url}
 
-    source = Source()
-    runner.source_clips = SourceClipConfig(enabled=True, min_clip_seconds=5, max_clip_seconds=10)
+    class Clips:
+        analyze_calls = render_calls = 0
+        def analyze(self, job_id, work_dir, params, cancelled):
+            self.analyze_calls += 1
+            assert params["clip_count"] == 2 and params["source_url"] == "https://example.com/video"
+            return {"video_path": str(work_dir / "source.mp4"), "segments": [{"start_time": "00:00", "end_time": "00:20"}, {"start_time": "00:30", "end_time": "00:50"}], "summary": "s", "key_topics": ["t"]}
+        def render(self, job_id, work_dir, params, cancelled):
+            self.render_calls += 1
+            work_dir.mkdir(parents=True, exist_ok=True)
+            clips = []
+            for index in (1, 2):
+                path = work_dir / f"clip-{index:02d}.mp4"; path.write_bytes(b"clip-media-%d" % index)
+                clips.append({"path": str(path), "start_time": "00:00", "end_time": "00:20", "duration": 20.0, "text": "words", "hook_title": f"Hook {index}", "virality_score": 90 - index})
+            return clips
+
+    source, clips = Source(), Clips()
+    runner.source_clips = SourceClipConfig(enabled=True, max_clip_seconds=10)
     runner.source_provider = source  # type: ignore[assignment]
-    def fake_audio(_ffmpeg: str, _source: Path, output: Path) -> None:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with wave.open(str(output), "wb") as stream:
-            stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(100); stream.writeframes(b"\xff\x7f" * 3000)
-    def fake_render(_ffmpeg: str, _ffprobe: str, _source: Path, output: Path, _start: float, _end: float, captions: Path | None = None) -> dict[str, object]:
-        output.parent.mkdir(parents=True, exist_ok=True); output.write_bytes(b"clip-media")
-        return {"width": 1080, "height": 1920, "has_audio": True, "duration_seconds": 10.0}
-    monkeypatch.setattr("tubeforge.pipeline.orchestrator.extract_audio", fake_audio)
-    monkeypatch.setattr("tubeforge.pipeline.orchestrator.probe_clip", lambda *_args: {"duration_seconds": 30.0})
-    monkeypatch.setattr("tubeforge.pipeline.orchestrator.render_vertical", fake_render)
-    source_request = ContentRequest(topic="A source", angle="clips", target_duration_seconds=30, language="en", audience="general", prompt_version="source-clip-v1", sources=(SourceReference(source_id="source-video", url="https://example.com/video", title="A source"),), review_mode="auto", captions_enabled=False, production_mode="source_clip", source_url="https://example.com/video", clip_count=1)
+    runner.clip_runner = clips  # type: ignore[assignment]
+    source_request = ContentRequest(topic="A source", angle="clips", target_duration_seconds=30, language="en", audience="general", prompt_version="source-clip-v1", sources=(SourceReference(source_id="source-video", url="https://example.com/video", title="A source"),), review_mode="auto", captions_enabled=False, production_mode="source_clip", source_url="https://example.com/video", clip_count=2)
     runner.jobs.create("source-clip", source_request)
     assert runner.run("source-clip").state is JobState.FINAL_READY
-    assert source.inspect_calls == source.acquire_calls == 1
-    assert runner.artifacts.get("source-clip", JobState.CLIP_RENDERING, "clip_001")
+    assert runner.artifacts.get("source-clip", JobState.CLIP_RENDERING, "clip_001") and runner.artifacts.get("source-clip", JobState.CLIP_RENDERING, "clip_002")
     assert runner.run("source-clip").state is JobState.PUBLICATION_APPROVAL_REQUIRED
     saved_source = runner.source_media.get("source-clip")
-    assert saved_source and saved_source.external_id == "video-1" and saved_source.duration_seconds == 30.0
+    assert saved_source and saved_source.external_id == "video-1"
     assert runner.run("source-clip").state is JobState.PUBLICATION_APPROVAL_REQUIRED
-    assert source.inspect_calls == source.acquire_calls == 1
+    assert source.inspect_calls == clips.analyze_calls == clips.render_calls == 1
 
 
 def test_successful_orchestration_persists_every_checkpoint(pipeline) -> None:
@@ -1253,3 +1254,94 @@ def test_retired_format_stops_before_any_script_call(pipeline) -> None:
     result = runner.run("retired-format")
     assert result.state is JobState.FAILED_VALIDATION and "retired" in (result.failure_message or "")
     assert content.calls == 0
+
+
+def test_an_approved_clip_becomes_its_own_job_bound_to_the_approved_file(pipeline, tmp_path: Path) -> None:
+    runner, *_ = pipeline
+    from tubeforge.db.repositories import Artifact
+    import hashlib, json as _json
+    parent_id = "a" * 32
+    request = ContentRequest(topic="A source", angle="clips", target_duration_seconds=30, language="en", audience="general", prompt_version="source-clip-v1", sources=(SourceReference(source_id="source-video", url="https://example.com/video", title="A source"),), review_mode="auto", captions_enabled=False, production_mode="source_clip", source_url="https://example.com/video", clip_count=2)
+    runner.jobs.create(parent_id, request)
+    files = tmp_path / "parent"; files.mkdir()
+    def save(stage, name, path):
+        digest = hashlib.sha256(path.read_bytes()).hexdigest(); runner.artifacts.save(Artifact(parent_id, stage, name, str(path), digest, {})); return digest
+    meta = files / "m.json"; meta.write_text(_json.dumps({"url": "https://example.com/video", "id": "video-1", "title": "A source", "uploader": "creator", "duration_seconds": 30.0, "webpage_url": "https://example.com/video"}))
+    save(JobState.SOURCE_INSPECTING, "source_metadata", meta)
+    clip = files / "clip2.mp4"; clip.write_bytes(b"approved clip bytes")
+    digest = save(JobState.CLIP_RENDERING, "clip_002", clip)
+    manifest = files / "manifest.json"; manifest.write_text(_json.dumps({"clips": [{"name": "clip_001", "path": "x", "checksum_sha256": "0" * 64, "candidate": {}}, {"name": "clip_002", "path": str(clip), "checksum_sha256": digest, "candidate": {"hook_title": "Second", "duration": 20.0}}]}))
+    save(JobState.CLIP_RENDERING, "clip_manifest", manifest)
+
+    class Refuse:
+        def analyze(self, *args): raise AssertionError("an approved clip is never analyzed again")
+        render = analyze
+    runner.clip_runner = Refuse()  # type: ignore[assignment]
+    runner.source_clips = SourceClipConfig(enabled=True)
+    runner.jobs.create("child", request.model_copy(update={"clip_of": f"{parent_id}:clip_002:{digest}", "clip_count": 1, "topic": "Second"}))
+    assert runner.run("child").state is JobState.FINAL_READY
+    final = runner.artifacts.get("child", JobState.FINAL_RENDERING, "final")
+    assert final.checksum_sha256 == digest and Path(final.path).read_bytes() == b"approved clip bytes"
+    assert runner.run("child").state is JobState.PUBLICATION_APPROVAL_REQUIRED
+
+    clip.write_bytes(b"edited later")  # a file that no longer matches the approval must never ride on it
+    runner.jobs.create("tampered", request.model_copy(update={"clip_of": f"{parent_id}:clip_002:{digest}", "clip_count": 1}))
+    assert runner.run("tampered").state is JobState.FAILED_VALIDATION
+
+
+@pytest.mark.parametrize("error_name,message,expected", [
+    ("DownloadBudgetExceeded", "YouTube download exceeded the 2000000000 byte job limit (5596848904 bytes)", JobState.FAILED_VALIDATION),
+    ("RunnerError", "The Claude runner refused the clip request (quota_exhausted): limit", JobState.FAILED_VALIDATION),
+    ("ValueError", "No usable clip segments were selected for this video.", JobState.FAILED_VALIDATION),
+    ("RunnerError", "The Claude runner is not reachable: ConnectionRefusedError", JobState.FAILED_RETRYABLE),
+    ("TimeoutError", "timed out", JobState.FAILED_RETRYABLE),
+])
+def test_clip_engine_failures_become_job_outcomes_instead_of_crashing_the_worker(pipeline, error_name, message, expected) -> None:
+    runner, *_ = pipeline
+    failure = type(error_name, (TimeoutError if error_name == "TimeoutError" else Exception,), {})(message)
+
+    class Source:
+        def can_handle(self, url: str) -> bool: return True
+        def inspect(self, url: str) -> dict[str, object]:
+            return {"url": url, "id": "video-1", "uploader": "creator", "title": "A source", "duration_seconds": 30.0, "webpage_url": url}
+
+    class Failing:
+        def analyze(self, *args): raise failure
+        render = analyze
+
+    runner.source_provider = Source()  # type: ignore[assignment]
+    runner.clip_runner = Failing()  # type: ignore[assignment]
+    runner.source_clips = SourceClipConfig(enabled=True)
+    request = ContentRequest(topic="A source", angle="clips", target_duration_seconds=30, language="en", audience="general", prompt_version="source-clip-v1", sources=(SourceReference(source_id="source-video", url="https://example.com/video", title="A source"),), review_mode="auto", captions_enabled=False, production_mode="source_clip", source_url="https://example.com/video", clip_count=1)
+    runner.jobs.create("failing-clip", request)
+    job = runner.run("failing-clip")
+    assert job.state is expected and message[:30] in (job.failure_message or "")
+
+
+def test_turning_off_verified_sources_skips_research_and_tells_the_writer(pipeline, monkeypatch, tmp_path):
+    """The operator can accept their own notes as the evidence: no web research, no refusal for thin sources."""
+    from tubeforge.core import runtime_settings
+    from tubeforge.core.config import AppConfig, DatabaseConfig, Settings
+    from tubeforge.pipeline.orchestrator import RELAXED_ACCURACY_NOTE
+    runner, content, *_ = pipeline
+    runner.research_enabled = True
+    store = runtime_settings.RuntimeSettings(tmp_path / "runtime-settings.json")
+    monkeypatch.setattr(runtime_settings, "shared", lambda: store)
+    request = ContentRequest(topic="Why windows cannot beat mac", angle="Fewer configurations are easier to test",
+        target_duration_seconds=60, language="en", audience="general", aspect_ratio="9:16", prompt_version="m6-content-v8",
+        script_owner="claude", sources=(SourceReference(source_id="operator-notes", url="https://local.invalid/operator-notes",
+                                                         title="Brief", excerpt="Hypothesis written by the operator"),))
+    calls = []
+    monkeypatch.setattr(content, "research_sources", lambda value: calls.append(value) or {}, raising=False)
+    strict_job = runner.jobs.create("strict-research", request)
+    with pytest.raises(Exception):
+        runner._effective_content_request(strict_job)  # the default still researches (this fake returns nothing usable)
+    assert calls
+    calls.clear()
+    settings = Settings(app=AppConfig(name="t", environment="test"), database=DatabaseConfig(url=f"sqlite:///{tmp_path / 's.db'}"))
+    store.update("script.require_verified_sources", False, "test", settings)
+    relaxed_job = runner.jobs.create("relaxed-research", request)
+    effective = runner._effective_content_request(relaxed_job)
+    assert calls == [] and [s.source_id for s in effective.sources] == ["operator-notes"]
+    assert RELAXED_ACCURACY_NOTE in effective.notes
+    assert any(event.event_type == "sources_unverified_accepted" for event in runner.events.list_for_job("relaxed-research"))

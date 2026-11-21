@@ -47,7 +47,7 @@ NODE_LIBRARIES = (
 
 
 class RejectedContentError(ValueError):
-    """Return a domain-valid rejected draft to the worker's existing audit cache."""
+    """Return a bounded rejected draft to the worker's existing audit cache."""
 
     def __init__(self, reason: str, result: HostRunnerSuccess) -> None:
         super().__init__(reason)
@@ -146,6 +146,9 @@ def codex_output_schema(*, envelope: bool = False, reference: bool = False, keep
             item["properties"].pop("vo")
             item["required"].remove("vo")
             item["properties"].pop("cues", None)
+            item["properties"].pop("source_ids", None)
+            if "source_ids" in item["required"]:
+                item["required"].remove("source_ids")
     if envelope:
         # The application binds immutable inputs; do not make the model copy
         # long fetched excerpts or runtime settings into generated output.
@@ -325,13 +328,6 @@ def run_request(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROO
         if not output_path.is_file() or output_path.stat().st_size > MAX_OUTPUT_BYTES:
             raise ValueError("Codex CLI did not produce a bounded structured package")
         raw = json.loads(output_path.read_text(encoding="utf-8"))
-        if request.request.prompt_version in CONTENT_ENVELOPE_TEMPLATES:
-            from tubeforge.providers.content.output import unwrap_generation
-            raw = unwrap_generation(raw, request=request.request)
-        normalized, normalizations = normalize_fallback_visuals(raw)
-        package = ContentPackage.model_validate(normalized)
-        if normalize_content_request(package.request) != normalize_content_request(request.request):
-            raise ValueError("Codex output source packet differs from the immutable request")
         usage: dict[str, object] = {}
         for line in completed.stdout.splitlines():
             try:
@@ -340,6 +336,34 @@ def run_request(request: GenerateShortsScriptRequest, *, root: Path = RUNNER_ROO
                 continue
             if isinstance(event, dict) and isinstance(event.get("usage"), dict):
                 usage = event["usage"]
+        try:
+            if request.request.prompt_version in CONTENT_ENVELOPE_TEMPLATES:
+                from tubeforge.providers.content.output import unwrap_generation
+                candidate = unwrap_generation(raw, request=request.request)
+            else:
+                candidate = raw
+            normalized, normalizations = normalize_fallback_visuals(candidate)
+            package = ContentPackage.model_validate(normalized)
+            if normalize_content_request(package.request) != normalize_content_request(request.request):
+                raise ValueError("Codex output source packet differs from the immutable request")
+        except InsufficientSourcesError:
+            raise
+        except (ValueError, ProviderValidationError) as error:
+            # Retain bounded raw output in the authenticated worker's audit cache;
+            # never put generated text or input excerpts into logs or errors.
+            from pydantic import ValidationError
+            if isinstance(error, ValidationError):
+                details = error.errors(include_input=False, include_context=False, include_url=False)
+                reason = "; ".join(f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}" for item in details[:5])
+            elif isinstance(error, ProviderValidationError):
+                reason = str(error)
+            else:
+                reason = "Generated draft failed structured validation."
+            raise RejectedContentError(reason[:1000], HostRunnerSuccess(
+                package={"raw_output": raw}, usage=usage,
+                provenance={"provider": "host-codex-runner", "model": CODEX_MODEL,
+                            "stage": "structured_validation", "accepted": False},
+            )) from error
         provenance: dict[str, object] = {"provider": "host-codex-runner", "model": CODEX_MODEL, "generated_at": datetime.now(UTC).isoformat(), "elapsed_seconds": round(time.monotonic() - started, 3)}
         from tubeforge.providers.content.prompts import prompt_evidence
         provenance["invocations"] = [prompt_evidence(prompt)]
@@ -449,7 +473,13 @@ def main() -> None:
                     evidence = prompt_evidence(prompt)
                     with tempfile.TemporaryDirectory(dir=RUNNER_ROOT) as workspace:
                         bubblewrap_args(Path(workspace))
-                    result = HostRunnerSuccess(package={}, provenance={"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True, "operations": ["ResearchSourcesV1"]})
+                    provenance = {"resource_hashes": hashes, "prompt_sha256": evidence["prompt_sha256"], "preflight": True, "operations": ["ResearchSourcesV1", "ExactScriptV1"]}
+                    if request.request.prompt_version == "m6-content-v8":
+                        from tubeforge.providers.content.output import REFERENCE_OUTPUT_CONTRACT_VERSION
+                        schema = codex_output_schema(envelope=True, reference=True)
+                        provenance["reference_contract_version"] = REFERENCE_OUTPUT_CONTRACT_VERSION
+                        provenance["reference_schema_sha256"] = hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                    result = HostRunnerSuccess(package={}, provenance=provenance)
                 elif request.operation == "ResearchSourcesV1":
                     result = run_research(request)
                 else:

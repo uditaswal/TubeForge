@@ -27,7 +27,7 @@ RUN python - <<'PY' > /tmp/requirements.txt
 import tomllib
 project = tomllib.load(open("pyproject.toml", "rb"))["project"]
 extras = project["optional-dependencies"]
-wanted = ["dev", "local-media", "kokoro", "alignment", "reference-renderer"]
+wanted = ["dev", "local-media", "kokoro", "alignment", "reference-renderer", "clips"]
 print("\n".join(project["dependencies"] + [dep for name in wanted for dep in extras[name]]))
 PY
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r /tmp/requirements.txt

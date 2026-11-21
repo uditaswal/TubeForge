@@ -30,11 +30,14 @@ from tubeforge.rendering.shorts.review import write_layout_review
 from tubeforge.rendering.shorts.schema import ShortsTopic
 from tubeforge.rendering.shorts.timeline import SceneTiming, Timeline, Word
 
-RENDERER_VERSION = "reference-short-v1/render-9"  # shared portrait editor/cursor changes pixels
-HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-7"
+RENDERER_VERSION = "reference-short-v1/render-10"  # Story reveal timing changes rendered pixels
+HYPERFRAMES_RENDERER_VERSION = "reference-short-v1/hyperframes-8"
+STORY_RENDERER_VERSION = "reference-short-v1/story-8"
 
 
-def renderer_version(config: ReferenceShortConfig) -> str:
+def renderer_version(config: ReferenceShortConfig, *, style: str = "classic") -> str:
+    if style == "story":
+        return STORY_RENDERER_VERSION
     return HYPERFRAMES_RENDERER_VERSION if config.renderer == "hyperframes" else RENDERER_VERSION
 
 

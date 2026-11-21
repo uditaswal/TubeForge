@@ -24,7 +24,7 @@ def test_single_paragraph_splits_into_sentences():
 
 
 def test_template_parses_as_a_batch_plan_for_every_length():
-    for length in (30, 45, 60, 75, 90):
+    for length in (30, 45, 60, 75, 90, 105, 120):
         plan = parse_batch(plan_template(length).replace("my-short-id", "x1"))
         assert not plan.errors, plan.errors
         assert plan.shorts[0].length_s == length and plan.shorts[0].narration
@@ -52,6 +52,8 @@ def test_script_fit_and_guide_endpoints_and_dashboard_controls(tmp_path):
         client.headers["x-csrf-token"] = client.cookies["tubeforge_csrf"]
         fit = client.post("/api/script-fit", json={"text": "Hello there friends and neighbours today.", "length_s": 60}).json()
         assert fit["status"] == "too_short" and fit["max_words"] == 177
+        assert client.post("/api/script-fit", json={"text": "A longer sample.", "length_s": 105}).status_code == 200
+        assert client.get("/api/script-guide?length_s=120").status_code == 200
         assert client.post("/api/script-fit", json={"length_s": 60}).status_code == 422
         guide = client.get("/api/script-guide?length_s=45").json()["markdown"]
         assert "45-second" in guide and "script: |" in guide

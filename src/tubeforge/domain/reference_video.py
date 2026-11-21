@@ -7,6 +7,7 @@ import re
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
+from pydantic.json_schema import SkipJsonSchema
 from pydantic import Field, computed_field, field_validator, model_validator
 
 from tubeforge.domain.contracts import DomainModel
@@ -101,11 +102,26 @@ class ReferenceSnapshot(DomainModel):
 class ReferenceIntakeRequest(DomainModel):
     """Validated intake input; never a video-generation request or approval."""
     reference_url: str = Field(max_length=2000)
-    target_duration_seconds: int = Field(ge=600, le=900)
+    target_duration_seconds: int = Field(ge=25, le=900)
     channel_identity: str = Field(default='default', pattern=r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
     language: str = Field(default='en', pattern=r'^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$')
 
     supplied_cues: tuple[TranscriptCue, ...] = Field(default=(), max_length=10000)
+    # What the operator wants the writer to focus on in this reference (optional; shapes the Short, never the capture).
+    focus: SkipJsonSchema[str | None] = Field(default=None, max_length=500)
+
+    @field_validator('focus')
+    @classmethod
+    def tidy_focus(cls, value):
+        value = ' '.join((value or '').split())
+        return value or None
+
+    @field_validator('target_duration_seconds')
+    @classmethod
+    def supported_target_duration(cls, value):
+        if not (25 <= value <= 120 or 600 <= value <= 900):
+            raise ValueError('target must be a 25–120 second Short or a 600–900 second long-form video')
+        return value
 
     @field_validator('reference_url')
     @classmethod

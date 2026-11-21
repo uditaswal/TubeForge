@@ -1,44 +1,5 @@
 """Account-first Scheduling controls backed by the existing local APIs."""
 
-SCHEDULING_CSS = r"""
-.studio-page>.channel-scheduling{max-width:none}
-.channel-scheduling{padding:24px}
-.channel-scheduling h2{font-size:17px}
-.channel-intro{display:flex;justify-content:space-between;align-items:start;gap:16px;margin-bottom:18px}
-.channel-intro p{margin-top:5px}
-.channel-intro a,.channel-link{color:var(--cyan);font-weight:650;text-decoration:none}
-.channel-intro a:hover,.channel-link:hover{text-decoration:underline}
-.channel-account-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,205px),1fr));gap:10px;margin-bottom:23px}
-.channel-account-card{width:100%;min-height:104px;margin:0;padding:15px;text-align:left;background:var(--studio-input);color:#edf3fb;border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
-.channel-account-card:hover:not(:disabled){background:var(--studio-panel-alt);border-color:#688071;transform:none}
-.channel-account-card[aria-pressed=true]{background:#20382f;border-color:#80cfa6;box-shadow:inset 0 0 0 1px #80cfa6}
-.channel-account-card strong{font-size:14px;line-height:1.25;overflow-wrap:anywhere}
-.channel-account-card span{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
-.channel-account-card[aria-pressed=true] span{color:#c7e7d4}
-.channel-account-card .channel-platform{color:var(--cyan);font-size:10px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
-.channel-head{padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--studio-panel-alt);margin-bottom:18px}
-.channel-head h2{font-size:21px}
-.channel-head p{margin-top:4px;overflow-wrap:anywhere}
-.channel-columns{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:18px;align-items:start}
-.channel-card{min-width:0;padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--studio-input)}
-.channel-card h3{font-size:15px;margin:0 0 5px}
-.channel-card .sub{font-size:12px}
-.channel-card textarea{min-height:110px}
-.channel-card button{margin-top:12px}
-.channel-list{display:grid;gap:8px;margin-top:16px}
-.channel-list-row{min-width:0;padding:12px 13px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
-.channel-list-row strong{display:block;font-size:13px;overflow-wrap:anywhere}
-.channel-list-row span{display:block;margin-top:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
-.channel-list-row a{display:inline-block;margin-top:7px;color:var(--cyan);font-size:12px;font-weight:650}
-.channel-queue-summary{margin:0 0 12px;color:var(--cyan);font-size:12px;font-weight:650}
-.channel-empty{padding:17px;border:1px dashed #43566c;border-radius:9px;color:var(--muted);font-size:12px}
-.channel-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
-.channel-form-grid .channel-wide{grid-column:1/-1}
-.channel-status{min-height:20px;margin-top:9px;color:var(--good);font-size:12px}
-@media(max-width:1030px){.channel-columns{grid-template-columns:1fr}}
-@media(max-width:760px){.channel-scheduling{padding:17px}.channel-intro{flex-direction:column}.channel-account-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.channel-card{padding:16px}}
-@media(max-width:440px){.channel-account-grid,.channel-form-grid{grid-template-columns:1fr}.channel-account-card{min-height:84px}}
-"""
 
 SCHEDULING_SCRIPT = r"""<script>
 (() => {

@@ -10,6 +10,9 @@ from tubeforge.domain.contracts import ContentRequest
 from tubeforge.domain.long_form_writing import LongFormHostRequest
 
 
+CLIP_PROMPT_MAX_CHARS = 48_000  # keeps the whole request inside the runner's 64 KiB socket read
+
+
 class GenerateShortsScriptRequest(BaseModel):
     """The sole worker-to-host operation; no prompt, path, or command fields."""
 
@@ -17,6 +20,23 @@ class GenerateShortsScriptRequest(BaseModel):
 
     operation: str = Field(default="GenerateShortsScriptV1", pattern=r"^(GenerateShortsScriptV1|PreflightContentV1|ResearchSourcesV1)$")
     request: ContentRequest
+
+
+class ClipCompletionRequest(BaseModel):
+    """One tool-less, bounded completion for clip selection.
+
+    The runner answers it with the Claude CLI in print mode with no tools, no files and a fixed
+    model; nothing here names a command, path or model. The prompt carries transcript text, so
+    its size is bounded and the runner counts every call against the shared daily limit and a
+    separate, lower clip limit.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    operation: str = Field(default="CompleteClipPromptV1", pattern=r"^CompleteClipPromptV1$")
+    system: str = Field(default="", max_length=20_000)
+    prompt: str = Field(min_length=1, max_length=CLIP_PROMPT_MAX_CHARS)
+    output_schema: dict[str, Any] | None = None
 
 
 class HostRunnerFailure(BaseModel):
@@ -70,7 +90,7 @@ def encode_request(message: GenerateShortsScriptRequest | LongFormHostRequest) -
 
 
 def receive_message(connection, *, maximum_bytes: int = MAX_REQUEST_BYTES,
-                    timeout_seconds: float = REQUEST_READ_SECONDS) -> GenerateShortsScriptRequest | LongFormHostRequest:
+                    timeout_seconds: float = REQUEST_READ_SECONDS) -> GenerateShortsScriptRequest | LongFormHostRequest | ClipCompletionRequest:
     """Read fragmented JSON with bounded bytes/time, including legacy clients.
 
     New clients half-close their write side; older clients wait for a response
@@ -82,6 +102,8 @@ def receive_message(connection, *, maximum_bytes: int = MAX_REQUEST_BYTES,
 
     def decode(payload):
         value=json.loads(payload)
+        if isinstance(value,dict) and value.get('operation')=='CompleteClipPromptV1':
+            return ClipCompletionRequest.model_validate(value)
         if isinstance(value,dict) and value.get('operation') in {'PreflightLongFormV1','PrepareLongFormCallV1','LongFormStageV1','InspectLongFormCallV1'}:
             return LongFormHostRequest.model_validate(value)
         return GenerateShortsScriptRequest.model_validate(value)

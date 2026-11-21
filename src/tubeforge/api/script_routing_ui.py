@@ -1,5 +1,4 @@
 """Small saved-default editor inside the existing Studio generation form."""
-ROUTING_CSS = '''.script-routing-settings{border:1px solid var(--line);border-radius:9px;padding:12px;margin:0 0 16px}.script-routing-settings summary{font-weight:700;cursor:pointer}.script-routing-settings select{width:100%;min-width:0;max-width:100%}.script-routing-settings .actions{display:flex;flex-wrap:wrap;margin-top:12px}.script-routing-settings p{overflow-wrap:anywhere}'''
 
 ROUTING_SCRIPT = r'''
 const routingPanel=document.createElement('details');routingPanel.className='script-routing-settings';routingPanel.id='scriptRoutingSettings';

@@ -38,6 +38,24 @@ class HostRunnerContentProvider:
         except TimeoutError as error:
             raise RetryableProviderError("Script runner timed out; automatic fallback is unsafe") from error
 
+    def _require_reference_preflight(self, request: ContentRequest, readiness: HostRunnerSuccess) -> None:
+        """Do not spend an invocation against a stale v8 prompt, schema or binder."""
+        if request.prompt_version != "m6-content-v8":
+            return
+        import hashlib
+        import json
+        from tubeforge.host_codex_runner import codex_output_schema
+        from tubeforge.providers.content.output import REFERENCE_OUTPUT_CONTRACT_VERSION
+        from tubeforge.providers.content.prompts import prompt_evidence
+        schema = codex_output_schema(envelope=True, reference=True, keep_lengths=self.script_owner == "claude")
+        expected_schema = hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        prompt = build_content_prompt(request, template_version=request.prompt_version, max_chars=self._max_prompt_chars())
+        evidence = readiness.provenance
+        if (evidence.get("reference_contract_version") != REFERENCE_OUTPUT_CONTRACT_VERSION
+                or evidence.get("reference_schema_sha256") != expected_schema
+                or evidence.get("prompt_sha256") != prompt_evidence(prompt)["prompt_sha256"]):
+            raise ProviderValidationError("Host reference output contract differs from worker; redeploy host wheel")
+
     def research_sources(self, request: ContentRequest) -> dict:
         """Typed research operation; no narration cache or approval mutation."""
         self._require_owner(request)
@@ -49,6 +67,7 @@ class HostRunnerContentProvider:
                 self._runner_failure(response)
             return response.result
         readiness = call("PreflightContentV1")
+        self._require_reference_preflight(request, readiness)
         if "ResearchSourcesV1" not in readiness.provenance.get("operations", []):
             raise ProviderValidationError("Host runner needs the research update installed before topic research can run")
         return call("ResearchSourcesV1").model_dump(mode="json")
@@ -101,6 +120,8 @@ class HostRunnerContentProvider:
             if "max_prompt_chars" not in str(error):
                 raise
             raise ProviderValidationError(f"the brief and source excerpts are too large for one script prompt: {error}") from error
+        if request.exact_script:
+            self._require_exact_support(request)
         from tubeforge.providers.content.youtube_skills import SKILL_TEMPLATE, SKILL_TEMPLATES, preflight
         from tubeforge.providers.content.prompts import CONTENT_ENVELOPE_TEMPLATES
         if request.prompt_version in SKILL_TEMPLATES:
@@ -118,10 +139,11 @@ class HostRunnerContentProvider:
                 if readiness.failure:
                     self._runner_failure(readiness)
                 raise ProviderValidationError("Host skill resources differ from worker; redeploy host wheel")
-            if request.prompt_version == SKILL_TEMPLATE:
+            if request.prompt_version in {SKILL_TEMPLATE, "m6-content-v8"}:
                 from tubeforge.providers.content.prompts import prompt_evidence
                 if readiness.result.provenance.get("prompt_sha256") != prompt_evidence(prompt)["prompt_sha256"]:
                     raise ProviderValidationError("Host skill preflight failed before invocation: assembled prompt differs; redeploy host wheel")
+            self._require_reference_preflight(request, readiness.result)
             if request.prompt_version in CONTENT_ENVELOPE_TEMPLATES:
                 from tubeforge.providers.content.output import require_source_excerpts
                 require_source_excerpts(request)
@@ -180,6 +202,21 @@ class HostRunnerContentProvider:
             evaluate(package)
         claims = tuple(claim.model_copy(update={"review_status": ClaimReviewStatus.NEEDS_REVIEW, "human_review_required": True}) if claim.time_sensitive or claim.confidence in {ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM} else claim for claim in package.claims)
         return package.model_copy(update={"claims": claims})
+
+    def _require_exact_support(self, request: ContentRequest) -> None:
+        """An exact-script request needs a host runner that knows the field; an older one would reject it with a confusing error."""
+        probe = generation_request_content(request.model_copy(update={"exact_script": False, "operator_script": None, "script_fit_notes": ()}))
+        try:
+            readiness = HostRunnerResponse.model_validate_json(self._call(str(self.config.socket_path), GenerateShortsScriptRequest(operation="PreflightContentV1", request=probe).model_dump_json().encode(), self.config.socket_timeout_seconds))
+        except (RetryableProviderError, ProviderCancellation):
+            raise
+        except OSError as error:
+            raise RetryableProviderError(f"Script runner is not reachable ({error}); retrying automatically") from error
+        operations = readiness.result.provenance.get("operations", []) if readiness.ok and readiness.result else []
+        if "ExactScriptV1" not in operations:
+            raise ProviderValidationError(
+                f"The {self.script_owner.title()} host runner does not support exact scripts yet. Install the updated runner "
+                "(docs/deploy/codex-runner-runtime.md for Codex; restart scripts/run_claude_runner.sh for Claude) or run this video in assisted mode.")
 
     def _max_prompt_chars(self) -> int:
         """The configured ceiling, or the operator's value from the dashboard Settings page."""

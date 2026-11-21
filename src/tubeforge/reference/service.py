@@ -8,9 +8,50 @@ from tubeforge.domain.reference_video import ReferenceSnapshot, TranscriptCue
 from tubeforge.reference.extractor import IntakeFailure, YoutubeReferenceExtractor, check_reference_text
 
 
-def parse_supplied_transcript(value: str):
+def is_plain_transcript(value: str) -> bool:
+    """True for ordinary text: no JSON cue list and no SRT/VTT timing lines."""
+    stripped = value.lstrip().lstrip('\ufeff').lstrip()
+    return bool(stripped) and not stripped.startswith('[') and '-->' not in value
+
+
+def parse_plain_transcript(value: str, duration_seconds: float):
+    """Turn an ordinary transcript into cues spread over the video's length, in proportion to the words spoken.
+
+    The timings are an estimate (a person pasting text has none), so they place each passage roughly, not exactly.
+    Short lines are grouped into cues of about 20 words so the text stays readable.
+    """
+    import math
+    text = re.sub(r'\[\s*\d{1,2}:\d{2}(?::\d{2})?\s*\]|\b\d{1,2}:\d{2}(?::\d{2})?\b(?=\s)', ' ', value.replace('\r\n', '\n').replace('\r', '\n').lstrip('\ufeff'))
+    pieces = [piece.strip() for piece in re.split(r'(?<=[.!?])\s+|\n+', text) if piece.strip()]
+    chunks, current = [], []
+    for piece in pieces:
+        current.append(piece)
+        if sum(len(item.split()) for item in current) >= 20:
+            chunks.append(' '.join(current)); current = []
+    if current:
+        chunks.append(' '.join(current))
+    chunks = [chunk[:3900] for chunk in chunks if chunk.split()]
+    words = [len(chunk.split()) for chunk in chunks]
+    total = sum(words)
+    if not chunks or total < 3 or not math.isfinite(duration_seconds) or duration_seconds <= 0:
+        raise ValueError('Supply the transcript text and capture the video first so its length is known.')
+    cues, spoken = [], 0
+    for chunk, count in zip(chunks, words):
+        start = duration_seconds * spoken / total
+        spoken += count
+        end = min(duration_seconds, max(duration_seconds * spoken / total, start + 0.05))
+        cues.append(TranscriptCue(start_seconds=round(start, 3), end_seconds=round(end, 3), text=chunk))
+    if len(cues) > 10000:
+        raise ValueError('Supply between one and 10,000 timestamped cues.')
+    check_reference_text('', '', tuple(cues))
+    return tuple(cues)
+
+
+def parse_supplied_transcript(value: str, duration_seconds: float | None = None):
     if not value.strip() or len(value.encode('utf-8'))>1_000_000:
-        raise ValueError('Supply a nonempty SRT, VTT or JSON transcript under 1 MB.')
+        raise ValueError('Supply a nonempty transcript under 1 MB (plain text, SRT, VTT or JSON).')
+    if is_plain_transcript(value):
+        return parse_plain_transcript(value, float(duration_seconds or 0))
     if value.lstrip().startswith('['):
         cues=tuple(TranscriptCue.model_validate(c) for c in json.loads(value))
     else:

@@ -1,0 +1,93 @@
+/*
+  TubeForge dashboard design tokens — THE ONLY PLACE COLORS, FONTS, RADII AND WIDTHS ARE DEFINED.
+
+  How to change the look:
+    1. Change a value below.
+    2. Run: python scripts/check_design.py
+    3. Run: python scripts/screenshot_design_guide.py   and Read the PNGs it prints.
+
+  Rules:
+    - Never add a hex color anywhere else (HTML, JS, Python strings). Add a token here instead.
+    - Every token here must also appear in design/tailwind.config.js (the checker enforces this).
+    - The dashboard is dark only (operator decision). There is no light theme.
+*/
+:root {
+  color-scheme: dark;
+
+  /* Surfaces: page → panel → raised (dialogs, hovered rows) → input wells */
+  --tf-bg: #0b111b;
+  --tf-surface: #121b28;
+  --tf-raised: #1a2638;
+  --tf-input: #0e1622;
+
+  /* Lines */
+  --tf-line: #263447;
+  --tf-line-strong: #556a86;
+
+  /* Text */
+  --tf-text: #e6edf6;      /* body and headings */
+  --tf-muted: #a3b3c8;     /* secondary text, help text (AA on all surfaces) */
+  --tf-faint: #7d8fa7;     /* placeholders and disabled text only */
+
+  /* Accent: "scope cyan", from video waveform monitors.
+     Use ONLY for: primary buttons, focus rings, current nav item, the current stage in a stage track. */
+  --tf-accent: #6fd8e8;
+  --tf-accent-ink: #052a31;    /* text on an accent background */
+  --tf-accent-soft: #10303a;   /* current nav item background */
+
+  /* Status: each has a strong color (text/icon) and a soft color (background). Never use these as decoration. */
+  --tf-ok: #7ddc9f;
+  --tf-ok-soft: #12301f;
+  --tf-warn: #f0c674;
+  --tf-warn-soft: #33290f;
+  --tf-bad: #ff9a9a;
+  --tf-bad-soft: #3a1a1e;
+  --tf-info: #a9bfff;
+  --tf-info-soft: #1a2442;
+
+  /* Behind open dialogs and the mobile nav drawer */
+  --tf-scrim: rgb(3 6 12 / 0.72);
+
+  /* Danger button (destructive actions) */
+  --tf-danger: #b9404d;
+  --tf-danger-ink: #fff4f5;
+
+  /* Type */
+  --tf-font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --tf-font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Shape: exactly three radii */
+  --tf-radius-sm: 4px;   /* badges, chips, checkboxes */
+  --tf-radius-md: 8px;   /* buttons, inputs, list rows */
+  --tf-radius-lg: 12px;  /* panels and dialogs */
+
+  /* Widths */
+  --tf-sidebar: 232px;
+  --tf-content: 1200px;  /* every page's main column */
+  --tf-form: 720px;      /* forms and reading text */
+}
+
+/* Base styles that Tailwind classes cannot express. Keep this list short. */
+html { background: var(--tf-bg); }
+body {
+  margin: 0;
+  background: var(--tf-bg);
+  color: var(--tf-text);
+  font: 400 14px/1.55 var(--tf-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 2px solid var(--tf-accent); outline-offset: 2px; }
+::placeholder { color: var(--tf-faint); }
+dialog::backdrop { background: var(--tf-scrim); }
+.tf-mono { font-family: var(--tf-font-mono); font-variant-numeric: tabular-nums; }
+
+/* Guide only (body.tf-guide): the guide's own text layout. The dashboard pages do not use this class. */
+.tf-guide :is(h1, h2, h3, h4, p, ul, ol, dl, dd, pre, figure) { margin: 0; }
+
+/* App shell: the sidebar is a drawer below 1024px (opened by tubeforge-ui.js), always visible from 1024px. */
+.tf-nav { display: none; }
+.tf-nav[data-open="true"] { display: flex; }
+@media (min-width: 1024px) { .tf-nav { display: flex; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

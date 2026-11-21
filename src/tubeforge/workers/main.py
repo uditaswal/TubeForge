@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import time
 import uuid
@@ -14,9 +15,21 @@ from tubeforge.workers.service import WorkerService
 
 def main() -> None:
     """Poll conservatively; each expensive operation remains globally leased."""
+    from tubeforge.core.tempdir import ensure_tempdir
+    ensure_tempdir()
     settings = load_settings()
+    kinds = os.environ.get("TUBEFORGE_WORKER_MODES", "").strip().lower()
+    if kinds:
+        if kinds not in {"all", "clips", "shorts"}:
+            raise SystemExit("TUBEFORGE_WORKER_MODES must be all, clips or shorts")
+        settings.worker.job_kinds = kinds
     runtime = create_runtime(settings)
     worker = WorkerService(f"worker-{uuid.uuid4().hex}", runtime.jobs, runtime.orchestrator, settings.worker)
+    from tubeforge.core.job_focus import JobFocus, focus_path
+    try:
+        worker.focus = JobFocus(focus_path(settings.pipeline.voice.artifact_root))
+    except AttributeError:  # a stripped-down settings object (tests); the worker then simply has no focus
+        worker.focus = None
     stopping = False
 
     def stop(_: int, __: object) -> None:

@@ -1,20 +1,24 @@
 """Batch intake surface; shares Studio tokens and operator authentication."""
-from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_CSS, SCRIPT_TOOLS_SCRIPT
-from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
+from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_SCRIPT
+from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 
 _MAIN_HTML = '''<main>
 <div class="studio-page-head"><div><h1>Batch plans</h1><p class="sub">Import shorts for review. Publish dates are metadata only.</p></div><a href="/batch/review" class="button-link">Day review queue</a></div>
 <section class="panel">
 <h2>Import a plan</h2>
 <p class="sub">One markdown file, one short per heading. Re-importing skips identical IDs and reports conflicts.</p>
-<label for="batchPlan">Plan ID</label><input id="batchPlan" value="default" pattern="[a-z0-9-]{1,80}" required>
 <form id="batchForm">
-<div id="dropZone" class="dropzone" role="button" tabindex="0" aria-label="Choose or drop a markdown plan file"><strong>Drop a .md plan here</strong><span>or press Enter to choose a file</span></div>
-<label for="batchFile">Markdown file</label><input id="batchFile" type="file" accept=".md,.markdown,text/markdown,text/plain">
-<label for="batchText">Markdown plan</label><textarea id="batchText" required></textarea>
+<div id="dropZone" class="planbox" aria-label="Markdown plan: paste it here or drop a file onto this box">
+<textarea id="batchText" required spellcheck="false" aria-label="Markdown plan" placeholder="Paste your plan here, or drop a .md file onto this box.&#10;&#10;## My short&#10;```yaml&#10;title: Why caching is hard&#10;concept: Explain cache invalidation with one real outage&#10;```&#10;&#10;Small mistakes (a missing id, a wrong length, an unknown field) are fixed for you and listed below."></textarea>
+<div class="planbar"><button type="button" id="chooseFile" class="small secondary">Choose a file…</button><input id="batchFile" type="file" hidden accept=".md,.markdown,text/markdown,text/plain">
+<label class="inline" for="batchPlan">Plan ID <input id="batchPlan" value="default" pattern="[a-z0-9\\-]{1,80}" required></label>
+<label class="inline" for="scriptMode">Scripts <select id="scriptMode"><option value="">As set in each short</option><option value="assist">Assist: the writer fits and checks my script</option><option value="exact">Exact: use my script word for word</option></select></label></div>
+</div>
 <ol id="importErrors" class="import-errors" role="alert" hidden></ol>
+<details id="importNotes" class="import-notes" hidden><summary id="importNotesSummary"></summary><ul id="importNotesList"></ul></details>
 <p id="scriptFit" class="sub" role="status" aria-live="polite"></p>
-<div class="actions"><button id="validate" type="submit">Validate and preview</button><button id="commit" type="button" class="secondary" disabled>Commit import</button></div>
+<div class="actions"><button id="validate" type="submit">Validate and preview</button><button id="commit" type="button" class="secondary" aria-describedby="commitHint" disabled>Commit import</button></div>
+<p id="commitHint" class="sub">Commit import unlocks after Validate and preview passes with no errors, and locks again if you edit the plan.</p>
 </form>
 </section>
 <section class="panel">
@@ -42,45 +46,9 @@ _MAIN_HTML = '''<main>
 </section>
 </main>'''
 
-_PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batch plans — TubeForge</title><style>''' + STUDIO_CSS + SCRIPT_TOOLS_CSS + '''
-main{max-width:980px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
-.panel h2{margin:0 0 4px}
-.panel>p.sub{margin:0 0 18px}
-.field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:4px 16px;margin-bottom:4px}
-.field-grid label{margin:14px 0 6px}
-.checkbox{display:flex;align-items:center;gap:8px;margin:14px 0;color:#d5e0ee;font-size:12px;font-weight:540}
-.checkbox input{margin:0}
-.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;align-items:center}
-a.button-link{display:inline-flex;align-items:center;flex:none;background:#223346;color:#eaf4ff;border:1px solid #3c5067;border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
-a.button-link:hover{background:#2d4258;border-color:#60758c}
-.dropzone{display:flex;flex-direction:column;align-items:center;gap:4px;padding:22px 16px;margin-bottom:6px;border:1.5px dashed #3c5067;border-radius:12px;background:#0f1a28;color:#d5e0ee;cursor:pointer;text-align:center}
-.dropzone span{color:var(--muted);font-size:12px}
-.dropzone:hover,.dropzone:focus-visible,.dropzone.over{border-color:var(--cyan);background:#12263a;outline:none}
-.import-errors{margin:12px 0 0;padding:10px 12px 10px 30px;border:1px solid #7a3b46;border-radius:10px;background:#2a1519;color:#ffd5db;font-size:13px}
-.import-errors li{margin:4px 0}.import-errors button{background:none;border:0;color:#ffb3bf;text-decoration:underline;padding:0;font:inherit;cursor:pointer}
-.day-group{margin-top:20px}.day-group h3{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:15px}
-.day-group h3 .count{color:var(--muted);font-size:12px;font-weight:500}.day-group h3 label{margin:0 0 0 auto;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--muted)}
-.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.short-card{display:flex;flex-direction:row;border:1px solid var(--line);border-radius:14px;background:#0f1a28;overflow:hidden}
-.short-card .thumb{flex:none;align-self:flex-start;width:84px;aspect-ratio:9/16;background:#162538;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;overflow:hidden}
-.short-card .thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.short-card .body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
-.short-card .pick{display:flex;gap:8px;align-items:flex-start;margin:0;font-weight:600;color:#eaf4ff}
-.short-card .meta{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
-.stages{display:flex;flex-wrap:wrap;gap:4px;margin:0;padding:0;list-style:none}
-.stages li{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
-.stages li.done{color:#9fd9b6;border-color:#2c5a43}.stages li.current{background:#1d4a6d;border-color:var(--cyan);color:#eaf4ff;font-weight:600}
-.stages li.attention{background:#4a1d26;border-color:#a8505e;color:#ffd5db;font-weight:600}
-.safety-box{margin:0 0 14px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:#0f1a28}.safety-box summary{cursor:pointer;color:#f1d9a6;font-size:13px}.safety-warnings{margin:8px 0 0;padding-left:18px;color:#f1d9a6;font-size:13px;max-height:240px;overflow:auto}.safety-warnings li.info{color:var(--muted)}
-.short-card a{font-size:12px}
-@media(max-width:640px){.card-grid{grid-template-columns:1fr}}
-textarea{display:block;width:100%;min-height:200px}
-label{display:block;margin:14px 0 6px}
-#day{display:inline-block;width:auto;margin-right:8px}
-.day-row{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:14px}
-.day-row label{margin:0}
-</style>
-'''
+
+_PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batch plans — TubeForge</title>'
+              + '\n')
 
 
 def render_batch_html(username: str | None = None) -> str:
@@ -107,11 +75,12 @@ function showErrors(list){errorsEl.hidden=!list.length;errorsEl.innerHTML=list.m
 errorsEl.onclick=e=>{const line=Number(e.target&&e.target.dataset&&e.target.dataset.line);if(!line)return;const lines=input.value.split('\\n');const start=lines.slice(0,line-1).join('\\n').length+(line>1?1:0);input.focus();input.setSelectionRange(start,start+(lines[line-1]||'').length);};
 async function readPlanFile(f){input.value=f?await f.text():'';input.oninput()}
 const drop=document.querySelector('#dropZone');
-drop.onclick=()=>file.click();drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();file.click()}};
-drop.ondragover=e=>{e.preventDefault();drop.className='dropzone over'};drop.ondragleave=()=>{drop.className='dropzone'};
-drop.ondrop=async e=>{e.preventDefault();drop.className='dropzone';const f=e.dataTransfer&&e.dataTransfer.files[0];if(f)await readPlanFile(f)};
-input.oninput=()=>{validated=null;commit.disabled=true;showErrors([])};file.onchange=()=>readPlanFile(file.files[0]);
-async function submit(save){if(busy)return;if(save&&validated!==input.value)return;busy=true;commit.disabled=true;document.querySelector('#validate').disabled=true;result.textContent=save?'Saving import…':'Validating…';try{const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');const response=await fetch('/api/batch-plans/import',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({markdown:input.value,commit:save,plan_id:document.querySelector('#batchPlan').value||'default'})});const data=await response.json();if(!response.ok){validated=null;if(Array.isArray(data.detail)){showErrors(data.detail);throw Error(`${data.detail.length} problem${data.detail.length===1?'':'s'} found in the plan. Nothing was saved.`)}throw Error(data.detail)}showErrors([]);display(data.items);document.querySelector('#scriptFit').textContent=Object.entries(data.script_fit||{}).map(([id,f])=>id+': '+f.words+' words, '+f.estimated_seconds+' s of speech ('+f.suggestion+')').join(' · ');document.querySelector('#cadenceWarnings').textContent=(data.cadence?.warnings||[]).map(w=>`${w.ids.join(', ')}: ${w.code}`).join(' · ')||'No cadence warnings in the available publish metadata.';if(save)loadSafety();validated=input.value;result.textContent=save?'Import saved. Conflicts were preserved.':'Validation passed. Review the rows before committing.';}catch(e){result.textContent=e.message;}finally{busy=false;document.querySelector('#validate').disabled=false;commit.disabled=validated!==input.value||validated===null;}}
+document.querySelector('#chooseFile').onclick=()=>file.click();
+drop.ondragover=e=>{e.preventDefault();drop.className='planbox over'};drop.ondragleave=()=>{drop.className='planbox'};
+drop.ondrop=async e=>{e.preventDefault();drop.className='planbox';const f=e.dataTransfer&&e.dataTransfer.files[0];if(f)await readPlanFile(f)};
+function showNotes(list){const box=document.querySelector('#importNotes');box.hidden=!list.length;document.querySelector('#importNotesSummary').textContent=list.length?list.length+' small thing'+(list.length===1?' was':'s were')+' fixed or ignored automatically (nothing blocks the import)':'';document.querySelector('#importNotesList').innerHTML=list.map(n=>`<li>Line ${esc(n.line)}: ${esc(n.message)}</li>`).join('')}
+input.oninput=()=>{validated=null;commit.disabled=true;showErrors([]);showNotes([])};file.onchange=()=>readPlanFile(file.files[0]);
+async function submit(save){if(busy)return;if(save&&validated!==input.value)return;busy=true;commit.disabled=true;document.querySelector('#validate').disabled=true;result.textContent=save?'Saving import…':'Validating…';try{const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');const response=await fetch('/api/batch-plans/import',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({markdown:input.value,commit:save,plan_id:document.querySelector('#batchPlan').value||'default',script_mode:document.querySelector('#scriptMode').value||null})});const data=await response.json();if(!response.ok){validated=null;if(Array.isArray(data.detail)){showErrors(data.detail);throw Error(`${data.detail.length} problem${data.detail.length===1?'':'s'} found in the plan. Nothing was saved.`)}throw Error(data.detail)}showErrors([]);showNotes(data.parse_notes||[]);display(data.items);document.querySelector('#scriptFit').textContent=Object.entries(data.script_fit||{}).map(([id,f])=>id+': '+f.words+' words, '+f.estimated_seconds+' s of speech ('+f.suggestion+')'+(f.exact?' · exact mode'+(f.exact_notes&&f.exact_notes.length?': '+f.exact_notes.join(' '):': used as written'):'')).join(' · ');document.querySelector('#cadenceWarnings').textContent=(data.cadence?.warnings||[]).map(w=>`${w.ids.join(', ')}: ${w.code}`).join(' · ')||'No cadence warnings in the available publish metadata.';if(save)loadSafety();validated=input.value;result.textContent=save?'Import saved. Conflicts were preserved.':'Validation passed. Review the rows before committing.';}catch(e){result.textContent=e.message;}finally{busy=false;document.querySelector('#validate').disabled=false;commit.disabled=validated!==input.value||validated===null;}}
 document.querySelector('#day').onchange=async()=>{try{const r=await fetch(planURL());if(!r.ok)throw Error('Could not load day');const items=await r.json();display(items.filter(x=>!document.querySelector('#day').value||(x.short.publish_at||'').slice(0,10)===document.querySelector('#day').value));}catch(e){result.textContent=e.message}};
 document.querySelector('#produce').onclick=async e=>{const ids=[...document.querySelectorAll('.batch-select:checked')].map(x=>x.value);if(!ids.length){result.textContent='Select at least one short.';return}e.currentTarget.disabled=true;try{const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');const r=await fetch('/api/batch-plans/produce',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({ids})});if(!r.ok)throw Error(await r.text());result.textContent='Jobs queued. Script and preview approvals remain required in Generations.';document.querySelector('#day').onchange();}catch(e){result.textContent=e.message}finally{document.querySelector('#produce').disabled=false}};
 setInterval(async()=>{try{const response=await fetch(planURL());if(!response.ok)return;const items=await response.json();for(const row of rows.querySelectorAll('[data-short]')){const item=items.find(x=>x.short.id===row.dataset.short);if(item){const state=item.action||item.status,stateEl=row.querySelector('.batch-state'),qaEl=row.querySelector('.batch-qa');stateEl.textContent=state;stateEl.className='badge batch-state '+stateBadgeClass(state);row.querySelector('.stages').innerHTML=stagesHTML(item.stage);const thumb=row.querySelector('.thumb');if(item.thumbnail_url&&!thumb.querySelector('img'))thumb.innerHTML=thumbHTML(item);qaEl.textContent=qaText(item.qa);qaEl.className='badge batch-qa '+qaBadgeClass(item.qa);}}const p=items[0]?.progress;if(p)document.querySelector('#progress').textContent=`${p.finished} / ${p.total} finished · ${p.eta_seconds===null?'ETA unavailable while awaiting measured work or approvals':`About ${Math.ceil(p.eta_seconds/60)} minutes remaining`}`;}catch(_){/* Keep the visible rows and selection during background refresh. */}},10000);

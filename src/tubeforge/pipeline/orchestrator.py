@@ -46,13 +46,23 @@ from tubeforge.pipeline.diagnostics import stage_clock, stage_measurement
 from tubeforge.rendering.audio import FFmpegAudioAssembler, FFprobe
 from tubeforge.rendering.loudness import MUSIC_LOUDNESS_VERSION
 from tubeforge.rendering.preview import PreviewRenderCancelled, PreviewRenderer, build_timeline, maximum_static_hold, pace_segments
-from tubeforge.clipping.analysis import Highlight, analyze_wav
-from tubeforge.clipping.render import extract_audio, probe as probe_clip, render_vertical
 from tubeforge.clipping.source import YtDlpSourceProvider
+from tubeforge.clips.cancellation import TaskCancelled
+from tubeforge.pipeline.clip_runs import ClipRunner, EngineClipRunner
 
 
 class PipelineInterrupted(RuntimeError):
     """Test-only interruption after a durable checkpoint has been written."""
+
+
+def artifacts_cookies(artifact_root) -> Path:
+    """data/config/youtube-cookies.txt, next to the artifacts folder."""
+    return Path(artifact_root).parent / "config" / "youtube-cookies.txt"
+
+
+RELAXED_ACCURACY_NOTE = ("Accuracy mode set by the operator: the operator's notes, script and reference are the evidence. Do not return insufficient_sources and do not refuse for "
+                         "missing outside sources. Where a fact is uncertain, say it plainly or leave it out, and mark that claim human_review_required.")
+CLIP_PUBLIC_FIELDS = ("start_time", "end_time", "duration", "text", "hook_title", "relevance_score", "reasoning", "virality_score", "hook_score", "engagement_score", "value_score", "shareability_score", "hook_type")
 
 
 class PipelineCancellation(RuntimeError):
@@ -75,7 +85,7 @@ def _event(event: str, **fields: object) -> None:
 class PipelineOrchestrator:
     """Run one job synchronously, committing only short persistence operations."""
 
-    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None, youtube_config: YouTubePublishingConfig | None = None, verification_config: PublicationVerificationConfig | None = None, source_ingestor: SourceIngestor | None = None, source_clips: SourceClipConfig | None = None, source_provider: YtDlpSourceProvider | None = None, source_media: SourceMediaRepository | None = None, shorts_preview_config: ShortsPreviewRenderConfig | None = None, shorts_final_config: ShortsFinalRenderConfig | None = None, word_aligner: LocalWordAligner | None = None, shorts_preview_renderer: PreviewRenderer | None = None, shorts_final_renderer: PreviewRenderer | None = None, music_catalog: MusicCatalog | None = None) -> None:
+    def __init__(self, jobs: JobRepository, artifacts: ArtifactRepository, approvals: ApprovalRepository, content: ContentProvider, media: MediaProvider, voice: VoiceProvider, publisher: Publisher, artifact_root: Path, external_operations: ExternalOperationRepository | None = None, voice_config: VoicePipelineConfig | None = None, audio_assembler: FFmpegAudioAssembler | None = None, ffprobe: FFprobe | None = None, asset_acquirer: AssetAcquisitionService | None = None, asset_limits: AssetLimits | None = None, preview_renderer: PreviewRenderer | None = None, final_renderer: PreviewRenderer | None = None, preview_config: PreviewRenderConfig | None = None, final_config: FinalRenderConfig | None = None, publication_config: PublicationPreparationConfig | None = None, youtube_config: YouTubePublishingConfig | None = None, verification_config: PublicationVerificationConfig | None = None, source_ingestor: SourceIngestor | None = None, source_clips: SourceClipConfig | None = None, source_provider: YtDlpSourceProvider | None = None, clip_runner: ClipRunner | None = None, source_media: SourceMediaRepository | None = None, shorts_preview_config: ShortsPreviewRenderConfig | None = None, shorts_final_config: ShortsFinalRenderConfig | None = None, word_aligner: LocalWordAligner | None = None, shorts_preview_renderer: PreviewRenderer | None = None, shorts_final_renderer: PreviewRenderer | None = None, music_catalog: MusicCatalog | None = None) -> None:
         self.jobs, self.artifacts, self.approvals = jobs, artifacts, approvals
         self.events = JobEventRepository(artifacts._session_factory)
         self._state_clock: dict[str, tuple[JobState, float]] = {}
@@ -100,7 +110,8 @@ class PipelineOrchestrator:
         self.source_ingestor = source_ingestor
         self.channel_approved_sources: dict[str, tuple[SourceReference, ...]] = {}
         self.source_clips = source_clips or SourceClipConfig()
-        self.source_provider = source_provider or YtDlpSourceProvider(self.source_clips.ytdlp_executable, self.source_clips.timeout_seconds)
+        self.source_provider = source_provider or YtDlpSourceProvider(self.source_clips.ytdlp_executable, self.source_clips.timeout_seconds, cookies_file=artifacts_cookies(artifact_root))
+        self.clip_runner: ClipRunner = clip_runner or EngineClipRunner(self.source_clips)
         self.source_media = source_media or SourceMediaRepository(artifacts._session_factory)
         self.visual_router = VisualRouter()
         self.music_catalog = music_catalog
@@ -123,6 +134,15 @@ class PipelineOrchestrator:
         orchestrator.retired_prompt_versions = frozenset(settings.pipeline.video_generation.retired_prompt_versions)
         orchestrator.pixabay_config = settings.pipeline.pixabay
         orchestrator.capture_config = settings.pipeline.source_capture
+        # Clip selection asks the host Claude runner; the clip engine shares the narration alignment's Whisper model.
+        from tubeforge.providers.content.clip_runner import ClipRunnerTransport
+
+        whisper_path = settings.pipeline.reference_short.alignment_model_path
+        orchestrator.clip_runner = EngineClipRunner(
+            settings.pipeline.source_clips,
+            transport=ClipRunnerTransport(settings.pipeline.claude.socket_path) if settings.pipeline.claude.enabled else None,
+            whisper_model=str(whisper_path) if whisper_path else None,
+        )
         return orchestrator
 
     def run(self, job_id: str, *, operator_resolved: bool = False, authentication_restored: bool = False, interrupt_after: JobState | None = None, cancellation_requested: Callable[[], bool] | None = None, ownership_check: Callable[..., bool] | None = None) -> PipelineJob:
@@ -207,6 +227,100 @@ class PipelineOrchestrator:
             if job.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.FINAL_READY, JobState.PUBLICATION_APPROVAL_REQUIRED, JobState.PUBLICATION_READY, JobState.PUBLICATION_VERIFICATION_PENDING}:
                 return job
 
+    def _parent_clip(self, job: PipelineJob) -> dict[str, object]:
+        """The approved clip a child job was made from, re-verified against the checksum it was approved with."""
+        parent_id, name, checksum = str(job.request.clip_of).split(":")
+        artifact = self.artifacts.get(parent_id, JobState.CLIP_RENDERING, name)
+        if artifact is None or artifact.checksum_sha256 != checksum:
+            raise ProviderValidationError("the approved clip no longer matches the file that was approved")
+        digest = hashlib.sha256()
+        with Path(artifact.path).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""): digest.update(chunk)
+        if digest.hexdigest() != checksum:
+            raise ProviderValidationError("the approved clip file changed after approval")
+        manifest = self._required_json(parent_id, JobState.CLIP_RENDERING, "clip_manifest")
+        candidate = next((item["candidate"] for item in manifest["clips"] if item["name"] == name), {})
+        return {"path": artifact.path, "candidate": candidate, "source_metadata": self._required_json(parent_id, JobState.SOURCE_INSPECTING, "source_metadata")}
+
+    def _clip_limits(self) -> tuple[int, int]:
+        """(longest source in seconds, largest download in bytes): the operator's Settings value, else the config default."""
+        from tubeforge.core import runtime_settings
+        values = runtime_settings.shared()
+        minutes = values.value("clips.max_source_minutes", self.source_clips.max_source_duration_seconds // 60)
+        gigabytes = values.value("clips.max_download_gb", -(-self.source_clips.max_download_bytes // 1_000_000_000))
+        return int(minutes) * 60, int(gigabytes) * 1_000_000_000
+
+    def _clip_window(self, job: PipelineJob, duration: float | None, limit: int) -> tuple[list[float] | None, bool]:
+        """Which part of the source to use. A video longer than the limit is trimmed to its first stretch instead of refused."""
+        start = job.request.source_start_seconds
+        length = job.request.source_length_seconds
+        chosen = start is not None or length is not None
+        start = float(start or 0)
+        length = float(min(length or limit, limit))
+        if duration is None:
+            return ([start, start + length] if chosen else None), False
+        if start >= duration:
+            raise ProviderValidationError(f"The start time is after the end of the video ({int(duration // 60)} minutes).")
+        end = min(float(duration), start + length)
+        if not chosen and duration <= limit:
+            return None, False
+        return [start, end], (not chosen and duration > limit)
+
+    def _accurate_whisper_model(self) -> str | None:
+        """The larger (small.en) Whisper snapshot next to the standard one, or ``None`` when it was not downloaded."""
+        standard = str(getattr(getattr(self, "clip_runner", None), "whisper_model", None) or "")
+        if len(Path(standard).parents) < 3:
+            return None
+        models = Path(standard).parents[2]
+        found = sorted((models / "models--Systran--faster-whisper-small.en" / "snapshots").glob("*/model.bin"))
+        return str(found[-1].parent) if found else None
+
+    def _clip_params(self, job: PipelineJob) -> dict[str, object]:
+        limit, download_bytes = self._clip_limits()
+        metadata = self._load_json_artifact(job.id, JobState.SOURCE_INSPECTING, "source_metadata") or {}
+        duration = metadata.get("duration_seconds")
+        window, trimmed = self._clip_window(job, float(duration) if duration else None, limit)
+        from tubeforge.core import runtime_settings
+        value = runtime_settings.shared().value
+        return {"source_url": str(job.request.source_url), "clip_count": job.request.clip_count, "captions": bool(job.request.captions_enabled),
+                "engaging_only": bool(value("clips.engaging_only", self.source_clips.engaging_only)),
+                "max_clip_seconds": min(float(job.request.target_duration_seconds), float(value("clips.max_clip_seconds", self.source_clips.max_clip_seconds))),
+                "signal_windows": value("clips.signal_windows", 8), "signal_window_before": value("clips.signal_window_before", 60),
+                "signal_window_after": value("clips.signal_window_after", 90), "whisper_threads": value("clips.whisper_threads", 4),
+                "max_height": value("clips.max_height", 1080), "cache_days": value("clips.cache_days", 7),
+                "direct_sections": bool(value("clips.direct_sections", True)), "download_connections": value("clips.download_connections", 1),
+                "analysis_window_max_chars": value("clips.analysis_window_max_chars", 24_000),
+                "whisper_model": self._accurate_whisper_model() if bool(value("clips.accurate_transcription", True)) else None,
+                "max_source_seconds": limit, "max_download_bytes": download_bytes, "cookies_file": str(artifacts_cookies(self.artifact_root)),
+                "instructions": " ".join(note.strip() for note in job.request.notes if note.strip())[:1000] or None,
+                "source_window": window, "source_trimmed": trimmed, "cache_dir": str(self.artifact_root.parent / "cache" / "clips-source"), "source_duration_seconds": duration}
+
+    def _clip_call(self, call, job: PipelineJob, cancellation_requested: Callable[[], bool] | None):
+        params = self._required_json(job.id, JobState.SOURCE_ACQUIRING, "clip_plan")
+        try:
+            return call(job.id, self._artifact_path(job.id, "clip-work"), params, cancellation_requested)
+        except TaskCancelled as error:
+            raise PipelineCancellation("cancelled during clip processing") from error
+        except (ProviderValidationError, RetryableProviderError, PipelineCancellation):
+            raise
+        except Exception as error:
+            raise self._clip_failure(error) from error
+
+    @staticmethod
+    def _clip_failure(error: Exception) -> Exception:
+        """An engine failure becomes a job outcome: retry what may recover, fail the job with a reason otherwise.
+        Anything else escaping here would take the whole worker down."""
+        kind, text = type(error).__name__, str(error)[:600]
+        if "sign in to confirm" in text.replace("\u2019", "'").lower():
+            return ProviderValidationError("YouTube asked to confirm this is not a bot. Export your YouTube cookies from a logged-in browser as a Netscape cookies.txt file, save it as data/config/youtube-cookies.txt, and retry (see docs/clips.md).")
+        if kind == "DownloadBudgetExceeded":
+            return ProviderValidationError(f"The video is larger than the download limit ({text}). Raise pipeline.source_clips.max_download_bytes or pick a shorter video.")
+        if kind == "RunnerError" and ("not reachable" in text or "quota" not in text and "refused" not in text):
+            return RetryableProviderError(f"The Claude runner is unavailable: {text}")
+        if isinstance(error, (OSError, TimeoutError)):
+            return RetryableProviderError(f"Clip processing hit a temporary problem ({kind}): {text}")
+        return ProviderValidationError(f"Clip processing failed ({kind}): {text}")
+
     def _run_stage(self, job: PipelineJob, cancellation_requested: Callable[[], bool] | None = None) -> None:
         if job.request.prompt_version == "m6-content-long-v1":
             raise ProviderValidationError("Use the long-form script preparation workflow. Landscape rendering is a separate phase.")
@@ -218,74 +332,57 @@ class PipelineOrchestrator:
             if not self.source_clips.enabled:
                 raise ProviderValidationError("source clipping is disabled by local configuration")
             metadata = self._load_json_artifact(job.id, JobState.SOURCE_INSPECTING, "source_metadata")
+            if metadata is None and job.request.clip_of:
+                metadata = self._parent_clip(job)["source_metadata"]
+                self._checkpoint_json(job.id, JobState.SOURCE_INSPECTING, "source_metadata", metadata)
+                self.source_media.save(SourceMedia(job.id, "yt-dlp", str(metadata["url"]), str(metadata.get("id")) if metadata.get("id") else None, str(metadata.get("uploader")) if metadata.get("uploader") else None, str(metadata.get("title")) if metadata.get("title") else None, metadata.get("duration_seconds"), metadata))
             if metadata is None:
+                from tubeforge.core import runtime_settings
+                self.source_provider.timeout_seconds = int(runtime_settings.shared().value("clips.inspect_timeout_seconds", self.source_clips.timeout_seconds))
                 metadata = self.source_provider.inspect(str(job.request.source_url))
-                if metadata.get("duration_seconds") is not None and float(metadata["duration_seconds"]) > self.source_clips.max_source_duration_seconds:
-                    raise ProviderValidationError("source exceeds the configured maximum duration")
+                if metadata.get("duration_seconds") is not None and float(metadata["duration_seconds"]) > 43_200:
+                    raise ProviderValidationError("source is longer than 12 hours; pick a part of it on the Clips page")
                 self._checkpoint_json(job.id, JobState.SOURCE_INSPECTING, "source_metadata", metadata)
                 self.source_media.save(SourceMedia(job.id, "yt-dlp", str(metadata["url"]), str(metadata.get("id")) if metadata.get("id") else None, str(metadata.get("uploader")) if metadata.get("uploader") else None, str(metadata.get("title")) if metadata.get("title") else None, float(metadata["duration_seconds"] or 0), metadata))
             self._transition(job, JobState.SOURCE_ACQUIRING); return
         if job.state is JobState.SOURCE_ACQUIRING:
-            existing = self._valid_artifact(job.id, JobState.SOURCE_ACQUIRING, "source_media")
-            if existing is None:
-                if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before source acquisition")
-                source = self.source_provider.acquire(str(job.request.source_url), self._artifact_path(job.id, "source"), captions=job.request.captions_enabled)
-                metadata = self._required_json(job.id, JobState.SOURCE_INSPECTING, "source_metadata")
-                if not metadata.get("duration_seconds"):
-                    source_probe = probe_clip(self.source_clips.ffprobe_executable, source)
-                    duration = float(source_probe["duration_seconds"])
-                    if duration <= 0 or duration > self.source_clips.max_source_duration_seconds:
-                        raise ProviderValidationError("acquired source has an invalid or over-limit duration")
-                    metadata["duration_seconds"] = duration
-                    metadata["local_probe"] = source_probe
-                    self._replace_json(job.id, JobState.SOURCE_INSPECTING, "source_metadata", metadata)
-                    self.source_media.save(
-                        SourceMedia(
-                            job.id,
-                            "yt-dlp",
-                            str(metadata["url"]),
-                            str(metadata.get("id")) if metadata.get("id") else None,
-                            str(metadata.get("uploader")) if metadata.get("uploader") else None,
-                            str(metadata.get("title")) if metadata.get("title") else None,
-                            duration,
-                            metadata,
-                        )
-                    )
-                existing = self._save_file(job.id, JobState.SOURCE_ACQUIRING, "source_media", source, {"provider": "yt-dlp", "url": str(job.request.source_url)})
-                subtitles = sorted(path for path in source.parent.glob("source*.srt") if path.is_file() and path.stat().st_size)
-                if subtitles:
-                    self._save_file(job.id, JobState.SOURCE_ACQUIRING, "source_captions", subtitles[0], {"provider": "yt-dlp", "language": "en", "automatic": True})
+            if self._load_json_artifact(job.id, JobState.SOURCE_ACQUIRING, "clip_plan") is None:
+                plan = self._clip_params(job)
+                self._checkpoint_json(job.id, JobState.SOURCE_ACQUIRING, "clip_plan", plan)
+                if plan.get("source_window"):
+                    self.events.append(job.id, "source_trimmed" if plan["source_trimmed"] else "source_part_selected", window=plan["source_window"], duration_seconds=plan.get("source_duration_seconds"), limit_seconds=plan["max_source_seconds"])
             self._transition(job, JobState.SOURCE_ANALYZING); return
         if job.state is JobState.SOURCE_ANALYZING:
-            analysis = self._load_json_artifact(job.id, JobState.SOURCE_ANALYZING, "highlight_candidates")
-            if analysis is None:
-                source = self._required_artifact(job.id, JobState.SOURCE_ACQUIRING, "source_media")
-                metadata = self._required_json(job.id, JobState.SOURCE_INSPECTING, "source_metadata")
-                wav = self._artifact_path(job.id, "analysis/source.wav")
-                if not wav.exists(): extract_audio(self.source_clips.ffmpeg_executable, Path(source.path), wav)
-                self._save_file(job.id, JobState.SOURCE_ANALYZING, "analysis_audio", wav, {"source_checksum": source.checksum_sha256, "format": "wav-mono-22050"})
-                highlights = analyze_wav(wav, window_seconds=self.source_clips.analysis_window_seconds, duration_seconds=float(metadata["duration_seconds"]), min_duration=self.source_clips.min_clip_seconds, max_duration=self.source_clips.max_clip_seconds, padding=self.source_clips.padding_seconds, count=job.request.clip_count)
-                if not highlights: raise ProviderValidationError("no highlight candidates could be detected")
-                analysis = {"method": "audio_energy_v1", "candidates": [{"start_seconds": item.start_seconds, "end_seconds": item.end_seconds, "score": item.score, "evidence": item.evidence} for item in highlights]}
-                self._checkpoint_json(job.id, JobState.SOURCE_ANALYZING, "highlight_candidates", analysis)
+            if self._load_json_artifact(job.id, JobState.SOURCE_ANALYZING, "highlight_candidates") is None and job.request.clip_of:
+                parent = self._parent_clip(job)
+                self._checkpoint_json(job.id, JobState.SOURCE_ANALYZING, "highlight_candidates", {"method": "approved_clip", "candidates": [parent["candidate"]]})
+            if self._load_json_artifact(job.id, JobState.SOURCE_ANALYZING, "highlight_candidates") is None:
+                if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before source analysis")
+                analysis = self._clip_call(self.clip_runner.analyze, job, cancellation_requested)
+                if not analysis.get("segments"): raise ProviderValidationError("no highlight candidates could be selected")
+                self._checkpoint_json(job.id, JobState.SOURCE_ANALYZING, "highlight_candidates", {"method": "transcript_ai_v1", "candidates": analysis["segments"], "summary": analysis.get("summary"), "key_topics": analysis.get("key_topics")})
             self._transition(job, JobState.CLIP_RENDERING); return
         if job.state is JobState.CLIP_RENDERING:
-            source = self._required_artifact(job.id, JobState.SOURCE_ACQUIRING, "source_media")
-            caption = self._valid_artifact(job.id, JobState.SOURCE_ACQUIRING, "source_captions") if job.request.captions_enabled else None
-            candidates = self._required_json(job.id, JobState.SOURCE_ANALYZING, "highlight_candidates")["candidates"]
-            manifest = self._load_json_artifact(job.id, JobState.CLIP_RENDERING, "clip_manifest") or {"clips": []}
-            rendered = {entry["name"]: entry for entry in manifest["clips"]}
-            for index, candidate in enumerate(candidates, 1):
-                name = f"clip_{index:03d}"
-                if name in rendered and self._valid_artifact(job.id, JobState.CLIP_RENDERING, name): continue
+            manifest = self._load_json_artifact(job.id, JobState.CLIP_RENDERING, "clip_manifest")
+            if manifest is None and job.request.clip_of:
+                parent = self._parent_clip(job)
+                work = self._artifact_path(job.id, "clip-work/approved.mp4"); work.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(parent["path"], work)
+                artifact = self._save_file(job.id, JobState.CLIP_RENDERING, "clip_001", work, {"clip": parent["candidate"], "approved_from": job.request.clip_of})
+                manifest = {"clips": [{"name": "clip_001", "path": artifact.path, "checksum_sha256": artifact.checksum_sha256, "candidate": parent["candidate"]}]}
+                self._replace_json(job.id, JobState.CLIP_RENDERING, "clip_manifest", manifest)
+            if manifest is None:
                 if cancellation_requested and cancellation_requested(): raise PipelineCancellation("cancelled before clip render")
-                output = self._artifact_path(job.id, f"clips/{name}.mp4")
-                details = render_vertical(self.source_clips.ffmpeg_executable, self.source_clips.ffprobe_executable, Path(source.path), output, float(candidate["start_seconds"]), float(candidate["end_seconds"]), captions=Path(caption.path) if caption else None)
-                artifact = self._save_file(job.id, JobState.CLIP_RENDERING, name, output, {"candidate": candidate, "probe": details})
-                rendered[name] = {"name": name, "path": artifact.path, "checksum_sha256": artifact.checksum_sha256, "candidate": candidate, "probe": details}
-                self._replace_json(job.id, JobState.CLIP_RENDERING, "clip_manifest", {"clips": [rendered[f"clip_{item:03d}"] for item in range(1, len(rendered) + 1)]})
-            first = rendered.get("clip_001")
-            if first is None: raise ProviderValidationError("source clip render produced no clips")
+                clips = self._clip_call(self.clip_runner.render, job, cancellation_requested)
+                entries = []
+                for index, clip in enumerate(clips, 1):
+                    name = f"clip_{index:03d}"
+                    artifact = self._save_file(job.id, JobState.CLIP_RENDERING, name, Path(clip["path"]), {"clip": {key: clip.get(key) for key in CLIP_PUBLIC_FIELDS}})
+                    entries.append({"name": name, "path": artifact.path, "checksum_sha256": artifact.checksum_sha256, "candidate": {key: clip.get(key) for key in CLIP_PUBLIC_FIELDS}})
+                if not entries: raise ProviderValidationError("source clip render produced no clips")
+                self._replace_json(job.id, JobState.CLIP_RENDERING, "clip_manifest", {"clips": entries})
+                manifest = {"clips": entries}
+            first = manifest["clips"][0]
             final_path = self._artifact_path(job.id, "final.mp4")
             if not final_path.exists():
                 final_path.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(str(first["path"]), final_path)
@@ -949,7 +1046,7 @@ class PipelineOrchestrator:
         timeline = reference_short.load_timeline(package.reference_short, directory)
         output = self._artifact_path(job.id, filename)
         self._ensure_ownership(force=True)
-        selected_renderer = reference_short.renderer_version(self.reference_config)
+        selected_renderer = reference_short.renderer_version(self.reference_config, style=reference_short.load_style(directory))
         self.events.append(job.id, "render_started", render=name, renderer=selected_renderer)
         report = reference_short.render(timeline, directory, output, self.reference_config, draft=name == "preview",
                                         cancelled=cancellation_requested or (lambda: False), bed=self._music_bed(music))
@@ -1063,7 +1160,7 @@ class PipelineOrchestrator:
         candidate = self._required_json(job.id, JobState.CLIP_RENDERING, "clip_manifest")["clips"][0]["candidate"]
         title = str(source.get("title") or job.request.topic)[:self.publication_config.title_max_length]
         metadata_inputs = {"source_external_id": source.get("id"), "final_checksum": final.checksum_sha256, "candidate": candidate, "template_version": "source-clip-metadata-v1"}
-        metadata = {"title": title, "description": f"Short highlight from {source.get('webpage_url') or job.request.source_url}\n\nSelected by TubeForge audio-energy ranking.", "tags": ["shorts", "highlight"], "chapters": [], "metadata_identity": publication_identity(metadata_inputs), "provenance": metadata_inputs, "validation": "accepted"}
+        metadata = {"title": title, "description": f"Short highlight from {source.get('webpage_url') or job.request.source_url}\n\nSelected by TubeForge transcript analysis.", "tags": ["shorts", "highlight"], "chapters": [], "metadata_identity": publication_identity(metadata_inputs), "provenance": metadata_inputs, "validation": "accepted"}
         self._replace_json(job.id, JobState.PUBLICATION_PREPARING, "metadata", metadata)
         thumbnail_inputs = {"final_checksum": final.checksum_sha256, "title": title, "template_version": "source-clip-thumbnail-v1", "dimensions": [self.publication_config.thumbnail_width, self.publication_config.thumbnail_height]}
         thumbnail_identity = publication_identity(thumbnail_inputs)
@@ -1301,6 +1398,11 @@ class PipelineOrchestrator:
         When source ingestion is enabled, immutable bounded snapshots replace
         those references before the content adapter receives the request.
         """
+        from tubeforge.reference.short_prepare import CONTEXT_PREFIX
+        from tubeforge.core import runtime_settings
+        relaxed = not runtime_settings.shared().value("script.require_verified_sources", True)
+        if any(note.startswith(CONTEXT_PREFIX) for note in job.request.notes) and not self.research_enabled and not relaxed:
+            raise ProviderValidationError("Reference Shorts require independent source research before writing")
         existing = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "effective_content_request")
         if existing is None and self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "effective_content_request") is not None:
             raise ProviderValidationError("saved effective source request is missing or has changed")
@@ -1313,7 +1415,12 @@ class PipelineOrchestrator:
             from tubeforge.providers.content.research import needs_research, ResearchResult, fetch_research_packet
             # Reference Shorts (m6-content-v8) research the same way: a notes-only brief has no evidence, and the
             # writer correctly refuses "insufficient_sources" rather than inventing facts for it.
-            if self.research_enabled and job.request.prompt_version in (CONTENT_TEMPLATE_VERSION, "m6-content-v8") and needs_research(job.request):
+            if relaxed and job.request.prompt_version in (CONTENT_TEMPLATE_VERSION, "m6-content-v8"):
+                # The operator accepted unverified facts: their notes are the evidence, so no web research runs.
+                packet = resolve_source_packet(job.request.sources, channel_approved=self.channel_approved_sources.get(job.request.channel_identity, ()),
+                                               ingestor=None, captured_at=job.created_at or datetime.now(UTC))
+                self.events.append(job.id, "sources_unverified_accepted", source_count=len(packet["sources"]), setting="script.require_verified_sources")
+            elif self.research_enabled and job.request.prompt_version in (CONTENT_TEMPLATE_VERSION, "m6-content-v8") and needs_research(job.request):
                 research = self._load_json_artifact(job.id, JobState.CONTENT_GENERATING, "source_research")
                 if research is None:
                     if self.artifacts.get(job.id, JobState.CONTENT_GENERATING, "source_research") is not None:
@@ -1362,6 +1469,11 @@ class PipelineOrchestrator:
             assessment = "Research assessment (verify against sources): " + str(packet["research_assessment"])
             updates["notes"] = ((*job.request.notes, assessment) if len(job.request.notes) < 30
                                 else (*job.request.notes[:-1], job.request.notes[-1] + "\n" + assessment))
+        if relaxed:
+            # Say it to the writer in the request itself, so it does not refuse for thin sources.
+            note = RELAXED_ACCURACY_NOTE
+            updates["notes"] = ((*updates.get("notes", job.request.notes), note) if len(updates.get("notes", job.request.notes)) < 30
+                                else (*updates.get("notes", job.request.notes)[:-1], updates.get("notes", job.request.notes)[-1] + "\n" + note))
         request = job.request.model_copy(update=updates)
         self._checkpoint_json(job.id, JobState.CONTENT_GENERATING, "effective_content_request", request.model_dump(mode="json"))
         return request

@@ -1,9 +1,10 @@
-"""Bounded yt-dlp source acquisition. No web server ever fetches a URL directly."""
+"""Source URL validation and metadata inspection. No web server ever fetches a URL directly."""
 
 from __future__ import annotations
 
 import ipaddress
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Protocol
@@ -17,7 +18,6 @@ class SourceProvider(Protocol):
 
     def can_handle(self, url: str) -> bool: ...
     def inspect(self, url: str) -> dict[str, object]: ...
-    def acquire(self, url: str, destination: Path, *, captions: bool = False) -> Path: ...
 
 
 def validate_source_url(value: str) -> str:
@@ -40,8 +40,18 @@ def validate_source_url(value: str) -> str:
 class YtDlpSourceProvider:
     """A subprocess adapter so acquisition is auditable and easy to mock."""
 
-    def __init__(self, executable: str = "yt-dlp", timeout_seconds: int = 900) -> None:
+    def __init__(self, executable: str = "yt-dlp", timeout_seconds: int = 900, cookies_file: Path | str | None = None) -> None:
         self.executable, self.timeout_seconds = executable, timeout_seconds
+        self.cookies_file = Path(cookies_file) if cookies_file else None
+
+    def _extra_arguments(self) -> list[str]:
+        """A JavaScript runtime for YouTube's player challenge, and the operator's cookies when they exist."""
+        arguments: list[str] = []
+        if not shutil.which("deno") and shutil.which("node"):
+            arguments += ["--js-runtimes", "node", "--remote-components", "ejs:github"]
+        if self.cookies_file is not None and self.cookies_file.is_file():
+            arguments += ["--cookies", str(self.cookies_file)]
+        return arguments
 
     def can_handle(self, url: str) -> bool:
         try:
@@ -54,7 +64,7 @@ class YtDlpSourceProvider:
         safe_url = validate_source_url(url)
         try:
             completed = subprocess.run(
-                [self.executable, "--dump-single-json", "--no-playlist", "--no-warnings", "--socket-timeout", str(self.timeout_seconds), "--retries", "0", safe_url],
+                [self.executable, "--dump-single-json", "--no-playlist", "--no-warnings", "--socket-timeout", str(self.timeout_seconds), "--retries", "0", *self._extra_arguments(), safe_url],
                 text=True, capture_output=True, timeout=self.timeout_seconds, check=False,
             )
         except FileNotFoundError as error:
@@ -62,6 +72,9 @@ class YtDlpSourceProvider:
         except subprocess.TimeoutExpired as error:
             raise RetryableProviderError("source inspection timed out") from error
         if completed.returncode:
+            if "sign in to confirm" in completed.stderr.replace("\u2019", "'").lower():
+                have = self.cookies_file is not None and self.cookies_file.is_file()
+                raise ProviderValidationError(("YouTube still asked to confirm this is not a bot even with your cookies: they may have expired; export them again. " if have else "YouTube asked to confirm this is not a bot. Export your YouTube cookies from a logged-in browser as a Netscape cookies.txt file, save it as data/config/youtube-cookies.txt, and retry (see docs/clips.md).") )
             raise ProviderValidationError(_diagnostic(completed.stderr, "source inspection failed"))
         try:
             raw = json.loads(completed.stdout)
@@ -72,27 +85,6 @@ class YtDlpSourceProvider:
         # local file is probed before analysis and becomes authoritative.
         duration_seconds = float(duration) if isinstance(duration, (int, float)) and duration > 0 else None
         return {"url": safe_url, "extractor": raw.get("extractor_key"), "id": raw.get("id"), "title": raw.get("title"), "uploader": raw.get("uploader"), "duration_seconds": duration_seconds, "webpage_url": raw.get("webpage_url") or safe_url}
-
-    def acquire(self, url: str, destination: Path, *, captions: bool = False) -> Path:
-        safe_url = validate_source_url(url)
-        destination.mkdir(parents=True, exist_ok=True)
-        output = destination / "source.%(ext)s"
-        try:
-            command = [self.executable, "--no-playlist", "--no-part", "--restrict-filenames", "--socket-timeout", str(self.timeout_seconds), "--retries", "0", "--paths", str(destination), "--output", str(output), "--format", "bv*+ba/b", "--merge-output-format", "mp4"]
-            if captions:
-                command.extend(["--write-auto-subs", "--sub-langs", "en", "--convert-subs", "srt"])
-            completed = subprocess.run(
-                [*command, safe_url],
-                text=True, capture_output=True, timeout=self.timeout_seconds, check=False,
-            )
-        except subprocess.TimeoutExpired as error:
-            raise RetryableProviderError("source acquisition timed out") from error
-        if completed.returncode:
-            raise ProviderValidationError(_diagnostic(completed.stderr, "source acquisition failed"))
-        files = sorted(path for path in destination.glob("source.*") if path.is_file() and path.stat().st_size)
-        if len(files) != 1:
-            raise ProviderValidationError("source acquisition did not produce exactly one media file")
-        return files[0]
 
 
 def _diagnostic(stderr: str, fallback: str) -> str:

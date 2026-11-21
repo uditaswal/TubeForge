@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TubeForge Design Guide</title>
+<link rel="stylesheet" href="../src/tubeforge/assets/ui/fonts.css">
+<link rel="stylesheet" href="../src/tubeforge/assets/ui/tokens.css">
+<link rel="stylesheet" href="../src/tubeforge/assets/ui/tubeforge.css">
+<script src="../src/tubeforge/assets/ui/tubeforge-ui.js" defer></script>
+<script src="guide.js" defer></script>
+</head>
+<body class="font-sans tf-guide">
+<!--
+  HOW THIS FILE WORKS (read DESIGN.md first)
+  - Each component is one <section data-component="NAME" id="NAME">. NAME must match "### Component: NAME" in DESIGN.md.
+  - Everything inside <div data-example> is the copy-ready recipe. guide.js shows it as code under the example.
+  - Text outside data-example (headings, "Use when") is guide-only and is not part of the recipe.
+  - Only tf-* colors, text-xs..text-xl, rounded-sm/md/lg/full. Run: python scripts/check_design.py
+-->
+
+<a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-tf-accent focus:px-4 focus:py-2 focus:text-tf-accent-ink no-underline">Skip to content</a>
+
+<button type="button" class="tf-nav-backdrop fixed inset-0 z-30 bg-tf-scrim lg:hidden" data-nav-close aria-label="Close navigation" hidden></button>
+
+<aside data-nav data-open="false" class="tf-nav fixed inset-y-0 left-0 z-40 w-sidebar flex-col gap-6 overflow-y-auto border-r border-tf-line bg-tf-bg px-3 py-5">
+  <a href="#top" class="flex items-center gap-3 px-2 no-underline">
+    <span class="grid h-8 w-8 place-items-center rounded-md bg-tf-accent text-sm font-semibold text-tf-accent-ink">TF</span>
+    <span class="grid leading-tight"><span class="text-md font-semibold text-tf-text">TubeForge</span><span class="text-xs text-tf-muted">Design guide</span></span>
+  </a>
+  <button type="button" class="absolute right-3 top-5 inline-flex h-8 items-center rounded-md px-3 text-sm font-medium text-tf-muted hover:bg-tf-raised hover:text-tf-text lg:hidden" data-nav-close>Close</button>
+  <nav aria-label="Guide sections" class="grid gap-5">
+    <div class="grid gap-1">
+      <p class="px-3 text-xs font-medium text-tf-faint">Foundations</p>
+      <a href="#colors" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Colors</a>
+      <a href="#type" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Type</a>
+      <a href="#shape" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Space and shape</a>
+    </div>
+    <div class="grid gap-1">
+      <p class="px-3 text-xs font-medium text-tf-faint">Layout</p>
+      <a href="#app-shell" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">App shell</a>
+      <a href="#page-header" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Page header</a>
+      <a href="#panel" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Panel</a>
+    </div>
+    <div class="grid gap-1">
+      <p class="px-3 text-xs font-medium text-tf-faint">Controls</p>
+      <a href="#button" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Buttons</a>
+      <a href="#link" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Links</a>
+      <a href="#field" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Form fields</a>
+      <a href="#dialog" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Dialog</a>
+    </div>
+    <div class="grid gap-1">
+      <p class="px-3 text-xs font-medium text-tf-faint">Status</p>
+      <a href="#stage-track" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Stage track</a>
+      <a href="#badge" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Status badge</a>
+      <a href="#notice" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Notice</a>
+      <a href="#empty-loading" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Empty and loading</a>
+    </div>
+    <div class="grid gap-1">
+      <p class="px-3 text-xs font-medium text-tf-faint">Content</p>
+      <a href="#job-list" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Job list</a>
+      <a href="#meta-list" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Details list</a>
+      <a href="#data-table" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Table</a>
+      <a href="#review-split" class="flex h-9 items-center rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-surface hover:text-tf-text aria-[current=page]:bg-tf-accent-soft aria-[current=page]:text-tf-accent no-underline">Video review</a>
+    </div>
+  </nav>
+</aside>
+
+<div class="lg:pl-sidebar">
+  <header class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-tf-line bg-tf-bg px-4 lg:px-8">
+    <button type="button" class="inline-flex h-8 items-center rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text lg:hidden" data-nav-open aria-expanded="false">Menu</button>
+    <nav aria-label="Breadcrumb" class="min-w-0 truncate text-sm text-tf-muted">TubeForge / <span class="font-medium text-tf-text" aria-current="page">Design guide</span></nav>
+    <p class="ml-auto hidden text-sm text-tf-muted sm:block">Tokens: <span class="tf-mono text-tf-text">src/tubeforge/assets/ui/tokens.css</span></p>
+  </header>
+
+  <main id="main" class="px-4 py-8 lg:px-8">
+    <div id="top" class="grid max-w-content grid-cols-1 gap-16">
+
+      <header class="grid max-w-form gap-3 border-b border-tf-line pb-8">
+        <h1 class="text-xl font-semibold">TubeForge design guide</h1>
+        <p class="text-md text-tf-muted">The parts every dashboard page is built from. Copy a recipe exactly, change only the words and the IDs, and run the checker. If a page needs something that isn't here, add it here first.</p>
+        <p class="text-base text-tf-muted">Rules and step-by-step instructions: <span class="tf-mono text-tf-text">design/DESIGN.md</span>. Check: <span class="tf-mono text-tf-text">python scripts/check_design.py</span>.</p>
+      </header>
+
+      <!-- ===================== FOUNDATIONS ===================== -->
+
+      <section id="colors" data-component="colors" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Colors</h2>
+          <p class="text-base text-tf-muted">Dark navy surfaces, one accent, four status colors. The accent marks what you can act on right now: primary buttons, focus, the current page, the current stage. Links and headings never use it.</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <div class="grid gap-2"><div class="h-14 rounded-md border border-tf-line bg-tf-bg"></div><p class="text-sm"><span class="tf-mono">tf-bg</span><br><span class="text-tf-muted">Page background</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md border border-tf-line bg-tf-surface"></div><p class="text-sm"><span class="tf-mono">tf-surface</span><br><span class="text-tf-muted">Panels, lists</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md border border-tf-line bg-tf-raised"></div><p class="text-sm"><span class="tf-mono">tf-raised</span><br><span class="text-tf-muted">Dialogs, secondary buttons</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md border border-tf-line bg-tf-input"></div><p class="text-sm"><span class="tf-mono">tf-input</span><br><span class="text-tf-muted">Inside text fields</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md bg-tf-text"></div><p class="text-sm"><span class="tf-mono">tf-text</span><br><span class="text-tf-muted">Body and headings</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md bg-tf-muted"></div><p class="text-sm"><span class="tf-mono">tf-muted</span><br><span class="text-tf-muted">Secondary text, help</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md bg-tf-faint"></div><p class="text-sm"><span class="tf-mono">tf-faint</span><br><span class="text-tf-muted">Placeholders, disabled only</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md bg-tf-accent"></div><p class="text-sm"><span class="tf-mono">tf-accent</span><br><span class="text-tf-muted">Primary action, focus, current</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md bg-tf-ok"></div><p class="text-sm"><span class="tf-mono">tf-ok / tf-ok-soft</span><br><span class="text-tf-muted">Finished, approved</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md bg-tf-warn"></div><p class="text-sm"><span class="tf-mono">tf-warn / tf-warn-soft</span><br><span class="text-tf-muted">Needs you, retrying</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md bg-tf-bad"></div><p class="text-sm"><span class="tf-mono">tf-bad / tf-bad-soft</span><br><span class="text-tf-muted">Failed, blocked</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md bg-tf-info"></div><p class="text-sm"><span class="tf-mono">tf-info / tf-info-soft</span><br><span class="text-tf-muted">Working, scheduled</span></p></div>
+        </div>
+      </section>
+
+      <section id="type" data-component="type" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Type</h2>
+          <p class="text-base text-tf-muted">IBM Plex Sans for everything. IBM Plex Mono (<span class="tf-mono">tf-mono</span>) only for values a machine produced: job IDs, file paths, durations, commands. Six sizes, three weights (400, 500, 600). Sentence case everywhere, no all-caps labels.</p>
+        </div>
+        <div class="grid gap-4 rounded-lg border border-tf-line bg-tf-surface p-5">
+          <div class="grid gap-1 sm:grid-cols-4 sm:items-baseline"><span class="tf-mono text-xs text-tf-muted">text-xl · 26</span><p class="text-xl font-semibold sm:col-span-3">Page title</p></div>
+          <div class="grid gap-1 sm:grid-cols-4 sm:items-baseline"><span class="tf-mono text-xs text-tf-muted">text-lg · 20</span><p class="text-lg font-semibold sm:col-span-3">Section heading</p></div>
+          <div class="grid gap-1 sm:grid-cols-4 sm:items-baseline"><span class="tf-mono text-xs text-tf-muted">text-md · 16</span><p class="text-md font-semibold sm:col-span-3">Item title, page description</p></div>
+          <div class="grid gap-1 sm:grid-cols-4 sm:items-baseline"><span class="tf-mono text-xs text-tf-muted">text-base · 14</span><p class="text-base sm:col-span-3">Body text, buttons, form values. The default.</p></div>
+          <div class="grid gap-1 sm:grid-cols-4 sm:items-baseline"><span class="tf-mono text-xs text-tf-muted">text-sm · 13</span><p class="text-sm sm:col-span-3">Labels, help text, metadata, small buttons</p></div>
+          <div class="grid gap-1 sm:grid-cols-4 sm:items-baseline"><span class="tf-mono text-xs text-tf-muted">text-xs · 12</span><p class="text-xs sm:col-span-3">Badges, stage labels, nav group names</p></div>
+          <div class="grid gap-1 sm:grid-cols-4 sm:items-baseline"><span class="tf-mono text-xs text-tf-muted">tf-mono</span><p class="tf-mono text-sm sm:col-span-3">job 6acd26ff · 0:58 · data/artifacts/6acd26ff/final.mp4</p></div>
+        </div>
+      </section>
+
+      <section id="shape" data-component="shape" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Space and shape</h2>
+          <p class="text-base text-tf-muted">Spacing uses Tailwind's 4 px steps; prefer 1, 2, 3, 4, 5, 6, 8, 10, 16. Three corner radii, each tied to a size of thing. One main column width for every page, left aligned.</p>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-3">
+          <div class="grid gap-2"><div class="h-14 rounded-sm border border-tf-line-strong bg-tf-surface"></div><p class="text-sm"><span class="tf-mono">rounded-sm</span> 4 px<br><span class="text-tf-muted">Badges, checkboxes</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-md border border-tf-line-strong bg-tf-surface"></div><p class="text-sm"><span class="tf-mono">rounded-md</span> 8 px<br><span class="text-tf-muted">Buttons, fields, notices</span></p></div>
+          <div class="grid gap-2"><div class="h-14 rounded-lg border border-tf-line-strong bg-tf-surface"></div><p class="text-sm"><span class="tf-mono">rounded-lg</span> 12 px<br><span class="text-tf-muted">Panels, lists, dialogs</span></p></div>
+        </div>
+        <ul class="grid max-w-form list-disc gap-1 pl-5 text-base text-tf-muted">
+          <li><span class="tf-mono text-tf-text">max-w-content</span> (1200 px): the main column on every page.</li>
+          <li><span class="tf-mono text-tf-text">max-w-form</span> (720 px): forms and paragraphs.</li>
+          <li>Gaps between page sections: <span class="tf-mono text-tf-text">gap-10</span>. Inside a panel: <span class="tf-mono text-tf-text">gap-4</span> or <span class="tf-mono text-tf-text">gap-5</span>.</li>
+        </ul>
+      </section>
+
+      <!-- ===================== LAYOUT ===================== -->
+
+      <section id="app-shell" data-component="app-shell" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">App shell</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use on:</strong> every signed-in page, including standalone pages like Batch plans and Settings. This page uses it too. The sidebar is a drawer below 1024 px. The top bar is the same on every page: breadcrumb on the left, connection and account on the right.</p>
+        </div>
+        <div data-example class="overflow-hidden rounded-lg border border-tf-line">
+<div class="flex h-14 items-center gap-3 border-b border-tf-line bg-tf-bg px-4 lg:px-8">
+  <button type="button" class="inline-flex h-8 items-center rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text lg:hidden" data-nav-open aria-expanded="false">Menu</button>
+  <nav aria-label="Breadcrumb" class="min-w-0 truncate text-sm text-tf-muted">Batch plans / <span class="font-medium text-tf-text" aria-current="page">Day review</span></nav>
+  <div class="ml-auto flex items-center gap-3 text-sm text-tf-muted">
+    <span class="hidden items-center gap-1.5 sm:inline-flex" role="status"><span class="h-1.5 w-1.5 rounded-full bg-tf-ok"></span>Connected</span>
+    <span class="hidden md:inline">operator</span>
+    <button type="button" class="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium text-tf-muted hover:bg-tf-raised hover:text-tf-text">Sign out</button>
+  </div>
+</div>
+        </div>
+        <p class="max-w-form text-sm text-tf-muted">The full page skeleton (sidebar, nav groups, main column) is the frame of this guide; copy it from <span class="tf-mono text-tf-text">design/guide.html</span> between <span class="tf-mono text-tf-text">&lt;body&gt;</span> and <span class="tf-mono text-tf-text">&lt;main&gt;</span>. Nav groups for the dashboard: Make (Studio, Batch plans, Reference videos, Long-form scripts, Clips), Review (Generations, Day review), Publish (Publishing, Scheduling, Accounts), System (Media tools, Settings).</p>
+      </section>
+
+      <section id="page-header" data-component="page-header" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Page header</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use:</strong> once per page, first thing in the main column. One sentence saying what the page is for. At most one primary action on the right.</p>
+        </div>
+        <div data-example>
+<header class="flex flex-wrap items-end justify-between gap-4 border-b border-tf-line pb-5">
+  <div class="grid gap-1">
+    <h1 class="text-xl font-semibold text-tf-text">Batch plans</h1>
+    <p class="max-w-form text-md text-tf-muted">Import a plan of Shorts, then review each video before it's staged for publishing.</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    <a href="/batch/review" class="inline-flex h-9 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted no-underline">Open day review</a>
+  </div>
+</header>
+        </div>
+      </section>
+
+      <section id="panel" data-component="panel" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Panel</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use for:</strong> a self-contained tool (a form, a list, a review area). <strong class="font-medium text-tf-text">Don't</strong> box single fields, single sentences or another panel. Panels are never nested. A page should have few panels; separate the rest with headings and space.</p>
+        </div>
+        <div data-example>
+<section class="grid gap-4 rounded-lg border border-tf-line bg-tf-surface p-5" aria-labelledby="import-plan-title">
+  <div class="grid gap-1">
+    <h2 id="import-plan-title" class="text-lg font-semibold text-tf-text">Import a plan</h2>
+    <p class="text-base text-tf-muted">One markdown file, one Short per heading. Re-importing skips identical IDs and lists conflicts.</p>
+  </div>
+  <p class="text-base text-tf-text">Panel content goes here.</p>
+</section>
+        </div>
+      </section>
+
+      <!-- ===================== CONTROLS ===================== -->
+
+      <section id="button" data-component="button" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Buttons</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Primary:</strong> the one action the area is for (at most one per panel or dialog). <strong class="font-medium text-tf-text">Secondary:</strong> other actions. <strong class="font-medium text-tf-text">Quiet:</strong> low-stakes actions in dense rows. <strong class="font-medium text-tf-text">Danger:</strong> deletes or irreversible actions, only inside a confirmation dialog or after a clear label. Labels are verbs that say exactly what happens.</p>
+        </div>
+        <div data-example class="flex flex-wrap items-center gap-3">
+<button type="button" class="inline-flex h-9 items-center gap-2 rounded-md bg-tf-accent px-4 text-base font-semibold text-tf-accent-ink hover:brightness-110 disabled:cursor-not-allowed disabled:bg-tf-raised disabled:text-tf-faint">Approve video</button>
+<button type="button" class="inline-flex h-9 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted disabled:cursor-not-allowed disabled:text-tf-faint">Regenerate</button>
+<button type="button" class="inline-flex h-9 items-center gap-2 rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-raised hover:text-tf-text disabled:cursor-not-allowed disabled:text-tf-faint">Show activity</button>
+<button type="button" class="inline-flex h-9 items-center gap-2 rounded-md bg-tf-danger px-4 text-base font-semibold text-tf-danger-ink hover:brightness-110 disabled:cursor-not-allowed disabled:bg-tf-raised disabled:text-tf-faint">Delete job</button>
+        </div>
+        <p class="text-sm text-tf-muted">Small size (inside list rows and the top bar): replace <span class="tf-mono text-tf-text">h-9 px-4 text-base</span> with <span class="tf-mono text-tf-text">h-8 px-3 text-sm</span>.</p>
+        <div data-example class="flex flex-wrap items-center gap-3">
+<button type="button" class="inline-flex h-8 items-center gap-2 rounded-md bg-tf-accent px-3 text-sm font-semibold text-tf-accent-ink hover:brightness-110">Approve script</button>
+<button type="button" class="inline-flex h-8 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text hover:border-tf-muted">Retry</button>
+<button type="button" class="inline-flex h-8 items-center gap-2 rounded-md bg-tf-accent px-3 text-sm font-semibold text-tf-accent-ink disabled:cursor-not-allowed disabled:bg-tf-raised disabled:text-tf-faint" disabled aria-describedby="approve-hint">Approve</button>
+<p id="approve-hint" class="text-sm text-tf-muted">Approve is unavailable: this video has no audio licence record. Re-render it to fix this.</p>
+        </div>
+        <p class="text-sm text-tf-muted">A disabled button always has a visible reason next to it, linked with <span class="tf-mono text-tf-text">aria-describedby</span>.</p>
+      </section>
+
+      <section id="link" data-component="link" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Links</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use for:</strong> going somewhere. Use a button for doing something. Links are body-colored with an underline; they turn the accent color only on hover. Never colored green.</p>
+        </div>
+        <div data-example>
+<p class="text-base text-tf-text">See the <a href="/settings" class="text-tf-text underline decoration-tf-line-strong underline-offset-4 hover:decoration-tf-accent">prompt size limits in Settings</a> before importing long sources.</p>
+        </div>
+      </section>
+
+      <section id="field" data-component="field" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Form fields</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Every field:</strong> a visible label tied with <span class="tf-mono">for</span>/<span class="tf-mono">id</span>, a unique <span class="tf-mono">id</span>, help text when the format isn't obvious. Errors say what's wrong and how to fix it, and set <span class="tf-mono">aria-invalid</span>. Stack fields in one column inside <span class="tf-mono">max-w-form</span>.</p>
+        </div>
+        <div data-example>
+<form class="grid max-w-form gap-5">
+  <div class="grid gap-1.5">
+    <label for="short-title" class="text-sm font-medium text-tf-text">Title</label>
+    <input id="short-title" name="title" type="text" placeholder="e.g. Why caching is hard" class="h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text hover:border-tf-muted focus:border-tf-accent">
+  </div>
+  <div class="grid gap-1.5">
+    <label for="short-notes" class="text-sm font-medium text-tf-text">Brief notes</label>
+    <textarea id="short-notes" name="notes" aria-describedby="short-notes-help" class="h-28 rounded-md border border-tf-line-strong bg-tf-input px-3 py-2 text-base text-tf-text hover:border-tf-muted focus:border-tf-accent"></textarea>
+    <p id="short-notes-help" class="text-sm text-tf-muted">One point per line. The writer keeps your facts and finds sources for them.</p>
+  </div>
+  <div class="grid gap-1.5">
+    <label for="short-length" class="text-sm font-medium text-tf-text">Length</label>
+    <select id="short-length" name="length" class="h-9 rounded-md border border-tf-line-strong bg-tf-input px-3 text-base text-tf-text hover:border-tf-muted focus:border-tf-accent">
+      <option>45 seconds</option>
+      <option selected>60 seconds</option>
+      <option>90 seconds</option>
+    </select>
+  </div>
+  <div class="grid gap-1.5">
+    <label for="short-plan-id" class="text-sm font-medium text-tf-text">Plan ID</label>
+    <input id="short-plan-id" name="plan_id" type="text" value="Week 46!" aria-invalid="true" aria-describedby="short-plan-id-error" class="h-9 rounded-md border border-tf-bad bg-tf-input px-3 text-base text-tf-text focus:border-tf-accent">
+    <p id="short-plan-id-error" class="text-sm text-tf-bad">Use lowercase letters, numbers and dashes, like week-46.</p>
+  </div>
+  <div class="flex items-start gap-3">
+    <input id="short-exact" name="exact" type="checkbox" class="mt-0.5 h-4 w-4 rounded-sm accent-tf-accent">
+    <div class="grid gap-0.5">
+      <label for="short-exact" class="text-base font-medium text-tf-text">Use my script exactly</label>
+      <p class="text-sm text-tf-muted">The writer only plans visuals; your wording is kept word for word.</p>
+    </div>
+  </div>
+</form>
+        </div>
+      </section>
+
+      <section id="dialog" data-component="dialog" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Dialog</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use for:</strong> confirming deletes and irreversible actions, and focused tasks (activity log, video player). Uses the native <span class="tf-mono">&lt;dialog&gt;</span>; a <span class="tf-mono">form method="dialog"</span> closes it without any JavaScript. Never use <span class="tf-mono">alert()</span> or <span class="tf-mono">confirm()</span>. Name the exact object and the consequence.</p>
+        </div>
+        <div data-example>
+<button type="button" class="inline-flex h-9 items-center gap-2 rounded-md bg-tf-danger px-4 text-base font-semibold text-tf-danger-ink hover:brightness-110" data-dialog-open="confirm-delete-job">Delete job…</button>
+<dialog id="confirm-delete-job" aria-labelledby="confirm-delete-job-title" class="w-full max-w-md rounded-lg border border-tf-line-strong bg-tf-raised p-0 text-tf-text">
+  <form method="dialog" class="grid gap-4 p-6">
+    <h2 id="confirm-delete-job-title" class="text-lg font-semibold">Delete “Source video highlights”?</h2>
+    <p class="text-base text-tf-muted">This removes the job, its 11 activity events and its saved files. Videos already published are not affected. This can't be undone.</p>
+    <div class="flex flex-wrap justify-end gap-2">
+      <button type="submit" value="cancel" class="inline-flex h-9 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted">Keep job</button>
+      <button type="submit" value="delete" class="inline-flex h-9 items-center gap-2 rounded-md bg-tf-danger px-4 text-base font-semibold text-tf-danger-ink hover:brightness-110">Delete job</button>
+    </div>
+  </form>
+</dialog>
+        </div>
+      </section>
+
+      <!-- ===================== STATUS ===================== -->
+
+      <section id="stage-track" data-component="stage-track" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Stage track</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">The signature element.</strong> Shows where one video is in its life: Script, Voice, Render, Review, Publish. Use it on every job row and at the top of a job's detail view. Five step states: done, working, needs you, failed, waiting. Under a step, show elapsed time or a short reason in <span class="tf-mono">tf-mono</span> when it's known.</p>
+        </div>
+        <div data-example class="grid max-w-xl gap-8">
+<ol class="grid grid-cols-5 gap-1" aria-label="Progress: rendering">
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Script<span class="sr-only">, done</span></span><span class="tf-mono text-xs text-tf-faint">1m 12s</span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Voice<span class="sr-only">, done</span></span><span class="tf-mono text-xs text-tf-faint">38s</span></li>
+  <li class="grid content-start gap-1.5" aria-current="step"><span class="h-1.5 rounded-full bg-tf-accent"></span><span class="text-xs font-semibold text-tf-accent">Render<span class="sr-only">, working</span></span><span class="tf-mono text-xs text-tf-faint">2m 05s</span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Review<span class="sr-only">, waiting</span></span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Publish<span class="sr-only">, waiting</span></span></li>
+</ol>
+<ol class="grid grid-cols-5 gap-1" aria-label="Progress: preview needs your review">
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Script<span class="sr-only">, done</span></span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Voice<span class="sr-only">, done</span></span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Render<span class="sr-only">, done</span></span></li>
+  <li class="grid content-start gap-1.5" aria-current="step"><span class="h-1.5 rounded-full bg-tf-warn"></span><span class="text-xs font-semibold text-tf-warn">Review<span class="sr-only">, needs you</span></span><span class="tf-mono text-xs text-tf-faint">needs you</span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Publish<span class="sr-only">, waiting</span></span></li>
+</ol>
+<ol class="grid grid-cols-5 gap-1" aria-label="Progress: render failed">
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Script<span class="sr-only">, done</span></span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Voice<span class="sr-only">, done</span></span></li>
+  <li class="grid content-start gap-1.5" aria-current="step"><span class="h-1.5 rounded-full bg-tf-bad"></span><span class="text-xs font-semibold text-tf-bad">Render<span class="sr-only">, failed</span></span><span class="tf-mono text-xs text-tf-faint">QA: loudness</span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Review<span class="sr-only">, waiting</span></span></li>
+  <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Publish<span class="sr-only">, waiting</span></span></li>
+</ol>
+        </div>
+      </section>
+
+      <section id="badge" data-component="badge" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Status badge</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use:</strong> one per item, top right of a row, for the item's overall state in plain words. Never show raw state names like <span class="tf-mono">failed_validation</span>; use the label table in DESIGN.md.</p>
+        </div>
+        <div data-example class="flex flex-wrap items-center gap-3">
+<span class="inline-flex items-center gap-1.5 rounded-sm bg-tf-ok-soft px-2 py-0.5 text-xs font-semibold text-tf-ok"><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>Final ready</span>
+<span class="inline-flex items-center gap-1.5 rounded-sm bg-tf-warn-soft px-2 py-0.5 text-xs font-semibold text-tf-warn"><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>Preview needs review</span>
+<span class="inline-flex items-center gap-1.5 rounded-sm bg-tf-bad-soft px-2 py-0.5 text-xs font-semibold text-tf-bad"><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>Failed</span>
+<span class="inline-flex items-center gap-1.5 rounded-sm bg-tf-info-soft px-2 py-0.5 text-xs font-semibold text-tf-info"><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>Rendering</span>
+<span class="inline-flex items-center gap-1.5 rounded-sm bg-tf-raised px-2 py-0.5 text-xs font-semibold text-tf-muted"><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>Cancelled</span>
+        </div>
+      </section>
+
+      <section id="notice" data-component="notice" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Notice</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use for:</strong> a failure, warning or important fact about one item or page. First line: what happened, in plain words. Second: what to do. Raw error text goes in "Technical details", never in the first line. Add <span class="tf-mono">role="alert"</span> only when it appears after the page has loaded.</p>
+        </div>
+        <div data-example class="grid max-w-form gap-3">
+<div class="grid gap-1 rounded-md bg-tf-bad-soft px-4 py-3">
+  <p class="text-base font-semibold text-tf-bad">YouTube blocked the source download</p>
+  <p class="text-base text-tf-text">YouTube wants a signed-in browser for this video. Export YouTube cookies on the host, then choose Retry.</p>
+  <details class="mt-1 text-sm text-tf-muted">
+    <summary class="cursor-pointer hover:text-tf-text">Technical details</summary>
+    <pre class="tf-mono mt-2 whitespace-pre-wrap break-words text-xs text-tf-muted">ERROR: [youtube] hCOqWDTTtcs: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies for the authentication.</pre>
+  </details>
+</div>
+<div class="grid gap-1 rounded-md bg-tf-warn-soft px-4 py-3">
+  <p class="text-base font-semibold text-tf-warn">Retrying at 01:40</p>
+  <p class="text-base text-tf-text">Source inspection timed out. This is attempt 1 of 3; nothing to do yet.</p>
+</div>
+<div class="grid gap-1 rounded-md bg-tf-info-soft px-4 py-3">
+  <p class="text-base font-semibold text-tf-info">Publish dates are metadata only</p>
+  <p class="text-base text-tf-text">Nothing is uploaded until you approve a video and schedule a private draft.</p>
+</div>
+        </div>
+      </section>
+
+      <section id="empty-loading" data-component="empty-loading" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Empty and loading</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Loading:</strong> one line, only until the first data arrives; remove it as soon as anything renders. Background refreshes are silent. <strong class="font-medium text-tf-text">Empty:</strong> say what will appear here and give the action that creates the first one.</p>
+        </div>
+        <div data-example class="grid gap-4">
+<p class="text-base text-tf-muted" role="status">Loading generations…</p>
+<div class="grid justify-items-start gap-3 rounded-lg border border-dashed border-tf-line-strong px-6 py-8">
+  <h3 class="text-md font-semibold text-tf-text">No generations yet</h3>
+  <p class="max-w-form text-base text-tf-muted">Each video you start appears here with its progress, so you can review it when it's ready.</p>
+  <a href="/#studio" class="inline-flex h-9 items-center gap-2 rounded-md bg-tf-accent px-4 text-base font-semibold text-tf-accent-ink hover:brightness-110 no-underline">Start a video</a>
+</div>
+        </div>
+      </section>
+
+      <!-- ===================== CONTENT ===================== -->
+
+      <section id="job-list" data-component="job-list" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Job list</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use for:</strong> lists of videos or jobs (Studio, Generations, Clips, Day review queue). One panel holding rows divided by lines, not one box per job. Each row: title and badge, stage track, details list, then the actions this state allows. Show the most useful action first; at most three buttons, the rest under "More".</p>
+        </div>
+        <div data-example>
+<ul class="divide-y divide-tf-line rounded-lg border border-tf-line bg-tf-surface" aria-label="Generations">
+  <li class="grid gap-4 px-5 py-4">
+    <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <h3 class="min-w-0 text-md font-semibold text-tf-text">When a relational database stops being enough</h3>
+      <span class="inline-flex items-center gap-1.5 rounded-sm bg-tf-warn-soft px-2 py-0.5 text-xs font-semibold text-tf-warn"><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>Preview needs review</span>
+    </div>
+    <ol class="grid max-w-xl grid-cols-5 gap-1" aria-label="Progress: preview needs your review">
+      <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Script<span class="sr-only">, done</span></span></li>
+      <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Voice<span class="sr-only">, done</span></span></li>
+      <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-ok"></span><span class="text-xs font-medium text-tf-muted">Render<span class="sr-only">, done</span></span></li>
+      <li class="grid content-start gap-1.5" aria-current="step"><span class="h-1.5 rounded-full bg-tf-warn"></span><span class="text-xs font-semibold text-tf-warn">Review<span class="sr-only">, needs you</span></span></li>
+      <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Publish<span class="sr-only">, waiting</span></span></li>
+    </ol>
+    <dl class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+      <div class="flex gap-1.5"><dt class="text-tf-muted">Job</dt><dd class="tf-mono text-tf-text">7fae45af</dd></div>
+      <div class="flex gap-1.5"><dt class="text-tf-muted">Writer</dt><dd class="text-tf-text">Claude</dd></div>
+      <div class="flex gap-1.5"><dt class="text-tf-muted">Length</dt><dd class="tf-mono text-tf-text">0:58</dd></div>
+      <div class="flex gap-1.5"><dt class="text-tf-muted">Created</dt><dd class="text-tf-text">18 Nov, 01:11</dd></div>
+    </dl>
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" class="inline-flex h-8 items-center gap-2 rounded-md bg-tf-accent px-3 text-sm font-semibold text-tf-accent-ink hover:brightness-110">Watch preview</button>
+      <button type="button" class="inline-flex h-8 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text hover:border-tf-muted">Inputs and script</button>
+      <details class="relative">
+        <summary class="inline-flex h-8 cursor-pointer list-none items-center rounded-md px-3 text-sm font-medium text-tf-muted hover:bg-tf-raised hover:text-tf-text">More</summary>
+        <div class="absolute left-0 z-10 mt-1 grid min-w-48 gap-1 rounded-md border border-tf-line-strong bg-tf-raised p-1">
+          <button type="button" class="flex h-8 items-center rounded-md px-3 text-left text-sm text-tf-text hover:bg-tf-surface">Show activity</button>
+          <button type="button" class="flex h-8 items-center rounded-md px-3 text-left text-sm text-tf-text hover:bg-tf-surface" data-copy="7fae45af">Copy job ID</button>
+          <button type="button" class="flex h-8 items-center rounded-md px-3 text-left text-sm text-tf-bad hover:bg-tf-surface">Delete job…</button>
+        </div>
+      </details>
+    </div>
+  </li>
+  <li class="grid gap-4 px-5 py-4">
+    <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <h3 class="min-w-0 text-md font-semibold text-tf-text">Source video highlights</h3>
+      <span class="inline-flex items-center gap-1.5 rounded-sm bg-tf-bad-soft px-2 py-0.5 text-xs font-semibold text-tf-bad"><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>Failed</span>
+    </div>
+    <div class="grid gap-1 rounded-md bg-tf-bad-soft px-4 py-3">
+      <p class="text-base font-semibold text-tf-bad">YouTube blocked the source download</p>
+      <p class="text-base text-tf-text">Export YouTube cookies on the host, then choose Retry.</p>
+    </div>
+    <ol class="grid max-w-xl grid-cols-5 gap-1" aria-label="Progress: failed">
+      <li class="grid content-start gap-1.5" aria-current="step"><span class="h-1.5 rounded-full bg-tf-bad"></span><span class="text-xs font-semibold text-tf-bad">Script<span class="sr-only">, failed</span></span><span class="tf-mono text-xs text-tf-faint">source</span></li>
+      <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Voice<span class="sr-only">, waiting</span></span></li>
+      <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Render<span class="sr-only">, waiting</span></span></li>
+      <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Review<span class="sr-only">, waiting</span></span></li>
+      <li class="grid content-start gap-1.5"><span class="h-1.5 rounded-full bg-tf-line"></span><span class="text-xs font-medium text-tf-faint">Publish<span class="sr-only">, waiting</span></span></li>
+    </ol>
+    <dl class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+      <div class="flex gap-1.5"><dt class="text-tf-muted">Job</dt><dd class="tf-mono text-tf-text">6acd26ff</dd></div>
+      <div class="flex gap-1.5"><dt class="text-tf-muted">Writer</dt><dd class="text-tf-text">Codex</dd></div>
+      <div class="flex gap-1.5"><dt class="text-tf-muted">Created</dt><dd class="text-tf-text">18 Nov, 01:38</dd></div>
+    </dl>
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" class="inline-flex h-8 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-3 text-sm font-medium text-tf-text hover:border-tf-muted">Retry</button>
+      <button type="button" class="inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm font-medium text-tf-muted hover:bg-tf-raised hover:text-tf-text">Show activity</button>
+    </div>
+  </li>
+</ul>
+        </div>
+      </section>
+
+      <section id="meta-list" data-component="meta-list" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Details list</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use for:</strong> facts about one item. A real <span class="tf-mono">&lt;dl&gt;</span> with labels, never a sentence of values joined by dots. Inline in rows; stacked in two columns in a detail view. Show only facts the operator acts on.</p>
+        </div>
+        <div data-example>
+<dl class="grid max-w-form gap-x-8 gap-y-3 text-base sm:grid-cols-2">
+  <div class="grid gap-0.5"><dt class="text-sm text-tf-muted">Script writer</dt><dd class="text-tf-text">Claude, exact script</dd></div>
+  <div class="grid gap-0.5"><dt class="text-sm text-tf-muted">Final file</dt><dd class="tf-mono break-all text-sm text-tf-text">data/artifacts/7fae45af/final.mp4</dd></div>
+  <div class="grid gap-0.5"><dt class="text-sm text-tf-muted">Loudness</dt><dd class="tf-mono text-tf-text">−14.1 LUFS</dd></div>
+  <div class="grid gap-0.5"><dt class="text-sm text-tf-muted">Claude spend today</dt><dd class="tf-mono text-tf-text">$1.37 of $8.00</dd></div>
+</dl>
+        </div>
+      </section>
+
+      <section id="data-table" data-component="data-table" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Table</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use for:</strong> rows that are compared across the same columns (settings, scenes, usage). Always inside an <span class="tf-mono">overflow-x-auto</span> wrapper. Numbers right-aligned in <span class="tf-mono">tf-mono</span>.</p>
+        </div>
+        <div data-example>
+<div class="overflow-x-auto rounded-lg border border-tf-line">
+  <table class="w-full min-w-[560px] text-left text-base">
+    <thead class="bg-tf-surface">
+      <tr>
+        <th scope="col" class="px-4 py-2.5 text-sm font-medium text-tf-muted">Setting</th>
+        <th scope="col" class="px-4 py-2.5 text-right text-sm font-medium text-tf-muted">Value</th>
+        <th scope="col" class="px-4 py-2.5 text-sm font-medium text-tf-muted">Applies</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-tf-line">
+      <tr><td class="px-4 py-3 text-tf-text">Prompt size limit</td><td class="tf-mono px-4 py-3 text-right text-tf-text">90,000</td><td class="px-4 py-3 text-tf-muted">Next job</td></tr>
+      <tr><td class="px-4 py-3 text-tf-text">Worker retries</td><td class="tf-mono px-4 py-3 text-right text-tf-text">3</td><td class="px-4 py-3 text-tf-muted">Next job</td></tr>
+      <tr><td class="px-4 py-3 text-tf-text">Claude calls per day</td><td class="tf-mono px-4 py-3 text-right text-tf-text">40</td><td class="px-4 py-3 text-tf-muted">After runner restart</td></tr>
+    </tbody>
+  </table>
+</div>
+        </div>
+      </section>
+
+      <section id="review-split" data-component="review-split" class="grid grid-cols-1 gap-5">
+        <div class="grid max-w-form gap-2">
+          <h2 class="text-lg font-semibold">Video review</h2>
+          <p class="text-base text-tf-muted"><strong class="font-medium text-tf-text">Use for:</strong> Day review and any approval of a rendered video. The exact file being approved on the left at 9:16, its script beside its sources on the right, decisions underneath. Approval applies to this exact file only.</p>
+        </div>
+        <div data-example>
+<section class="grid gap-5 rounded-lg border border-tf-line bg-tf-surface p-5 lg:flex lg:items-start" aria-labelledby="review-title">
+  <video class="aspect-[9/16] w-full max-w-72 shrink-0 rounded-md bg-tf-input" controls preload="metadata" aria-label="Preview of When a relational database stops being enough"></video>
+  <div class="grid min-w-0 flex-1 gap-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <h2 id="review-title" class="text-lg font-semibold text-tf-text">When a relational database stops being enough</h2>
+      <span class="inline-flex items-center gap-1.5 rounded-sm bg-tf-warn-soft px-2 py-0.5 text-xs font-semibold text-tf-warn"><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>Needs review</span>
+    </div>
+    <div class="overflow-x-auto rounded-md border border-tf-line">
+      <table class="w-full min-w-[480px] text-left text-base">
+        <thead class="bg-tf-raised"><tr><th scope="col" class="w-12 px-3 py-2 text-sm font-medium text-tf-muted">Scene</th><th scope="col" class="px-3 py-2 text-sm font-medium text-tf-muted">Narration</th><th scope="col" class="w-40 px-3 py-2 text-sm font-medium text-tf-muted">Source</th></tr></thead>
+        <tbody class="divide-y divide-tf-line">
+          <tr><td class="tf-mono px-3 py-2.5 text-tf-muted">1</td><td class="px-3 py-2.5 text-tf-text">Your database handled a million users fine. Then one query took the site down.</td><td class="px-3 py-2.5 text-sm text-tf-muted">No claim</td></tr>
+          <tr><td class="tf-mono px-3 py-2.5 text-tf-muted">2</td><td class="px-3 py-2.5 text-tf-text">More than half of the load came from a single table scan.</td><td class="px-3 py-2.5 text-sm"><a href="#" class="text-tf-text underline decoration-tf-line-strong underline-offset-4 hover:decoration-tf-accent">Claim c9</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" class="inline-flex h-9 items-center gap-2 rounded-md bg-tf-accent px-4 text-base font-semibold text-tf-accent-ink hover:brightness-110">Approve this video</button>
+      <button type="button" class="inline-flex h-9 items-center gap-2 rounded-md border border-tf-line-strong bg-tf-raised px-4 text-base font-medium text-tf-text hover:border-tf-muted">Regenerate…</button>
+      <button type="button" class="inline-flex h-9 items-center gap-2 rounded-md px-3 text-base font-medium text-tf-muted hover:bg-tf-raised hover:text-tf-text">Reject…</button>
+    </div>
+  </div>
+</section>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+</body>
+</html>

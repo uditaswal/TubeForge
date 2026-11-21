@@ -261,8 +261,7 @@ def test_video_brief_uses_defaults_and_persists_user_options(tmp_path: Path) -> 
         assert r"split('\n')" in dashboard.text
         assert r"join('\n')" in dashboard.text
         assert "jobsRoot.innerHTML=j.map" not in dashboard.text
-        assert "sourceClipCreate" in dashboard.text
-        assert "/api/source-clips" in dashboard.text
+        assert 'href="/clips"' in dashboard.text and "sourceClipCreate" not in dashboard.text
         assert "/api/voices" in dashboard.text
         assert "Preview voice" in dashboard.text
         assert "Watch video" in dashboard.text
@@ -697,7 +696,7 @@ def test_dashboard_shows_signed_in_user_copy_script_and_markdown_mode_controls(t
         runtime.auth.create_admin("chrome-operator", "correct-horse-battery-staple")
         assert client.post("/login", json={"username": "chrome-operator", "password": "correct-horse-battery-staple"}).status_code == 200
         dashboard = client.get("/").text
-        assert 'id="authInfo" data-username="chrome-operator"' in dashboard
+        assert 'id="authInfo"' in dashboard and 'data-username="chrome-operator"' in dashboard
         assert 'id="signOutButton"' not in dashboard  # built client-side by STUDIO_SCRIPT from #authInfo, not server-rendered
         assert 'id="copyFullScript"' in dashboard and 'id="copyScriptStatus"' in dashboard
         assert "reference_scenes:currentPackage.reference_short?.scenes||[]" in dashboard

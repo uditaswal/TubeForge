@@ -30,9 +30,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from tubeforge.core.app_logging import configure_logging, request_id_var
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.api.scene_ui import SCENE_CONTROLS
-from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_SCRIPT
-from tubeforge.api.generation_ui import GENERATION_CSS, GENERATION_CONTROLS
-from tubeforge.api.scheduling_ui import SCHEDULING_CSS, SCHEDULING_SCRIPT
+from tubeforge.api.design_system import STATIC_PREFIX, register_design_assets
+from tubeforge.api.studio_shell import STUDIO_NAV_ITEMS, STUDIO_SCRIPT
+from tubeforge.api.design_system import spa_shell_close, spa_shell_open
+from tubeforge.api.generation_ui import GENERATION_CONTROLS, JOB_EXTRAS_SCRIPT
+from tubeforge.api.scheduling_ui import SCHEDULING_SCRIPT
 from tubeforge.core.runtime import Runtime, create_runtime
 from tubeforge.domain.contracts import ContentPackage, ContentRequest, SourceReference, VoiceRequest, video_plan_from_package
 from tubeforge.core.errors import ProviderValidationError, RetryableProviderError
@@ -135,6 +137,9 @@ class VideoBriefRequest(BaseModel):
     channel_identity: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     destination_account_ids: tuple[str, ...] = Field(default=(), max_length=20)
     description: str | None = Field(default=None, min_length=1, max_length=5000)
+    # What the operator wants on the thumbnail (words, picture, mood). It reaches the writer as a note, so every way of
+    # starting a video (Studio, markdown plan, reference) carries it the same way.
+    thumbnail_guidance: str | None = Field(default=None, max_length=1_000)
     source_title: str | None = Field(default=None, max_length=500)
     source_excerpt: str | None = Field(default=None, max_length=24_000)
     show_source_credit: bool = False
@@ -146,12 +151,15 @@ class VideoBriefRequest(BaseModel):
     video_style: str = Field(default="classic", pattern=r"^(classic|story)$")
     # Optional operator-written narration (see pipeline/script_fit.py); the writer keeps its wording.
     operator_script: str | None = Field(default=None, max_length=12_000)
-    # Use operator_script word for word (Claude writer only): it only plans the visuals, and the writing checks are skipped.
-    exact_script: bool = False
+    # Use operator_script word for word (either writer): it only plans the visuals, and the writing checks are skipped.
+    exact_script: bool | None = None   # None: follow the Settings default
     script_routing_mode: str | None = Field(default=None, pattern=r"^(claude_only|codex_only|automatic)$")
     script_owner: str | None = Field(default=None, pattern=r"^(codex|claude)$")
     # Studio's single "script writer" choice. Omitted = the configured default (Sonnet, medium effort).
     script_model: str | None = Field(default=None, pattern=r"^(sonnet-medium|opus|gpt-sol)$")
+
+
+THUMBNAIL_NOTE_PREFIX = "Thumbnail direction from the operator (shape the thumbnail text options and the hook's promise around it): "
 
 
 # id -> (script owner, Claude model choice). Sonnet is the default for testing.
@@ -167,6 +175,9 @@ class SourceClipRequest(BaseModel):
     clip_count: int = Field(default=1, ge=1, le=12)
     max_duration_seconds: int = Field(default=60, ge=10, le=900)
     captions_enabled: bool = False
+    start_seconds: int | None = Field(default=None, ge=0, le=172_800)
+    length_minutes: int | None = Field(default=None, ge=1, le=2_880)
+    guidance: str | None = Field(default=None, max_length=1_000)  # what to look for, in the operator's words
 
 
 class TopicCreateRequest(BaseModel):
@@ -310,6 +321,15 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     except KeyError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"unknown video preset: {name}") from error
     duration = value.duration_seconds or preset.duration_seconds
+    from tubeforge.core import runtime_settings as runtime_values
+    operator_script = (value.operator_script or "").strip() or None
+    exact_script = bool(operator_script) and (value.exact_script if value.exact_script is not None else runtime_values.shared().value("script.exact_by_default", False))
+    fit_notes: tuple[str, ...] = ()
+    if exact_script:   # the wording is final, so the scenes and the video length adapt to it instead of the script failing
+        from tubeforge.pipeline.exact_fit import fit_exact_script
+        fitted = fit_exact_script(operator_script, duration)
+        operator_script, fit_notes = fitted.text, fitted.notes
+        duration = min(max(fitted.length_s, preset.minimum_duration_seconds), preset.maximum_duration_seconds)
     if not preset.minimum_duration_seconds <= duration <= preset.maximum_duration_seconds:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{name} duration must be between {preset.minimum_duration_seconds} and {preset.maximum_duration_seconds} seconds")
     music = value.music_track if value.music_track is not None else preset.music_track
@@ -322,6 +342,8 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
     if len(set(mcp)) != len(mcp) or any(not server.strip() for server in mcp):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="mcp_servers must be unique and nonblank")
     notes = tuple(note.strip() for note in value.notes if note.strip())
+    if value.thumbnail_guidance and value.thumbnail_guidance.strip() and notes:
+        notes = (*notes, THUMBNAIL_NOTE_PREFIX + " ".join(value.thumbnail_guidance.split()))
     if not notes:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="at least one nonblank note is required")
     if value.visual_source == "stock" and settings.pipeline.media.provider not in {"wikimedia", "hybrid"}:
@@ -361,16 +383,12 @@ def _video_request(value: VideoBriefRequest, settings: Settings, *, available_mu
         else:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Claude script writers are not enabled in this TubeForge configuration")
     owner, claude_model = SCRIPT_MODELS[choice]
-    from tubeforge.core import runtime_settings as runtime_values
-    exact_script = bool((value.operator_script or "").strip()) and (value.exact_script or runtime_values.shared().value("script.exact_by_default", False))
-    if exact_script and owner != "claude":
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Using your script exactly needs the Claude writer; choose a Claude script model")
     channel, profile = voice_for(settings.pipeline.codex, value.channel_identity)
     voice_id, voice_speed_scale = channel_voice_character_for(settings.pipeline.codex, value.channel_identity, value.voice_id)
     request = ContentRequest(
         script_owner=owner, script_model=claude_model, script_routing_mode=value.script_routing_mode, ending=value.ending, video_style=value.video_style,
-        operator_script=(value.operator_script or "").strip() or None,
-        exact_script=exact_script,
+        operator_script=operator_script,
+        exact_script=exact_script, script_fit_notes=fit_notes,
         show_source_credit=value.show_source_credit, show_mascot=value.show_mascot, channel_watermark=_watermark(value.channel_watermark),
         channel_identity=channel, channel_voice_profile=profile,
         topic=value.title, angle=value.angle.strip() if value.angle and value.angle.strip() else "\n".join(notes), target_duration_seconds=duration,
@@ -398,7 +416,8 @@ def _source_clip_request(value: SourceClipRequest) -> ContentRequest:
         target_duration_seconds=max(30, value.max_duration_seconds), language="en", audience="general",
         prompt_version="source-clip-v1", sources=(SourceReference(source_id="source-video", url=source_url, title=title),),
         review_mode="auto", captions_enabled=value.captions_enabled, production_mode="source_clip", source_url=source_url,
-        clip_count=value.clip_count,
+        clip_count=value.clip_count, notes=((value.guidance.strip(),) if value.guidance and value.guidance.strip() else ()),
+        source_start_seconds=value.start_seconds, source_length_seconds=value.length_minutes * 60 if value.length_minutes else None,
     )
 
 
@@ -475,10 +494,9 @@ def _can_retry_approved_asset_validation(runtime: Runtime, job: object) -> tuple
 
 DASHBOARD_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TubeForge Studio</title><style>
-:root{color-scheme:dark;--bg:#080d1a;--panel:#111a2e;--muted:#8ea0bd;--line:#253451;--cyan:#5ee8ff;--good:#70e1a1;--warn:#ffd36a;--bad:#ff8492}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#162544,#080d1a 45%);color:#f3f7ff;font:15px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}.shell{max-width:1180px;margin:auto;padding:22px 16px 48px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:22px}.brand{font-size:22px;font-weight:800;letter-spacing:-.5px}.brand i{font-style:normal;color:var(--cyan)}.sub{color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:minmax(270px,350px) 1fr;gap:18px}.panel,.job{background:linear-gradient(145deg,#131f37,#0e1729);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 32px #0003}.panel{padding:18px}h1,h2,h3,p{margin:0}h2{font-size:17px}label{display:block;margin:13px 0 0;color:#cbd7eb;font-size:13px}input:not([type=checkbox]),textarea,select,button{font:inherit;width:100%;margin-top:5px;border-radius:9px;border:1px solid #31415f;padding:10px;background:#0a1222;color:#f5f8ff}textarea{min-height:106px;resize:vertical}input[type=checkbox]{accent-color:var(--cyan)}button{border:0;background:linear-gradient(100deg,#53d6f1,#8099ff);color:#07111e;font-weight:800;cursor:pointer}button.secondary{background:#223452;color:#eaf4ff;border:1px solid #3b5076}button.danger{background:#4b2634;color:#ffdce1;border:1px solid #864454}button.small{width:auto;margin:0;padding:7px 10px;font-size:12px}.checkbox{display:flex;gap:8px;align-items:center;margin-top:15px}.checkbox input{width:auto}.toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}.toolbar select{width:auto;margin:0;padding:7px}.jobs{display:grid;gap:11px}.job{padding:15px;overflow-wrap:anywhere}.jobhead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.title{font-weight:800;font-size:16px}.badge{display:inline-flex;align-items:center;border-radius:99px;padding:4px 8px;background:#223654;color:#b7ebff;font-size:11px;font-weight:800;white-space:nowrap}.badge.failed{background:#4a2631;color:#ffc0c8}.badge.ready{background:#1c4038;color:#adf4ce}.badge.pending{background:#4a3c1d;color:#ffe5a1}.muted{color:var(--muted);font-size:13px}.failure{margin-top:10px;border-left:3px solid var(--bad);padding:8px 10px;background:#2b1720;color:#ffdce1;border-radius:6px;font-size:13px}.failure.pending{border-color:var(--warn);background:#2b2617;color:#ffecad}.actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px}.empty,.loading,.error{padding:25px;text-align:center;color:var(--muted)}.error{color:#ffc0c8}.notice{min-height:20px;margin-top:10px;color:var(--good);font-size:13px}dialog{width:min(680px,calc(100% - 24px));max-height:86vh;color:#f4f7ff;background:#101a2d;border:1px solid #3b4d70;border-radius:16px;padding:0;box-shadow:0 24px 80px #000b}dialog::backdrop{background:#020714bb}.modal-head{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:15px 16px;border-bottom:1px solid var(--line)}.modal-body{padding:16px;overflow:auto;max-height:70vh}.close{width:auto;background:transparent;color:#dbe8ff;font-size:20px;padding:0 6px}.video{width:100%;border-radius:10px;background:#000}.timeline{display:grid;gap:11px}.event{border-left:2px solid #406392;padding-left:10px}.event-time{color:var(--muted);font-size:12px}.event-type{font-weight:750}.event-detail{font-size:13px;color:#cbd7eb;white-space:pre-wrap;overflow-wrap:anywhere}@media(max-width:780px){.shell{padding:14px 12px}.grid{grid-template-columns:1fr}.top{align-items:flex-start}.panel{padding:15px}.jobhead{flex-direction:column}.badge{white-space:normal}.toolbar{align-items:flex-start;flex-direction:column}.toolbar select{width:100%}}#activityDialog{width:min(980px,calc(100% - 24px))}#activityDialog .modal-body{max-height:76vh}.act{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}.act-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.act-link{color:var(--cyan);font-size:13px}.act-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr));gap:10px}.act-card{background:#0b1426;border:1px solid var(--line);border-radius:12px;padding:12px 14px}.act-card b{display:block;font-size:24px;line-height:1.25;letter-spacing:-.5px}.act-card span{color:var(--muted);font-size:12px}.act-label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.act-panel{border:1px solid var(--line);border-radius:12px;background:#0b1426;padding:13px 15px}.act-panel h3{margin:0 0 10px;font-size:14px}.act-fail{border-color:#ff849266;background:#2a1220;color:#ffc0c8}.act-note{margin-top:10px}.act-scroll{overflow-x:auto}.act-table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}.act-table th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;text-align:right;padding:4px 8px;white-space:nowrap}.act-table td{padding:8px;text-align:right;border-top:1px solid var(--line);white-space:nowrap}.act-table th:first-child,.act-table td:first-child{text-align:left;min-width:150px}.act-table td:first-child span:first-child{text-transform:capitalize}.act-total td{font-weight:750;color:#fff}.act-bar{height:4px;border-radius:3px;background:#1b2a47;margin-top:5px;overflow:hidden}.act-bar.big{margin:0;height:8px;border-radius:4px}.act-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#2f8fc4,var(--cyan))}.stage-row{display:grid;grid-template-columns:minmax(120px,190px) 1fr 96px 74px;gap:12px;align-items:center;padding:6px 0;font-size:13px}.stage-name{text-transform:capitalize}.stage-row.bad .act-bar i{background:var(--bad)}.stage-time,.stage-mem{text-align:right;font-variant-numeric:tabular-nums}.stage-mem{color:var(--muted)}.act-log summary{cursor:pointer;font-weight:750;font-size:14px}.act-chips{display:flex;gap:6px;margin:10px 0 4px}.chip{width:auto;padding:3px 11px;border-radius:99px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:12px;cursor:pointer}.chip.on{background:#1d3558;color:#fff;border-color:#406392}.ev-row{display:grid;grid-template-columns:84px 170px 1fr;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13px;align-items:start}.ev-row[hidden]{display:none}.ev-time{color:var(--muted);font-variant-numeric:tabular-nums}.ev-type{font-weight:700;text-transform:capitalize;padding-left:11px;position:relative}.ev-type:before{content:"";position:absolute;left:0;top:.5em;width:6px;height:6px;border-radius:50%;background:#406392}.ev-type.info:before{background:var(--cyan)}.ev-type.warn:before{background:var(--warn)}.ev-type.bad{color:#ffc0c8}.ev-type.bad:before{background:var(--bad)}.ev-detail{display:flex;flex-wrap:wrap;gap:4px 14px;color:#cbd7eb;overflow-wrap:anywhere}.ev-kv em{font-style:normal;color:var(--muted)}@media(max-width:640px){.stage-row{grid-template-columns:1fr 1fr}.stage-row .act-bar{grid-column:1/-1;order:3}.ev-row{grid-template-columns:1fr;gap:2px}}</style></head>
-<body><main class="shell"><header class="top"><div><div class="brand">Tube<i>Forge</i> Studio</div><div class="sub">Local video creation, review, and activity</div></div><div class="sub" id="authInfo" data-username=""></div><div class="sub" id="connection">Connecting…</div></header><div class="grid"><section class="panel"><h2>New generation</h2><p class="sub">Give a title and the key points. You stay in control of review.</p><form id="createForm"><label>Title<input name="title" maxlength="500" required placeholder="e.g. Bare minimum for software engineers"></label><label>Notes<textarea name="notes" required placeholder="One point per line"></textarea></label><label>Target duration (seconds)<input name="duration_seconds" type="number" value="60" min="30" max="7200" required></label><label>Review mode<select name="review_mode"><option value="manual">Manual review</option><option value="auto">Automatic render</option></select></label><label class="checkbox"><input name="captions_enabled" type="checkbox" checked> Include captions</label><button type="submit">Create video</button><div class="notice" id="notice" role="status"></div></form></section><section><div class="toolbar"><div><h2>Generations</h2><div class="sub">Updates in place every 30 seconds</div></div><select id="filter" aria-label="Filter generations"><option value="all">All generations</option><option value="active">In progress</option><option value="needs_review">Needs review</option><option value="failed">Failed</option><option value="complete">Video ready</option></select><button type="button" class="secondary" id="refreshJobs">Refresh</button></div><div id="jobs" class="jobs"><div class="loading">Loading generations…</div></div></section></div></main><dialog id="videoDialog" aria-labelledby="videoTitle"><div class="modal-head"><h2 id="videoTitle">Video</h2><button class="close" type="button" data-close="videoDialog" aria-label="Close video">×</button></div><div class="modal-body"><video id="player" class="video" controls preload="metadata" playsinline></video></div></dialog><dialog id="activityDialog" aria-labelledby="activityTitle"><div class="modal-head"><h2 id="activityTitle">Activity</h2><button class="close" type="button" data-close="activityDialog" aria-label="Close activity">×</button></div><div class="modal-body"><div id="timeline" class="timeline"><div class="loading">Loading activity…</div></div></div></dialog><script>
-const jobsRoot=document.querySelector('#jobs'),filter=document.querySelector('#filter'),notice=document.querySelector('#notice'),cards=new Map();const esc=v=>String(v??'');const ready=s=>['preview_ready','final_ready','publication_approval_required','publication_ready','published'].includes(s),failed=s=>['failed_validation','failed_exhausted'].includes(s);const needs=s=>['script_approval_required','preview_ready','publication_approval_required'].includes(s);function matches(j){return filter.value==='all'||filter.value==='active'&&(!ready(j.state)&&!failed(j.state)&&!needs(j.state))||filter.value==='needs_review'&&needs(j.state)||filter.value==='failed'&&failed(j.state)||filter.value==='complete'&&j.artifacts.includes('final')}function badgeClass(j){return j.state==='failed_retryable'?'pending':failed(j.state)?'failed':j.artifacts.includes('final')?'ready':''}function button(label,cls,fn){let b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=fn;return b}function renderCard(card,j){card.replaceChildren();card.className='job';let head=document.createElement('div');head.className='jobhead';let name=document.createElement('div');name.className='title';name.textContent=j.topic;let badge=document.createElement('span');badge.className='badge '+badgeClass(j);badge.textContent=j.paused?'Paused':j.pausing?'Pausing…':j.blocked_reason==='insufficient_sources'?'Blocked: insufficient sources':j.state==='failed_retryable'?(j.next_retry_at?'Retry scheduled':'Retry pending'):j.state.replaceAll('_',' ');head.append(name,badge);card.append(head);if(j.failure_message){let msg=document.createElement('div');msg.className='failure'+(j.state==='failed_retryable'?' pending':'');msg.textContent=j.failure_message;card.append(msg)}let meta=document.createElement('div');meta.className='muted';meta.textContent=`${j.artifacts.length} saved artifacts · ${j.event_count} activity events`;if(j.state==='failed_retryable'&&j.next_retry_at)meta.textContent+=` · Next attempt ${new Date(j.next_retry_at).toLocaleString()} (attempt ${j.attempt_count})`;card.append(meta);let actions=document.createElement('div');actions.className='actions';if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')));for(const clip of j.artifacts.filter(name=>name.startsWith('clip_')))actions.append(button(clip.replace('_',' '),'secondary',()=>openVideo(j,clip,clip.replace('_',' '))));actions.append(button('Activity','secondary',()=>openActivity(j)));if(j.state==='script_approval_required')actions.append(button('Approve script','',()=>approve(j.id,'script')));if(j.state==='preview_ready')actions.append(button('Approve preview','',()=>approve(j.id,'preview')));if(j.can_retry_validation)actions.append(button('Retry approved media stages','secondary',()=>retryValidation(j)));if(j.can_pause)actions.append(button('Pause','secondary',()=>pauseJob(j)));if(j.can_resume)actions.append(button('Resume','',()=>resumeJob(j)));if(j.deletable)actions.append(button('Delete','danger',()=>removeJob(j.id)));else if(j.can_pause||j.pausing)actions.append(button('Stop & delete','danger',()=>stopAndDelete(j)));card.append(actions)}async function refresh(){try{let r=await fetch('/api/jobs');if(r.status===401){location.assign('/login');return}if(!r.ok)throw Error('Could not load generations (HTTP '+r.status+')');let data=await r.json(),visible=data.filter(matches),seen=new Set;for(const job of visible){let card=cards.get(job.id);if(!card){card=document.createElement('article');cards.set(job.id,card);jobsRoot.append(card)}renderCard(card,job);seen.add(job.id)}for(const [id,card]of cards)if(!seen.has(id)){card.remove();cards.delete(id)}if(!visible.length)jobsRoot.innerHTML='<div class="empty">No matching generations yet.</div>';else if(jobsRoot.querySelector('.empty'))jobsRoot.querySelector('.empty').remove();document.querySelector('#connection').textContent='Dashboard connected'}catch(e){if(!cards.size)jobsRoot.innerHTML='<div class="error">'+esc(String(e&&e.message||'Unable to load generations')+'. Retrying…')+'</div>';document.querySelector('#connection').textContent='Reconnecting…'}}async function openVideo(job,name,label){let dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');document.querySelector('#videoTitle').textContent=`${label}: ${job.topic}`;player.pause();player.removeAttribute('src');player.load();player.src=`/api/jobs/${job.id}/artifacts/${name}`;player.autoplay=false;dialog.showModal()}async function openActivity(job){const dialog=document.querySelector('#activityDialog'),root=document.querySelector('#timeline');const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};const dur=ms=>ms<1000?Math.round(ms)+' ms':ms<60000?(ms/1000).toFixed(1)+' s':Math.floor(ms/60000)+' min '+Math.round(ms%60000/1000)+' s',mem=b=>b==null?'n/a':b>=1073741824?(b/1073741824).toFixed(2)+' GiB':Math.round(b/1048576)+' MiB',num=n=>Number(n||0).toLocaleString(),compact=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?(n/1e3).toFixed(1)+'k':num(n),usd=v=>v==null?'n/a':'$'+Number(v).toFixed(v<1?3:2);document.querySelector('#activityTitle').textContent='Activity: '+job.topic;root.replaceChildren(el('div','loading','Loading activity…'));dialog.showModal();let events=[],report=null,failed=false;try{const [er,dr]=await Promise.all([fetch('/api/jobs/'+job.id+'/events'),fetch('/api/jobs/'+job.id+'/diagnostics')]);if(er.ok)events=await er.json();else failed=true;if(dr.ok)report=await dr.json()}catch(_){failed=true}root.replaceChildren();const page=el('div','act');root.append(page);if(failed&&!events.length){page.append(el('div','error','Activity could not be loaded. Close this dialog and try again.'));return}
+<title>TubeForge Studio</title></head>
+<body>__SPA_SHELL_OPEN__<main class="shell"><div class="studio-grid"><section class="panel"><h2>New generation</h2><p class="sub">Give a title and the key points. You stay in control of review.</p><form id="createForm"><label>Title<input name="title" maxlength="500" required placeholder="e.g. Bare minimum for software engineers"></label><label>Notes<textarea name="notes" required placeholder="One point per line"></textarea></label><label>Target duration (seconds)<input name="duration_seconds" type="number" value="60" min="30" max="7200" required></label><label>Review mode<select name="review_mode"><option value="manual">Manual review</option><option value="auto">Automatic render</option></select></label><label class="checkbox"><input name="captions_enabled" type="checkbox" checked> Include captions</label><button type="submit">Create video</button><div class="notice" id="notice" role="status"></div></form></section><section><div class="toolbar"><div><h2>Generations</h2><div class="sub">Updates in place every 30 seconds</div></div><select id="filter" aria-label="Filter generations"><option value="all">All generations</option><option value="active">In progress</option><option value="needs_review">Needs review</option><option value="failed">Failed</option><option value="complete">Video ready</option></select><button type="button" class="secondary" id="refreshJobs">Refresh</button></div><div id="jobs" class="jobs"><div class="loading">Loading generations…</div></div></section></div></main>__SPA_SHELL_CLOSE__<dialog id="videoDialog" aria-labelledby="videoTitle"><div class="modal-head"><h2 id="videoTitle">Video</h2><button class="close" type="button" data-close="videoDialog" aria-label="Close video">×</button></div><div class="modal-body"><video id="player" class="video" controls preload="metadata" playsinline></video></div></dialog><dialog id="activityDialog" aria-labelledby="activityTitle"><div class="modal-head"><h2 id="activityTitle">Activity</h2><button class="close" type="button" data-close="activityDialog" aria-label="Close activity">×</button></div><div class="modal-body"><div id="timeline" class="timeline"><div class="loading">Loading activity…</div></div></div></dialog><script>
+const jobsRoot=document.querySelector('#jobs'),filter=document.querySelector('#filter'),notice=document.querySelector('#notice'),cards=new Map();const esc=v=>String(v??'');const ready=s=>['preview_ready','final_ready','publication_approval_required','publication_ready','published'].includes(s),failed=s=>['failed_validation','failed_exhausted'].includes(s);const needs=s=>['script_approval_required','preview_ready','publication_approval_required'].includes(s);function matches(j){return filter.value==='all'||filter.value==='active'&&(!ready(j.state)&&!failed(j.state)&&!needs(j.state))||filter.value==='needs_review'&&needs(j.state)||filter.value==='failed'&&failed(j.state)||filter.value==='complete'&&j.artifacts.includes('final')}function badgeClass(j){return j.state==='failed_retryable'?'pending':failed(j.state)?'failed':j.artifacts.includes('final')?'ready':''}function button(label,cls,fn){let b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=fn;return b}function renderCard(card,j){card.replaceChildren();card.className='job';let head=document.createElement('div');head.className='jobhead';let name=document.createElement('div');name.className='title';name.textContent=j.topic;let badge=document.createElement('span');badge.className='badge '+badgeClass(j);badge.textContent=j.paused?'Paused':j.pausing?'Pausing…':j.blocked_reason==='insufficient_sources'?'Blocked: insufficient sources':j.state==='failed_retryable'?(j.next_retry_at?'Retry scheduled':'Retry pending'):j.state.replaceAll('_',' ');head.append(name,badge);card.append(head);if(j.failure_message){let msg=document.createElement('div');msg.className='failure'+(j.state==='failed_retryable'?' pending':'');msg.textContent=j.failure_message;card.append(msg)}let meta=document.createElement('div');meta.className='muted';meta.textContent=`${j.artifacts.length} saved artifacts · ${j.event_count} activity events`;if(j.state==='failed_retryable'&&j.next_retry_at)meta.textContent+=` · Next attempt ${new Date(j.next_retry_at).toLocaleString()} (attempt ${j.attempt_count})`;card.append(meta);let actions=document.createElement('div');actions.className='actions';if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')));for(const clip of j.artifacts.filter(name=>name.startsWith('clip_')))actions.append(button(clip.replace('_',' '),'secondary',()=>openVideo(j,clip,clip.replace('_',' '))));actions.append(button('Activity','secondary',()=>openActivity(j)));if(j.state==='script_approval_required')actions.append(button('Approve script','',()=>approve(j.id,'script')));if(j.state==='preview_ready')actions.append(button('Approve preview','',()=>approve(j.id,'preview')));if(j.can_retry_validation)actions.append(button('Retry approved media stages','secondary',()=>retryValidation(j)));if(j.can_pause)actions.append(button('Pause','secondary',()=>pauseJob(j)));if(j.can_resume)actions.append(button('Resume','',()=>resumeJob(j)));if(j.deletable)actions.append(button('Delete','danger',()=>removeJob(j.id)));else if(j.can_pause||j.pausing)actions.append(button('Stop & delete','danger',()=>stopAndDelete(j)));card.append(actions)}async function refresh(){try{let r=await fetch('/api/jobs');if(r.status===401){location.assign('/login');return}if(!r.ok)throw Error('Could not load generations (HTTP '+r.status+')');let data=await r.json(),visible=data.filter(matches),seen=new Set;for(const job of visible){let card=cards.get(job.id);if(!card){card=document.createElement('article');cards.set(job.id,card);jobsRoot.append(card)}renderCard(card,job);seen.add(job.id)}for(const [id,card]of cards)if(!seen.has(id)){card.remove();cards.delete(id)}if(!visible.length)jobsRoot.innerHTML='<div class="empty">No matching generations yet.</div>';else{jobsRoot.querySelector('.empty')?.remove();jobsRoot.querySelector('.loading')?.remove()}document.querySelector('#connection').textContent='Dashboard connected'}catch(e){if(!cards.size)jobsRoot.innerHTML='<div class="error">'+esc(String(e&&e.message||'Unable to load generations')+'. Retrying…')+'</div>';document.querySelector('#connection').textContent='Reconnecting…'}}async function openVideo(job,name,label){let dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');document.querySelector('#videoTitle').textContent=`${label}: ${job.topic}`;player.pause();player.removeAttribute('src');player.load();player.src=`/api/jobs/${job.id}/artifacts/${name}`;player.autoplay=false;dialog.showModal()}async function openActivity(job){const dialog=document.querySelector('#activityDialog'),root=document.querySelector('#timeline');const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};const dur=ms=>ms<1000?Math.round(ms)+' ms':ms<60000?(ms/1000).toFixed(1)+' s':Math.floor(ms/60000)+' min '+Math.round(ms%60000/1000)+' s',mem=b=>b==null?'n/a':b>=1073741824?(b/1073741824).toFixed(2)+' GiB':Math.round(b/1048576)+' MiB',num=n=>Number(n||0).toLocaleString(),compact=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?(n/1e3).toFixed(1)+'k':num(n),usd=v=>v==null?'n/a':'$'+Number(v).toFixed(v<1?3:2);document.querySelector('#activityTitle').textContent='Activity: '+job.topic;root.replaceChildren(el('div','loading','Loading activity…'));dialog.showModal();let events=[],report=null,failed=false;try{const [er,dr]=await Promise.all([fetch('/api/jobs/'+job.id+'/events'),fetch('/api/jobs/'+job.id+'/diagnostics')]);if(er.ok)events=await er.json();else failed=true;if(dr.ok)report=await dr.json()}catch(_){failed=true}root.replaceChildren();const page=el('div','act');root.append(page);if(failed&&!events.length){page.append(el('div','error','Activity could not be loaded. Close this dialog and try again.'));return}
 const top=el('div','act-top');top.append(el('span','sub',job.state.replaceAll('_',' ')+' · '+events.length+' events'));if(report){const a=el('a','act-link','Download diagnostics JSONL');a.href='/api/jobs/'+job.id+'/diagnostics.jsonl';top.append(a)}page.append(top);
 if(report){const stages=Object.entries(report.stage_metrics),totalMs=stages.reduce((n,[,v])=>n+v.elapsed_ms,0),peaks=stages.map(([,v])=>v.cgroup_peak_bytes).filter(v=>v!=null),ai=report.ai_usage,total=ai&&ai.total,card=(label,value,sub)=>{const c=el('div','act-card');c.append(el('div','act-label',label),el('b',null,value),el('span',null,sub));return c};const cards=el('div','act-cards');cards.append(card('Pipeline time',stages.length?dur(totalMs):'n/a',stages.length+' measured stages'+(report.worker_retry_count?' · '+report.worker_retry_count+' retries':'')),card('Memory peak',peaks.length?mem(Math.max(...peaks)):'n/a','container lifetime, not per job'),card('AI tokens',total?compact(total.total_tokens):'n/a',total?total.calls+' calls · '+(ai.model||'model n/a'):'no script call recorded'),card('AI cost',total?usd(total.cost_usd):'n/a',total&&total.cost_usd!=null?'script'+(total.web_searches?' + research':''):'not reported by provider'));page.append(cards);
 if(report.failure_reason){const f=el('div','act-panel act-fail');f.append(el('h3',null,'Failure'),el('div',null,report.failure_reason));page.append(f)}
@@ -489,6 +507,8 @@ const logPanel=el('details','act-panel act-log');if(!report||report.failure_reas
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Create the HTTP application using explicit settings when supplied."""
+    from tubeforge.core.tempdir import ensure_tempdir
+    ensure_tempdir()
     application_settings = settings or load_settings()
     validate_selected_provider(application_settings)
     runtime: Runtime = create_runtime(application_settings)
@@ -580,7 +600,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def require_dashboard_auth(request: Request, call_next):
-        if not application_settings.auth.enabled or request.url.path in {"/healthz", "/login", "/logout", "/favicon.ico", "/docs", "/openapi.json"}:
+        if not application_settings.auth.enabled or request.url.path in {"/healthz", "/login", "/logout", "/favicon.ico", "/docs", "/openapi.json"} or request.url.path.startswith(STATIC_PREFIX + "/"):
             return await call_next(request)
         session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         if session is None:
@@ -683,6 +703,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         configured = application_settings.auth.enabled and google_oauth is not None and oauth_store is not None
         return {"configured": configured, "reason": None if configured else "Google application, HTTPS or loopback HTTP callback, account encryption key, and Studio login are required"}
 
+    youtube_log = logging.getLogger("tubeforge.youtube_connection")
+
     @app.post("/api/oauth/youtube/start", tags=["social accounts"])
     def start_youtube_oauth(value: OAuthStartRequest, request: Request) -> dict[str, str]:
         if not application_settings.auth.enabled or google_oauth is None or oauth_store is None:
@@ -694,11 +716,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             account = next((item for item in runtime.accounts.list() if item.id == value.account_id), None)
             if account is None or account.platform != "youtube":
                 raise HTTPException(status_code=404, detail="YouTube account not found")
+        youtube_log.info("YouTube connection started")
         verifier = secrets.token_urlsafe(64)
         state = oauth_store.begin(platform="youtube", account_id=value.account_id, session_id=login_session.id, redirect_uri=google_oauth.redirect_uri, code_verifier=verifier)
         try:
             url = google_oauth.authorization_url(state, verifier)
         except Exception as error:
+            youtube_log.warning("YouTube authorization URL failed: %s", type(error).__name__)
             raise HTTPException(status_code=502, detail="Could not start Google authorization") from error
         return {"authorization_url": url}
 
@@ -709,16 +733,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         if login_session is None:
             raise HTTPException(status_code=401, detail="Studio sign-in is required")
+        youtube_log.info("YouTube callback received")
         pending = oauth_store.consume(state, platform="youtube", session_id=login_session.id)
         if pending is None:
+            youtube_log.warning("YouTube callback state rejected: expired, used, missing or session mismatch")
             raise HTTPException(status_code=400, detail="Google authorization state is expired or invalid")
         if error or not code or not pending.code_verifier:
+            youtube_log.warning("YouTube callback incomplete: provider_error=%s code_present=%s verifier_present=%s", bool(error), bool(code), bool(pending.code_verifier))
             raise HTTPException(status_code=400, detail="Google authorization was declined or incomplete")
         try:
             verified = google_oauth.exchange_and_discover(code=code, state=state, code_verifier=pending.code_verifier)
             candidate = oauth_store.stage_verified(state, session_id=login_session.id, external_id=verified.channel_id, label=verified.label, credential=verified.credential, scopes=verified.scopes, expires_at=verified.expires_at)
         except Exception as failure:
+            cause = failure.__cause__
+            youtube_log.warning("YouTube channel verification failed: error_type=%s cause_type=%s", type(failure).__name__, type(cause).__name__ if cause else "none")
             raise HTTPException(status_code=400, detail="Google channel verification failed; reconnect and try again") from failure
+        youtube_log.info("YouTube channel verified; awaiting confirmation")
         return f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm YouTube channel — TubeForge</title><style>body{{background:#080d1a;color:#f3f7ff;font:16px system-ui;max-width:520px;margin:10vh auto;padding:20px}}main{{background:#111a2e;border:1px solid #253451;border-radius:16px;padding:24px}}button{{background:#5ee8ff;color:#07111e;border:0;border-radius:9px;padding:12px;font:inherit;font-weight:700;cursor:pointer}}button:disabled{{opacity:.6}}a{{color:#5ee8ff}}</style><main><h1>Confirm YouTube channel</h1><p>TubeForge found <strong>{html.escape(candidate.label)}</strong>.</p><p>Channel ID: <code>{html.escape(candidate.external_id)}</code></p><p>Confirm this exact destination before saving the encrypted connection.</p><input id="oauthState" type="hidden" value="{html.escape(state)}"><button id="confirm" type="button">Connect this channel</button><p id="result" role="status" aria-live="polite"></p><a href="/">Return to Studio</a></main><script>document.querySelector('#confirm').onclick=async()=>{{const button=document.querySelector('#confirm'),result=document.querySelector('#result');button.disabled=true;button.textContent='Saving connection…';const csrf=(document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1];try{{const response=await fetch('/api/oauth/youtube/confirm',{{method:'POST',headers:{{'content-type':'application/json','x-csrf-token':decodeURIComponent(csrf||'')}},body:JSON.stringify({{state:document.querySelector('#oauthState').value}})}});if(!response.ok)throw Error(await response.text());result.textContent='Channel connected. Returning to Studio…';location.assign('/');}}catch(_){{result.textContent='Could not save this connection. Start authorization again.';button.disabled=false;button.textContent='Connect this channel';}}}};</script></html>"""
 
     @app.post("/api/oauth/youtube/confirm", tags=["social accounts"])
@@ -731,7 +761,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             account_id = oauth_store.confirm(value.state, session_id=login_session.id)
         except ValueError as failure:
+            youtube_log.warning("YouTube account confirmation rejected")
             raise HTTPException(status_code=409, detail=str(failure)) from failure
+        youtube_log.info("YouTube account connection confirmed")
         account = next(item for item in runtime.accounts.list() if item.id == account_id)
         return {"id": account.id, "platform": account.platform, "display_name": account.display_name, "external_account_id": account.external_account_id, "status": account.status}
 
@@ -1127,7 +1159,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from tubeforge.api.runtime_settings import register_settings_routes
     register_settings_routes(app, runtime)
     from tubeforge.api.reference_intake import register_reference_routes
-    register_reference_routes(app, runtime, application_settings)
+    register_reference_routes(app, runtime, application_settings, routing_policy)
     from tubeforge.api.long_form import register_long_form_routes
     register_long_form_routes(app, runtime, application_settings)
 
@@ -1154,15 +1186,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         runtime.events.append(job.id, "job_created", topic=job.request.topic, review_mode=job.request.review_mode)
+        if job.request.script_fit_notes:
+            runtime.events.append(job.id, "script_fitted", notes=list(job.request.script_fit_notes), exact_script=True)
         return {**_job_payload(job), "video_description": runtime.jobs.video_description(job.id), "destination_intents": runtime.jobs.destination_intents(job.id), "watch_url": f"/api/jobs/{job.id}/artifacts/final"}
 
-    @app.post("/api/source-clips", status_code=status.HTTP_201_CREATED, tags=["videos"])
-    def create_source_clips(brief: SourceClipRequest) -> dict[str, object]:
+    def make_source_clip_job(brief: SourceClipRequest) -> dict[str, object]:
         if not application_settings.pipeline.source_clips.enabled:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="source clipping is disabled")
         job = runtime.jobs.create(uuid4().hex, _source_clip_request(brief))
         runtime.events.append(job.id, "source_clip_job_created", source_url=str(job.request.source_url), clip_count=job.request.clip_count)
         return {**_job_payload(job), "watch_url": f"/api/jobs/{job.id}/artifacts/final"}
+
+    @app.post("/api/source-clips", status_code=status.HTTP_201_CREATED, tags=["videos"])
+    def create_source_clips(brief: SourceClipRequest) -> dict[str, object]:
+        return make_source_clip_job(brief)
+
+    from tubeforge.api.clips_ui import register_clips_routes
+    register_clips_routes(app, runtime, lambda body: make_source_clip_job(SourceClipRequest(**body.model_dump())))
+    register_design_assets(app)
 
     def legacy_video_form() -> str:
         return """<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>TubeForge</title><style>*{box-sizing:border-box}body{font:16px system-ui;max-width:760px;margin:20px auto;padding:0 14px;background:#101827;color:#e6edf3;overflow-x:hidden}label{display:block;margin:10px 0}input:not([type=checkbox]),textarea,select,button{font:inherit;padding:9px;margin-top:4px;width:100%;max-width:100%;border-radius:6px;border:1px solid #334155;background:#fff;color:#0f172a}textarea{min-height:88px;resize:vertical}input[type=checkbox]{width:auto;margin-right:7px}button{background:#38bdf8;border:0;color:#06233a;font-weight:700;cursor:pointer}.job{background:#172033;margin:10px 0;padding:12px;border-radius:8px;overflow-wrap:anywhere}.state{color:#7dd3fc}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}.actions button{width:auto;margin:0;padding:7px 10px}.danger{background:#fda4af}a{color:#7dd3fc}video{display:block;width:100%;max-width:100%;margin-top:10px;border-radius:6px;background:#000}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><h1>TubeForge</h1><p>Create, review, and track local video generations.</p><form id=f><label>Title<input name=title required></label><label>Notes<textarea name=notes required placeholder='One point per line'></textarea></label><label>Duration (seconds)<input name=duration_seconds type=number value=60 min=30></label><label><input name=captions_enabled type=checkbox checked> Captions</label><label>Review<select name=review_mode><option value=manual>Manual: approve script and preview</option><option value=auto>Auto render</option></select></label><button>Create video</button></form><pre id=o></pre><h2>Generations</h2><div id=jobs>Loading…</div><script>const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));async function refresh(){let r=await fetch('/api/jobs');let j=await r.json();jobs.innerHTML=j.map(x=>{let a=x.artifacts||[],preview=a.includes('preview'),final=a.includes('final'),actions=(x.state==='script_approval_required'?`<button onclick=approve('${x.id}','script')>Approve script</button>`:'')+(x.state==='preview_ready'?`<button onclick=approve('${x.id}','preview')>Approve preview</button>`:'')+(x.deletable?`<button class=danger onclick=removeJob('${x.id}')>Delete</button>`:'');let media=final?`<video controls preload=metadata src='/api/jobs/${x.id}/artifacts/final'></video>`:preview?`<video controls preload=metadata src='/api/jobs/${x.id}/artifacts/preview'></video>`:'';return `<div class=job><b>${esc(x.topic)}</b><br><span class=state>${esc(x.state)}</span>${x.failure_message?'<br>'+esc(x.failure_message):''}${media}<div class=actions>${actions}</div></div>`}).join('')||'No generations yet.'}async function approve(id,gate){await fetch(`/api/jobs/${id}/approvals/${gate}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:'approved',actor:'local-dashboard'})});refresh()}async function removeJob(id){if(confirm('Delete this generation and its local files?')){let r=await fetch(`/api/jobs/${id}`,{method:'DELETE'});if(!r.ok)alert(await r.text());refresh()}}f.onsubmit=async e=>{e.preventDefault();let d=new FormData(f),b={title:d.get('title'),notes:d.get('notes').split('\\n').filter(Boolean),duration_seconds:+d.get('duration_seconds'),captions_enabled:d.has('captions_enabled'),review_mode:d.get('review_mode')};let r=await fetch('/api/videos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)});o.textContent=await r.text();refresh()};refresh();setInterval(refresh,3000)</script>"""
@@ -1220,8 +1261,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           const originalFetch=window.fetch;
           window.fetch=(url, init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);body.script_model=ownerSelect.value||null;body.ending=endingSelect.value||'loop';body.video_style=styleSelect.value||'classic';body.visual_source=visualSelect.value;body.preset=presetSelect.value;body.channel_identity=channelSelect.value||null;body.music_track=document.querySelector('#musicSelect')?.value||null;body.destination_account_ids=[...intentAccounts.querySelectorAll('input[type="checkbox"]:checked')].map(item=>item.value);body.description=descriptionInput.value.trim()||null;init={...init,body:JSON.stringify(body)};}catch(_){}}return originalFetch(url,init);};
           const panel = document.createElement('fieldset');
-          panel.style.marginTop = '18px'; panel.style.border = '1px solid #31415f'; panel.style.borderRadius = '9px';
-          panel.innerHTML = '<legend>Clip existing video / stream</legend><label>Source URL<input id="sourceClipUrl" type="url" placeholder="https://…"></label><label>Number of clips<input id="sourceClipCount" type="number" value="1" min="1" max="12"></label><label class="checkbox"><input id="sourceClipCaptions" type="checkbox"> Burn available captions</label><button id="sourceClipCreate" type="button" class="secondary">Create clip job</button>';
+          panel.id = 'clipsLink'; panel.style.marginTop = '18px'; panel.style.border = '1px solid #31415f'; panel.style.borderRadius = '9px';
+          panel.innerHTML = '<legend>Clip an existing video</legend><p class="sub">Clips have their own page: pick the best moments of a long video and review each one.</p><a class="button secondary" href="/clips">Open Clips</a>';
           form.append(panel);
           const voiceLabel=document.createElement('label'); voiceLabel.textContent='Narrator voice';
           const voiceSelect=document.createElement('select'); voiceSelect.name='voice_id'; voiceSelect.id='voiceSelect';
@@ -1243,14 +1284,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           form.append(musicPanel);
           document.querySelector('#musicUpload').onclick=async()=>{const file=document.querySelector('#musicFile').files[0],status=document.querySelector('#musicStatus');if(!file){status.textContent='Choose an audio file.';return;}const query=new URLSearchParams({name:document.querySelector('#musicName').value,filename:file.name,source_url:document.querySelector('#musicSource').value,license_name:document.querySelector('#musicLicenseName').value,license_url:document.querySelector('#musicLicenseUrl').value,attribution_required:String(document.querySelector('#musicAttributionRequired').checked),attribution:document.querySelector('#musicAttribution').value,publishing_allowed:String(document.querySelector('#musicPublishingAllowed').checked)});status.textContent='Validating and uploading…';const response=await fetch('/api/music?'+query,{method:'POST',headers:{'content-type':'application/octet-stream'},body:file});const data=response.ok?await response.json():null;status.textContent=response.ok?'Approved track added to the catalog.':'Could not add track: '+await response.text();if(data){await loadMusic();musicSelect.value=data.name;updateMusicPreviewButton();}};
           voicePreview.onclick=async()=>{const voice=voiceSelect.value;if(!voice){previewStatus.textContent='Choose a voice first.';return;}voicePreview.disabled=true;voicePreview.textContent='Loading preview…';previewStatus.textContent='';try{const audio=new Audio(`/api/voices/${encodeURIComponent(voice)}/preview`);await audio.play();previewStatus.textContent='Playing local sample.';audio.onended=()=>previewStatus.textContent='';audio.onerror=()=>previewStatus.textContent='Voice preview could not be played.';}catch(_){previewStatus.textContent='Voice preview could not be loaded.';}finally{voicePreview.disabled=false;voicePreview.textContent='Preview voice';}};
-          document.querySelector('#sourceClipCreate').addEventListener('click', async () => {
-            const notice = document.querySelector('#notice');
-            const sourceUrl = document.querySelector('#sourceClipUrl').value.trim();
-            const clipCount = Number(document.querySelector('#sourceClipCount').value);
-            if (!sourceUrl) { notice.textContent = 'Enter a public source URL first.'; return; }
-            const response = await fetch('/api/source-clips', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({source_url: sourceUrl, clip_count: clipCount, captions_enabled: document.querySelector('#sourceClipCaptions').checked})});
-            notice.textContent = response.ok ? 'Source clip job created. It will appear in the list shortly.' : 'Could not create clip job: ' + await response.text();
-          });
         })();
         </script>"""
         operations_controls = SCHEDULING_SCRIPT
@@ -1456,12 +1489,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         })();
         </script>"""
         reviewer_controls += SCENE_CONTROLS
-        dashboard = DASHBOARD_HTML.replace(
-            "</style>",
-            ".creative-list{margin:6px 0 14px;padding-inline-start:1.4rem}.creative-row{padding:7px 2px 10px;overflow-wrap:anywhere;border-bottom:1px solid var(--line)}.creative-score{display:inline-block;margin-right:8px;padding:2px 7px;border-radius:999px;background:#223654;color:#b7ebff;font-size:12px;font-weight:700}.creative-row ul{margin:5px 0 0;padding-inline-start:1.2rem}.creative-row li+li{margin-top:3px}#creativeChecks{overflow-wrap:anywhere}#scriptDialog details summary{cursor:pointer}@media(max-width:600px){.creative-row{padding-inline-start:2px}}"
-            "</style>",
-            1,
-        )
+        dashboard = DASHBOARD_HTML
         research_enabled = application_settings.pipeline.sources.research_enabled
         dashboard = dashboard.replace(
             "Give a title and the key points.",
@@ -1484,10 +1512,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dashboard = dashboard.replace(
             "</label><label>Target duration (seconds)",
             "</label>" + source_fields + "<label>Target duration (seconds)",
-        )
-        dashboard = dashboard.replace(
-            "textarea{min-height:106px;resize:vertical}",
-            "textarea{min-height:106px;resize:vertical}fieldset.sources{margin:14px 0;padding:10px 12px;border:1px solid var(--line);border-radius:9px}fieldset.sources legend{color:#cbd7eb;font-size:13px;font-weight:700}.source-row{margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px}",
         )
         dashboard = dashboard.replace("join('\n')", r"join('\n')").replace("split('\n')", r"split('\n')")
         dashboard = dashboard.replace(
@@ -1515,6 +1539,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "actions.append(button('Inputs & script','secondary',()=>window.openStudioRecord(j.id)));if(j.can_retry_as_new)actions.append(button('Retry…','',()=>window.openRetryJob(j.id)));actions.append(button('Copy job ID','secondary',async ev=>{const b=ev.currentTarget;try{await navigator.clipboard.writeText(j.id);b.textContent='Copied '+j.id.slice(0,8);}catch(_){window.prompt('Job ID',j.id);}setTimeout(()=>{b.textContent='Copy job ID'},2500);}));let format=document.createElement('div');format.className='generation-format';const kind=j.format.production_mode==='source_clip'?'Source clips':j.format.aspect_ratio==='9:16'&&j.format.duration_seconds<=120?'Shorts':j.format.aspect_ratio==='9:16'?'Vertical video':'Landscape video';format.textContent=kind+' · '+j.format.preset+' · '+j.format.duration_seconds+'s · '+(j.destinations.length?j.destinations.map(item=>item.platform+' / '+item.account_name+' / '+item.category).join(', '):'No destination selected');card.append(format,actions)}async function refresh()",
         )
         dashboard = dashboard.replace(
+            "card.append(format,actions)}async function refresh()",
+            "if(j.artifacts.includes('final')){const thumb=document.createElement('img');thumb.className='job-thumb';thumb.tabIndex=0;thumb.title='Click to see the full thumbnail';thumb.alt='Thumbnail for '+j.topic;thumb.loading='lazy';thumb.hidden=true;const make=button('Create thumbnail','secondary',async ev=>{const b=ev.currentTarget;b.disabled=true;b.textContent='Creating…';try{const r=await fetch('/api/publishing/jobs/'+j.id+'/thumbnail',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});if(!r.ok)throw Error();thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg?t='+Date.now();}catch(_){b.disabled=false;b.textContent='Create thumbnail (failed, retry)';}});thumb.onload=()=>{thumb.hidden=false;make.remove()};thumb.onerror=()=>{thumb.hidden=true};thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg';card.append(thumb);actions.append(make)}"
+            "if(['final_ready','publication_approval_required','publication_ready'].includes(j.state)&&j.artifacts.includes('final'))actions.append(button('Publish…','',()=>{try{sessionStorage.setItem('tubeforge:publish-job',j.id)}catch(_){}location.hash='#publishing'}));"
+            "if(!['final_ready','script_approval_required','preview_ready','publication_approval_required','publication_ready','published','failed_validation','failed_exhausted','cancelled'].includes(j.state)){if(window.focusedJobId===j.id)actions.append(button('Running alone — release','secondary',()=>window.releaseFocus()));else actions.append(button('Run only this','secondary',()=>window.focusJob(j.id)))}"
+            "card.append(format,actions)}async function refresh()",
+        )
+        dashboard = dashboard.replace(
             "const meta=card.querySelector('.muted');if(meta&&!meta.dataset.created){const created=job.created_at?new Date(job.created_at).toLocaleString():'unknown';meta.textContent+=' · Created '+created;meta.dataset.created='true';}",
             "",
         )
@@ -1526,7 +1557,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           form.before(toggle);
           const mdPanel=document.createElement('div');mdPanel.id='markdownModePanel';mdPanel.hidden=true;
           const mdExample='## Short title\n\n```yaml\nid: my-short-id\ntitle: "Why Amazon Uses DynamoDB for Some Workloads"\nconcept: "SQL vs NoSQL: scalability and schema flexibility"\nlength_s: 60\nending: loop\nhook: "Billions of products load instantly. Is it really one relational database?"\nbeats:\n  - {t: "0-10", point: "Hook: how a product page loads fast at huge scale"}\n  - {t: "10-40", point: "Strict relational schemas get costly at huge read volume; key-value stores trade guarantees for scale"}\n  - {t: "40-60", point: "Use a key-value store for high-scale reads; keep SQL where you need joins and strong consistency"}\ncta: "Full deep-dive coming in the long-form video"\nclaims_to_verify:\n  - "Amazon uses DynamoDB for parts of its catalog and still uses relational databases elsewhere"\nsources: []\nthumbnail: {text: "SQL Dies at Scale?", visual: "SQL logo vs NoSQL logo with a VS badge"}\ntags: [system design, sql, nosql]\n```';
-          mdPanel.innerHTML='<p class="sub">One <code>## Heading</code> plus exactly one fenced <code>```yaml</code> block, same format as Batch plans (<a href="/batch" target="_blank" rel="noopener">docs/batch-plans.md</a>). Required: <code>id, title, concept, beats: [{t, point}]</code>. Optional: <code>length_s</code> (30&ndash;90, default 60), <code>ending</code> (loop/debate), <code>channel</code>, <code>publish_at</code>, <code>hook</code>, <code>cta</code>, <code>claims_to_verify</code>, <code>sources</code>, <code>thumbnail: {text, visual}</code>, <code>tags</code>, <code>script</code> (your own narration; alias <code>narration</code>).</p><label for="studioMarkdownFile">Markdown file</label><input id="studioMarkdownFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="studioMarkdownText">Markdown plan (same format as Batch plans)</label><textarea id="studioMarkdownText" required placeholder="'+mdExample.replace(/"/g,'&quot;')+'"></textarea><button id="studioMarkdownSubmit" type="button">Validate and create video</button><button id="studioMarkdownBack" type="button" class="secondary">Use the structured form instead</button><p id="studioMarkdownStatus" class="notice" role="status" aria-live="polite"></p>';
+          mdPanel.innerHTML='<p class="sub">One <code>## Heading</code> plus exactly one fenced <code>```yaml</code> block, same format as Batch plans (<a href="/batch" target="_blank" rel="noopener">docs/batch-plans.md</a>). Required: <code>id, title, concept, beats: [{t, point}]</code>. Optional: <code>length_s</code> (30&ndash;90, default 60), <code>ending</code> (loop/debate), <code>channel</code>, <code>publish_at</code>, <code>hook</code>, <code>cta</code>, <code>claims_to_verify</code>, <code>sources</code>, <code>thumbnail: {text, visual}</code>, <code>tags</code>, <code>script</code> (your own narration; alias <code>narration</code>), <code>script_mode</code> (<code>exact</code> uses it word for word).</p><label for="studioMarkdownFile">Markdown file</label><input id="studioMarkdownFile" type="file" accept=".md,.markdown,text/markdown,text/plain"><label for="studioScriptMode">Script mode for shorts that have a script</label><select id="studioScriptMode"><option value="">As set in each short (default)</option><option value="assist">Assist: the writer fits and checks my script</option><option value="exact">Exact: use my script word for word</option></select><label for="studioMarkdownText">Markdown plan (same format as Batch plans)</label><textarea id="studioMarkdownText" required placeholder="'+mdExample.replace(/"/g,'&quot;')+'"></textarea><button id="studioMarkdownSubmit" type="button">Validate and create video</button><button id="studioMarkdownBack" type="button" class="secondary">Use the structured form instead</button><p id="studioMarkdownStatus" class="notice" role="status" aria-live="polite"></p>';
           form.after(mdPanel);
           function setMode(markdown){form.hidden=markdown;mdPanel.hidden=!markdown;toggle.hidden=markdown;}
           toggle.onclick=()=>setMode(true);
@@ -1539,7 +1570,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             button.disabled=true;status.textContent='Validating…';
             try{
               const csrf=decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');
-              const importResponse=await fetch('/api/batch-plans/import',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({markdown,commit:true,plan_id:'studio'})});
+              const importResponse=await fetch('/api/batch-plans/import',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':csrf},body:JSON.stringify({markdown,commit:true,plan_id:'studio',script_mode:document.querySelector('#studioScriptMode')?.value||null})});
               const importData=await importResponse.json();
               if(!importResponse.ok)throw Error(Array.isArray(importData.detail)?importData.detail.map(e=>`Line ${e.line||'?'}: ${e.message||e.msg}`).join(' / '):importData.detail);
               if(!importData.items.length)throw Error('No shorts were found in this markdown plan.');
@@ -1555,16 +1586,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
           };
         })();
         </script>"""
-        from tubeforge.api.script_routing_ui import ROUTING_SCRIPT, ROUTING_CSS
-        from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_CSS, SCRIPT_TOOLS_SCRIPT
+        from tubeforge.api.script_routing_ui import ROUTING_SCRIPT
+        from tubeforge.api.script_tools_ui import SCRIPT_TOOLS_SCRIPT
         source_controls = source_controls.replace('/* SCRIPT_ROUTING_CONTROLS */', ROUTING_SCRIPT)
         source_controls = source_controls.replace("join('\n\n')", r"join('\n\n')")
-        dashboard = dashboard.replace("</head>", f"<style>{STUDIO_CSS}{SCHEDULING_CSS}{GENERATION_CSS}{ROUTING_CSS}{SCRIPT_TOOLS_CSS}</style></head>")
+        dashboard = dashboard.replace("</head>", '<link rel="stylesheet" href="' + STATIC_PREFIX + '/dashboard.css"></head>')
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         username = (runtime.auth.username_for(login_session.user_id) or "") if login_session else ""
+        dashboard = dashboard.replace('__SPA_SHELL_OPEN__', spa_shell_open(STUDIO_NAV_ITEMS)).replace('__SPA_SHELL_CLOSE__', spa_shell_close())
         assert dashboard.count('data-username=""') == 1
         dashboard = dashboard.replace('data-username=""', f'data-username="{html.escape(username)}"')
-        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + markdown_mode_controls + SCRIPT_TOOLS_SCRIPT + STUDIO_SCRIPT + "</body>")
+        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + JOB_EXTRAS_SCRIPT + markdown_mode_controls + SCRIPT_TOOLS_SCRIPT + STUDIO_SCRIPT + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -1628,6 +1660,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except (OSError, ValueError, TypeError):
                 pass
         return {"job_id": job_id, "request": job.request.model_dump(mode="json"), "destinations": runtime.jobs.destination_intents(job_id), "video_description": runtime.jobs.video_description(job_id), "codex_commands": commands, "generation": generation, "command_status": "recorded" if commands else "not_recorded"}
+
+    from tubeforge.core.job_focus import FOCUS_ENDS, JobFocus, focus_path
+    job_focus = JobFocus(focus_path(application_settings.pipeline.voice.artifact_root))
+
+    @app.get("/api/job-focus", tags=["jobs"])
+    def get_job_focus() -> dict[str, object]:
+        """Whether one job is running alone (every other job waits) and which."""
+        current = job_focus.current()
+        if current is not None:
+            try:
+                if runtime.jobs.get(str(current["job_id"])).state in FOCUS_ENDS:
+                    job_focus.clear()
+                    current = None
+            except KeyError:
+                job_focus.clear()
+                current = None
+        return {"active": current is not None, "job_id": current["job_id"] if current else None, "since": current["since"] if current else None}
+
+    @app.post("/api/jobs/{job_id}/focus", tags=["jobs"])
+    def focus_job(job_id: str) -> dict[str, object]:
+        """Run only this job: the worker takes nothing else until it reaches a resting state or the focus is released."""
+        try:
+            job = runtime.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found") from error
+        if job.state in FOCUS_ENDS:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This job has nothing left to run, so there is nothing to focus on.")
+        job_focus.set(job_id)
+        runtime.events.append(job_id, "job_focus_started", actor="local-dashboard")
+        return {"active": True, "job_id": job_id}
+
+    @app.delete("/api/job-focus", tags=["jobs"])
+    def release_job_focus() -> dict[str, object]:
+        current = job_focus.current()
+        job_focus.clear()
+        if current:
+            try:
+                runtime.events.append(str(current["job_id"]), "job_focus_released", actor="local-dashboard")
+            except Exception:
+                pass
+        return {"active": False, "job_id": None}
 
     @app.post("/api/jobs/{job_id}/pause", tags=["jobs"])
     def pause_job(job_id: str) -> dict[str, str]:

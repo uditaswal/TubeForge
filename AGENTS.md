@@ -38,7 +38,7 @@ Large files and generated trees are fine to use for debugging, but read them by 
 
 ### Script generation
 
-Use Codex CLI or Claude for production scripts; no local LLM for production generation, retries or acceptance without operator approval for that run. Before changing the script provider, report provider, expected cost/tokens, fallback and acceptance test. Accept a script only after reviewing source grounding and creative quality (schema validity alone is insufficient). After two failed attempts or when the agreed budget is reached, stop retries, show rejected scripts and reasons, and ask: Codex CLI, Claude, or a revised brief. Never silently reset an exhausted allowance.
+Use Codex CLI or Claude for production scripts; no local LLM for production generation, retries or acceptance without operator approval for that run. Before changing the script provider, report provider, expected cost/tokens, fallback and acceptance test. Accept a script only after reviewing creative quality (schema validity alone is insufficient), and source grounding while Settings → "Require verified sources and independent research" is on (the default). The operator may turn that off: then their notes, script or reference are the evidence, no web research runs, source-card checks are skipped, and factual accuracy is theirs to vouch for; do not re-impose source verification as a gate or refuse work for thin sources in that mode. After two failed attempts or when the agreed budget is reached, stop retries, show rejected scripts and reasons, and ask: Codex CLI, Claude, or a revised brief. Never silently reset an exhausted allowance.
 
 ## Repository hygiene
 
@@ -53,6 +53,32 @@ The Creator Studio dashboard, login page and HTTP APIs are one operator workflow
 - Preserve the dark navy visual system, readable hierarchy, keyboard accessibility and desktop/tablet/mobile behavior; reuse existing components.
 - Add or update focused API/UI tests for changed workflows; update `readme.md` when a flow, login behavior or dashboard URL changes.
 - `http://127.0.0.1:62065` is the sole documented developer dashboard URL; Compose binds it to loopback only. Do not document or reserve other host ports (preview-proxy ports are transient).
+
+## Clips package boundary
+
+`src/tubeforge/clips/` is a self-contained engine: it must import nothing from the rest of TubeForge (enforced by
+`tests/test_clips_boundary.py`, which also checks that importing it loads no SQL, S3, Redis or web-framework code). The
+pipeline reaches it only through `pipeline/clip_runs.py`. It keeps OpenCV below 5 (`opencv-python-headless>=4.8,<5`:
+OpenCV 5 removed the cascade face-detector fallback). Clip AI calls go through the host Claude runner under its own
+daily limit; never add API keys or a direct CLI call to the package. See `docs/clips.md`.
+
+## Settings page upkeep
+
+Every limit, timeout, cap or threshold that can stall or break a run must be visible and, where safe, editable on the
+Settings page (`/settings`, `core/runtime_settings.py`). When you add or change one, in the same change:
+- If it is read when a job or stage starts, add a `Definition` (label, plain-language help, range, config default) and read it
+  with `runtime_settings.shared().value(key, default)` at the point of use, so it applies to the next job without a restart. Wire it
+  for real (a setting nothing reads is a bug) and add a test that the override reaches the code.
+- If it is read once at process start, or is a security, secret, render-geometry or safety-contract value (two-attempt allowance,
+  auth, ports, socket paths), leave it out of the editable list. Config-file values appear automatically in the read-only
+  "Everything else" reference; add a row to `_ENVIRONMENT` in `api/runtime_settings.py` for a new environment variable, and
+  to `_LOCKED` when it must never be edited from the page. State in the help text whether a restart is needed.
+- Never put a secret value on the page (show set / not set). Update `docs/settings.md`.
+- Hard-coded constants that can break execution (window sizes, timeouts, caps) belong in the config or on the page, not buried in code.
+
+## Scratch space
+
+The host `/tmp` is a small RAM-backed tmpfs. Containers run with `TMPDIR=/app/data/tmp` (compose.yaml; `core/tempdir.py` creates it and sweeps day-old leftovers). On the host, run builds, tests and installs through `scripts/with_disk_tmp.sh <command>` (or `export TMPDIR=$HOME/tmp`); `restart_stack.sh` and `stackctl.sh` already do. Never put large downloads or renders in `/tmp`.
 
 ## Allowed autonomous actions
 

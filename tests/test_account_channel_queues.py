@@ -85,7 +85,7 @@ def test_channel_schedules_only_reserve_their_own_topics(tmp_path: Path) -> None
         assert "Audio diagnostics" in dashboard
         assert "final_qa" in dashboard and "preview_qa" in dashboard
         assert "Set as default" in dashboard
-        assert 'data-studio-nav="media"' in dashboard
+        assert 'href="/#media"' in dashboard
 
 
 def test_account_queue_migration_keeps_existing_items_unassigned(tmp_path: Path) -> None:

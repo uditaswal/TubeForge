@@ -10,7 +10,7 @@ import re
 from tubeforge.providers.content.prompts import reference_word_budget
 
 SECTION_MIN_WORDS, SECTION_MAX_WORDS = 8, 15
-LENGTHS = (30, 45, 60, 75, 90)
+LENGTHS = (30, 45, 60, 75, 90, 105, 120)
 _TAG = re.compile(r"\[(?:pause[^\]]*|breath|/?whisper)\]|\*(?=\S)|(?<=\S)\*")
 
 
@@ -38,7 +38,7 @@ def _number_note(text: str) -> str:
     return ""
 
 
-def analyze_script(sections_or_text: str | list[str], length_s: int) -> dict:
+def analyze_script(sections_or_text: str | list[str], length_s: int, *, check_numbers: bool = True) -> dict:
     """Word/time fit of a script against ``length_s``; ``suggestion`` says what to cut or add."""
     sections = split_sections(sections_or_text) if isinstance(sections_or_text, str) else [s.strip() for s in sections_or_text if s.strip()]
     budget = reference_word_budget(length_s)
@@ -47,7 +47,7 @@ def analyze_script(sections_or_text: str | list[str], length_s: int) -> dict:
         words = spoken_words(text)
         note = "too short (under 8 words): merge it into a neighbour" if words < SECTION_MIN_WORDS else \
                "too long (over 15 words): split it into two scenes" if words > SECTION_MAX_WORDS else ""
-        note = note or _number_note(text)
+        note = note or (_number_note(text) if check_numbers else "")
         rows.append({"index": index, "words": words, "note": note, "text": text})
     total = sum(row["words"] for row in rows)
     if total == 0:
@@ -75,7 +75,7 @@ def plan_template(length_s: int = 60) -> str:
 id: my-short-id            # lowercase letters, digits and dashes; unique
 title: "Up to 100 characters"
 concept: "One sentence: what this Short is about"
-length_s: {length_s}               # 30-90
+length_s: {length_s}               # 30-120
 ending: loop               # loop (last line flows into the hook) or debate (closes on a question)
 channel: engineering       # optional
 publish_at: 2026-11-10T09:00:00+05:30   # optional, metadata only
@@ -91,7 +91,7 @@ sources:                   # optional page URLs; when given, no web research run
   - https://example.com/source-page
 thumbnail: {{text: "Short Words", visual: "What the thumbnail shows"}}
 tags: [tag one, tag two]
-script_mode: assist        # assist (the writer fits and checks your script) or exact (word for word; Claude writer only)
+script_mode: assist        # assist (the writer fits and checks your script) or exact (word for word; scenes and length are fitted around your wording)
 script: |                  # optional: your own narration (the name narration works too)
   Your own script, {b["aim_low"]}-{b["aim_high"]} words for {length_s} s.
   Short sentences. One idea per line or paragraph, 8-15 spoken words each.

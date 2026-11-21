@@ -253,6 +253,14 @@
           "default": false,
           "title": "Exact Script",
           "type": "boolean"
+        },
+        "script_fit_notes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Script Fit Notes",
+          "type": "array"
         }
       },
       "required": [

@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict
 
-from tubeforge.api.studio_shell import STUDIO_CSS, STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
+from tubeforge.api.studio_shell import STUDIO_STATIC_MENU_SCRIPT, wrap_studio_page
 from tubeforge.core import runtime_settings as store_module
 
 _MAIN_HTML = '''<main>
@@ -16,22 +16,13 @@ _MAIN_HTML = '''<main>
 <p id="settingsStatus" class="sub" role="status" aria-live="polite">Loading settings…</p>
 <div id="settingsGroups"></div>
 <section class="panel"><h2>Recent changes</h2><ul id="settingsAudit" class="audit"></ul></section>
+<section class="panel"><h2>Everything else (read-only)</h2><p class="sub">Every other value from <code>config/production.yaml</code>, and the environment variables that change how runs behave. They are listed so nothing is hidden. Changing one means editing the file (or the process environment) and restarting; some are locked on purpose.</p><div id="referenceGroups"><p class="sub">Loading…</p></div></section>
 <section class="panel"><h2>Not editable here</h2><p class="sub">The two-attempt limit per source packet is part of the safety contract and is not a setting: a rejected script is retried automatically using the remaining attempt, and a revised brief or new sources starts a fresh packet.</p></section>
 </main>'''
 
-_PAGE_HEAD = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings — TubeForge</title><style>''' + STUDIO_CSS + '''
-main{max-width:900px;margin:32px auto;padding:0 20px;display:flex;flex-direction:column;gap:22px}
-.panel h2{margin:0 0 12px}
-.setting{padding:14px 0;border-top:1px solid var(--line)}.setting:first-of-type{border-top:0;padding-top:0}
-.setting-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:4px}.setting-head strong{font-size:14px}
-.setting .help{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.5}
-.setting-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
-.setting input[type=number]{width:160px}.setting .default{color:var(--muted);font-size:12px}
-.setting .state{font-size:12px;min-height:1.2em;margin-top:6px}.state.bad{color:#ffb3bf}.state.good{color:#9fd9b6}
-.audit{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:12px;color:var(--muted)}
-.checkbox{display:flex;align-items:center;gap:8px;margin:0;font-weight:540}.checkbox input{margin:0}
-@media(max-width:640px){main{margin:16px auto;padding:0 14px}.setting input[type=number]{width:100%}}</style>
-'''
+
+_PAGE_HEAD = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings — TubeForge</title>'
+              + '\n')
 
 _SCRIPT = r'''
 <script>
@@ -58,9 +49,96 @@ function row(s){
   box.append(head,el('p',s.help,'help'),row,state);return box}
 async function loadAudit(){try{renderAudit((await call('GET','/api/runtime-settings')).audit)}catch(_){}}
 async function load(){try{const data=await call('GET','/api/runtime-settings');groupsEl.replaceChildren();const groups={};for(const s of data.settings)(groups[s.group]=groups[s.group]||[]).push(s);for(const [name,list] of Object.entries(groups)){const panel=el('section',undefined,'panel');panel.append(el('h2',name));for(const s of list)panel.append(row(s));groupsEl.append(panel)}renderAudit(data.audit);statusEl.textContent='Changes are saved to data/config/runtime-settings.json and shared by the web server and the worker.'}catch(e){statusEl.textContent='Could not load settings: '+e.message+'. Reload the page to retry.'}}
+async function loadReference(){const holder=document.querySelector('#referenceGroups');try{const data=await call('GET','/api/runtime-settings/reference');holder.replaceChildren();
+  for(const group of data.groups){const box=document.createElement('details');box.className='ref';const sum=document.createElement('summary');sum.textContent=group.name+' ('+group.rows.length+')';box.append(sum);
+    const table=document.createElement('table');table.className='ref-table';for(const row of group.rows){const tr=document.createElement('tr');if(row.editable_here)tr.className='here';else if(row.locked)tr.className='locked';
+      const k=document.createElement('td');k.textContent=row.key;const v=document.createElement('td');v.textContent=String(row.value);const h=document.createElement('td');h.textContent=row.how;if(row.setting_key){const go=document.createElement('button');go.type='button';go.className='secondary';go.textContent='Change it';go.onclick=()=>{const t=document.querySelector('.setting[data-key="'+row.setting_key+'"]');if(t){t.scrollIntoView({block:'center'});const i=t.querySelector('input');if(i)i.focus()}};h.append(' ',go)}tr.append(k,v,h);table.append(tr)}box.append(table);holder.append(box)}
+  const env=document.createElement('details');env.className='ref';const s2=document.createElement('summary');s2.textContent='Environment variables ('+data.environment.length+')';env.append(s2);
+  const t2=document.createElement('table');t2.className='ref-table';for(const row of data.environment){const tr=document.createElement('tr');const a=document.createElement('td');a.textContent=row.names;const b=document.createElement('td');b.textContent=row.process;const c=document.createElement('td');c.textContent=row.effect+(row.restart?' (needs a restart)':'');tr.append(a,b,c);t2.append(tr)}env.append(t2);holder.append(env)}catch(error){holder.textContent='Could not load the reference: '+error.message}}
+loadReference();
 load();
 ''' + STUDIO_STATIC_MENU_SCRIPT + '''
 </script>'''
+
+
+# Values that must never be changed from a web page, with the reason shown next to them.
+_LOCKED = (
+    ("invocation_limit", "The two-attempt allowance per request is part of the safety contract."),
+    ("reservation_seconds", "Tied to the two-attempt allowance; changing it could double-spend a request."),
+    ("auth.", "Login security: change it in the file and restart."),
+    ("app.port", "The address the dashboard listens on; change it in the file and restart."),
+    ("database.", "Database connection; change it in the file and restart."),
+    ("socket_path", "Where the host runner listens; a wrong value cuts the worker off from it."),
+    ("socket_timeout_seconds", "Must stay below the runner's own time limit; change it in the file and restart."),
+    ("width", "Render geometry: quality checks assume it."), ("height", "Render geometry: quality checks assume it."),
+    ("sample_rate", "Audio format the quality checks assume."), ("crf", "Encoder quality used by the quality checks."),
+    ("fps", "Frame rate the quality checks assume."), ("caption_", "Caption layout tuned for the render size."),
+)
+# Where a file value has an equivalent on this page.
+_ON_PAGE = {
+    "pipeline.claude.max_prompt_chars": "prompt.max_chars_claude", "worker.max_attempts": "worker.max_attempts",
+    "worker.retry_base_seconds": "worker.retry_base_seconds", "worker.retry_max_seconds": "worker.retry_max_seconds",
+    "pipeline.source_clips.max_clip_seconds": "clips.max_clip_seconds", "pipeline.source_clips.engaging_only": "clips.engaging_only",
+    "pipeline.source_clips.timeout_seconds": "clips.inspect_timeout_seconds",
+    "pipeline.source_clips.max_source_duration_seconds": "clips.max_source_minutes",
+    "pipeline.source_clips.max_download_bytes": "clips.max_download_gb",
+}
+_SECRET_WORDS = ("key", "token", "secret", "password", "encryption", "cookie")
+# Environment variables that change how runs behave. Values are never shown: they live in the process that reads them.
+_ENVIRONMENT = (
+    ("TUBEFORGE_CONFIG", "web, worker", "Which config file to load.", True),
+    ("TUBEFORGE_WORKER_MODES", "worker", "all, clips or shorts: which kind of job this worker takes (scripts/stackctl.sh sets it).", True),
+    ("TUBEFORGE_RUNTIME_SETTINGS", "web, worker, runner", "Where this page's values are stored.", True),
+    ("TUBEFORGE_CLAUDE_MAX_CALLS_PER_DAY", "Claude runner", "Shared daily call limit across scripts and clips (default 40).", True),
+    ("TUBEFORGE_CLAUDE_MAX_USD_PER_DAY", "Claude runner", "Shared daily spend limit (default $8).", True),
+    ("TUBEFORGE_CLAUDE_MAX_USD_PER_CALL", "Claude runner", "Spend limit for a single call (default $1.50).", True),
+    ("TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY", "Claude runner", "Default for the clip allowance; the value on this page overrides it.", True),
+    ("TUBEFORGE_CLAUDE_CLIP_MODEL", "Claude runner", "Which Claude model answers clip requests.", True),
+    ("TUBEFORGE_CLAUDE_MAX_PROMPT_CHARS", "Claude runner", "The runner's own prompt ceiling; the script prompt setting above is clamped to it.", True),
+    ("TUBEFORGE_CLAUDE_BIN / TUBEFORGE_CLAUDE_SOCKET / TUBEFORGE_CLAUDE_LEDGER", "Claude runner", "Where the Claude program, its socket and its spend ledger are.", True),
+    ("YOUTUBE_DOWNLOAD_PROVIDER / YOUTUBE_PROXY_URL / YOUTUBE_PROXY_TIMEOUT_SECONDS", "worker", "How videos are downloaded; a proxy is optional.", True),
+    ("YOUTUBE_DIRECT_SECTIONS / YOUTUBE_SECTION_PADDING_SECONDS", "worker", "Download only the needed sections of a video (needs a JavaScript runtime for yt-dlp).", True),
+    ("WHISPER_MODEL / WHISPER_COMPUTE_TYPE / TRANSCRIPTION_LANGUAGE", "worker", "Which speech model transcribes, how precisely, and the language.", True),
+    ("TEMP_DIR / TUBEFORGE_CLIPS_LOCK_DIR", "worker", "Scratch folders. Keep them on the data disk: /tmp here is a 1.9 GB memory disk.", True),
+    ("TUBEFORGE_LOG_LEVEL / TUBEFORGE_LOG_MAX_MB / TUBEFORGE_LOG_RETENTION_DAYS", "all", "How much is logged and for how long.", True),
+    ("TUBEFORGE_PIXABAY_API_KEY, YOUTUBE_DATA_API_KEY, PEXELS_API_KEY, TUBEFORGE_ACCOUNT_ENCRYPTION_KEY", "various", "Secrets: never shown or editable here.", True),
+)
+
+
+def _leaves(value, path=""):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _leaves(item, f"{path}.{key}" if path else str(key))
+    elif isinstance(value, (str, int, float, bool)) or value is None:
+        yield path, value
+
+
+def configuration_reference(settings, store) -> dict:
+    """Every other file value, read-only, with how to change it; plus the environment variables that matter."""
+    rows = []
+    for path, value in _leaves(settings.model_dump(mode="json")):
+        if ".presets." in path or path.startswith("pipeline.video_generation.presets"):
+            continue
+        lowered = path.lower()
+        if any(word in lowered for word in _SECRET_WORDS):
+            value = "set" if value else "not set"
+        locked = next((reason for needle, reason in _LOCKED if needle in lowered), None)
+        page_key = _ON_PAGE.get(path)
+        if page_key:
+            how = "Editable on this page without a restart: " + (store_module.BY_KEY[page_key].label if page_key in store_module.BY_KEY else page_key)
+        elif locked:
+            how = "Not editable from here. " + locked
+        else:
+            how = "Edit config/production.yaml and restart the worker (and the web server if it is a web value)."
+        rows.append({"key": path, "value": value, "how": how, "editable_here": bool(page_key), "setting_key": page_key, "locked": bool(locked and not page_key)})
+    groups: dict[str, list] = {}
+    for row in rows:
+        parts = row["key"].split(".")
+        groups.setdefault(".".join(parts[:2]) if parts[0] == "pipeline" and len(parts) > 2 else parts[0], []).append(row)
+    return {
+        "groups": [{"name": name, "rows": items} for name, items in sorted(groups.items())],
+        "environment": [{"names": names, "process": process, "effect": effect, "restart": restart} for names, process, effect, restart in _ENVIRONMENT],
+    }
 
 
 class SettingValue(BaseModel):
@@ -81,6 +159,10 @@ def register_settings_routes(app, runtime):
     def list_settings():
         store = store_module.shared()
         return {"settings": store.snapshot(app.state.settings), "audit": store.audit(20), "path": str(store.path)}
+
+    @app.get("/api/runtime-settings/reference", tags=["settings"])
+    def settings_reference():
+        return configuration_reference(app.state.settings, store_module.shared())
 
     @app.put("/api/runtime-settings/{key}", tags=["settings"])
     def put_setting(key: str, body: SettingValue, request: Request):

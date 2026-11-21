@@ -296,7 +296,7 @@ class JobRepository:
             session.execute(delete(PipelineJobRecord).where(PipelineJobRecord.id == job_id))
             return artifacts
 
-    def claim_oldest_eligible(self, worker_id: str, *, now: datetime, lease_seconds: int) -> PipelineJob | None:
+    def claim_oldest_eligible(self, worker_id: str, *, now: datetime, lease_seconds: int, job_kinds: str = "all", only_job_id: str | None = None) -> PipelineJob | None:
         """Atomically lease the oldest runnable job; provider work occurs after commit.
 
         The conditional UPDATE is the correctness primitive on SQLite and remains
@@ -384,6 +384,12 @@ class JobRepository:
                     held_topic.generation_job_id == PipelineJobRecord.id,
                     func.json_extract(held_topic.options_json, "$.batch_plan.id").is_not(None),
                 ).correlate(PipelineJobRecord)))
+            if only_job_id is not None:
+                eligible = and_(eligible, PipelineJobRecord.id == only_job_id)  # a focus is set: nothing else runs
+            if job_kinds != "all":
+                # A worker started for one kind of work leaves the other kind queued for a different worker.
+                clip_job = func.coalesce(func.json_extract(PipelineJobRecord.request_json, "$.production_mode"), "generated") == "source_clip"
+                eligible = and_(eligible, clip_job if job_kinds == "clips" else ~clip_job)
             candidate = session.scalar(select(PipelineJobRecord.id).where(eligible, ~batch_blocked, PipelineJobRecord.claim_owner.is_(None)).order_by(PipelineJobRecord.created_at, PipelineJobRecord.id).limit(1))
             if candidate is None:
                 return None

@@ -149,3 +149,11 @@ def test_import_cadence_warnings_cover_only_the_shorts_in_that_import(tmp_path):
         dated = post(_plan(('fresh-two', '2026-11-12T09:00:00+00:00')))['cadence']
         assert dated['warnings'] == [] and dated['scope']['all_warnings'] == 3
     db.dispose()
+
+
+def test_the_import_panel_is_one_box_with_notes_for_repaired_mistakes():
+    from tubeforge.api.batch_ui import render_batch_html
+    html = render_batch_html('operator')
+    for needle in ('id="dropZone" class="planbox"', 'id="chooseFile"', 'id="importNotes"', 'id="batchPlan"', 'id="scriptMode"', 'showNotes(data.parse_notes'):
+        assert needle in html, needle
+    assert 'id="batchFile" type="file" hidden' in html and html.count('<textarea id="batchText"') == 1

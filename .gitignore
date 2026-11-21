@@ -86,6 +86,8 @@ issues.md
 *.mp3
 *.m4a
 *.onnx
+# The bundled face-detection model the clip engine needs (a small, licensed file); other .onnx files stay ignored.
+!src/tubeforge/clips/media/face_models/face_detection_yunet_2023mar.onnx
 *.onnx.json
 *.safetensors
 *.gguf
@@ -115,3 +117,6 @@ logs/
 
 # --- Internal-only documentation (plans, handoff, reviews, evidence); never published ---
 doc-internal/
+
+# Dashboard build tooling (design/): node_modules is rebuilt by scripts/build_design_css.sh
+design/node_modules/

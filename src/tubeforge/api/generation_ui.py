@@ -1,18 +1,5 @@
 """Saved generation details and truthful copy controls for Studio."""
 
-GENERATION_CSS = r"""
-#generationRecord .record-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-#generationRecord textarea{width:100%;min-height:180px;resize:vertical;font:12px/1.5 ui-monospace,monospace}
-#generationRecord .record-wide{grid-column:1/-1}
-#generationRecord .record-copy{width:auto;margin-top:8px}
-#generationRecord .record-state{min-height:20px;margin:8px 0;color:var(--cyan);font-size:12px}
-#generationRecord .record-audio{white-space:pre-wrap;line-height:1.5}
-#retryJob textarea{width:100%;min-height:340px;resize:vertical;font:12px/1.5 ui-monospace,monospace}
-#retryJob .retry-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-#retryJob .retry-state{min-height:20px;margin:8px 0;font-size:12px;color:var(--cyan);white-space:pre-wrap}
-#retryJob .retry-state.error{color:#fda4af}
-@media(max-width:680px){#generationRecord .record-grid{grid-template-columns:1fr}#generationRecord .record-wide{grid-column:auto}}
-"""
 
 GENERATION_CONTROLS = r"""<dialog id="retryJob" aria-labelledby="retryJobTitle"><div class="modal-head"><h2 id="retryJobTitle">Retry generation</h2><button class="close" type="button" id="retryJobClose" aria-label="Close retry">×</button></div><div class="modal-body"><p class="sub">Starts a new job with the same destinations. The failed job and its script-attempt allowance stay as they are. Edit the request JSON below, or leave it unchanged; an identical request reuses the same allowance and may fail the same way.</p><div id="retryJobState" class="retry-state" role="status"></div><textarea id="retryJobJson" spellcheck="false" aria-label="Request JSON" disabled></textarea><div class="retry-actions"><button id="retryJobReset" class="secondary" type="button" disabled>Reset to saved</button><button id="retryJobSubmit" type="button" disabled>Start new job</button></div></div></dialog><script>
 (() => {
@@ -44,5 +31,46 @@ GENERATION_CONTROLS = r"""<dialog id="retryJob" aria-labelledby="retryJobTitle">
   window.openStudioRecord=open;
   function openFocused(){if(location.hash!=='#generations')return;const id=sessionStorage.getItem('tubeforge:focus-job');if(id){sessionStorage.removeItem('tubeforge:focus-job');open(id);}}
   window.addEventListener('hashchange',openFocused);setTimeout(openFocused,0);
+})();
+</script>"""
+
+
+
+JOB_EXTRAS_SCRIPT = r"""<script>
+(() => {
+  // One job alone: the worker takes only the chosen job until it rests or the focus is released.
+  window.focusedJobId=null;
+  const csrf=()=>decodeURIComponent((document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1]||'');
+  const send=(method,path)=>fetch(path,{method,headers:{'x-csrf-token':csrf(),'content-type':'application/json'}});
+  function banner(state,title){let box=document.querySelector('#focusBanner');const jobs=document.querySelector('#jobs');if(!jobs)return;
+    if(!state.active){if(box)box.remove();return}
+    if(!box){box=document.createElement('div');box.id='focusBanner';box.className='focus-banner';box.setAttribute('role','status');jobs.before(box)}
+    box.replaceChildren();const text=document.createElement('span');text.textContent='Running only '+(title||('job '+String(state.job_id).slice(0,8)))+'. Every other job waits until it finishes or you release this.';
+    const release=document.createElement('button');release.type='button';release.className='small secondary';release.textContent='Run everything again';release.onclick=window.releaseFocus;box.append(text,release)}
+  async function sync(){try{const r=await fetch('/api/job-focus');if(!r.ok)return;const state=await r.json();const changed=window.focusedJobId!==(state.job_id||null);window.focusedJobId=state.job_id||null;
+      let title=null;if(state.active){const card=[...document.querySelectorAll('#jobs .job')].find(c=>c.textContent.includes(String(state.job_id).slice(0,8)));title=card&&card.querySelector('.title')?card.querySelector('.title').textContent:null}
+      banner(state,title);if(changed&&typeof refresh==='function')refresh()}catch(_){}}
+  window.focusJob=async id=>{const r=await send('POST','/api/jobs/'+encodeURIComponent(id)+'/focus');if(!r.ok){let d='';try{d=(await r.json()).detail}catch(_){}window.alert(d||'Could not focus this job.');return}await sync()};
+  window.releaseFocus=async()=>{await send('DELETE','/api/job-focus');await sync()};
+  sync();setInterval(sync,5000);
+  // Click a thumbnail to see it at full size (Escape or a click closes it).
+  document.addEventListener('click',event=>{const image=event.target.closest&&event.target.closest('.job-thumb');if(!image||!image.src)return;
+    let box=document.querySelector('#thumbLightbox');if(!box){box=document.createElement('dialog');box.id='thumbLightbox';box.className='thumb-lightbox';box.setAttribute('aria-label','Thumbnail at full size');
+      const big=document.createElement('img');big.alt='Thumbnail at full size';const caption=document.createElement('div');caption.className='caption';caption.textContent='Click anywhere or press Escape to close · the picture is the exact thumbnail file';box.append(big,caption);box.onclick=()=>box.close();document.body.append(box)}
+    box.querySelector('img').src=image.src.replace(/\?.*$/,'')+'?full='+Date.now();box.showModal()});
+  document.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){const image=document.activeElement;if(image&&image.classList&&image.classList.contains('job-thumb')){event.preventDefault();image.click()}}});
+  // Studio: guidance for the thumbnail, sent with every new brief.
+  (function(){const form=document.querySelector('#createForm');if(!form||document.querySelector('#thumbnailGuidance'))return;
+    const label=document.createElement('label');label.setAttribute('for','thumbnailGuidance');label.textContent='Thumbnail guidance (optional)';
+    const area=document.createElement('textarea');area.id='thumbnailGuidance';area.maxLength=1000;area.rows=2;area.placeholder='What should the thumbnail say and show? For example: the number 8x in big yellow type, the host looking shocked.';
+    const hint=document.createElement('p');hint.className='sub';hint.textContent='The writer shapes the thumbnail text options and the hook around this. A markdown plan can set it per short with thumbnail: {text, visual}.';
+    const submit=form.querySelector('button[type=submit],button:not([type])');(submit||form.lastElementChild).before(label,area,hint);
+    const original=window.fetch;window.fetch=(url,init={})=>{if(String(url)==='/api/videos'&&init.body){try{const body=JSON.parse(init.body);const value=area.value.trim();if(value)body.thumbnail_guidance=value;init={...init,body:JSON.stringify(body)}}catch(_){}}return original(url,init)}})();
+  // "Publish…" on a generation opens the Publishing page with that video chosen.
+  function preselect(){let id=null;try{id=sessionStorage.getItem('tubeforge:publish-job')}catch(_){}if(!id||location.hash!=='#publishing')return;
+    let tries=0;const timer=setInterval(()=>{const select=document.querySelector('#publishVideo');tries++;
+      if(select&&[...select.options].some(o=>o.value===id)){select.value=id;select.dispatchEvent(new Event('change'));select.scrollIntoView({block:'center'});try{sessionStorage.removeItem('tubeforge:publish-job')}catch(_){}clearInterval(timer)}
+      else if(tries>40){clearInterval(timer)}},250)}
+  window.addEventListener('hashchange',preselect);setTimeout(preselect,0);
 })();
 </script>"""

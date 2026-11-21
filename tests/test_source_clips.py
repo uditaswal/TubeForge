@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import wave
 from pathlib import Path
 import subprocess
 
 import pytest
 
-from tubeforge.clipping.analysis import analyze_wav
 from tubeforge.clipping.source import YtDlpSourceProvider, validate_source_url
 from tubeforge.core.errors import ProviderValidationError
 from tubeforge.core.state_machine import PipelineSnapshot, PipelineStateMachine
@@ -20,22 +18,16 @@ def test_source_url_rejects_non_public_and_credentialed_targets() -> None:
             validate_source_url(value)
 
 
-def test_ytdlp_inspection_and_acquisition_are_argument_safe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ytdlp_inspection_is_argument_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     commands: list[list[str]] = []
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         commands.append(command)
-        if "--dump-single-json" in command:
-            return subprocess.CompletedProcess(command, 0, '{"id":"abc","title":"Demo","uploader":"Creator","duration":42}', "")
-        destination = Path(command[command.index("--paths") + 1]); destination.mkdir(parents=True, exist_ok=True)
-        (destination / "source.mp4").write_bytes(b"media")
-        return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess(command, 0, '{"id":"abc","title":"Demo","uploader":"Creator","duration":42}', "")
     monkeypatch.setattr("tubeforge.clipping.source.subprocess.run", fake_run)
     provider = YtDlpSourceProvider("yt-dlp")
     metadata = provider.inspect("https://example.com/watch?v=abc")
-    path = provider.acquire("https://example.com/watch?v=abc", tmp_path, captions=True)
-    assert metadata["id"] == "abc" and metadata["duration_seconds"] == 42.0
-    assert path.name == "source.mp4" and provider.can_handle("https://example.com/watch?v=abc")
-    assert "--no-playlist" in commands[0] and "--write-auto-subs" in commands[1]
+    assert metadata["id"] == "abc" and metadata["duration_seconds"] == 42.0 and provider.can_handle("https://example.com/watch?v=abc")
+    assert "--no-playlist" in commands[0]
     assert commands[0][commands[0].index("--socket-timeout") + 1] == "900"
     assert all(";" not in item for command in commands for item in command)
 
@@ -48,12 +40,41 @@ def test_source_branch_is_durable_and_does_not_skip_final_ready() -> None:
     assert snapshot.state is JobState.FINAL_READY
 
 
-def test_audio_highlights_are_non_overlapping_and_repeatable(tmp_path: Path) -> None:
-    path = tmp_path / "energy.wav"
-    with wave.open(str(path), "wb") as output:
-        output.setnchannels(1); output.setsampwidth(2); output.setframerate(100)
-        output.writeframes(b"\x00\x00" * 200 + b"\xff\x7f" * 100 + b"\x00\x00" * 200 + b"\xff\x7f" * 100)
-    first = analyze_wav(path, window_seconds=.5, duration_seconds=6, min_duration=1, max_duration=2, padding=0, count=2)
-    second = analyze_wav(path, window_seconds=.5, duration_seconds=6, min_duration=1, max_duration=2, padding=0, count=2)
-    assert first == second and first
-    assert all(left.end_seconds <= right.start_seconds or right.end_seconds <= left.start_seconds for left, right in zip(first, first[1:]))
+def test_the_lookup_passes_a_javascript_runtime_and_the_cookies_file_when_they_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, '{"id":"abc","title":"Demo","duration":42}', "")
+    monkeypatch.setattr("tubeforge.clipping.source.subprocess.run", fake_run)
+    monkeypatch.setattr("tubeforge.clipping.source.shutil.which", lambda name: "/usr/bin/node" if name == "node" else None)
+    cookies = tmp_path / "youtube-cookies.txt"
+    YtDlpSourceProvider("yt-dlp", cookies_file=cookies).inspect("https://example.com/watch?v=abc")
+    assert "--js-runtimes" in commands[0] and "node" in commands[0] and "--cookies" not in commands[0]  # no cookies yet
+    cookies.write_text("# Netscape HTTP Cookie File\n")
+    YtDlpSourceProvider("yt-dlp", cookies_file=cookies).inspect("https://example.com/watch?v=abc")
+    assert commands[1][commands[1].index("--cookies") + 1] == str(cookies)
+
+
+@pytest.mark.parametrize("have_cookies", [False, True])
+def test_a_bot_check_says_what_to_do_instead_of_dumping_the_tool_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, have_cookies: bool) -> None:
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(command, 1, "", "ERROR: [youtube] abc: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.")
+    monkeypatch.setattr("tubeforge.clipping.source.subprocess.run", fake_run)
+    cookies = tmp_path / "youtube-cookies.txt"
+    if have_cookies:
+        cookies.write_text("x")
+    with pytest.raises(ProviderValidationError) as error:
+        YtDlpSourceProvider("yt-dlp", cookies_file=cookies).inspect("https://example.com/watch?v=abc")
+    message = str(error.value)
+    assert "youtube-cookies.txt" in message or "expired" in message
+    assert "--cookies-from-browser" not in message and ("export them again" in message) is have_cookies
+
+
+def test_the_cookie_option_is_added_only_when_the_file_exists(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from tubeforge.clips.ytdlp_options import cookie_options, is_bot_check
+    path = tmp_path / "c.txt"
+    assert cookie_options(SimpleNamespace(youtube_cookies_file=str(path))) == {}
+    path.write_text("x")
+    assert cookie_options(SimpleNamespace(youtube_cookies_file=str(path))) == {"cookiefile": str(path)}
+    assert is_bot_check("ERROR: Sign in to confirm you’re not a bot.") and not is_bot_check("HTTP 503")

@@ -34,7 +34,7 @@ from tubeforge.host_codex_runner import (
     AllowanceExhaustedError, RejectedContentError, codex_output_schema, consume_invocation,
     encode_failure, normalize_fallback_visuals, MAX_RESPONSE_BYTES,
 )
-from tubeforge.providers.content.host_runner_protocol import GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess, MAX_REQUEST_BYTES
+from tubeforge.providers.content.host_runner_protocol import ClipCompletionRequest, GenerateShortsScriptRequest, HostRunnerResponse, HostRunnerSuccess, MAX_REQUEST_BYTES
 from tubeforge.providers.content.prompts import (
     ANGLE_INSTRUCTIONS, CONTENT_ENVELOPE_TEMPLATES, RECIPES, build_content_prompt, normalize_content_request, prompt_evidence,
     reference_word_budget,
@@ -80,7 +80,7 @@ def peer_uid(connection: socket.socket) -> int:
     return struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[1]
 
 
-def receive_request(connection: socket.socket) -> GenerateShortsScriptRequest:
+def receive_request(connection: socket.socket) -> GenerateShortsScriptRequest | ClipCompletionRequest:
     if peer_uid(connection) != os.getuid():
         raise PermissionError("runner accepts only the operator's own UID")
     from tubeforge.providers.content.host_runner_protocol import receive_message
@@ -110,10 +110,10 @@ def build_command(schema: dict, *, model: str, effort: str | None = None, web_se
     return command
 
 
-def call_claude(prompt: str, schema: dict, *, model: str, effort: str | None = None, web_search: bool = False) -> tuple[dict, dict]:
+def call_claude(prompt: str, schema: dict, *, model: str, effort: str | None = None, web_search: bool = False, label: str = "launch") -> tuple[dict, dict]:
     """Run one print-mode call; return (structured output, usage evidence)."""
     BUDGET.check()
-    BUDGET.record(usd=None, label="launch")  # counted before launch so failed or timed-out calls still count
+    BUDGET.record(usd=None, label=label)  # counted before launch so failed or timed-out calls still count
     with tempfile.TemporaryDirectory(prefix="tubeforge-claude-") as cwd:
         try:
             completed = subprocess.run(build_command(schema, model=model, effort=effort, web_search=web_search), input=prompt.encode(),
@@ -363,7 +363,9 @@ def run_request(request: GenerateShortsScriptRequest, *, model: str | None = Non
             task = (prompt + RULES + "\n\nYour previous output was rejected by validation:\n" + last_error +
                     "\nReturn the complete corrected output, changing only what is needed to fix these errors.")
     if package is None:
-        raise ProviderValidationError("Claude output failed validation twice: " + last_error)
+        raise RejectedContentError("Claude output failed validation twice: " + last_error, HostRunnerSuccess(
+            package={"raw_output": raw}, usage=usage_total,
+            provenance={"provider": "host-claude-runner", "accepted": False}))
     if version == "m6-content-v8" and writers_room_enabled() and not exact:
         edited, edited_normalizations, room_notes["editor"] = editor_pass(
             request, root, raw, model=model, effort=effort, schema=schema, version=version, usage_total=usage_total)
@@ -444,7 +446,55 @@ def codex_output_schema_for_research(model_class) -> dict:
     return schema
 
 
-def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunnerSuccess:
+CLIP_MODEL = os.environ.get("TUBEFORGE_CLAUDE_CLIP_MODEL", DEFAULT_MODEL)
+CLIP_CALLS_PER_DAY = int(os.environ.get("TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY", "12"))  # default; the Settings page overrides it
+CLIP_LABEL = "clips"
+
+
+def clip_calls_used(budget: ClaudeBudget | None = None) -> int:
+    """Calls the clip engine made in the budget window (ledger rows labelled "clips")."""
+    budget = budget or BUDGET
+    return sum(int(row.get("n", 1)) for row in budget._entries(time.time()) if row.get("label") == CLIP_LABEL)
+
+
+def clip_call_limit() -> int:
+    """The operator's Settings value when set, else the runner's own default."""
+    try:
+        from tubeforge.core import runtime_settings
+        return int(runtime_settings.shared().value("clips.claude_calls_per_day", CLIP_CALLS_PER_DAY))
+    except Exception:
+        return CLIP_CALLS_PER_DAY
+
+
+def clip_window_frees() -> str:
+    """When the oldest counted clip call leaves the 24-hour window (the allowance starts to come back)."""
+    rows = [row for row in BUDGET._entries(time.time()) if row.get("label") == CLIP_LABEL]
+    if not rows:
+        return ""
+    seconds = max(0, int(min(float(row["at"]) for row in rows) + BUDGET.window - time.time()))
+    return f"the oldest call leaves the window in {seconds // 3600} h {seconds % 3600 // 60} min. "
+
+
+def run_clip_completion(request: ClipCompletionRequest, *, model: str | None = None) -> HostRunnerSuccess:
+    """One tool-less completion for clip selection, under the shared limit and the clip sub-limit."""
+    limit = clip_call_limit()
+    if clip_calls_used() >= limit:
+        raise BudgetExceededError(
+            f"Clip selection daily call limit reached ({limit} in the last 24 h); {clip_window_frees()}"
+            "Raise it on the Settings page (Clips) or wait.")
+    BUDGET.check()
+    schema = request.output_schema or {"type": "object", "additionalProperties": True}
+    prompt = (request.system + "\n\n" if request.system else "") + request.prompt
+    started = time.monotonic()
+    structured, usage = call_claude(prompt, schema, model=model or CLIP_MODEL, label=CLIP_LABEL)
+    return HostRunnerSuccess(package=structured, usage=usage, provenance={
+        "provider": "host-claude-clips", "model": model or CLIP_MODEL, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "elapsed_seconds": round(time.monotonic() - started, 3)})
+
+
+def handle(request: GenerateShortsScriptRequest | ClipCompletionRequest, model: str | None) -> HostRunnerSuccess:
+    if isinstance(request, ClipCompletionRequest):
+        return run_clip_completion(request)
     from tubeforge.domain.long_form_writing import LongFormHostRequest
     if isinstance(request,LongFormHostRequest):
         from tubeforge.long_form.host import handle_claude
@@ -453,8 +503,14 @@ def handle(request: GenerateShortsScriptRequest, model: str | None) -> HostRunne
         from tubeforge.providers.content.youtube_skills import preflight
         prompt = build_content_prompt(request.request, template_version=request.request.prompt_version, max_chars=MAX_PROMPT_CHARS)
         claude_binary()
-        return HostRunnerSuccess(package={}, provenance={"resource_hashes": preflight(template_version=request.request.prompt_version), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
-                                                         "preflight": True, "operations": ["ResearchSourcesV1"], "runner": "claude"})
+        provenance = {"resource_hashes": preflight(template_version=request.request.prompt_version), "prompt_sha256": prompt_evidence(prompt)["prompt_sha256"],
+                      "preflight": True, "operations": ["ResearchSourcesV1", "ExactScriptV1"], "runner": "claude"}
+        if request.request.prompt_version == "m6-content-v8":
+            from tubeforge.providers.content.output import REFERENCE_OUTPUT_CONTRACT_VERSION
+            schema = codex_output_schema(envelope=True, reference=True, keep_lengths=True)
+            provenance["reference_contract_version"] = REFERENCE_OUTPUT_CONTRACT_VERSION
+            provenance["reference_schema_sha256"] = hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return HostRunnerSuccess(package={}, provenance=provenance)
     if request.operation == "ResearchSourcesV1":
         return run_research(request, model=model)
     return run_request(request, model=model)
