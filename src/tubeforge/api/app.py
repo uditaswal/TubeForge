@@ -702,6 +702,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         configured = application_settings.auth.enabled and google_oauth is not None and oauth_store is not None
         return {"configured": configured, "reason": None if configured else "Google application, HTTPS or loopback HTTP callback, account encryption key, and Studio login are required"}
 
+    youtube_log = logging.getLogger("tubeforge.youtube_connection")
+
     @app.post("/api/oauth/youtube/start", tags=["social accounts"])
     def start_youtube_oauth(value: OAuthStartRequest, request: Request) -> dict[str, str]:
         if not application_settings.auth.enabled or google_oauth is None or oauth_store is None:
@@ -713,11 +715,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             account = next((item for item in runtime.accounts.list() if item.id == value.account_id), None)
             if account is None or account.platform != "youtube":
                 raise HTTPException(status_code=404, detail="YouTube account not found")
+        youtube_log.info("YouTube connection started")
         verifier = secrets.token_urlsafe(64)
         state = oauth_store.begin(platform="youtube", account_id=value.account_id, session_id=login_session.id, redirect_uri=google_oauth.redirect_uri, code_verifier=verifier)
         try:
             url = google_oauth.authorization_url(state, verifier)
         except Exception as error:
+            youtube_log.warning("YouTube authorization URL failed: %s", type(error).__name__)
             raise HTTPException(status_code=502, detail="Could not start Google authorization") from error
         return {"authorization_url": url}
 
@@ -728,16 +732,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         login_session = runtime.auth.session(request.cookies.get("tubeforge_session"))
         if login_session is None:
             raise HTTPException(status_code=401, detail="Studio sign-in is required")
+        youtube_log.info("YouTube callback received")
         pending = oauth_store.consume(state, platform="youtube", session_id=login_session.id)
         if pending is None:
+            youtube_log.warning("YouTube callback state rejected: expired, used, missing or session mismatch")
             raise HTTPException(status_code=400, detail="Google authorization state is expired or invalid")
         if error or not code or not pending.code_verifier:
+            youtube_log.warning("YouTube callback incomplete: provider_error=%s code_present=%s verifier_present=%s", bool(error), bool(code), bool(pending.code_verifier))
             raise HTTPException(status_code=400, detail="Google authorization was declined or incomplete")
         try:
             verified = google_oauth.exchange_and_discover(code=code, state=state, code_verifier=pending.code_verifier)
             candidate = oauth_store.stage_verified(state, session_id=login_session.id, external_id=verified.channel_id, label=verified.label, credential=verified.credential, scopes=verified.scopes, expires_at=verified.expires_at)
         except Exception as failure:
+            cause = failure.__cause__
+            youtube_log.warning("YouTube channel verification failed: error_type=%s cause_type=%s", type(failure).__name__, type(cause).__name__ if cause else "none")
             raise HTTPException(status_code=400, detail="Google channel verification failed; reconnect and try again") from failure
+        youtube_log.info("YouTube channel verified; awaiting confirmation")
         return f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm YouTube channel — TubeForge</title><style>body{{background:#080d1a;color:#f3f7ff;font:16px system-ui;max-width:520px;margin:10vh auto;padding:20px}}main{{background:#111a2e;border:1px solid #253451;border-radius:16px;padding:24px}}button{{background:#5ee8ff;color:#07111e;border:0;border-radius:9px;padding:12px;font:inherit;font-weight:700;cursor:pointer}}button:disabled{{opacity:.6}}a{{color:#5ee8ff}}</style><main><h1>Confirm YouTube channel</h1><p>TubeForge found <strong>{html.escape(candidate.label)}</strong>.</p><p>Channel ID: <code>{html.escape(candidate.external_id)}</code></p><p>Confirm this exact destination before saving the encrypted connection.</p><input id="oauthState" type="hidden" value="{html.escape(state)}"><button id="confirm" type="button">Connect this channel</button><p id="result" role="status" aria-live="polite"></p><a href="/">Return to Studio</a></main><script>document.querySelector('#confirm').onclick=async()=>{{const button=document.querySelector('#confirm'),result=document.querySelector('#result');button.disabled=true;button.textContent='Saving connection…';const csrf=(document.cookie.match(/(?:^|; )tubeforge_csrf=([^;]+)/)||[])[1];try{{const response=await fetch('/api/oauth/youtube/confirm',{{method:'POST',headers:{{'content-type':'application/json','x-csrf-token':decodeURIComponent(csrf||'')}},body:JSON.stringify({{state:document.querySelector('#oauthState').value}})}});if(!response.ok)throw Error(await response.text());result.textContent='Channel connected. Returning to Studio…';location.assign('/');}}catch(_){{result.textContent='Could not save this connection. Start authorization again.';button.disabled=false;button.textContent='Connect this channel';}}}};</script></html>"""
 
     @app.post("/api/oauth/youtube/confirm", tags=["social accounts"])
@@ -750,7 +760,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             account_id = oauth_store.confirm(value.state, session_id=login_session.id)
         except ValueError as failure:
+            youtube_log.warning("YouTube account confirmation rejected")
             raise HTTPException(status_code=409, detail=str(failure)) from failure
+        youtube_log.info("YouTube account connection confirmed")
         account = next(item for item in runtime.accounts.list() if item.id == account_id)
         return {"id": account.id, "platform": account.platform, "display_name": account.display_name, "external_account_id": account.external_account_id, "status": account.status}
 
