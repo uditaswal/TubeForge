@@ -9,6 +9,11 @@ access or refresh tokens. Password-based platform automation is unsupported.
 
 ## YouTube
 
+Enable YouTube Data API v3 in the Google Cloud project that owns the OAuth client.
+For an app in testing mode, add the connecting Google account as a test user.
+An `accessNotConfigured` error from Google can indicate that the API is disabled
+for that project; check the API Library and the project's status before retrying.
+
 For setup, follow [the publishing plan](../publishing-plan.md#1-operator-credentials-only-one-time).
 Keep `TUBEFORGE_ACCOUNT_ENCRYPTION_KEY` backed up separately: loss of the key makes the
 encrypted account credentials unreadable and requires reconnecting each account. Never
@@ -40,6 +45,12 @@ publications are spaced to avoid a burst and may be marked missed after their gr
 Google may restrict an unaudited API project to private uploads. `pipeline.youtube.youtube_api_audited` defaults to false and Studio shows “audit pending: private only”. Only set it after the project's audit is approved. A future YouTube `publishAt` also requires an explicit future-public confirmation when scheduling that exact reviewed draft; the choice is frozen at scheduling time. Instagram preparation starts 30 minutes before its slot; unstarted work over 30 minutes late is marked missed. The calendar UI is still awaiting integration. Local fake tests are not proof of a real upload or schedule. A real private upload requires separate operator permission for that final.
 
 ## Instagram (Reels)
+
+Use the Instagram Login app ID and secret from the Meta developer app; placeholder
+values cannot authorize an account. Register the exact HTTPS callback with Meta and
+make it reachable in the browser that starts the connection, using the same signed-in
+Studio session. The status endpoint checks local configuration, so it does not prove
+that Meta accepts the app or that the callback is reachable.
 
 Live Instagram publishing requires `TUBEFORGE_INSTAGRAM_APP_ID`,
 `TUBEFORGE_INSTAGRAM_APP_SECRET`, `TUBEFORGE_INSTAGRAM_OAUTH_REDIRECT_URI`,

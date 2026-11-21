@@ -1,153 +1,129 @@
 # TubeForge
 
-A self-hosted pipeline that turns a topic into a reviewed, upload-ready vertical Short. An AI model writes a strict-JSON script and scene plan; everything else — narration, captions, imagery, motion, mixing, encoding and quality checks — runs locally with Python and FFmpeg, so rendering costs no tokens. Nothing is published without an explicit human approval.
+TubeForge is a self-hosted video production workspace for creating and reviewing vertical Shorts and clips. It combines a Creator Studio dashboard, a job queue, local media processing and optional publishing integrations.
 
-## What It Does
+A typical Short starts with a brief, moves through script review and preview approval, and produces a final video for review. The Clips workflow finds candidate moments in a longer source and renders vertical clips. Publication requires separate review and approval.
 
-You brief a topic in the Creator Studio dashboard (or let a schedule pick one). TubeForge researches sources, has the AI write a script, and pauses for your approval. Approved scripts are narrated, aligned word by word, rendered as a 9:16 preview, then a 1080×1920 final. Each step is a durable job you can pause, retry or delete, and publication (YouTube first) stays behind its own approval gate and defaults to dry-run.
+## Creator Studio
 
-## Features
+The screenshots below show an isolated demo with sample accounts and publishing data.
 
-- 30–120 s vertical Shorts with word-timed captions, motion, icons, brand logos, real imagery and licensed background music
-- Script owner chosen per job: Codex CLI or Claude, behind a host-side runner (no API keys in the app)
-- Source-grounded writing with research, hook/craft quality gates and an optional writers' room revision pass
-- Local narration (Kokoro, Piper) with Whisper word alignment
-- Clips (`/clips`): a long video becomes vertical clips, with transcript-driven moment selection, face-aware 9:16 crop and word-synced captions; each approved clip becomes its own reviewable job
-- Final-video quality checks: decodability, loudness (−15…−13 LUFS), true peak (≤ −1.5 dB)
-- Dashboard with login, CSRF protection, audited approvals, topic queue, schedules and activity history
-- Publishing preparation: title, description and thumbnail suggestions; encrypted OAuth credentials; a private YouTube delivery queue under local verification
-- Structured, rotating, redacted application logs
+![Publishing workspace with sample data](docs/images/publishing-demo.png)
 
-## Engineering Highlights
+The review screen can prepare a destination draft from an approved video.
 
-- **Durable job pipeline.** A state machine with worker leases, ownership fencing, checkpoints, retries, cancellation and atomic artifact promotion, so a crashed worker never leaves half-written output.
-- **Approval-gated by design.** Script, preview and publication are separate approvals bound to the exact reviewed artifact; edits require a fresh approval.
-- **The AI is only the brain.** It returns validated JSON; all pixels, audio and encoding are deterministic local code. Failed generations have a bounded attempt allowance per request.
-- **Secrets stay out.** No credentials in configuration, encrypted account envelopes, gitleaks on every commit and in CI, `pip-audit`, Dependabot.
-- **Observable.** JSON-lines logs per service with job and request ids, stage timings, memory samples, HTTP status codes for inbound and outbound calls, and secret redaction.
-- **Tested against real output.** Unit and integration tests plus an FFmpeg-based review of rendered frames and audio before a video counts as done.
+![Prepare a publishing draft with a sample account](docs/images/prepare-draft-demo.png)
 
-## Architecture
+## What you can do
 
-```text
-Dashboard / API (FastAPI)
-        |
-        v
-SQLite + Alembic  <-->  Scheduler (topics, schedules)
-        |
-        v
-Worker (leased jobs) --> Pipeline state machine
-        |                   research -> script (AI) -> approval -> voice + alignment
-        |                   -> preview render -> approval -> final render -> QA
-        |                   -> publication prep -> approval -> upload
-        v
-Host script runner (Codex / Claude CLI over a Unix socket)
-Local services: Piper TTS server, FFmpeg, headless Chromium for source captures
-```
+- Create 30–120 second Shorts with local narration, captions, visuals and audio.
+- Turn supported long videos into clips with transcript-based selection and vertical framing.
+- Manage topics, schedules, batch plans and review stages in Creator Studio.
+- Prepare reviewed publishing drafts and schedule eligible private YouTube deliveries.
+- Inspect job state, stage timings and stored application logs.
 
-Services run under Docker Compose: `web`, `worker`, `scheduler`, `publisher-worker`, `piper-tts`, and a one-shot `migrate`. The publisher stays idle without a valid account encryption key.
+The YouTube delivery path has fake-service test coverage and has not yet been verified with a live upload. Instagram account connection is implemented, while Instagram publishing remains disabled pending delivery adapter and confirmation-gate integration. Live account connections require platform configuration.
 
-## Trade-offs
+## Requirements
 
-- **SQLite** keeps setup trivial for a single-operator deployment; a multi-tenant service would need PostgreSQL.
-- **Host-side AI runner** reuses an existing CLI login instead of storing API keys, at the cost of an extra process and socket to manage.
-- **Local rendering** costs no tokens and is reproducible, but is bounded by the host CPU (a 60 s Short renders in minutes, not seconds).
+- Linux host with Docker Engine and the Docker Compose plugin, plus enough disk space for images, models and generated video.
+- An interactive terminal for creating the dashboard administrator.
+- A Piper voice model and its matching configuration file in `models/`. The default production configuration expects `en_US-lessac-medium.onnx` and `en_US-lessac-medium.onnx.json`. Obtain both from the [Piper voice repository](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/medium).
+- For script generation, a separately configured and authenticated Codex or Claude host runner. The containers do not include the operator's CLI login. See [runner deployment](docs/deploy/codex-runner-runtime.md) and [Claude runner service](docs/deploy/tubeforge-claude-runner.service).
+- Optional features may need additional local voice and alignment models. Paths and provider settings are in [production configuration](config/production.yaml).
 
-## Tech Stack
+## Get started
 
-Python 3.12/3.13 · FastAPI · SQLAlchemy 2 + Alembic (SQLite) · Pydantic · Docker Compose · FFmpeg · Pillow/NumPy renderer · Kokoro and Piper TTS · faster-whisper · Playwright/Chromium · pytest · pre-commit + gitleaks · GitHub Actions
-
-Pillow code visuals use syntax-coloured editor cards with a following cursor and a bounded frame cache. Code visuals may supply reviewed `line_reveal_words` (one narration word index per line) for the Pillow motion renderer or Story checklist code scenes; these resolve against the saved alignment, retain its provenance and require a one-second finished-code hold. Unanchored code keeps proportional scene timing. Story checklist code scenes type syntax-coloured lines, follow them with a cursor and retain their checklist. Oversized layouts fail rather than truncating code. Other Story layouts and classic HyperFrames reject explicit code-line anchors. Story/HyperFrames use their own rendering path. Pillow and Story hooks show their headline on frame one. Loop endpoints reuse the opening frame; Story preserves its output frame count. Story source cards keep captured text fixed inside their bounds while the word-timed highlight animates. Local code-line anchors are not yet requested from production writers. New rendered outputs require the existing artifact review.
-
-New source captures use a consistent dark reader appearance (navy background, light text and animated yellow highlights), including pages that originally use a light theme. Capture changes paint only: exact quote text, fonts, line breaks and geometry stay intact. The manifest records `appearance: dark-reader-v1` and capture policy `source-capture-v5-dark-reader`. Captures also remove matching interactive Ask AI/Copy controls, including controls in open shadow roots, and record hidden controls. Article text stays intact. Older captures and approved
-outputs retain their existing identity; regenerated assets need a new render and
-artifact review.
-
-A captured reference can also be prepared as an original Short after the operator watches it and supplies visual observations. The Short job requires independent source research and exact script review; automated visual analysis and real end-to-end acceptance are still pending. See [reference intake](docs/operations/reference-intake.md).
-
-## Run Locally
-
-Prerequisites: Docker with Compose, FFmpeg for host-side checks, and operator-supplied voice models in `models/` (they are large and not committed).
+Run these commands on the machine that will host TubeForge:
 
 ```bash
-git clone https://github.com/uditaswal/TubeForge.git && cd TubeForge
-cp .env.example .env              # fill in values; never commit .env
-docker compose build              # large first build
+git clone https://github.com/uditaswal/TubeForge.git
+cd TubeForge
+mkdir -p data models
+cp .env.example .env
+```
+
+Place the Piper model and its `.onnx.json` file in `models/`. Edit `.env` for any integrations you intend to use. The sample Pixabay value is a placeholder and should be replaced with a valid key or left empty.
+
+Build the image and start the services:
+
+```bash
+docker compose build
 docker compose up -d web worker scheduler publisher-worker
-docker compose exec web python -m tubeforge.cli create-admin --username you
+docker compose ps
 ```
 
-Open <http://127.0.0.1:62065> (bound to loopback only) and sign in. The AI script runner (Codex or Claude) is a separate host process; see [docs/deploy](docs/deploy). Configuration lives in `config/*.yaml`; select one with `TUBEFORGE_CONFIG`.
-
-Script-runner requests are limited to 65,536 UTF-8 bytes, independently of prompt character limits. Oversized briefs/source excerpts are rejected before a provider attempt is reserved; shorten the source packet rather than raising the prompt ceiling. Accepted evidence is never silently truncated.
-
-Development without Docker:
+Compose runs the database migration and starts the Piper service as dependencies. Wait for Piper to become healthy and the web service to start. Create an administrator and enter a password at the prompt:
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
+docker compose exec web python -m tubeforge.cli create-admin --username your-name
+```
+
+Open <http://127.0.0.1:62065> and sign in. The dashboard binds to the host loopback interface. If the server is remote, open a tunnel on your own computer and keep it running:
+
+```bash
+ssh -N -L 62065:127.0.0.1:62065 your-server
+```
+
+Then open the same dashboard address on your computer. Configure and start a host runner before submitting a script generation job. The Docker dashboard can be used to inspect jobs and settings independently of runner setup.
+
+## Creator Studio workflow
+
+1. Create a generation from a topic and brief, or queue work through a batch plan or schedule.
+2. Review the generated script and approve the exact version you want to render.
+3. Review the preview, approve it, and inspect the final video and quality checks.
+4. For a clip, review each selected moment and approve the exact clip before preparing a publishing draft.
+5. Connect an eligible destination, review the draft and separately approve the exact post before delivery.
+
+Clipping, upload preparation and scheduling have different provider and account requirements. See [Clips](docs/clips.md), [batch plans](docs/batch-plans.md), and [platform integrations](docs/operations/platform-integrations.md).
+
+## Accounts and publishing
+
+For YouTube, create a Google Cloud OAuth client, enable YouTube Data API v3 in the same project, configure the callback and add test users when the app is in testing mode. Set the Google OAuth values and account encryption key in `.env`. The account encryption key must be retained to read saved credentials. Complete Google consent and confirm the exact channel in Studio.
+
+Instagram requires a Meta app configured for Instagram Login, a Professional account, the required permissions and a browser-reachable HTTPS callback. Account connection and Instagram publishing are separate stages. The current publishing worker does not enable Instagram delivery. See [platform integrations](docs/operations/platform-integrations.md) for details and current limitations.
+
+## Logs and troubleshooting
+
+Application logs are stored in `data/logs/`. The web service records dashboard and account connection activity, the worker records pipeline activity, and the scheduler, publisher and Claude runner each have their own logs.
+
+```bash
+docker compose ps -a
+curl -fsS http://127.0.0.1:62065/healthz
+tail -n 100 data/logs/web.log
+tail -n 100 data/logs/worker.log
+docker compose logs --tail=100 web
+```
+
+Logs rotate at 10 MiB by default, with rotated files retained for five days. `TUBEFORGE_LOG_DIR`, `TUBEFORGE_LOG_MAX_MB`, `TUBEFORGE_LOG_RETENTION_DAYS` and `TUBEFORGE_LOG_LEVEL` configure each process. Job events are stored in `data/tubeforge.db`. Clip jobs also keep timings, progress and decision records under `data/artifacts/<job-id>/clip-work/`. See [logging](docs/operations/logging.md).
+
+If the dashboard cannot be reached, check Docker, `docker compose ps -a`, the server-side health check and the SSH tunnel in that order. If Piper is unhealthy, check the model and sidecar paths. If Google reports that its API is not configured, enable YouTube Data API v3 in the project that owns the OAuth client.
+
+## Development
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
 pip install -e '.[dev]'
 python -c "import tiktoken; tiktoken.get_encoding('o200k_base')"
 python -m alembic upgrade head
 python -m pytest
 ```
 
-Install the optional extras you need (`reference-renderer`, `kokoro`, `alignment`, `local-media`).
-
-Long-form script preparation is available in the reviewed branch through **Long-form scripts**. It takes an exact ready reference revision through drafting and operator review. You can supply two or three public primary pages for local capture before drafting, saving the writer research call. Landscape rendering is a separate phase. See the [Studio workflow](docs/operations/long-form-scripts.md) and [LF2 plan](docs/long-form-lf2-plan.md). The declared `tiktoken` dependency measures local plain text/schema only. The setup command above primes its public vocabulary once. Docker primes a readable `/opt/tubeforge/tokenizer-cache` at build time; host runners need their own explicit cache setup ([deployment instructions](docs/deploy/codex-runner-runtime.md#long-form-preparation)). Runtime preflight checks the vocabulary hash and fails closed when it is missing or corrupt rather than downloading implicitly. These measurements do not reveal remaining Codex/Claude subscription allowance. LF2 limits Claude CLI turns and requests one structured-output attempt for drafting, review and repair. Those stages use low effort with Sonnet. Research uses the CLI defaults for turns and structured output under the shared Claude guard. The LF2 draft writer supplies ordered teaching directions. TubeForge assigns scene IDs and derives initial asset hints before canonical validation. Invalid optional engagement comments are omitted and recorded in activity. Claude reports aggregate usage after a call, and the worker stops further dispatch when that usage exhausts the preparation budget.
-
-## Logs and troubleshooting
-
-TubeForge writes its own persistent JSON-lines logs to `data/logs/` in the dev checkout (mounted as `/app/data/logs` in containers). Check these files when investigating an issue after it happens:
-
-- `web.log` contains dashboard and API activity, including YouTube connection diagnostics.
-- `worker.log` contains pipeline and clipping activity.
-- `scheduler.log`, `publisher.log` and `claude-runner.log` contain their respective service activity.
-
-Each service rotates its log at 10 MiB by default, naming older files `web.1.log`, `web.2.log`, and so on. Rotated files older than five days are removed during startup or rotation. `TUBEFORGE_LOG_DIR`, `TUBEFORGE_LOG_MAX_MB`, `TUBEFORGE_LOG_RETENTION_DAYS` and `TUBEFORGE_LOG_LEVEL` configure logging for each process. Logs include job and request IDs where available and apply secret redaction.
-
-Use `tail -n 100 data/logs/web.log` for recent web activity or `tail -n 100 data/logs/worker.log` for pipeline activity. Look in rotated files when the event is older. Job state and events also live in `data/tubeforge.db`. Clip jobs have per-job `timings.json`, `progress.json` and `decisions.jsonl` under `data/artifacts/<job-id>/clip-work/`. When reporting an issue, include the approximate time and job ID so the relevant entries can be located.
+Install the optional extras needed for your workload. On hosts with a small RAM-backed `/tmp`, run tests through `scripts/with_disk_tmp.sh`. Configuration is under `config/`, and `TUBEFORGE_CONFIG` selects the configuration file.
 
 ## Documentation
 
-| Topic | Where |
+| Topic | Guide |
 | --- | --- |
-| Reference-video intake: link, metadata, captions and supplied transcript | [Operator workflow](docs/operations/reference-intake.md) |
-| Prepare and review a 10–15-minute script | [Studio workflow](docs/operations/long-form-scripts.md) |
-| Planned 10–15-minute video generation (not enabled) | [Implementation plan](docs/long-form-reference-video-plan.md) |
-| Long-form editorial design and local contract evidence | [Editorial proposal](docs/long-form-editorial-proposal.md), [LF0 acceptance](docs/long-form-lf0-acceptance.md) |
-| Index | [docs/README.md](docs/README.md) |
-| Application logs and fields | [docs/operations/logging.md](docs/operations/logging.md) |
-| Reviewing jobs through the API | [docs/operations/api-workflow.md](docs/operations/api-workflow.md) |
-| Platform integrations (YouTube, Meta) | [docs/operations/platform-integrations.md](docs/operations/platform-integrations.md) |
-| Running the script runners as services | [docs/deploy](docs/deploy) |
-| Script routing and membership selection | [docs/script-routing.md](docs/script-routing.md) |
-| Opt-in classic video design tokens (local benchmark option) | [docs/video-design-tokens.md](docs/video-design-tokens.md) |
-| Scene direction review and local benchmark evidence | [docs/video-direction-review.md](docs/video-direction-review.md) |
-| Batch plans: import, queue, disclosure/rights review, staged export | [docs/batch-plans.md](docs/batch-plans.md) |
-| Clips: how clip jobs work, worker modes, limits, what is deferred | [docs/clips.md](docs/clips.md) |
-| Settings page (`/settings`): script prompt size, source trimming, automatic retry of rejected scripts, worker retries; no restart needed | [docs/settings.md](docs/settings.md) |
-| Video quality standard | [docs/SHORT_FORM_VIDEO_RULEBOOK.md](docs/SHORT_FORM_VIDEO_RULEBOOK.md) |
-| Security policy | [SECURITY.md](SECURITY.md) |
+| Documentation index | [docs/README.md](docs/README.md) |
+| Clips | [docs/clips.md](docs/clips.md) |
+| Batch plans and review | [docs/batch-plans.md](docs/batch-plans.md) |
+| Reference video intake | [docs/operations/reference-intake.md](docs/operations/reference-intake.md) |
+| Long-form scripts | [docs/operations/long-form-scripts.md](docs/operations/long-form-scripts.md) |
+| Account and platform setup | [docs/operations/platform-integrations.md](docs/operations/platform-integrations.md) |
+| Settings | [docs/settings.md](docs/settings.md) |
+| Logging | [docs/operations/logging.md](docs/operations/logging.md) |
+| Security | [SECURITY.md](SECURITY.md) |
 
-## Project Structure
-
-```text
-src/tubeforge/api/          Dashboard and HTTP API
-src/tubeforge/pipeline/     State machine and stage orchestration
-src/tubeforge/workers/      Leased job worker
-src/tubeforge/scheduling/   Topic queue and schedules
-src/tubeforge/providers/    Content, voice, media and publishing adapters
-src/tubeforge/rendering/    Shorts renderer, audio, encoding, QA
-src/tubeforge/core/         Configuration, runtime, logging
-migrations/                 Alembic migrations
-config/                     Default and production settings
-tests/                      Unit and integration tests
-.agents/skills/             Content skills used by the script writer
-docs/                       Public documentation
-```
-
-## Status
-
-In **Generations → Revise one scene**, direction warnings show the selected scene’s teaching purpose/reveal gaps and similar recent channel angles. These are advisory; saving an edit creates a separate draft that needs fresh exact-script and preview approval. Older videos without saved channel context say so.
-
-In Day review, an approved final can be used to prepare a destination draft; review that draft in Publishing before submitting or choosing an India-time slot. Scheduled pending deliveries can be paused, resumed or cancelled when eligible. YouTube and Instagram connection controls are present; Instagram publication remains unavailable until its adapter and confirmation gate are integrated. Local rendering, review and approval workflows are working. Private YouTube delivery has local fake-service coverage but is not yet verified with a real account; each real upload requires a separate operator go-ahead. Approve the exact final and disclosure in Day review before preparing a YouTube draft. See [platform integrations](docs/operations/platform-integrations.md) for credentials, quota and reconnect details. The Publishing screen reports the audit-pending state; a full scheduling calendar and Instagram publication still need work. Operator-facing setup details beyond this page are in the `docs/` guides above.
+The application is organised under `src/tubeforge/`, with the dashboard in `api/`, job orchestration in `pipeline/`, workers in `workers/`, and media rendering in `rendering/`. Database migrations are in `migrations/` and automated tests are in `tests/`.
