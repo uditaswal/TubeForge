@@ -10,6 +10,10 @@ already told YouTube where the good parts are, so we read that first:
   laughter, "oh my god") mark the loud moments. A weak signal on its own, but it separates the
   candidates when comments or the heatmap are thin.
 
+* the live-chat replay of a finished stream: messages per minute spike at the funny, tense or shocking moments, and
+  nobody types timestamps for those on a stream, so this is the strongest signal a stream has,
+* the audio itself: loud, excited stretches (measured from the downloaded audio, see ``audio_energy``).
+
 ``choose_windows`` turns them into a few time windows; only those get transcribed.
 When the evidence is thin, remaining slots are spread across the video so coverage never
 collapses to nothing.
@@ -113,6 +117,39 @@ def _fetch_caption_cues(info: dict[str, Any]) -> list[dict[str, Any]]:
         return []
 
 
+def _rate_by_second(series: Optional[dict[str, Any]]) -> list[tuple[float, float]]:
+    """A stored ``{"bucket": seconds, "values": [...]}`` series as ``(start_second, value)`` pairs."""
+    if not series:
+        return []
+    width = float(series.get("bucket") or 0)
+    values = series.get("values") or []
+    if width <= 0 or not values:
+        return []
+    return [(i * width, float(v)) for i, v in enumerate(values)]
+
+
+def _spikes(series: list[tuple[float, float]], duration: float, bucket: float) -> dict[int, float]:
+    """How far each bucket stands above the usual level, 0..1.
+
+    The usual level is the median, so a stream that is always busy does not mark every minute as a peak; only
+    a rise above it counts. Several source points falling in one bucket keep the largest.
+    """
+    values = sorted(v for _, v in series)
+    median = values[len(values) // 2]
+    top = values[-1]
+    if top <= median:
+        return {}
+    out: dict[int, float] = {}
+    for start, value in series:
+        if start >= duration:
+            continue
+        rise = (value - median) / (top - median)
+        if rise > 0.05:
+            index = int(start // bucket)
+            out[index] = max(out.get(index, 0.0), rise)
+    return out
+
+
 def _bucket_scores(duration: float, signals: dict[str, Any], bucket: float) -> list[tuple[float, float, list[str]]]:
     """Per-bucket ``(center_seconds, score, reasons)`` from every available signal.
 
@@ -152,6 +189,16 @@ def _bucket_scores(duration: float, signals: dict[str, Any], bucket: float) -> l
         top = max(caption_scores.values()) or 1.0
         for index, value in caption_scores.items():
             add(index, 1.0 * value / top, "captions")
+
+    chat = _rate_by_second(signals.get("chat"))
+    if chat:
+        for index, value in _spikes(chat, duration, bucket).items():
+            add(index, 2.5 * value, "chat")
+
+    loud = _rate_by_second(signals.get("audio_energy"))
+    if loud:
+        for index, value in _spikes(loud, duration, bucket).items():
+            add(index, 1.0 * value, "loud-audio")
 
     for chapter in signals.get("chapters") or []:
         add(int(float(chapter["start_time"]) // bucket), 0.5, "chapter")
@@ -236,9 +283,71 @@ def _js_runtime_opts() -> dict[str, Any]:
     return {}
 
 
-def fetch_youtube_signals(url: str, *, max_comments: int = 300) -> dict[str, Any]:
-    """Heatmap, chapters and timestamped top comments, with no media download."""
+def parse_live_chat(lines, bucket: float = 30.0) -> dict[str, Any]:
+    """Messages per ``bucket`` seconds from a yt-dlp ``live_chat`` file (one JSON action per line)."""
+    counts: dict[int, int] = {}
+    for line in lines:
+        try:
+            action = json.loads(line).get("replayChatItemAction") or {}
+            offset_ms = int(action.get("videoOffsetTimeMsec"))
+        except (ValueError, TypeError, AttributeError):
+            continue
+        messages = sum(1 for item in action.get("actions") or [] if "addChatItemAction" in item)
+        if messages and offset_ms >= 0:
+            index = int(offset_ms / 1000 // bucket)
+            counts[index] = counts.get(index, 0) + messages
+    if not counts:
+        return {}
+    values = [0] * (max(counts) + 1)
+    for index, number in counts.items():
+        values[index] = number
+    return {"bucket": bucket, "values": values, "messages": sum(values)}
+
+
+def fetch_live_chat(url: str, work_dir: Path) -> dict[str, Any]:
+    """The chat replay of a finished live stream as messages-per-bucket, or ``{}`` (no replay, or it failed)."""
     import yt_dlp
+
+    from .ytdlp_options import cookie_options
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    options: dict[str, Any] = {
+        "quiet": True, "no_warnings": True, "noprogress": True, "skip_download": True, "writesubtitles": True,
+        "subtitleslangs": ["live_chat"], "outtmpl": str(work_dir / "chat.%(ext)s"), **_js_runtime_opts(),
+    }
+    options.update(cookie_options())
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            ydl.extract_info(url, download=True)
+        files = sorted(work_dir.glob("chat*live_chat*"))
+        if not files:
+            decisions.record("signals", "chat-missing", "this video has no live-chat replay (not a finished live stream, or chat replay is off)")
+            return {}
+        with files[0].open(encoding="utf-8", errors="replace") as handle:
+            series = parse_live_chat(handle)
+        for file in files:
+            file.unlink(missing_ok=True)
+        if not series:
+            decisions.record("signals", "chat-missing", "the live-chat replay had no messages")
+        return series
+    except Exception as error:
+        logger.info("Live chat unavailable (%s)", error)
+        decisions.record("signals", "chat-missing", "the live-chat replay could not be downloaded", error=str(error)[:160])
+        return {}
+
+
+def _no_chat() -> dict[str, Any]:
+    decisions.record("signals", "chat-missing", "this video has no live-chat replay (not a finished live stream, or chat replay is off)")
+    return {}
+
+
+def fetch_youtube_signals(url: str, *, max_comments: int = 300, cache_dir: Optional[Path] = None) -> dict[str, Any]:
+    """Heatmap, chapters, timestamped top comments and (for a finished stream) chat activity, with no media download."""
+    import tempfile
+
+    import yt_dlp
+
+    cache_dir = cache_dir or Path(tempfile.mkdtemp(prefix="signals-"))
 
     options: dict[str, Any] = {
         "quiet": True,
@@ -259,6 +368,7 @@ def fetch_youtube_signals(url: str, *, max_comments: int = 300) -> dict[str, Any
         "heatmap": info.get("heatmap") or [],
         "chapters": info.get("chapters") or [],
         "caption_cues": _fetch_caption_cues(info),
+        "chat": fetch_live_chat(url, cache_dir / "chat") if "live_chat" in (info.get("subtitles") or {}) else _no_chat(),
         "comments": [
             {"text": c.get("text", ""), "like_count": c.get("like_count") or 0}
             for c in (info.get("comments") or [])
@@ -268,20 +378,73 @@ def fetch_youtube_signals(url: str, *, max_comments: int = 300) -> dict[str, Any
 
 
 def load_or_fetch_signals(url: str, cache_file: Path) -> Optional[dict[str, Any]]:
-    """Signals cached beside the media; ``None`` when they cannot be fetched."""
+    """Signals cached beside the media; ``None`` when they cannot be fetched.
+
+    A cache written before chat activity was read has no ``chat`` entry, so it is fetched again once.
+    """
+    cached: Optional[dict[str, Any]] = None
     try:
         if cache_file.exists():
-            return json.loads(cache_file.read_text())
+            cached = json.loads(cache_file.read_text())
     except (OSError, json.JSONDecodeError):
-        pass
+        cached = None
+    if cached is not None and "chat" in cached:
+        return cached
     try:
-        signals = fetch_youtube_signals(url)
+        signals = fetch_youtube_signals(url, cache_dir=cache_file.parent)
     except Exception as error:  # network, rate limit, extractor change: never fail the task
         logger.warning("Could not fetch engagement signals (%s); falling back to spread windows", error)
         decisions.record("signals", "unavailable", "viewer signals could not be fetched, so parts are spread evenly instead", error=str(error)[:160])
-        return None
+        return cached
     try:
         cache_file.write_text(json.dumps(signals))
     except OSError:
         pass
     return signals
+
+
+def measure_audio_energy(audio_path: Path, cache_file: Path, bucket: float = 30.0) -> dict[str, Any]:
+    """Loudness per ``bucket`` seconds (dB), from the audio already on disk; ``{}`` when it cannot be measured.
+
+    Decoded at 8 kHz mono and reduced to one RMS value per bucket, so a ten-hour stream is measured in a few
+    minutes with no model. Cached beside the media.
+    """
+    import subprocess
+
+    import numpy as np
+
+    try:
+        if cache_file.exists():
+            return json.loads(cache_file.read_text())
+    except (OSError, json.JSONDecodeError):
+        pass
+    rate = 8000
+    per_bucket = int(rate * bucket)
+    try:
+        process = subprocess.Popen(
+            ["ffmpeg", "-v", "error", "-i", str(audio_path), "-vn", "-ac", "1", "-ar", str(rate), "-f", "s16le", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+    except OSError as error:
+        decisions.record("signals", "audio-missing", "the loudness could not be measured", error=str(error)[:160])
+        return {}
+    values: list[float] = []
+    assert process.stdout is not None
+    while True:
+        raw = process.stdout.read(per_bucket * 2)
+        if not raw:
+            break
+        samples = np.frombuffer(raw[: len(raw) // 2 * 2], dtype=np.int16).astype(np.float64)
+        if samples.size < rate:  # a trailing sliver is not a bucket
+            break
+        values.append(round(float(20 * np.log10(max(float(np.sqrt(np.mean(samples ** 2))), 1.0))), 2))
+    process.wait()
+    if process.returncode != 0 or not values:
+        decisions.record("signals", "audio-missing", "the loudness could not be measured from the audio")
+        return {}
+    series = {"bucket": bucket, "values": values}
+    try:
+        cache_file.write_text(json.dumps(series))
+    except OSError:
+        pass
+    return series

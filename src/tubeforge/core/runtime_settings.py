@@ -98,6 +98,10 @@ DEFINITIONS: tuple[Definition, ...] = (
                "On: only the busiest parts of a long video (peaks in replays, comments, chapters) are transcribed, which is far faster. "
                "Off: the whole video is transcribed, which can take hours on this machine.",
                "bool", lambda s: bool(s.pipeline.source_clips.engaging_only)),
+    Definition("clips.accurate_transcription", "Clips", "Use the larger speech-to-text model",
+               "On: the busy parts are transcribed with Whisper small.en, which mishears far less than base.en but takes about three times "
+               "as long per minute of speech. It is used only when the model is downloaded on this machine; otherwise base.en is used.",
+               "bool", lambda s: True),
     Definition("clips.signal_windows", "Clips", "Busy parts to transcribe",
                "How many busy parts of a long video are transcribed. More parts find more moments but take longer and use more AI calls.",
                "int", lambda s: 8, 1, 20),

@@ -111,3 +111,17 @@ automated downloads. They are passed to yt-dlp only and are never logged or save
 ## Decision log
 
 Each clip job writes `decisions.jsonl` in its `clip-work` folder (`clips/decisions.py`) and the Clips page shows it as "Why these clips". It records which viewer signals existed (most-replayed heatmap, chapters, auto-captions, timestamp comments), which parts of the video were transcribed and why, every AI pick with its reasoning and scores, what was dropped or left out afterwards, and per clip whether faces were found or the default crop was used and whether captions were burned in or skipped (with the reason). Logging never changes a result.
+
+## How moments are chosen
+
+Only the busiest parts of a long video are transcribed, so what picks them matters most. Signals, strongest first:
+
+1. **Most-replayed heatmap** (not present on live streams or small videos).
+2. **Live-chat replay**: messages per 30 s of a finished stream, read with yt-dlp. A burst of chat marks the funny, tense or shocking moment. Only a rise above the stream's usual level counts, so a busy chat does not mark every minute. Not every stream has it: when the replay is off or missing, the decision log says `chat-missing` and the job carries on without it.
+3. **Timestamps in comments**, weighted by likes.
+4. **Loudness**: the audio is decoded at 8 kHz and measured per 30 s (`audio-energy.json` beside the media). Loud stretches add a weaker score.
+5. **Auto-caption pace and chapters.**
+
+The AI always gets a default goal (`DEFAULT_GOAL` in `clips/engine.py`): each clip should make a viewer want to watch the whole video, with a hook, a payoff, and no mid-thought starts. The operator's own notes follow it.
+
+The Settings page has "Use the larger speech-to-text model" (Whisper small.en when its folder is present under `data/benchmark/models`, otherwise base.en). It mishears less and takes about three times as long per minute of speech.

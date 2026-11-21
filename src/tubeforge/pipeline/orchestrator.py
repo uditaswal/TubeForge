@@ -266,6 +266,15 @@ class PipelineOrchestrator:
             return None, False
         return [start, end], (not chosen and duration > limit)
 
+    def _accurate_whisper_model(self) -> str | None:
+        """The larger (small.en) Whisper snapshot next to the standard one, or ``None`` when it was not downloaded."""
+        standard = str(getattr(self.clip_runner, "whisper_model", None) or "")
+        if len(Path(standard).parents) < 3:
+            return None
+        models = Path(standard).parents[2]
+        found = sorted((models / "models--Systran--faster-whisper-small.en" / "snapshots").glob("*/model.bin"))
+        return str(found[-1].parent) if found else None
+
     def _clip_params(self, job: PipelineJob) -> dict[str, object]:
         limit, download_bytes = self._clip_limits()
         metadata = self._load_json_artifact(job.id, JobState.SOURCE_INSPECTING, "source_metadata") or {}
@@ -281,6 +290,7 @@ class PipelineOrchestrator:
                 "max_height": value("clips.max_height", 1080), "cache_days": value("clips.cache_days", 7),
                 "direct_sections": bool(value("clips.direct_sections", True)), "download_connections": value("clips.download_connections", 1),
                 "analysis_window_max_chars": value("clips.analysis_window_max_chars", 24_000),
+                "whisper_model": self._accurate_whisper_model() if bool(value("clips.accurate_transcription", True)) else None,
                 "max_source_seconds": limit, "max_download_bytes": download_bytes, "cookies_file": str(artifacts_cookies(self.artifact_root)),
                 "instructions": " ".join(note.strip() for note in job.request.notes if note.strip())[:1000] or None,
                 "source_window": window, "source_trimmed": trimmed, "cache_dir": str(self.artifact_root.parent / "cache" / "clips-source"), "source_duration_seconds": duration}
