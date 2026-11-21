@@ -82,7 +82,7 @@ DEFINITIONS: tuple[Definition, ...] = (
                "int", lambda s: 12, 1, 40),
     Definition("clips.max_download_gb", "Clips", "Largest download for one clip job (GB)",
                "The video is stopped if its download would pass this size. A 4-hour 1080p video is about 6 GB.",
-               "int", lambda s: -(-s.pipeline.source_clips.max_download_bytes // 1_000_000_000), 1, 30),
+               "int", lambda s: -(-s.pipeline.source_clips.max_download_bytes // 1_000_000_000), 1, 200),
     Definition("clips.direct_sections", "Clips", "Download only the parts the clips need",
                "On: the audio is downloaded first, the AI picks the moments, and only those sections of the video are fetched (minutes instead "
                "of the 30-45 it takes to download a 5 GB show). Off: the whole video is downloaded first. If a section download fails the "
