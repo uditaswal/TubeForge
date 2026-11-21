@@ -8,7 +8,7 @@ from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
 from pydantic.json_schema import SkipJsonSchema
-from pydantic import Field, computed_field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_serializer, model_validator
 
 from tubeforge.domain.contracts import DomainModel
 
@@ -115,6 +115,14 @@ class ReferenceIntakeRequest(DomainModel):
     def tidy_focus(cls, value):
         value = ' '.join((value or '').split())
         return value or None
+
+    @model_serializer(mode='wrap')
+    def omit_unset_focus(self, handler):
+        # Left out while unset: the frozen response schema does not list this optional field, so existing examples stay valid.
+        value = handler(self)
+        if self.focus is None:
+            value.pop('focus', None)
+        return value
 
     @field_validator('target_duration_seconds')
     @classmethod

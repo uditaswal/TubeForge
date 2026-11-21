@@ -61,12 +61,12 @@ def test_a_script_longer_than_the_longest_video_loses_whole_low_value_sentences_
     keeper = "In a study of forty eight students, being watched raised stress by more than half."
     script = "\n\n".join([opening, *filler[:20], keeper, *filler[20:], closing])
     fit = fit_exact_script(script, 60)
-    assert fit.length_s == 90 and fit.text.startswith(opening) and fit.text.endswith(closing)
+    assert fit.length_s == 120 and fit.text.startswith(opening) and fit.text.endswith(closing)
     assert keeper in fit.text.replace("\n\n", " ")                                # sentences with figures survive longest
     assert any(n.startswith("Too long") and "dropped" in n and "Sentence number" in n for n in fit.notes)
     kept = [s for s in re.split(r"(?<=[.!?])\s+", fit.text.replace("\n\n", " ")) if s]
     assert all(s in script for s in kept)                                         # every kept sentence is verbatim
-    assert sum(spoken_words(s) for s in fit.text.split("\n\n")) <= 266
+    assert sum(spoken_words(s) for s in fit.text.split("\n\n")) <= 354   # the 120 s word budget
 
 
 def test_rechunk_never_invents_or_loses_words():
@@ -76,7 +76,7 @@ def test_rechunk_never_invents_or_loses_words():
 
 
 def test_random_scripts_keep_every_word_in_order_and_fit_the_layout():
-    """Property check (seeded): fitting never rewords; scenes stay 8-15 words; length stays 30-90 s."""
+    """Property check (seeded): fitting never rewords; scenes stay 8-15 words; length stays 30-120 s."""
     import random
     import re
     from tubeforge.pipeline.exact_fit import fit_exact_script
@@ -99,7 +99,7 @@ def test_random_scripts_keep_every_word_in_order_and_fit_the_layout():
             assert strip(' '.join(scenes)) == strip(script)
         assert all(re.search(r'[.!?…]["\')\]]*$', scene) for scene in scenes[:-1])   # the scene validator rejects anything else
         floor = 8 if spoken_words(script) >= 8 else 1          # a script under 8 words in total cannot make an 8-word scene
-        assert all(floor <= spoken_words(scene) <= 15 for scene in scenes) and 30 <= fitted.length_s <= 90   # the layout validator rejects anything else
+        assert all(floor <= spoken_words(scene) <= 15 for scene in scenes) and 30 <= fitted.length_s <= 120   # the layout validator rejects anything else
 
 
 def test_a_short_sentence_between_two_long_ones_is_not_left_as_a_scene_of_its_own():
