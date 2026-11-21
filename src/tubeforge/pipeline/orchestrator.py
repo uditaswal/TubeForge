@@ -268,7 +268,7 @@ class PipelineOrchestrator:
 
     def _accurate_whisper_model(self) -> str | None:
         """The larger (small.en) Whisper snapshot next to the standard one, or ``None`` when it was not downloaded."""
-        standard = str(getattr(self.clip_runner, "whisper_model", None) or "")
+        standard = str(getattr(getattr(self, "clip_runner", None), "whisper_model", None) or "")
         if len(Path(standard).parents) < 3:
             return None
         models = Path(standard).parents[2]
