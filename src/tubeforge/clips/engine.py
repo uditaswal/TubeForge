@@ -36,7 +36,7 @@ from .youtube_source import load_time_map, localize_segment, restore_clip_timeli
 
 logger = logging.getLogger(__name__)
 
-ENGINE_VERSION = "clips-v1"
+ENGINE_VERSION = "clips-v2"
 MAX_CLIPS = 12
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
@@ -147,6 +147,21 @@ class ClipRunResult:
     key_topics: Optional[List[str]] = None
     stage_seconds: Dict[str, float] = field(default_factory=dict)
     resumed_clips: int = 0
+
+
+# Always sent to the AI, before the creator's own instructions: the point of a clip is to bring viewers to the whole video.
+DEFAULT_GOAL = (
+    "These clips are advertisements for the full video or stream: each one should make a viewer want to go and watch the whole thing. "
+    "Prefer a moment with a clear hook in its first seconds and a payoff (a reveal, a punchline, a surprising or tense turn, a strong "
+    "opinion or reaction) that makes sense without having seen the rest. Skip crosstalk, dead air, chatter about the stream itself, "
+    "setup without a payoff, and anything that starts or ends mid-thought."
+)
+
+
+def steering_text(instructions: Optional[str]) -> str:
+    """The default goal followed by the creator's own instructions, when there are any."""
+    own = (instructions or "").strip()
+    return DEFAULT_GOAL + (f"\n\nThe creator also asks: {own}" if own else "")
 
 
 def clip_cache_key(request: ClipRequest) -> str:
@@ -289,7 +304,7 @@ class ClipEngine:
                 max_video_duration=86_400 if request.source_window else request.max_video_duration,
                 cached_transcript=cache.get("transcript_text"),
                 cached_analysis_json=cache.get("analysis_json"),
-                **({"instructions": request.instructions.strip()} if (request.instructions or "").strip() else {}),
+                instructions=steering_text(request.instructions),
                 progress_callback=report,
                 should_cancel=should_cancel,
                 clip_length=request.clip_length,

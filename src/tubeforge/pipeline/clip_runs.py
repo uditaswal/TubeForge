@@ -66,11 +66,11 @@ class EngineClipRunner:
             stop.set()
             thread.join(timeout=5)
 
-    def _engine(self, work_dir: Path):
+    def _engine(self, work_dir: Path, params: dict[str, Any] | None = None):
         # Imported here so a worker image without the clip dependencies still starts and runs Shorts.
         from tubeforge.clips.engine import ClipEngine, FileClipStore
 
-        return ClipEngine(FileClipStore(work_dir / "state"), transport=self.transport, whisper_model=self.whisper_model)
+        return ClipEngine(FileClipStore(work_dir / "state"), transport=self.transport, whisper_model=(params or {}).get("whisper_model") or self.whisper_model)
 
     @staticmethod
     def request(work_dir: Path, params: dict[str, Any]):
@@ -128,7 +128,7 @@ class EngineClipRunner:
         self._adopt_earlier_downloads(work_dir, params)
         try:
             with self._keepalive(cancelled):
-                analysis = asyncio.run(self._engine(work_dir).analyze(self.request(work_dir, params), progress=self._progress(work_dir, "analyze"), should_cancel=self._cancel(cancelled)))
+                analysis = asyncio.run(self._engine(work_dir, params).analyze(self.request(work_dir, params), progress=self._progress(work_dir, "analyze"), should_cancel=self._cancel(cancelled)))
         finally:
             self._close_timings(work_dir)
         return {"video_path": analysis.video_path, "segments": analysis.segments, "summary": analysis.summary, "key_topics": analysis.key_topics}
@@ -137,7 +137,7 @@ class EngineClipRunner:
         write_progress(work_dir, "render", 70, "Starting to render")
         try:
             with self._keepalive(cancelled):
-                result = asyncio.run(self._engine(work_dir).render(self.request(work_dir, params), progress=self._progress(work_dir, "render"), should_cancel=self._cancel(cancelled)))
+                result = asyncio.run(self._engine(work_dir, params).render(self.request(work_dir, params), progress=self._progress(work_dir, "render"), should_cancel=self._cancel(cancelled)))
         finally:
             self._close_timings(work_dir)
         return result.clips
