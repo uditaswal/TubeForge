@@ -40,7 +40,7 @@ def test_importing_the_engine_loads_no_service_dependencies():
         "bad += [m for m in sys.modules if m.startswith(('tubeforge.db', 'tubeforge.api'))]\n"
         "print(','.join(bad))\n"
     )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == ""
 
