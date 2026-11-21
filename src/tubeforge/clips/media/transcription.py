@@ -357,10 +357,12 @@ def merge_whisper_windows(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _get_transcript_with_signals(video_path: Path, source_url: str, runtime_config) -> str:
     """Transcribe only the windows viewers engaged with, not the whole video."""
-    from ..signals import choose_windows, load_or_fetch_signals
+    from ..signals import choose_windows, load_or_fetch_signals, measure_audio_energy
 
     duration = ffprobe_duration(video_path)
-    signals = load_or_fetch_signals(source_url, video_path.with_suffix(".signals.json")) or {}
+    signals = dict(load_or_fetch_signals(source_url, video_path.with_suffix(".signals.json")) or {})
+    if "audio_energy" not in signals:
+        signals["audio_energy"] = measure_audio_energy(video_path, video_path.with_suffix(".audio-energy.json"))
     windows = choose_windows(
         duration,
         signals,
@@ -370,8 +372,12 @@ def _get_transcript_with_signals(video_path: Path, source_url: str, runtime_conf
         window=getattr(runtime_config, "source_window", None),
     )
     counts = {name: len(signals.get(name) or []) for name in ("heatmap", "chapters", "caption_cues", "comments")}
+    counts["chat_messages"] = int((signals.get("chat") or {}).get("messages") or 0)
+    counts["loudness_points"] = len((signals.get("audio_energy") or {}).get("values") or [])
     decisions.record(
-        "signals", "read", "most-replayed heatmap: " + ("yes" if counts["heatmap"] else "none (live streams and small videos have none)"),
+        "signals", "read", ("most-replayed heatmap: " + ("yes" if counts["heatmap"] else "none (live streams and small videos have none)")
+         + "; live chat: " + (f'{counts["chat_messages"]} messages' if counts["chat_messages"] else "none")
+         + "; loudness: " + ("measured" if counts["loudness_points"] else "not measured")),
         source_seconds=round(duration), **counts,
     )
     if not windows:
