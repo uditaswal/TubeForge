@@ -43,7 +43,7 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
                     context=browser.new_context(viewport=dict(width=width,height=height));page=context.new_page();errors=[]
                     page.on('pageerror',lambda error:errors.append(str(error)))
                     page.goto(base+'/login');page.locator('[name=username]').fill('intake-reviewer');page.locator('[name=password]').fill('test-only-browser-intake-password');page.locator('button[type=submit]').click();page.wait_for_url(base+'/')
-                    if width<=760:page.locator('.studio-menu').click()
+                    if width<1024:page.locator('[data-nav-open]').click()
                     page.get_by_role('link',name='Reference videos',exact=True).click();page.wait_for_url(base+'/references')
                     expect(page.get_by_text('Signed in as intake-reviewer',exact=True)).to_have_count(1)
                     video_id='AbCdEfGhI_'+{'105':'1','720':'2','900':'3'}[target]
@@ -108,9 +108,10 @@ def test_signed_in_reference_intake_desktop_tablet_mobile(tmp_path):
                     expect(page.locator('#referenceTranscript')).to_contain_text('First fixture cue.')
                     assert runtime.reference_intakes.repository.get(key,2)['intake']['reference_snapshot_sha256']==identity
                     page.reload();expect(page.locator('#referenceState')).to_have_text('Context captured')
-                    if width<=760:
+                    if width<1024:
                         page.locator('[data-nav-open]').click();expect(page.locator('aside[data-nav]')).to_have_attribute('data-open','true')
                         page.keyboard.press('Escape');expect(page.locator('[data-nav-open]')).to_have_attribute('aria-expanded','false')
+                        expect(page.locator('[data-nav-open]')).to_be_focused()
                     assert not page.evaluate('document.documentElement.scrollWidth>innerWidth')
                     assert not errors,errors
                     page.locator('#referenceBrief summary').click();expect(page.locator('#briefProposals')).to_contain_text('Source excerpt:')

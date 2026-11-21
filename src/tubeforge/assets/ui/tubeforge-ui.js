@@ -58,6 +58,10 @@
 
   document.addEventListener("keydown", function (event) {
     var nav = document.querySelector("[data-nav][data-open='true']");
-    if (event.key === "Escape" && nav) setNav(false);
+    if (event.key === "Escape" && nav) {
+      setNav(false);
+      var opener = document.querySelector("[data-nav-open]");
+      if (opener) opener.focus();
+    }
   });
 })();
