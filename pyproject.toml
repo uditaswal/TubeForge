@@ -56,7 +56,7 @@ clips = [
   # Source clipping: transcript-driven moment selection, face-aware vertical crop, captions.
   "faster-whisper==1.2.1",
   "av>=14,<17",  # faster-whisper 1.2.1 opens audio with an option PyAV 17 and later removed
-  "opencv-python-headless>=4.8,<5",
+  "opencv-python-headless>=4.8,<6",
   "numpy>=2,<3",
   "pydantic-ai-slim>=1.107.7,<2",
   "srt>=3.5.3,<4",
