@@ -160,3 +160,45 @@ def test_stale_worker_cannot_promote_checkpoint_or_state(tmp_path: Path) -> None
         assert jobs.get("job").state is JobState.TOPIC_CREATED
     finally:
         database.dispose()
+
+
+class _StaleApprovalOrchestrator:
+    """Mimics the orchestrator when the recorded approval belongs to an older preview: nothing advances."""
+
+    def __init__(self, jobs: JobRepository) -> None:
+        self.jobs = jobs
+        self.events = JobEventRepository(jobs._session_factory)
+        self.calls = 0
+
+    def run(self, job_id: str, **_: object) -> PipelineJob:
+        self.calls += 1
+        return self.jobs.get(job_id)
+
+
+def test_stale_preview_approval_backs_off_instead_of_reclaiming_in_a_loop(tmp_path: Path) -> None:
+    from tubeforge.db.repositories import ApprovalRepository
+    from tubeforge.domain.states import ApprovalGate
+
+    database = create_database(DatabaseConfig(url=f"sqlite:///{tmp_path / 'stale.db'}"))
+    Base.metadata.create_all(database.engine)
+    jobs = JobRepository(database.session_factory)
+    approvals = ApprovalRepository(database.session_factory)
+    orchestrator = _StaleApprovalOrchestrator(jobs)
+    worker = WorkerService("worker-1", jobs, orchestrator, WorkerConfig(), clock=lambda: datetime.now(UTC))
+    try:
+        jobs.create("stale-job", _request())
+        jobs.update_state("stale-job", JobState.PREVIEW_READY)
+        approvals.record("old-approval", "stale-job", ApprovalGate.PREVIEW, reviewed_identity="old-preview-identity")
+        assert worker.run_once().state is JobState.PREVIEW_READY
+        assert orchestrator.calls == 1
+        # Backed off: the job is not claimed again right away.
+        assert worker.run_once() is None
+        assert orchestrator.calls == 1
+        kinds = [event.event_type for event in JobEventRepository(database.session_factory).list_for_job("stale-job")]
+        assert kinds.count("approval_stale") == 1 and "waiting_for_approval" not in kinds
+        # A fresh approval clears the wait immediately.
+        approvals.record("new-approval", "stale-job", ApprovalGate.PREVIEW, reviewed_identity="new-preview-identity")
+        assert worker.run_once() is not None
+        assert orchestrator.calls == 2
+    finally:
+        database.dispose()
