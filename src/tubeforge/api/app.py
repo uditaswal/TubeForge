@@ -254,6 +254,7 @@ class ThumbnailRequest(BaseModel):
     text: str | None = Field(default=None, max_length=48)
     frame_time: float | None = Field(default=None, ge=0, le=7200)
     logo: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=1000)
 
 
 class ManualPublishDraftRequest(BaseModel):
@@ -806,13 +807,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="job not found") from error
         final = runtime.artifacts.get(job_id, JobState.FINAL_RENDERING, "final")
         content = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_package")
-        if job.state not in READY_STATES or final is None or content is None:
+        if job.state not in READY_STATES or final is None:
             raise HTTPException(status_code=409, detail="the final video is not ready")
-        package = ContentPackage.model_validate_json(Path(content.path).read_text(encoding="utf-8"))
         folder = Path(final.path).parent / "publishing"
+        if content is None:
+            # Source-video clip jobs have no script package; build a light stand-in from the clip metadata.
+            metadata = runtime.artifacts.get(job_id, JobState.PUBLICATION_PREPARING, "metadata")
+            if metadata is None:
+                raise HTTPException(status_code=409, detail="the final video is not ready")
+            from types import SimpleNamespace
+            info = json.loads(Path(metadata.path).read_text(encoding="utf-8"))
+            probe = subprocess.run([str(application_settings.pipeline.voice.ffprobe_executable), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:format=duration", "-of", "csv=p=0", str(final.path)], capture_output=True, text=True, timeout=30, check=False)
+            try:
+                lines = probe.stdout.strip().splitlines()
+                width, height = (int(part) for part in lines[0].split(",")[:2])
+                clip_duration = float(lines[1])
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail="the final video could not be inspected") from error
+            title = str(info.get("title") or "Highlight")
+            return SimpleNamespace(is_clip=True, clip_info=info, clip_duration=clip_duration, request=SimpleNamespace(aspect_ratio="9:16" if height > width else "16:9", topic=title), reference_short=None, thumbnail_brief=None), Path(final.path), folder
+        package = ContentPackage.model_validate_json(Path(content.path).read_text(encoding="utf-8"))
         return package, Path(final.path), folder
 
-    def _thumbnail_state(job_id: str, *, text: str | None = None, frame_time: float | None = None, logo: str | None | bool = False, force: bool = False) -> dict[str, object]:
+    def _thumbnail_state(job_id: str, *, text: str | None = None, frame_time: float | None = None, logo: str | None | bool = False, force: bool = False, notes: str | None = None) -> dict[str, object]:
         """Current thumbnail for the job; (re)composed from the final video when asked or missing."""
         from tubeforge.pipeline import thumbnail as thumbs
         from tubeforge.pipeline.publication_suggest import suggest
@@ -820,11 +837,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         meta_path = folder / "thumbnail.json"
         meta: dict[str, object] = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
         ffmpeg = application_settings.pipeline.voice.ffmpeg_executable
-        duration = float(meta["duration"]) if meta.get("duration") else float(runtime.orchestrator.ffprobe.inspect(video)["duration_seconds"])
+        duration = float(meta["duration"]) if meta.get("duration") else (float(package.clip_duration) if getattr(package, "is_clip", False) else float(runtime.orchestrator.ffprobe.inspect(video)["duration_seconds"]))
         wants_portrait = package.request.aspect_ratio == "9:16"
         stale_shape = bool(meta) and not meta.get("custom") and bool(meta.get("portrait", False)) != wants_portrait
         if force or stale_shape or not meta or not (folder / str(meta.get("file", "-"))).is_file():
-            options = suggest(package)["thumbnail_text_options"]
+            options = [package.request.topic] if getattr(package, "is_clip", False) else suggest(package)["thumbnail_text_options"]
             scenes = package.reference_short.scenes if package.reference_short is not None else ()
             default_logo = next((scene.logo for scene in scenes if scene.logo), None)
             new = {"text": text if text is not None else str(meta.get("text") or (options[0] if options else package.request.topic)),
@@ -836,18 +853,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 image, _ = thumbs.compose_portrait(frame, str(new["text"]), new["logo"], config=shorts, brand=Path(shorts.brand_logo_path) if shorts.brand_logo_path else thumbs.BRAND_LOGO)
             else:
                 image = thumbs.compose(frame, str(new["text"]), new["logo"])
+            folder.mkdir(parents=True, exist_ok=True)
             temporary = folder / "thumbnail.tmp.jpg"
             digest = thumbs.save(image, temporary)
             target = folder / f"thumbnail-{digest[:12]}.jpg"
             temporary.replace(target)
-            meta = {**new, "file": target.name, "sha256": digest, "portrait": wants_portrait, "duration": duration}
+            meta = {**new, "file": target.name, "sha256": digest, "portrait": wants_portrait, "duration": duration, "notes": notes if notes is not None else meta.get("notes")}
             meta_path.write_text(json.dumps(meta, indent=1))
             for stale in folder.glob("thumbnail-*.jpg"):
                 if stale != target:
                     stale.unlink(missing_ok=True)
         portrait = package.request.aspect_ratio == "9:16"
         return {"url": f"/api/publishing/jobs/{job_id}/thumbnail.jpg?v={str(meta['sha256'])[:12]}", "sha256": meta["sha256"], "text": meta.get("text"), "portrait": portrait,
-                "frame_time": meta.get("frame_time"), "logo": meta.get("logo"), "custom": bool(meta.get("custom")),
+                "frame_time": meta.get("frame_time"), "logo": meta.get("logo"), "custom": bool(meta.get("custom")), "notes": meta.get("notes"),
                 "frame_times": thumbs.candidate_times(duration), "logos": list(thumbs.LOGO_NAMES)}
 
     @app.get("/api/publishing/jobs/{job_id}/suggestion", tags=["publishing"])
@@ -858,14 +876,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             thumbnail = _thumbnail_state(job_id)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             raise HTTPException(status_code=500, detail="thumbnail could not be composed from the video") from error
+        if getattr(package, "is_clip", False):
+            info = package.clip_info
+            heading = str(info.get("title") or "")
+            return {"title": heading[:100], "title_options": [heading], "description": str(info.get("description") or ""), "tags": list(info.get("tags") or [])[:30], "thumbnail_text_options": [package.request.topic], "thumbnail": thumbnail}
         return {**suggest(package), "thumbnail": thumbnail}
 
     @app.post("/api/publishing/jobs/{job_id}/thumbnail", tags=["publishing"])
     def regenerate_thumbnail(job_id: str, value: ThumbnailRequest) -> dict[str, object]:
         try:
-            return _thumbnail_state(job_id, text=value.text, frame_time=value.frame_time, logo=value.logo if "logo" in value.model_fields_set else False, force=True)
+            return _thumbnail_state(job_id, text=value.text, frame_time=value.frame_time, logo=value.logo if "logo" in value.model_fields_set else False, force=True, notes=value.notes)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
-            raise HTTPException(status_code=422, detail="thumbnail could not be composed from the video") from error
+            raise HTTPException(status_code=422, detail=f"thumbnail could not be composed from the video ({type(error).__name__})") from error
 
     @app.post("/api/publishing/jobs/{job_id}/thumbnail/upload", tags=["publishing"])
     async def upload_thumbnail(job_id: str, request: Request) -> dict[str, object]:
@@ -886,6 +908,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         shorts = application_settings.pipeline.shorts_thumbnail
         package, _, _ = _publishing_context(job_id)
         image = ImageOps.fit(image, (shorts.width, shorts.height) if package.request.aspect_ratio == "9:16" else thumbs.SIZE, Image.Resampling.LANCZOS)
+        folder.mkdir(parents=True, exist_ok=True)
         temporary = folder / "thumbnail.tmp.jpg"
         digest = thumbs.save(image, temporary)
         target = folder / f"thumbnail-{digest[:12]}.jpg"
@@ -1608,7 +1631,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         dashboard = dashboard.replace(
             "card.append(format,actions)}async function refresh()",
-            "if(j.artifacts.includes('final')){const thumb=document.createElement('img');thumb.className='job-thumb';thumb.tabIndex=0;thumb.title='Click to see the full thumbnail';thumb.alt='Thumbnail for '+j.topic;thumb.loading='lazy';thumb.hidden=true;const make=button('Create thumbnail','secondary',async ev=>{const b=ev.currentTarget;b.disabled=true;b.textContent='Creating…';try{const r=await fetch('/api/publishing/jobs/'+j.id+'/thumbnail',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});if(!r.ok)throw Error();thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg?t='+Date.now();}catch(_){b.disabled=false;b.textContent='Create thumbnail (failed, retry)';}});thumb.onload=()=>{thumb.hidden=false;make.remove()};thumb.onerror=()=>{thumb.hidden=true};thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg';card.append(thumb);actions.append(make)}"
+            "if(j.artifacts.includes('final')){const thumb=document.createElement('img');thumb.className='job-thumb';thumb.tabIndex=0;thumb.title='Click to see the full thumbnail';thumb.alt='Thumbnail for '+j.topic;thumb.loading='lazy';thumb.hidden=true;const make=button('Create thumbnail','secondary',ev=>{const b=ev.currentTarget;if(card.querySelector('.thumb-form')){card.querySelector('.thumb-form').remove();return;}const f=document.createElement('form');f.className='thumb-form';f.innerHTML='<label>Thumbnail text (optional, up to 48 characters)<input name=\"text\" maxlength=\"48\"></label><label>Notes on how it should look (saved with the thumbnail)<textarea name=\"notes\" maxlength=\"1000\" rows=\"3\" placeholder=\"For example: close-up of the speaker, bold yellow text, no logo\"></textarea></label><button type=\"submit\" class=\"small\">Create thumbnail</button><div role=\"status\" aria-live=\"polite\"></div>';f.onsubmit=async e=>{e.preventDefault();const st=f.querySelector('[role=\"status\"]'),go=f.querySelector('button');go.disabled=true;st.textContent='Creating…';const body={};const t=f.elements.text.value.trim(),n=f.elements.notes.value.trim();if(t)body.text=t;if(n)body.notes=n;try{const r=await fetch('/api/publishing/jobs/'+j.id+'/thumbnail',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok){let d='';try{d=(await r.json()).detail||''}catch(_){}throw Error(d||('HTTP '+r.status));}thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg?t='+Date.now();f.remove();}catch(err){st.textContent='Could not create the thumbnail: '+err.message;go.disabled=false;}};actions.after(f);});thumb.onload=()=>{thumb.hidden=false;make.remove()};thumb.onerror=()=>{thumb.hidden=true};thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg';card.append(thumb);actions.append(make)}"
             "if(['final_ready','publication_approval_required','publication_ready'].includes(j.state)&&j.artifacts.includes('final'))actions.append(button('Publish…','',()=>{try{sessionStorage.setItem('tubeforge:publish-job',j.id)}catch(_){}location.hash='#publishing'}));"
             "if(!['final_ready','script_approval_required','preview_ready','publication_approval_required','publication_ready','published','failed_validation','failed_exhausted','cancelled'].includes(j.state)){if(window.focusedJobId===j.id)actions.append(button('Running alone — release','secondary',()=>window.releaseFocus()));else actions.append(button('Run only this','secondary',()=>window.focusJob(j.id)))}"
             "card.append(format,actions)}async function refresh()",
