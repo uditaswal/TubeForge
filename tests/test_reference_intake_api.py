@@ -120,3 +120,28 @@ def test_a_focus_is_saved_with_the_reference_and_does_not_change_the_identity_of
     assert submit(client,headers).json()['intake']['intake_id']==plain['intake_id']   # no focus: the same reference is reused
     assert submit(client,headers,focus='the 8x claim and what it costs').json()['intake']['intake_id']==focused['intake_id']
     assert 'referenceFocus' in client.get('/references').text and 'referenceFocusNote' in client.get('/references').text
+
+
+def test_edit_inputs_then_capture_again_and_delete(api):
+    client,runtime,headers=api
+    created=submit(client,headers,focus='first focus').json()['intake']
+    iid=created['intake_id']
+    # a pending capture cannot be deleted; cancel it first
+    assert client.delete(f'/api/reference-intakes/{iid}',headers=headers).status_code==409
+    runtime.reference_intakes.run_once('test-worker')
+    detail=client.get(f'/api/reference-intakes/{iid}').json()
+    revised=client.post(f'/api/reference-intakes/{iid}/revisions',json=dict(expected_revision=detail['intake']['revision'],action='refresh',edits=dict(focus='new focus',target_duration_seconds=900)),headers=headers)
+    assert revised.status_code==201,revised.text
+    request=revised.json()['intake']['request']
+    assert (request['focus'],request['target_duration_seconds'],request['reference_url'])==('new focus',900,URL)
+    assert revised.json()['intake']['revision']==detail['intake']['revision']+1
+    bad=client.post(f'/api/reference-intakes/{iid}/revisions',json=dict(expected_revision=revised.json()['intake']['revision'],action='refresh',edits=dict(channel_identity='nope')),headers=headers)
+    assert bad.status_code==422 or bad.status_code==409
+    forged=client.post(f'/api/reference-intakes/{iid}/revisions',json=dict(expected_revision=1,action='refresh',edits=dict(reference_url='https://example.com')),headers=headers)
+    assert forged.status_code==422
+    runtime.reference_intakes.run_once('test-worker')
+    assert client.delete(f'/api/reference-intakes/{iid}').status_code==403
+    assert client.delete(f'/api/reference-intakes/{iid}',headers=headers).json()=={'deleted':iid}
+    assert client.get(f'/api/reference-intakes/{iid}').status_code==404
+    assert client.delete(f'/api/reference-intakes/{iid}',headers=headers).status_code==404
+    assert all(item['intake']['intake_id']!=iid for item in client.get('/api/reference-intakes').json()['items'])

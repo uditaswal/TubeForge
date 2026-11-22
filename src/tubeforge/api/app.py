@@ -254,6 +254,7 @@ class ThumbnailRequest(BaseModel):
     text: str | None = Field(default=None, max_length=48)
     frame_time: float | None = Field(default=None, ge=0, le=7200)
     logo: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=1000)
 
 
 class ManualPublishDraftRequest(BaseModel):
@@ -453,6 +454,31 @@ def _as_ist(value: datetime) -> datetime:
     return (value.replace(tzinfo=UTC) if value.tzinfo is None else value).astimezone(IST)
 
 
+def _clip_titles(job: object, runtime: object) -> dict[str, object]:
+    """For source-video clip jobs: the source video's real title and each clip's hook title, for the Generations list."""
+    if getattr(job.request, "prompt_version", "") != "source-clip-v1":
+        return {}
+    found: dict[str, object] = {}
+
+    def load(name: str) -> dict | None:
+        for artifact in runtime.artifacts.list_for_job(job.id):
+            if artifact.name == name:
+                try:
+                    return json.loads(Path(artifact.path).read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    return None
+        return None
+
+    source = load("source_metadata")
+    if source and str(source.get("title") or "").strip():
+        found["display_title"] = str(source["title"]).strip()[:200]
+    manifest = load("clip_manifest")
+    if manifest:
+        titles = [str((clip.get("candidate") or {}).get("hook_title") or "").strip() for clip in manifest.get("clips", []) if isinstance(clip, dict)]
+        found["clip_titles"] = [title[:140] for title in titles if title]
+    return found
+
+
 def _job_payload(job: object) -> dict[str, object]:
     return {
         "id": job.id,
@@ -508,7 +534,7 @@ DASHBOARD_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TubeForge Studio</title></head>
 <body>__SPA_SHELL_OPEN__<main class="shell"><div class="studio-grid"><section class="panel"><h2>New generation</h2><p class="sub">Give a title and the key points. You stay in control of review.</p><form id="createForm"><label>Title<input name="title" maxlength="500" required placeholder="e.g. Bare minimum for software engineers"></label><label>Notes<textarea name="notes" required placeholder="One point per line"></textarea></label><label>Target duration (seconds)<input name="duration_seconds" type="number" value="60" min="30" max="7200" required></label><label>Review mode<select name="review_mode"><option value="manual">Manual review</option><option value="auto">Automatic render</option></select></label><label class="checkbox"><input name="captions_enabled" type="checkbox" checked> Include captions</label><button type="submit">Create video</button><div class="notice" id="notice" role="status"></div></form></section><section><div class="toolbar"><div><h2>Generations</h2><div class="sub">Updates in place every 30 seconds</div></div><select id="filter" aria-label="Filter generations"><option value="all">All generations</option><option value="active">In progress</option><option value="needs_review">Needs review</option><option value="failed">Failed</option><option value="complete">Video ready</option></select><button type="button" class="secondary" id="refreshJobs">Refresh</button></div><div id="jobs" class="jobs"><div class="loading">Loading generations…</div></div></section></div></main>__SPA_SHELL_CLOSE__<dialog id="videoDialog" aria-labelledby="videoTitle"><div class="modal-head"><h2 id="videoTitle">Video</h2><button class="close" type="button" data-close="videoDialog" aria-label="Close video">×</button></div><div class="modal-body"><video id="player" class="video" controls preload="metadata" playsinline></video></div></dialog><dialog id="activityDialog" aria-labelledby="activityTitle"><div class="modal-head"><h2 id="activityTitle">Activity</h2><button class="close" type="button" data-close="activityDialog" aria-label="Close activity">×</button></div><div class="modal-body"><div id="timeline" class="timeline"><div class="loading">Loading activity…</div></div></div></dialog><script>
-const jobsRoot=document.querySelector('#jobs'),filter=document.querySelector('#filter'),notice=document.querySelector('#notice'),cards=new Map();const esc=v=>String(v??'');const ready=s=>['preview_ready','final_ready','publication_approval_required','publication_ready','published'].includes(s),failed=s=>['failed_validation','failed_exhausted'].includes(s);const needs=s=>['script_approval_required','preview_ready','publication_approval_required'].includes(s);function matches(j){return filter.value==='all'||filter.value==='active'&&(!ready(j.state)&&!failed(j.state)&&!needs(j.state))||filter.value==='needs_review'&&needs(j.state)||filter.value==='failed'&&failed(j.state)||filter.value==='complete'&&j.artifacts.includes('final')}function badgeClass(j){return j.state==='failed_retryable'?'pending':failed(j.state)?'failed':j.artifacts.includes('final')?'ready':''}function button(label,cls,fn){let b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=fn;return b}function renderCard(card,j){card.replaceChildren();card.className='job';let head=document.createElement('div');head.className='jobhead';let name=document.createElement('div');name.className='title';name.textContent=j.topic;let badge=document.createElement('span');badge.className='badge '+badgeClass(j);badge.textContent=j.paused?'Paused':j.pausing?'Pausing…':j.blocked_reason==='insufficient_sources'?'Blocked: insufficient sources':j.state==='failed_retryable'?(j.next_retry_at?'Retry scheduled':'Retry pending'):j.state.replaceAll('_',' ');head.append(name,badge);card.append(head);if(j.failure_message){let msg=document.createElement('div');msg.className='failure'+(j.state==='failed_retryable'?' pending':'');msg.textContent=j.failure_message;card.append(msg)}let meta=document.createElement('div');meta.className='muted';meta.textContent=`${j.artifacts.length} saved artifacts · ${j.event_count} activity events`;if(j.state==='failed_retryable'&&j.next_retry_at)meta.textContent+=` · Next attempt ${new Date(j.next_retry_at).toLocaleString()} (attempt ${j.attempt_count})`;card.append(meta);let actions=document.createElement('div');actions.className='actions';if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')));for(const clip of j.artifacts.filter(name=>name.startsWith('clip_')))actions.append(button(clip.replace('_',' '),'secondary',()=>openVideo(j,clip,clip.replace('_',' '))));actions.append(button('Activity','secondary',()=>openActivity(j)));if(j.state==='script_approval_required')actions.append(button('Approve script','',()=>approve(j.id,'script')));if(j.state==='preview_ready')actions.append(button('Approve preview','',()=>approve(j.id,'preview')));if(j.can_retry_validation)actions.append(button('Retry approved media stages','secondary',()=>retryValidation(j)));if(j.can_pause)actions.append(button('Pause','secondary',()=>pauseJob(j)));if(j.can_resume)actions.append(button('Resume','',()=>resumeJob(j)));if(j.deletable)actions.append(button('Delete','danger',()=>removeJob(j.id)));else if(j.can_pause||j.pausing)actions.append(button('Stop & delete','danger',()=>stopAndDelete(j)));card.append(actions)}async function refresh(){try{let r=await fetch('/api/jobs');if(r.status===401){location.assign('/login');return}if(!r.ok)throw Error('Could not load generations (HTTP '+r.status+')');let data=await r.json(),visible=data.filter(matches),seen=new Set;for(const job of visible){let card=cards.get(job.id);if(!card){card=document.createElement('article');cards.set(job.id,card);jobsRoot.append(card)}renderCard(card,job);seen.add(job.id)}for(const [id,card]of cards)if(!seen.has(id)){card.remove();cards.delete(id)}if(!visible.length)jobsRoot.innerHTML='<div class="empty">No matching generations yet.</div>';else{jobsRoot.querySelector('.empty')?.remove();jobsRoot.querySelector('.loading')?.remove()}document.querySelector('#connection').textContent='Dashboard connected'}catch(e){if(!cards.size)jobsRoot.innerHTML='<div class="error">'+esc(String(e&&e.message||'Unable to load generations')+'. Retrying…')+'</div>';document.querySelector('#connection').textContent='Reconnecting…'}}async function openVideo(job,name,label){let dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');document.querySelector('#videoTitle').textContent=`${label}: ${job.topic}`;player.pause();player.removeAttribute('src');player.load();player.src=`/api/jobs/${job.id}/artifacts/${name}`;player.autoplay=false;dialog.showModal()}async function openActivity(job){const dialog=document.querySelector('#activityDialog'),root=document.querySelector('#timeline');const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};const dur=ms=>ms<1000?Math.round(ms)+' ms':ms<60000?(ms/1000).toFixed(1)+' s':Math.floor(ms/60000)+' min '+Math.round(ms%60000/1000)+' s',mem=b=>b==null?'n/a':b>=1073741824?(b/1073741824).toFixed(2)+' GiB':Math.round(b/1048576)+' MiB',num=n=>Number(n||0).toLocaleString(),compact=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?(n/1e3).toFixed(1)+'k':num(n),usd=v=>v==null?'n/a':'$'+Number(v).toFixed(v<1?3:2);document.querySelector('#activityTitle').textContent='Activity: '+job.topic;root.replaceChildren(el('div','loading','Loading activity…'));dialog.showModal();let events=[],report=null,failed=false;try{const [er,dr]=await Promise.all([fetch('/api/jobs/'+job.id+'/events'),fetch('/api/jobs/'+job.id+'/diagnostics')]);if(er.ok)events=await er.json();else failed=true;if(dr.ok)report=await dr.json()}catch(_){failed=true}root.replaceChildren();const page=el('div','act');root.append(page);if(failed&&!events.length){page.append(el('div','error','Activity could not be loaded. Close this dialog and try again.'));return}
+const jobsRoot=document.querySelector('#jobs'),filter=document.querySelector('#filter'),notice=document.querySelector('#notice'),cards=new Map();const esc=v=>String(v??'');const ready=s=>['preview_ready','final_ready','publication_approval_required','publication_ready','published'].includes(s),failed=s=>['failed_validation','failed_exhausted'].includes(s);const needs=s=>['script_approval_required','preview_ready','publication_approval_required'].includes(s);function matches(j){return filter.value==='all'||filter.value==='active'&&(!ready(j.state)&&!failed(j.state)&&!needs(j.state))||filter.value==='needs_review'&&needs(j.state)||filter.value==='failed'&&failed(j.state)||filter.value==='complete'&&j.artifacts.includes('final')}function badgeClass(j){return j.state==='failed_retryable'?'pending':failed(j.state)?'failed':j.artifacts.includes('final')?'ready':''}function button(label,cls,fn){let b=document.createElement('button');b.type='button';b.className='small '+(cls||'secondary');b.textContent=label;b.onclick=fn;return b}function renderCard(card,j){card.replaceChildren();card.className='job';let head=document.createElement('div');head.className='jobhead';let name=document.createElement('div');name.className='title';name.textContent=j.display_title||j.topic;let badge=document.createElement('span');badge.className='badge '+badgeClass(j);badge.textContent=j.paused?'Paused':j.pausing?'Pausing…':j.blocked_reason==='insufficient_sources'?'Blocked: insufficient sources':j.state==='failed_retryable'?(j.next_retry_at?'Retry scheduled':'Retry pending'):j.state.replaceAll('_',' ');head.append(name,badge);card.append(head);if(j.clip_titles&&j.clip_titles.length){let clips=document.createElement('ol');clips.className='muted';clips.setAttribute('aria-label','Clip titles');clips.style.margin='4px 0 0';clips.style.paddingLeft='20px';j.clip_titles.forEach(t=>{let li=document.createElement('li');li.textContent=t;clips.append(li)});card.append(clips)}if(j.failure_message){let msg=document.createElement('div');msg.className='failure'+(j.state==='failed_retryable'?' pending':'');msg.textContent=j.failure_message;card.append(msg)}let meta=document.createElement('div');meta.className='muted';meta.textContent=`${j.artifacts.length} saved artifacts · ${j.event_count} activity events`;if(j.state==='failed_retryable'&&j.next_retry_at)meta.textContent+=` · Next attempt ${new Date(j.next_retry_at).toLocaleString()} (attempt ${j.attempt_count})`;card.append(meta);let actions=document.createElement('div');actions.className='actions';if(j.artifacts.includes('preview'))actions.append(button('Preview','secondary',()=>openVideo(j,'preview','Preview')));if(j.artifacts.includes('final'))actions.append(button('Watch final','',()=>openVideo(j,'final','Final video')));for(const clip of j.artifacts.filter(name=>name.startsWith('clip_')))actions.append(button(clip.replace('_',' '),'secondary',()=>openVideo(j,clip,clip.replace('_',' '))));actions.append(button('Activity','secondary',()=>openActivity(j)));if(j.state==='script_approval_required')actions.append(button('Approve script','',()=>approve(j.id,'script')));if(j.state==='preview_ready')actions.append(button('Approve preview','',()=>approve(j.id,'preview')));if(j.can_retry_validation)actions.append(button('Retry approved media stages','secondary',()=>retryValidation(j)));if(j.can_pause)actions.append(button('Pause','secondary',()=>pauseJob(j)));if(j.can_resume)actions.append(button('Resume','',()=>resumeJob(j)));if(j.deletable)actions.append(button('Delete','danger',()=>removeJob(j.id)));else if(j.can_pause||j.pausing)actions.append(button('Stop & delete','danger',()=>stopAndDelete(j)));card.append(actions)}async function refresh(){try{let r=await fetch('/api/jobs');if(r.status===401){location.assign('/login');return}if(!r.ok)throw Error('Could not load generations (HTTP '+r.status+')');let data=await r.json(),visible=data.filter(matches),seen=new Set;for(const job of visible){let card=cards.get(job.id);if(!card){card=document.createElement('article');cards.set(job.id,card);jobsRoot.append(card)}renderCard(card,job);seen.add(job.id)}for(const [id,card]of cards)if(!seen.has(id)){card.remove();cards.delete(id)}if(!visible.length)jobsRoot.innerHTML='<div class="empty">No matching generations yet.</div>';else{jobsRoot.querySelector('.empty')?.remove();jobsRoot.querySelector('.loading')?.remove()}document.querySelector('#connection').textContent='Dashboard connected'}catch(e){if(!cards.size)jobsRoot.innerHTML='<div class="error">'+esc(String(e&&e.message||'Unable to load generations')+'. Retrying…')+'</div>';document.querySelector('#connection').textContent='Reconnecting…'}}async function openVideo(job,name,label){let dialog=document.querySelector('#videoDialog'),player=document.querySelector('#player');document.querySelector('#videoTitle').textContent=`${label}: ${job.topic}`;player.pause();player.removeAttribute('src');player.load();player.src=`/api/jobs/${job.id}/artifacts/${name}`;player.autoplay=false;dialog.showModal()}async function openActivity(job){const dialog=document.querySelector('#activityDialog'),root=document.querySelector('#timeline');const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};const dur=ms=>ms<1000?Math.round(ms)+' ms':ms<60000?(ms/1000).toFixed(1)+' s':Math.floor(ms/60000)+' min '+Math.round(ms%60000/1000)+' s',mem=b=>b==null?'n/a':b>=1073741824?(b/1073741824).toFixed(2)+' GiB':Math.round(b/1048576)+' MiB',num=n=>Number(n||0).toLocaleString(),compact=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?(n/1e3).toFixed(1)+'k':num(n),usd=v=>v==null?'n/a':'$'+Number(v).toFixed(v<1?3:2);document.querySelector('#activityTitle').textContent='Activity: '+job.topic;root.replaceChildren(el('div','loading','Loading activity…'));dialog.showModal();let events=[],report=null,failed=false;try{const [er,dr]=await Promise.all([fetch('/api/jobs/'+job.id+'/events'),fetch('/api/jobs/'+job.id+'/diagnostics')]);if(er.ok)events=await er.json();else failed=true;if(dr.ok)report=await dr.json()}catch(_){failed=true}root.replaceChildren();const page=el('div','act');root.append(page);if(failed&&!events.length){page.append(el('div','error','Activity could not be loaded. Close this dialog and try again.'));return}
 const top=el('div','act-top');top.append(el('span','sub',job.state.replaceAll('_',' ')+' · '+events.length+' events'));if(report){const a=el('a','act-link','Download diagnostics JSONL');a.href='/api/jobs/'+job.id+'/diagnostics.jsonl';top.append(a)}page.append(top);
 if(report){const stages=Object.entries(report.stage_metrics),totalMs=stages.reduce((n,[,v])=>n+v.elapsed_ms,0),peaks=stages.map(([,v])=>v.cgroup_peak_bytes).filter(v=>v!=null),ai=report.ai_usage,total=ai&&ai.total,card=(label,value,sub)=>{const c=el('div','act-card');c.append(el('div','act-label',label),el('b',null,value),el('span',null,sub));return c};const cards=el('div','act-cards');cards.append(card('Pipeline time',stages.length?dur(totalMs):'n/a',stages.length+' measured stages'+(report.worker_retry_count?' · '+report.worker_retry_count+' retries':'')),card('Memory peak',peaks.length?mem(Math.max(...peaks)):'n/a','container lifetime, not per job'),card('AI tokens',total?compact(total.total_tokens):'n/a',total?total.calls+' calls · '+(ai.model||'model n/a'):'no script call recorded'),card('AI cost',total?usd(total.cost_usd):'n/a',total&&total.cost_usd!=null?'script'+(total.web_searches?' + research':''):'not reported by provider'));page.append(cards);
 if(report.failure_reason){const f=el('div','act-panel act-fail');f.append(el('h3',null,'Failure'),el('div',null,report.failure_reason));page.append(f)}
@@ -806,13 +832,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="job not found") from error
         final = runtime.artifacts.get(job_id, JobState.FINAL_RENDERING, "final")
         content = runtime.artifacts.get(job_id, JobState.CONTENT_GENERATING, "content_package")
-        if job.state not in READY_STATES or final is None or content is None:
+        if job.state not in READY_STATES or final is None:
             raise HTTPException(status_code=409, detail="the final video is not ready")
-        package = ContentPackage.model_validate_json(Path(content.path).read_text(encoding="utf-8"))
         folder = Path(final.path).parent / "publishing"
+        if content is None:
+            # Source-video clip jobs have no script package; build a light stand-in from the clip metadata.
+            metadata = runtime.artifacts.get(job_id, JobState.PUBLICATION_PREPARING, "metadata")
+            if metadata is None:
+                raise HTTPException(status_code=409, detail="the final video is not ready")
+            from types import SimpleNamespace
+            info = json.loads(Path(metadata.path).read_text(encoding="utf-8"))
+            probe = subprocess.run([str(application_settings.pipeline.voice.ffprobe_executable), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:format=duration", "-of", "csv=p=0", str(final.path)], capture_output=True, text=True, timeout=30, check=False)
+            try:
+                lines = probe.stdout.strip().splitlines()
+                width, height = (int(part) for part in lines[0].split(",")[:2])
+                clip_duration = float(lines[1])
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail="the final video could not be inspected") from error
+            title = str(info.get("title") or "Highlight")
+            return SimpleNamespace(is_clip=True, clip_info=info, clip_duration=clip_duration, request=SimpleNamespace(aspect_ratio="9:16" if height > width else "16:9", topic=title), reference_short=None, thumbnail_brief=None), Path(final.path), folder
+        package = ContentPackage.model_validate_json(Path(content.path).read_text(encoding="utf-8"))
         return package, Path(final.path), folder
 
-    def _thumbnail_state(job_id: str, *, text: str | None = None, frame_time: float | None = None, logo: str | None | bool = False, force: bool = False) -> dict[str, object]:
+    def _thumbnail_state(job_id: str, *, text: str | None = None, frame_time: float | None = None, logo: str | None | bool = False, force: bool = False, notes: str | None = None) -> dict[str, object]:
         """Current thumbnail for the job; (re)composed from the final video when asked or missing."""
         from tubeforge.pipeline import thumbnail as thumbs
         from tubeforge.pipeline.publication_suggest import suggest
@@ -820,11 +862,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         meta_path = folder / "thumbnail.json"
         meta: dict[str, object] = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
         ffmpeg = application_settings.pipeline.voice.ffmpeg_executable
-        duration = float(meta["duration"]) if meta.get("duration") else float(runtime.orchestrator.ffprobe.inspect(video)["duration_seconds"])
+        duration = float(meta["duration"]) if meta.get("duration") else (float(package.clip_duration) if getattr(package, "is_clip", False) else float(runtime.orchestrator.ffprobe.inspect(video)["duration_seconds"]))
         wants_portrait = package.request.aspect_ratio == "9:16"
         stale_shape = bool(meta) and not meta.get("custom") and bool(meta.get("portrait", False)) != wants_portrait
         if force or stale_shape or not meta or not (folder / str(meta.get("file", "-"))).is_file():
-            options = suggest(package)["thumbnail_text_options"]
+            options = [package.request.topic] if getattr(package, "is_clip", False) else suggest(package)["thumbnail_text_options"]
             scenes = package.reference_short.scenes if package.reference_short is not None else ()
             default_logo = next((scene.logo for scene in scenes if scene.logo), None)
             new = {"text": text if text is not None else str(meta.get("text") or (options[0] if options else package.request.topic)),
@@ -836,18 +878,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 image, _ = thumbs.compose_portrait(frame, str(new["text"]), new["logo"], config=shorts, brand=Path(shorts.brand_logo_path) if shorts.brand_logo_path else thumbs.BRAND_LOGO)
             else:
                 image = thumbs.compose(frame, str(new["text"]), new["logo"])
+            folder.mkdir(parents=True, exist_ok=True)
             temporary = folder / "thumbnail.tmp.jpg"
             digest = thumbs.save(image, temporary)
             target = folder / f"thumbnail-{digest[:12]}.jpg"
             temporary.replace(target)
-            meta = {**new, "file": target.name, "sha256": digest, "portrait": wants_portrait, "duration": duration}
+            meta = {**new, "file": target.name, "sha256": digest, "portrait": wants_portrait, "duration": duration, "notes": notes if notes is not None else meta.get("notes")}
             meta_path.write_text(json.dumps(meta, indent=1))
             for stale in folder.glob("thumbnail-*.jpg"):
                 if stale != target:
                     stale.unlink(missing_ok=True)
         portrait = package.request.aspect_ratio == "9:16"
         return {"url": f"/api/publishing/jobs/{job_id}/thumbnail.jpg?v={str(meta['sha256'])[:12]}", "sha256": meta["sha256"], "text": meta.get("text"), "portrait": portrait,
-                "frame_time": meta.get("frame_time"), "logo": meta.get("logo"), "custom": bool(meta.get("custom")),
+                "frame_time": meta.get("frame_time"), "logo": meta.get("logo"), "custom": bool(meta.get("custom")), "notes": meta.get("notes"),
                 "frame_times": thumbs.candidate_times(duration), "logos": list(thumbs.LOGO_NAMES)}
 
     @app.get("/api/publishing/jobs/{job_id}/suggestion", tags=["publishing"])
@@ -858,14 +901,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             thumbnail = _thumbnail_state(job_id)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             raise HTTPException(status_code=500, detail="thumbnail could not be composed from the video") from error
+        if getattr(package, "is_clip", False):
+            info = package.clip_info
+            heading = str(info.get("title") or "")
+            return {"title": heading[:100], "title_options": [heading], "description": str(info.get("description") or ""), "tags": list(info.get("tags") or [])[:30], "thumbnail_text_options": [package.request.topic], "thumbnail": thumbnail}
         return {**suggest(package), "thumbnail": thumbnail}
 
     @app.post("/api/publishing/jobs/{job_id}/thumbnail", tags=["publishing"])
     def regenerate_thumbnail(job_id: str, value: ThumbnailRequest) -> dict[str, object]:
         try:
-            return _thumbnail_state(job_id, text=value.text, frame_time=value.frame_time, logo=value.logo if "logo" in value.model_fields_set else False, force=True)
+            return _thumbnail_state(job_id, text=value.text, frame_time=value.frame_time, logo=value.logo if "logo" in value.model_fields_set else False, force=True, notes=value.notes)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
-            raise HTTPException(status_code=422, detail="thumbnail could not be composed from the video") from error
+            raise HTTPException(status_code=422, detail=f"thumbnail could not be composed from the video ({type(error).__name__})") from error
 
     @app.post("/api/publishing/jobs/{job_id}/thumbnail/upload", tags=["publishing"])
     async def upload_thumbnail(job_id: str, request: Request) -> dict[str, object]:
@@ -886,6 +933,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         shorts = application_settings.pipeline.shorts_thumbnail
         package, _, _ = _publishing_context(job_id)
         image = ImageOps.fit(image, (shorts.width, shorts.height) if package.request.aspect_ratio == "9:16" else thumbs.SIZE, Image.Resampling.LANCZOS)
+        folder.mkdir(parents=True, exist_ok=True)
         temporary = folder / "thumbnail.tmp.jpg"
         digest = thumbs.save(image, temporary)
         target = folder / f"thumbnail-{digest[:12]}.jpg"
@@ -1608,7 +1656,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         dashboard = dashboard.replace(
             "card.append(format,actions)}async function refresh()",
-            "if(j.artifacts.includes('final')){const thumb=document.createElement('img');thumb.className='job-thumb';thumb.tabIndex=0;thumb.title='Click to see the full thumbnail';thumb.alt='Thumbnail for '+j.topic;thumb.loading='lazy';thumb.hidden=true;const make=button('Create thumbnail','secondary',async ev=>{const b=ev.currentTarget;b.disabled=true;b.textContent='Creating…';try{const r=await fetch('/api/publishing/jobs/'+j.id+'/thumbnail',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});if(!r.ok)throw Error();thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg?t='+Date.now();}catch(_){b.disabled=false;b.textContent='Create thumbnail (failed, retry)';}});thumb.onload=()=>{thumb.hidden=false;make.remove()};thumb.onerror=()=>{thumb.hidden=true};thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg';card.append(thumb);actions.append(make)}"
+            "if(j.artifacts.includes('final')){const thumb=document.createElement('img');thumb.className='job-thumb';thumb.tabIndex=0;thumb.title='Click to see the full thumbnail';thumb.alt='Thumbnail for '+j.topic;thumb.loading='lazy';thumb.hidden=true;const make=button('Create thumbnail','secondary',ev=>{const b=ev.currentTarget;if(card.querySelector('.thumb-form')){card.querySelector('.thumb-form').remove();return;}const f=document.createElement('form');f.className='thumb-form';f.innerHTML='<label>Thumbnail text (optional, up to 48 characters)<input name=\"text\" maxlength=\"48\"></label><label>Notes on how it should look (saved with the thumbnail)<textarea name=\"notes\" maxlength=\"1000\" rows=\"3\" placeholder=\"For example: close-up of the speaker, bold yellow text, no logo\"></textarea></label><button type=\"submit\" class=\"small\">Create thumbnail</button><div role=\"status\" aria-live=\"polite\"></div>';f.onsubmit=async e=>{e.preventDefault();const st=f.querySelector('[role=\"status\"]'),go=f.querySelector('button');go.disabled=true;st.textContent='Creating…';const body={};const t=f.elements.text.value.trim(),n=f.elements.notes.value.trim();if(t)body.text=t;if(n)body.notes=n;try{const r=await fetch('/api/publishing/jobs/'+j.id+'/thumbnail',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok){let d='';try{d=(await r.json()).detail||''}catch(_){}throw Error(d||('HTTP '+r.status));}thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg?t='+Date.now();f.remove();}catch(err){st.textContent='Could not create the thumbnail: '+err.message;go.disabled=false;}};actions.after(f);});thumb.onload=()=>{thumb.hidden=false;make.remove()};thumb.onerror=()=>{thumb.hidden=true};thumb.src='/api/publishing/jobs/'+j.id+'/thumbnail.jpg';card.append(thumb);actions.append(make)}"
             "if(['final_ready','publication_approval_required','publication_ready'].includes(j.state)&&j.artifacts.includes('final'))actions.append(button('Publish…','',()=>{try{sessionStorage.setItem('tubeforge:publish-job',j.id)}catch(_){}location.hash='#publishing'}));"
             "if(!['final_ready','script_approval_required','preview_ready','publication_approval_required','publication_ready','published','failed_validation','failed_exhausted','cancelled'].includes(j.state)){if(window.focusedJobId===j.id)actions.append(button('Running alone — release','secondary',()=>window.releaseFocus()));else actions.append(button('Run only this','secondary',()=>window.focusJob(j.id)))}"
             "card.append(format,actions)}async function refresh()",
@@ -1678,7 +1726,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             can_retry_validation, retry_identity = _can_retry_approved_asset_validation(runtime, job)
             events = runtime.events.list_for_job(job.id)
             payloads.append({
-                **_job_payload(job), "topic": job.request.topic, "script_owner": job.request.script_owner, "script_model": job.request.script_model, "script_routing_mode": job.request.script_routing_mode, "video_style": job.request.video_style,
+                **_job_payload(job), "topic": job.request.topic, **_clip_titles(job, runtime), "script_owner": job.request.script_owner, "script_model": job.request.script_model, "script_routing_mode": job.request.script_routing_mode, "video_style": job.request.video_style,
                 "artifacts": [artifact.name for artifact in runtime.artifacts.list_for_job(job.id)],
                 "script_routing": next((event.details for event in reversed(events) if event.event_type == "script_routing_completed"), None),
                 "event_count": len(events),

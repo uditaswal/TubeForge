@@ -103,7 +103,7 @@ class ReferenceIntakeRepository:
                 snapshot=dict(title=title) if title else None),created_at=self._stamp(created))
                 for i,r,s,created,url,target,title in rows]
 
-    def revise(self,intake_id,expected_revision,actor,*,supplied_cues=None,refresh=False):
+    def revise(self,intake_id,expected_revision,actor,*,supplied_cues=None,refresh=False,edits=None):
         with self.sessions() as db:
             db.execute(text('BEGIN IMMEDIATE'));old=self._row(db,intake_id)
             if old.revision!=expected_revision:raise IntakeConflict('This reference changed; reload before creating a revision.')
@@ -113,10 +113,14 @@ class ReferenceIntakeRepository:
                 # A fresh capture asks the public source again; supplied text
                 # remains available only in its immutable earlier revision.
                 request=request.model_copy(update={'supplied_cues': ()})
+            if edits:
+                # Operator-edited inputs (never the link itself): re-validated as a whole request.
+                raw=request.model_dump(mode='python');raw.update({k:v for k,v in edits.items() if k in ('focus','language','target_duration_seconds','channel_identity')})
+                request=ReferenceIntakeRequest.model_validate(raw)
             if supplied_cues is not None:
                 raw=request.model_dump(mode='python');raw['supplied_cues']=supplied_cues;request=ReferenceIntakeRequest.model_validate(raw)
             row=self._new(request,intake_id,old.revision+1,force_refresh=refresh)
-            db.add(row);self._event(db,row,'revision_created',actor,previous_revision=old.revision,refresh=refresh,transcript_supplied=supplied_cues is not None)
+            db.add(row);self._event(db,row,'revision_created',actor,previous_revision=old.revision,refresh=refresh,transcript_supplied=supplied_cues is not None,edited=sorted(edits) if edits else [])
             db.commit();return self.get(intake_id,row.revision)
 
     def cancel(self,intake_id,revision,actor):
@@ -126,6 +130,19 @@ class ReferenceIntakeRepository:
             row.state='failed';row.failure_code='cancelled';row.message='Reference intake was cancelled.'
             row.finished_at=self.clock();row.claim_token=None;row.claim_owner=None;row.lease_expires_at=None
             self._event(db,row,'intake_cancelled',actor);db.commit();return self.get(intake_id,revision)
+
+    def delete(self,intake_id,actor):
+        """Remove a saved reference and its captures. Videos already made from it keep their own embedded snapshot."""
+        from tubeforge.db.models import LongFormWritingRecord
+        with self.sessions() as db:
+            db.execute(text('BEGIN IMMEDIATE'));self._row(db,intake_id)
+            if db.scalar(select(Row.row_id).where(Row.intake_id==intake_id,Row.state=='pending').limit(1)):
+                raise IntakeConflict('Cancel the pending capture before deleting this reference.')
+            if db.scalar(select(LongFormWritingRecord.id).where(LongFormWritingRecord.intake_id==intake_id).limit(1)):
+                raise IntakeConflict('A long-form script run uses this reference; remove that run first.')
+            for table in (Row,Event):
+                for item in db.scalars(select(table).where(table.intake_id==intake_id)).all():db.delete(item)
+            db.commit();return dict(deleted=intake_id)
 
     def claim(self,owner,lease_seconds=120):
         now=self.clock()
