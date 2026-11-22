@@ -987,7 +987,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             "account_connected": bool(connected("youtube")), "quota": youtube_quota, "ready": youtube_ready,
                             "youtube_api_audited": application_settings.pipeline.youtube.youtube_api_audited,
                             "audit_state": "audited" if application_settings.pipeline.youtube.youtube_api_audited else "audit pending: private only"},
-                "instagram": {"worker_live": "instagram" in platforms, "oauth_configured": False,
+                "instagram": {"worker_live": "instagram" in platforms, "oauth_configured": bool(application_settings.auth.enabled and instagram_oauth and oauth_store),
                               "account_connected": bool(connected("instagram")), "quota": None, "ready": False},
             },
         }
