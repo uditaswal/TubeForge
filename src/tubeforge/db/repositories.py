@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tubeforge.domain.contracts import ContentRequest
 from tubeforge.domain.states import ApprovalGate, ApprovalStatus, JobState
-from tubeforge.db.models import AnalyticsSnapshotRecord, ApprovalRecord, ArtifactRecord, AssetCacheRecord, ChannelBaselineRecord, CreatorSourceRecord, ExperimentOutcomeRecord, ExternalOperationRecord, GenerationCacheRecord, HeavyWorkLeaseRecord, JobEventRecord, LearningEventRecord, NextVideoBriefRecord, NextVideoRecommendationRecord, OptimizationCandidateRecord, OptimizationCandidateSetRecord, OptimizationExecutionRecord, OptimizationExperimentRecord, OptimizationProposalRecord, PerformanceEvaluationRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord, SourceMediaRecord, TopicRecord, ScheduleRecord, ScheduleRunRecord, SocialAccountRecord, VideoDestinationIntentRecord
+from tubeforge.db.models import AccountGroupRecord, AnalyticsSnapshotRecord, ApprovalRecord, ArtifactRecord, AssetCacheRecord, ChannelBaselineRecord, CreatorSourceRecord, ExperimentOutcomeRecord, ExternalOperationRecord, GenerationCacheRecord, HeavyWorkLeaseRecord, JobEventRecord, LearningEventRecord, NextVideoBriefRecord, NextVideoRecommendationRecord, OptimizationCandidateRecord, OptimizationCandidateSetRecord, OptimizationExecutionRecord, OptimizationExperimentRecord, OptimizationProposalRecord, PerformanceEvaluationRecord, PipelineJobRecord, PublicationObservationRecord, PublicationRecord, SourceMediaRecord, TopicRecord, ScheduleRecord, ScheduleRunRecord, SocialAccountRecord, VideoDestinationIntentRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +69,7 @@ class Schedule:
 
 @dataclass(frozen=True, slots=True)
 class SocialAccount:
-    id: str; platform: str; display_name: str; external_account_id: str | None; auth_type: str; scopes: tuple[str, ...]; status: str; capabilities: tuple[str, ...]; is_default: bool; disabled: bool; token_expires_at: datetime | None; last_validated_at: datetime | None; category: str; default_description: str
+    id: str; platform: str; display_name: str; external_account_id: str | None; auth_type: str; scopes: tuple[str, ...]; status: str; capabilities: tuple[str, ...]; is_default: bool; disabled: bool; token_expires_at: datetime | None; last_validated_at: datetime | None; category: str; default_description: str; group_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,8 +337,10 @@ class JobRepository:
                     PipelineJobRecord.state.in_([JobState.SCRIPT_APPROVAL_REQUIRED.value, JobState.PREVIEW_READY.value]),
                     func.json_extract(PipelineJobRecord.request_json, "$.review_mode") == "auto",
                 ),
-                and_(PipelineJobRecord.state == JobState.SCRIPT_APPROVAL_REQUIRED.value, approved(ApprovalGate.SCRIPT)),
-                and_(PipelineJobRecord.state == JobState.PREVIEW_READY.value, approved(ApprovalGate.PREVIEW)),
+                # An approval can be stale (the preview was re-rendered after it was given): the orchestrator then
+                # leaves the job waiting, and without a back-off it would be re-claimed several times a second.
+                and_(PipelineJobRecord.state == JobState.SCRIPT_APPROVAL_REQUIRED.value, approved(ApprovalGate.SCRIPT), or_(PipelineJobRecord.next_retry_at.is_(None), PipelineJobRecord.next_retry_at <= now)),
+                and_(PipelineJobRecord.state == JobState.PREVIEW_READY.value, approved(ApprovalGate.PREVIEW), or_(PipelineJobRecord.next_retry_at.is_(None), PipelineJobRecord.next_retry_at <= now)),
                 and_(PipelineJobRecord.state == JobState.PUBLICATION_APPROVAL_REQUIRED.value, approved(ApprovalGate.PUBLICATION_PREPARATION)),
                 and_(PipelineJobRecord.state == JobState.PUBLICATION_READY.value, approved(ApprovalGate.PUBLISH)),
                 and_(PipelineJobRecord.state == JobState.FAILED_RETRYABLE.value, PipelineJobRecord.next_retry_at <= now),
@@ -694,11 +696,11 @@ class ScheduleRepository:
 class SocialAccountRepository:
     """Account metadata is safe to list; encrypted credentials are never returned."""
     def __init__(self, session_factory: sessionmaker[Session]) -> None: self._session_factory = session_factory
-    def create(self, account_id: str, *, platform: str, display_name: str, external_account_id: str | None, auth_type: str, credential_ciphertext: str | None, scopes: tuple[str, ...], capabilities: tuple[str, ...], token_expires_at: datetime | None = None, category: str = "general", default_description: str = "") -> SocialAccount:
+    def create(self, account_id: str, *, platform: str, display_name: str, external_account_id: str | None, auth_type: str, credential_ciphertext: str | None, scopes: tuple[str, ...], capabilities: tuple[str, ...], token_expires_at: datetime | None = None, category: str = "general", default_description: str = "", group_id: str | None = None) -> SocialAccount:
         if platform not in {"youtube", "instagram", "facebook", "snapchat", "x"}: raise ValueError("unsupported platform")
         if not category.strip() or len(category) > 100 or len(default_description) > 5000: raise ValueError("invalid account profile")
         now = datetime.now(UTC)
-        record = SocialAccountRecord(id=account_id, platform=platform, display_name=display_name.strip(), category=category.strip(), default_description=default_description.strip(), external_account_id=external_account_id, auth_type=auth_type, credential_ciphertext=credential_ciphertext, scopes_json=json.dumps(scopes), token_expires_at=token_expires_at, status="unconfigured" if auth_type == "oauth" else "manual_handoff_required", capabilities_json=json.dumps(capabilities), is_default=False, disabled=False, last_validated_at=None, created_at=now, updated_at=now)
+        record = SocialAccountRecord(id=account_id, group_id=group_id, platform=platform, display_name=display_name.strip(), category=category.strip(), default_description=default_description.strip(), external_account_id=external_account_id, auth_type=auth_type, credential_ciphertext=credential_ciphertext, scopes_json=json.dumps(scopes), token_expires_at=token_expires_at, status="unconfigured" if auth_type == "oauth" else "manual_handoff_required", capabilities_json=json.dumps(capabilities), is_default=False, disabled=False, last_validated_at=None, created_at=now, updated_at=now)
         if not record.display_name: raise ValueError("display name must not be blank")
         with self._session_factory.begin() as session: session.add(record)
         return _social_account_from_record(record)
@@ -713,6 +715,11 @@ class SocialAccountRepository:
             session.flush()
             result = _social_account_from_record(row)
         return result
+    def assign_group(self, account_id: str, group_id: str) -> None:
+        with self._session_factory.begin() as session:
+            row = session.get(SocialAccountRecord, account_id)
+            if row is None: raise KeyError("account not found")
+            row.group_id, row.updated_at = group_id, datetime.now(UTC)
     def set_default(self, account_id: str) -> SocialAccount:
         """Select one local creation default without changing saved job intents."""
         with self._session_factory.begin() as session:
@@ -736,6 +743,38 @@ class SocialAccountRepository:
             row = session.get(SocialAccountRecord, account_id)
             if row is None: raise KeyError("account not found")
             row.disabled, row.is_default, row.status, row.updated_at = True, False, "disabled", datetime.now(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class AccountGroup:
+    id: str; name: str; category: str; default_description: str
+
+
+class AccountGroupRepository:
+    """Groups connections (one per platform) under a person or brand."""
+    def __init__(self, session_factory: sessionmaker[Session]) -> None: self._session_factory = session_factory
+    @staticmethod
+    def _view(row: AccountGroupRecord) -> AccountGroup: return AccountGroup(row.id, row.name, row.category, row.default_description)
+    def create(self, group_id: str, *, name: str, category: str = "general", default_description: str = "") -> AccountGroup:
+        if not name.strip() or not category.strip() or len(name) > 200 or len(category) > 100 or len(default_description) > 5000: raise ValueError("invalid account")
+        now = datetime.now(UTC)
+        row = AccountGroupRecord(id=group_id, name=name.strip(), category=category.strip(), default_description=default_description.strip(), created_at=now, updated_at=now)
+        with self._session_factory.begin() as session: session.add(row)
+        return self._view(row)
+    def list(self) -> list[AccountGroup]:
+        with self._session_factory() as session: return [self._view(row) for row in session.scalars(select(AccountGroupRecord).order_by(AccountGroupRecord.name))]
+    def get(self, group_id: str) -> AccountGroup | None:
+        with self._session_factory() as session:
+            row = session.get(AccountGroupRecord, group_id)
+            return self._view(row) if row else None
+    def update(self, group_id: str, *, name: str, category: str, default_description: str) -> AccountGroup:
+        if not name.strip() or not category.strip() or len(default_description) > 5000: raise ValueError("invalid account")
+        with self._session_factory.begin() as session:
+            row = session.get(AccountGroupRecord, group_id)
+            if row is None: raise KeyError("account not found")
+            row.name, row.category, row.default_description, row.updated_at = name.strip(), category.strip(), default_description.strip(), datetime.now(UTC)
+            session.flush()
+            return self._view(row)
 
 
 class ArtifactRepository:
@@ -1077,6 +1116,7 @@ class ApprovalRepository:
                 if effective.status != status.value:
                     raise ValueError("approval decision conflicts with existing decision")
                 return
+            session.execute(update(PipelineJobRecord).where(PipelineJobRecord.id == job_id, PipelineJobRecord.state.in_([JobState.SCRIPT_APPROVAL_REQUIRED.value, JobState.PREVIEW_READY.value])).values(next_retry_at=None))
             session.add(ApprovalRecord(id=approval_id, job_id=job_id, gate=gate.value, status=status.value, created_at=datetime.now(UTC), actor=actor, reviewed_identity=reviewed_identity, decision_identity=self._decision_identity(reviewed_identity), audit_json=json.dumps(audit or {}, sort_keys=True)))
 
     @staticmethod
@@ -1123,7 +1163,7 @@ def _social_account_from_record(record: SocialAccountRecord) -> SocialAccount:
     # Older API calls could mark browser-supplied tokens connected without
     # validating the remote identity. Never surface those rows as trusted.
     status = "verification_required" if record.status == "connected" and record.last_validated_at is None else record.status
-    return SocialAccount(record.id, record.platform, record.display_name, record.external_account_id, record.auth_type, tuple(json.loads(record.scopes_json)), status, tuple(json.loads(record.capabilities_json)), record.is_default, record.disabled, record.token_expires_at, record.last_validated_at, record.category, record.default_description)
+    return SocialAccount(record.id, record.platform, record.display_name, record.external_account_id, record.auth_type, tuple(json.loads(record.scopes_json)), status, tuple(json.loads(record.capabilities_json)), record.is_default, record.disabled, record.token_expires_at, record.last_validated_at, record.category, record.default_description, record.group_id)
 
 
 def _job_event_from_record(record: JobEventRecord) -> JobEvent:

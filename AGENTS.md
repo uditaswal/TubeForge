@@ -1,104 +1,61 @@
-# TubeForge autonomous development rules
+# TubeForge agent rules
 
-You are developing TubeForge, an automated YouTube-video generation system. This file is the durable rules/safety contract (no milestone history). Current phase and next step: `docs/HANDOFF.md`.
+Durable rules and safety contract. **No status or history here**: current focus and next step are in `docs/HANDOFF.md`.
+Rules enforced by hooks (`.pre-commit-config.yaml`) are listed once and not repeated as prose.
 
-## Publishing branch purpose and status
+## Never
+- Commit on `main`, push to any remote, force-push, or merge to `main` without explicit approval for that exact merge.
+- Publish to YouTube/Instagram, use paid external APIs, or make a live writer (Claude/Codex) call without the operator's go-ahead (state provider, calls and cost first).
+- Reset a script-attempt allowance, expose secrets, alter host networking/firewall, touch unrelated Docker workloads, delete unrelated user files, or run destructive DB operations outside the TubeForge test/local DB.
+- Use `--no-verify` or add AI-attribution trailers (hook-enforced).
 
-The publishing work merged into local `dev` prepares approved Shorts for safe delivery, so operators can connect accounts and later schedule or submit the exact reviewed video. Implemented work includes YouTube and Instagram connection controls, private YouTube delivery, reviewed draft preparation, scheduling controls, durable retries and a fake-backed Instagram container protocol. The merged publishing regression passed 151 tests and the seven-day fake soak had no lost or duplicate deliveries. Neither live account connection nor live upload has been verified; Instagram publication stays disabled until its adapter and confirmation gate satisfy the separate-container protocol. A full calendar and live scheduling remain pending. See `docs/internal/project_goals.md` for the current summary and `docs/HANDOFF.md` for the next action.
+## Allowed without asking
+Inspect and edit repo files, add tests, install Python packages in the project env, run pytest, run this project's Docker Compose and read its logs, run FFmpeg/ffprobe, create temporary test artifacts, change local TubeForge config needed for tests.
 
-## Project records (keep consistent; never copy status between them)
+## Branches (hook-enforced: `scripts/check_branch_name.sh`)
+- Names are `<type>/<topic>`: `feat/`, `feature/`, `fix/`, `chore/`, `docs/`, `exp/`, `backup/`, `release/`. **Never `claude/`, `codex/` or any tool name**, including branches created by a tool's worktree feature — rename with `git branch -m` before the first commit.
+- Work on `dev` or a feature branch/worktree; one agent per branch. Post a review (changes + validation evidence). Remove the branch and worktree after merging.
 
-- `doc-internal/design_doc/tubeforge-publishing-design.md` — single current plan/status: contracts, phases, release state, blockers, next five actions. Removed historical docs live only in git history. Update affected stages, status, evidence and next action after each coherent stage.
-- `AUTONOMOUS_PROGRESS.md` — local-only (gitignored) append-only evidence log: scope, validation commands/results, artifacts inspected, blocker, next action, **≤ ~15 lines per entry**. Append with `cat >> AUTONOMOUS_PROGRESS.md <<'EOF'`; never Read/grep/cat it whole. **Rotate** when it exceeds 40 KB (`wc -c`) or a new calendar month starts: rename to the next free `AUTONOMOUS_PROGRESS.md_N`, create a fresh file with a short summary of the archive plus the last entry. Never read `AUTONOMOUS_PROGRESS.md_*` unless the operator asks. Do not claim a milestone complete there unless its plan stage is **VERIFIED** with linked evidence.
-- `readme.md` — operator setup/workflow guide; update when supported setup, configuration or workflow changes.
-- `docs/SHORT_FORM_VIDEO_RULEBOOK.md` — video quality and creative review.
-- `doc-internal/CONTENT_SKILLS_CONTRACT.md` — binding rules for `.agents/skills`, `yt-script`, research, scene plans and the reference-short profile. **Read it before any script, skill, research or scene-plan work.**
+## Before you start
+- `git status`, `git log -5 --oneline`, read `docs/HANDOFF.md`. Work only on the HANDOFF "Current focus" or what the operator asked; do not start frozen items.
+- Read only what the task needs. Files over ~50 KB (`readme.md`, `api/app.py`, `pipeline/orchestrator.py`, `db/repositories.py`, design docs): line ranges via `rg -n`. No `grep -r`/`find`/`ls -R` sweeps over `data/`, `artifacts/`, `autonomous_logs/`; never read `.venv*/`, `models/` or media as text.
+- Python with renderer deps: `.venv-benchmark/bin/python` with `PYTHONPATH=src`. Full suite ≈ 18 min: run it in the background.
 
-- Delivery QA: before any video job is called done, run `.agents/skills/om-video-quality/qa_check.py` on its artifact folder and apply that skill's checklist; publishing-package rules are in `om-social-delivery`.
+## Working
+- Multi-phase work: write a short plan first (per phase: user-visible outcome, acceptance test, evidence, out of scope). One phase at a time.
+- Run relevant tests after a coherent stage, not after every edit. Fix failures rather than reporting them.
+- Same root problem after two repair attempts or 45 min: stop and report evidence, two options and a recommendation.
+- Preserve worker leases, ownership fencing, checkpoint/restart safety, atomic artifact promotion and cancellation.
+- Status labels, exactly: **NOT STARTED**, **IMPLEMENTED** (code exists, not proven end to end), **VERIFIED** (tests + real-artifact inspection passed), **BLOCKED** (needs a user decision or external dependency).
 
-## Context hygiene (token cost)
+## Video and scripts
+- Judge video by looking at frames (`ffmpeg … tile=6x2` contact sheet, view the PNG), then run `.agents/skills/om-video-quality/qa_check.py <artifact dir>`. Tests alone never verify creative work. Standard: `docs/SHORT_FORM_VIDEO_RULEBOOK.md`.
+- Production scripts come from Codex CLI or Claude only (no local LLM without approval). Accept a script only after reviewing creative quality and, while Settings "Require verified sources" is on (default), source grounding. When the operator turns it off, their material is the evidence: do not re-impose source checks.
+- After two failed attempts or at the agreed budget: stop, show rejected scripts and reasons, ask Codex, Claude or a revised brief.
+- Before any script, skill, research or scene-plan work read `doc-internal/CONTENT_SKILLS_CONTRACT.md`. `yt-script` is the only production narration skill. Never fabricate analytics, trends, sources or tool execution. Installed wheels must hash-match `.agents/skills`.
 
-Large files and generated trees are fine to use for debugging, but read them by exact path and in slices; never sweep them.
-- Never read `AUTONOMOUS_PROGRESS.md_*`, `.venv*/`, `models/`, or media files as text. Inspect video via FFmpeg frames/ffprobe.
-- No `grep -r`, `find`, `ls -R` or glob sweeps over `data/`, `artifacts/`, `autonomous_logs/`. Open the named job file, `tail -n 100` logs, query `data/tubeforge.db` with targeted `sqlite3` SELECTs.
-- Prefer `rg`/`grep -n` over whole-file reads. For files over ~50 KB (`readme.md`, the design doc, `api/app.py`, `pipeline/orchestrator.py`, `db/repositories.py`) read only the needed line range.
-- Delegate broad exploration to a subagent; report conclusions, not file dumps.
+## Dashboard UI
+- **Load a design skill first** (`frontend-design`, `impeccable` or `design-taste-frontend`) and keep the existing dark navy system (there is no dashboard token file yet; the video tokens in `docs/video-design-tokens.md` are not for the UI). Reuse components.
+- **Look at the result:** signed-in screenshots at 390, 768 and 1440 px before reporting UI work done.
+- Every control calls a real, tested API action and shows success, pending, disabled and failure truthfully; loading/empty/error states and keyboard access are part of the change.
+- Background refresh is silent (no flicker; open dialogs stay open). Never show approval, deletion, render or publication as done before the backend confirms it; edits need a new approval of the exact artifact.
+- `http://127.0.0.1:62065` is the only documented dashboard URL (loopback).
 
-## Working policy
-
-- Branching: never commit on `main`. Work on `dev` or a new feature branch/worktree and post a review (changes + validation evidence); merge to `main` only after the operator explicitly approves that specific merge in the current conversation (always ask first; one approval covers one merge, never a push to a remote or a force-push); delete temporary branches/worktrees after merge.
-- Inspect the existing architecture first; implement the requested milestone completely.
-- Run relevant tests after a coherent stage and before reporting acceptance; do not rerun suites after each small edit. Diagnose and fix failures rather than reporting them. No completion claim until validation passes.
-- Preserve worker leases, ownership fencing, checkpoint/restart safety, atomic artifact promotion and cancellation handling.
-- Multi-phase work: write a plan first. Per phase: one user-visible outcome, acceptance test, required artifact/evidence, out-of-scope items. One phase at a time; report its acceptance before the next.
-- Status labels exactly: **NOT STARTED**, **IMPLEMENTED** (code exists, not proven end to end), **VERIFIED** (required tests and real-artifact inspection passed), **BLOCKED** (needs a user decision or external dependency). Never call IMPLEMENTED work complete. Creative work needs a real generated artifact inspected against the quality bar, with concrete pass/fail evidence; tests alone are insufficient.
-- Same root problem after two repair attempts or 45 min of active debugging (downloads and healthy renders excluded): stop; report failure, evidence, two options, and a recommendation. Add no adjacent features while the phase's highest-risk acceptance test fails.
-- Long runs: report every 20 min — phase, verified result or blocker, next acceptance test, whether a decision is needed.
-- Before claiming the full Shorts workflow complete: inspect one real 30–120 s 1080×1920 video against the standard in `readme.md`, verify the signed-in dashboard flow, and update status docs. Test the signed-in dashboard whenever an operator-facing workflow changes.
-
-### Script generation
-
-Use Codex CLI or Claude for production scripts; no local LLM for production generation, retries or acceptance without operator approval for that run. Before changing the script provider, report provider, expected cost/tokens, fallback and acceptance test. Accept a script only after reviewing creative quality (schema validity alone is insufficient), and source grounding while Settings → "Require verified sources and independent research" is on (the default). The operator may turn that off: then their notes, script or reference are the evidence, no web research runs, source-card checks are skipped, and factual accuracy is theirs to vouch for; do not re-impose source verification as a gate or refuse work for thin sources in that mode. After two failed attempts or when the agreed budget is reached, stop retries, show rejected scripts and reasons, and ask: Codex CLI, Claude, or a revised brief. Never silently reset an exhausted allowance.
+## Module boundaries and settings
+- `src/tubeforge/clips/` imports nothing from the rest of TubeForge (`tests/test_clips_boundary.py`); reach it only via `pipeline/clip_runs.py`; OpenCV `<5`; AI calls only through the host Claude runner. `docs/clips.md`.
+- Any limit, timeout or cap that can stall a run belongs on `/settings`: read it with `runtime_settings.shared().value(key, default)` at the point of use and test that the override reaches the code. Keep security, secret, geometry and safety-contract values (attempt allowance, auth, ports, sockets) locked. Never show a secret value. Update `docs/settings.md`.
 
 ## Repository hygiene
-
-Secret/large-file guards: `pre-commit` with gitleaks runs on every commit and in CI (`SECURITY.md`); never use `--no-verify`, never commit AI-attribution trailers (Co-Authored-By/"Generated with"). Before every commit review `git status --short` for generated, machine-local or sensitive files, and update `.gitignore` in the same change for any new ignorable path (media/artifacts, model weights/caches, local DBs, logs, venvs, build/test output, credentials, editor/OS files). Verify with `git check-ignore -v`; find tracked-but-ignored files with `git ls-files -ci --exclude-standard`. Avoid broad rules that hide source, migrations, fixtures or intentionally versioned config. Never untrack files merely to make an ignore rule apply; flag that to the operator.
-
-## Dashboard UI contract
-
-The Creator Studio dashboard, login page and HTTP APIs are one operator workflow; update the UI in the same change as any operator-visible capability.
-- A control must invoke a real, tested API action and report success, pending, disabled and failure states truthfully. Consider labels, permissions, loading/empty/error states, mobile layout and activity/audit visibility for every API workflow change.
-- Background refresh stays silent after initial load: keep visible data and open dialogs; no loading screens or flicker.
-- Reviews are explicit and safe: edits/revisions need a new approval of the exact reviewed artifact; never imply approval, deletion, render, publication or AI revision completed before the durable backend confirms it.
-- Preserve the dark navy visual system, readable hierarchy, keyboard accessibility and desktop/tablet/mobile behavior; reuse existing components.
-- Add or update focused API/UI tests for changed workflows; update `readme.md` when a flow, login behavior or dashboard URL changes.
-- `http://127.0.0.1:62065` is the sole documented developer dashboard URL; Compose binds it to loopback only. Do not document or reserve other host ports (preview-proxy ports are transient).
-
-## Clips package boundary
-
-`src/tubeforge/clips/` is a self-contained engine: it must import nothing from the rest of TubeForge (enforced by
-`tests/test_clips_boundary.py`, which also checks that importing it loads no SQL, S3, Redis or web-framework code). The
-pipeline reaches it only through `pipeline/clip_runs.py`. It keeps OpenCV below 5 (`opencv-python-headless>=4.8,<5`:
-OpenCV 5 removed the cascade face-detector fallback). Clip AI calls go through the host Claude runner under its own
-daily limit; never add API keys or a direct CLI call to the package. See `docs/clips.md`.
-
-## Settings page upkeep
-
-Every limit, timeout, cap or threshold that can stall or break a run must be visible and, where safe, editable on the
-Settings page (`/settings`, `core/runtime_settings.py`). When you add or change one, in the same change:
-- If it is read when a job or stage starts, add a `Definition` (label, plain-language help, range, config default) and read it
-  with `runtime_settings.shared().value(key, default)` at the point of use, so it applies to the next job without a restart. Wire it
-  for real (a setting nothing reads is a bug) and add a test that the override reaches the code.
-- If it is read once at process start, or is a security, secret, render-geometry or safety-contract value (two-attempt allowance,
-  auth, ports, socket paths), leave it out of the editable list. Config-file values appear automatically in the read-only
-  "Everything else" reference; add a row to `_ENVIRONMENT` in `api/runtime_settings.py` for a new environment variable, and
-  to `_LOCKED` when it must never be edited from the page. State in the help text whether a restart is needed.
-- Never put a secret value on the page (show set / not set). Update `docs/settings.md`.
-- Hard-coded constants that can break execution (window sizes, timeouts, caps) belong in the config or on the page, not buried in code.
+- Before each commit check `git status --short`; add any new generated/local path to `.gitignore` in the same change (`git check-ignore -v` to verify). Never untrack files just to make an ignore rule apply; flag it.
 
 ## Scratch space
 
 The host `/tmp` is a small RAM-backed tmpfs. Containers run with `TMPDIR=/app/data/tmp` (compose.yaml; `core/tempdir.py` creates it and sweeps day-old leftovers). On the host, run builds, tests and installs through `scripts/with_disk_tmp.sh <command>` (or `export TMPDIR=$HOME/tmp`); `restart_stack.sh` and `stackctl.sh` already do. Never put large downloads or renders in `/tmp`.
 
-## Allowed autonomous actions
-
-Without asking: inspect repo files, edit source, add tests, install Python packages in the project environment, run pytest, run Docker Compose and read logs for this project, run FFmpeg/ffprobe, create temporary test artifacts, modify local TubeForge config needed for tests.
-
-## Do not
-
-Delete unrelated user files; alter host networking/firewall; expose secrets; push to remote Git repositories; publish anything to YouTube; use paid external APIs; modify unrelated Docker workloads; run destructive database operations against anything except the TubeForge test/local database.
-
 ## Definition of done
+1. Relevant tests pass and existing tests still pass.
+2. For video or UI: the real artifact or screenshot was inspected, with concrete pass/fail notes.
+3. `docs/HANDOFF.md` "Open" and "Next command" updated (keep it under 60 lines; detail goes in the linked doc).
+4. Only when an operator-visible workflow or setup changed: `readme.md` / the feature's doc updated, with a focused UI/API test.
 
-"Implemented" is not done. Completion requires:
-1. relevant automated tests pass and existing tests remain passing;
-2. the requested end-to-end smoke test passes and produced artifacts are inspected/validated;
-3. important findings appended to `AUTONOMOUS_PROGRESS.md` (rotating per above);
-4. the plan's current-status section updated with state, evidence, blocker and next action;
-5. `readme.md`/operator docs updated for externally visible setup or workflow changes;
-6. `.gitignore` reviewed; the Dashboard UI contract applied with focused workflow tests whenever an operator-visible capability changed.
-When validation fails, continue debugging.
-
-## Content skills and research
-
-Project skills live in `.agents/skills/`; `yt-script` is the sole production narration skill (never update or load competing copies); `viral-short-form` is optional reference only. Read the selected `SKILL.md` and required resources before use, and review supporting scripts before running them. Skills supply content instructions; rendering, narration, scheduling, analytics and publishing belong to the application. Never fabricate analytics, trends, sources, performance or tool execution; heuristic scores are review signals, not view predictions. Installed wheels must hash-match `.agents/skills`; changed skill resources need installed-wheel verification before host use. Research is separate from narration, runs once per exact brief, and its output is context, never approved factual evidence or operator approval. Everything else — skill-to-task mapping, reference-short-v1 profile numbers, scene-contract and landscape rules, envelope binding — is in `doc-internal/CONTENT_SKILLS_CONTRACT.md`.
+Commit messages are the change log: say what changed and how it was validated. There is no separate progress log.

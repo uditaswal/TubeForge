@@ -16,13 +16,13 @@ shared by the web server and the worker. API: `GET /api/runtime-settings`, `PUT`
 | `script.require_verified_sources` | on | Off: your notes/script/reference are the evidence; no web research, no source-card checks, and the writer is told not to refuse for thin sources. You vouch for the facts. |
 | `script.exact_by_default` | off | Treat every script you provide as exact (see "Exact script" in `docs/batch-plans.md`): wording forced in, writing checks skipped, scenes re-cut and length fitted around your wording. |
 | `generation.auto_retry_rejected` | on | A script that fails validation is retried by the worker while the source packet still has an attempt left. |
-| `clips.max_source_minutes` | `pipeline.source_clips.max_source_duration_seconds` (240 min) | Longest video a clip job reads; a longer video is trimmed to its first stretch instead of refused. |
+| `clips.max_source_minutes` | `pipeline.source_clips.max_source_duration_seconds` (720 min) | Longest video a clip job reads; a longer video is trimmed to its first stretch instead of refused. |
 | `clips.claude_calls_per_day` | `TUBEFORGE_CLAUDE_CLIP_CALLS_PER_DAY` on the runner (12) | Claude calls per day for clip selection, inside the shared limit; the runner reads it on every request. |
 | `clips.max_download_gb` | `pipeline.source_clips.max_download_bytes` (6 GB) | Largest download for one clip job. |
 | `reference.use_transcript_as_script` | off | Preparing a Short from a reference starts with the transcript used exactly as the script (otherwise fresh AI narration); changeable per Short. |
 | `clips.max_clip_seconds` | `pipeline.source_clips.max_clip_seconds` (60) | No clip is cut longer than this. |
 | `clips.engaging_only` | `pipeline.source_clips.engaging_only` (on) | Transcribe only the busiest parts of a long video. |
-| `clips.signal_windows` / `clips.signal_window_before` / `clips.signal_window_after` | 8 parts, 60 s before, 90 s after | How many busy parts are transcribed and how much is kept around each. |
+| `clips.signal_windows` / `clips.signal_window_before` / `clips.signal_window_after` | 16 parts, 60 s before, 90 s after | How many busy parts are transcribed and how much is kept around each. |
 | `clips.whisper_threads` | 4 | CPU threads for transcription. |
 | `clips.max_height` | 1080 | Highest video quality downloaded. |
 | `clips.cache_days` | 7 | Days downloaded videos are kept. |

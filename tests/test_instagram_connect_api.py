@@ -40,6 +40,7 @@ def test_unconfigured_reports_truthfully(tmp_path: Path, monkeypatch) -> None:
         client.post("/login", json={"username": "operator", "password": "correct-horse-battery-staple"})
         status = client.get("/api/oauth/instagram/status").json()
         assert status["configured"] is False and status["reason"]
+        assert client.get("/api/publishing/status").json()["readiness"]["instagram"]["oauth_configured"] is False
 
 
 def test_connect_requires_confirmation_and_rejects_other_identity_on_reconnect(tmp_path: Path, monkeypatch) -> None:
@@ -50,6 +51,9 @@ def test_connect_requires_confirmation_and_rejects_other_identity_on_reconnect(t
         client.post("/login", json={"username": "operator", "password": "correct-horse-battery-staple"})
         csrf = client.cookies.get("tubeforge_csrf")
         assert client.get("/api/oauth/instagram/status").json()["configured"] is True
+        readiness = client.get("/api/publishing/status").json()["readiness"]["instagram"]
+        assert readiness["oauth_configured"] is True
+        assert readiness["ready"] is False
         started = client.post("/api/oauth/instagram/start", json={}, headers={"x-csrf-token": csrf})
         url = started.json()["authorization_url"]
         assert urlsplit(url).hostname == "www.instagram.com"

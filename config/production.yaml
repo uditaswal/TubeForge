@@ -120,6 +120,7 @@ pipeline:
     max_clip_seconds: 60
     engaging_only: true
     max_download_bytes: 60000000000
+    max_source_duration_seconds: 43200
   preview:
     audio_normalization_enabled: true
   final:

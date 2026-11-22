@@ -1,7 +1,7 @@
 # Local guards run on every commit. Install once per clone:
 #   pre-commit install            (needs gitleaks on PATH or uses the pinned hook below)
 # Run on everything: pre-commit run --all-files
-default_install_hook_types: [pre-commit, commit-msg]
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 default_stages: [pre-commit]
 repos:
   - repo: https://github.com/gitleaks/gitleaks
@@ -33,3 +33,10 @@ repos:
         language: pygrep
         entry: '(?i)(^co-authored-by:.*(claude|anthropic|openai|codex|copilot|noreply@anthropic)|generated with \[?claude)'
         stages: [commit-msg]
+      - id: branch-name
+        name: reject branches named after an AI tool (claude/, codex/ ...)
+        language: script
+        entry: scripts/check_branch_name.sh
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit, pre-push]

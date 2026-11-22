@@ -12,11 +12,20 @@ from tubeforge.reference.service import is_plain_transcript,parse_supplied_trans
 from tubeforge.reference.extractor import IntakeFailure
 
 
+class InputEdits(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    focus: str | None=Field(default=None,max_length=500)
+    language: str | None=Field(default=None,max_length=35)
+    target_duration_seconds: int | None=Field(default=None,ge=25,le=900)
+    channel_identity: str | None=Field(default=None,max_length=64)
+
+
 class RevisionRequest(BaseModel):
     model_config=ConfigDict(extra='forbid')
     expected_revision: int=Field(ge=1)
     action: Literal['refresh','transcript','cancel']
     transcript_text: str | None=Field(default=None,max_length=1_000_000)
+    edits: InputEdits | None=None
 
 
 async def bounded_json(request):
@@ -79,7 +88,9 @@ def register_reference_routes(app,runtime,settings,routing_policy):
             if value.action=='cancel':return repo.cancel(intake_id,value.expected_revision,actor(request))
             if value.action=='refresh':
                 if value.transcript_text is not None:raise ValueError('Refresh cannot replace transcript text.')
-                return repo.revise(intake_id,value.expected_revision,actor(request),refresh=True)
+                edits=value.edits.model_dump(exclude_unset=True) if value.edits else None
+                if edits and edits.get('channel_identity') not in (None,*channels):raise ValueError('Choose a configured channel identity.')
+                return repo.revise(intake_id,value.expected_revision,actor(request),refresh=True,edits=edits)
             if value.transcript_text is None:raise ValueError('Supply a transcript (plain text, SRT, VTT or JSON).')
             duration=None
             if is_plain_transcript(value.transcript_text):
@@ -90,6 +101,12 @@ def register_reference_routes(app,runtime,settings,routing_policy):
         except KeyError:raise HTTPException(404,'Reference intake not found.') from None
         except IntakeConflict as error:raise HTTPException(409,str(error)) from error
         except (ValueError,IntakeFailure):raise HTTPException(422,'Transcript or revision request is invalid. Paste the transcript as plain text (or ordered SRT/VTT cues inside the video length), capture the link first, or reload a stale revision.') from None
+
+    @app.delete('/api/reference-intakes/{intake_id}',tags=['references'])
+    def delete_intake(intake_id:str,request:Request):
+        try:return repo.delete(intake_id,actor(request))
+        except KeyError:raise HTTPException(404,'Reference intake not found.') from None
+        except IntakeConflict as error:raise HTTPException(409,str(error)) from error
 
     @app.post('/api/reference-intakes/{intake_id}/short',status_code=201,tags=['references'])
     async def create_short(intake_id:str,request:Request):
