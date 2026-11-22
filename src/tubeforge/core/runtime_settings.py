@@ -104,7 +104,7 @@ DEFINITIONS: tuple[Definition, ...] = (
                "bool", lambda s: True),
     Definition("clips.signal_windows", "Clips", "Busy parts to transcribe",
                "How many busy parts of a long video are transcribed. More parts find more moments but take longer and use more AI calls.",
-               "int", lambda s: 8, 1, 20),
+               "int", lambda s: 16, 1, 20),
     Definition("clips.signal_window_before", "Clips", "Seconds kept before a busy moment",
                "Setup shown before the peak, so a clip does not start mid-sentence.", "int", lambda s: 60, 10, 300),
     Definition("clips.signal_window_after", "Clips", "Seconds kept after a busy moment",

@@ -67,6 +67,7 @@ def test_a_start_after_the_end_of_the_video_is_refused_with_a_reason():
 def test_the_limits_are_settings_with_the_config_as_default(tmp_path, monkeypatch):
     from tubeforge.core import runtime_settings
     runner = _orchestrator_with(240)
+    monkeypatch.setattr(runtime_settings, "shared", lambda: runtime_settings.RuntimeSettings(tmp_path / "empty.json"))  # not the machine's own overrides
     assert runner._clip_limits() == (240 * 60, 6_000_000_000)
     assert {"clips.max_source_minutes", "clips.max_download_gb"} <= set(runtime_settings.BY_KEY)
     from tubeforge.core.config import AppConfig, DatabaseConfig, Settings
