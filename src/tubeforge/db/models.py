@@ -52,10 +52,22 @@ class AuthSessionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AccountGroupRecord(Base):
+    """A person or brand that owns one connection per platform (rows in social_accounts)."""
+    __tablename__ = "account_groups"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False, default="general")
+    default_description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SocialAccountRecord(Base):
     """Non-secret destination identity; credential payload is encrypted separately."""
     __tablename__ = "social_accounts"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    group_id: Mapped[str | None] = mapped_column(String(64), index=True)
     platform: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     category: Mapped[str] = mapped_column(String(100), nullable=False, default="general")
