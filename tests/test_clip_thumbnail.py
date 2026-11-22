@@ -42,3 +42,15 @@ def test_clip_job_thumbnail_is_created_and_keeps_notes(tmp_path: Path) -> None:
         again = client.post(f"/api/publishing/jobs/{job_id}/thumbnail", json={"text": "NEW TEXT"}, headers=csrf)
         assert again.json()["text"] == "NEW TEXT" and again.json()["notes"] == "close-up, bold text"
         assert client.get(f"/api/publishing/jobs/{job_id}/suggestion").json()["title"] == "A CLIP TITLE"
+
+
+def test_clip_jobs_expose_source_title_and_clip_titles(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from tubeforge.api.app import _clip_titles
+    (tmp_path / "source_metadata.json").write_text(json.dumps({"title": "Real Source Title"}))
+    (tmp_path / "clip_manifest.json").write_text(json.dumps({"clips": [{"candidate": {"hook_title": "First clip"}}, {"candidate": {"hook_title": "Second clip"}}, {"candidate": {}}]}))
+    files = [SimpleNamespace(name="source_metadata", path=str(tmp_path / "source_metadata.json")), SimpleNamespace(name="clip_manifest", path=str(tmp_path / "clip_manifest.json"))]
+    runtime = SimpleNamespace(artifacts=SimpleNamespace(list_for_job=lambda job_id: files))
+    clip_job = SimpleNamespace(id="j", request=SimpleNamespace(prompt_version="source-clip-v1"))
+    assert _clip_titles(clip_job, runtime) == {"display_title": "Real Source Title", "clip_titles": ["First clip", "Second clip"]}
+    assert _clip_titles(SimpleNamespace(id="j", request=SimpleNamespace(prompt_version="m6-content-v8")), runtime) == {}
