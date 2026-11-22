@@ -31,6 +31,7 @@ from tubeforge.core.app_logging import configure_logging, request_id_var
 from tubeforge.core.config import Settings, load_settings, validate_selected_provider
 from tubeforge.api.scene_ui import SCENE_CONTROLS
 from tubeforge.api.design_system import STATIC_PREFIX, register_design_assets
+from tubeforge.api.link_intake_ui import LINK_INTAKE_SCRIPT
 from tubeforge.api.studio_shell import STUDIO_NAV_ITEMS, STUDIO_SCRIPT
 from tubeforge.api.design_system import spa_shell_close, spa_shell_open
 from tubeforge.api.generation_ui import GENERATION_CONTROLS, JOB_EXTRAS_SCRIPT
@@ -1712,7 +1713,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dashboard = dashboard.replace('__SPA_SHELL_OPEN__', spa_shell_open(STUDIO_NAV_ITEMS)).replace('__SPA_SHELL_CLOSE__', spa_shell_close())
         assert dashboard.count('data-username=""') == 1
         dashboard = dashboard.replace('data-username=""', f'data-username="{html.escape(username)}"')
-        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + JOB_EXTRAS_SCRIPT + markdown_mode_controls + SCRIPT_TOOLS_SCRIPT + STUDIO_SCRIPT + "</body>")
+        return dashboard.replace("</body>", source_controls + operations_controls + account_controls + publishing_controls + reviewer_controls + GENERATION_CONTROLS + JOB_EXTRAS_SCRIPT + markdown_mode_controls + SCRIPT_TOOLS_SCRIPT + STUDIO_SCRIPT + LINK_INTAKE_SCRIPT + "</body>")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
