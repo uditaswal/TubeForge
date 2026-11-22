@@ -36,8 +36,8 @@ First read:
 
 - AGENTS.md
 - OVERNIGHT_MISSION.md
-- AUTONOMOUS_PROGRESS.md if it exists
-- current git diff/status
+- docs/HANDOFF.md ("Open" and "Next command")
+- git log -10 (previous iterations' commit messages) and current git diff/status
 - relevant source and tests
 
 You are one iteration of an overnight autonomous engineering loop.
@@ -60,11 +60,9 @@ Before finishing this iteration:
 
 1. run relevant tests
 2. perform whatever validation is currently possible
-3. update AUTONOMOUS_PROGRESS.md with:
-   - work completed
-   - current failures
-   - next required action
-   - commands/tests run
+3. commit at a green checkpoint with a message stating the work done and
+   the tests run, and update docs/HANDOFF.md "Open"/"Next command" with
+   current failures and the next required action (keep it under 60 lines)
 4. If and only if ALL acceptance criteria are genuinely satisfied and the
    real smoke video was successfully generated and validated, create:
 
@@ -127,7 +125,7 @@ done
 echo
 echo "================================================"
 echo " Maximum iterations reached."
-echo " Review AUTONOMOUS_PROGRESS.md and autonomous_logs/"
+echo " Review git log, docs/HANDOFF.md and autonomous_logs/"
 echo "================================================"
 
 exit 1
