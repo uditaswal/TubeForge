@@ -8,7 +8,7 @@ Operator drops a link or brief → AI Short / clip / long script → local rende
 to several social accounts. The AI (Codex or Claude) only returns a strict JSON script + scene plan; pixels, audio and encoding are local.
 
 ## Current focus (one at a time)
-**Publish the first private YouTube Short end to end** (Rakesh Rawat channel, private only: `youtube_api_audited` is off).
+**Publish the first private YouTube Short end to end** (the connected YouTube channel, private only: `youtube_api_audited` is off).
 Everything not listed under "Open" is frozen.
 
 ## Architecture in one screen
