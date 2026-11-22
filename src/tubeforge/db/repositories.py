@@ -337,8 +337,10 @@ class JobRepository:
                     PipelineJobRecord.state.in_([JobState.SCRIPT_APPROVAL_REQUIRED.value, JobState.PREVIEW_READY.value]),
                     func.json_extract(PipelineJobRecord.request_json, "$.review_mode") == "auto",
                 ),
-                and_(PipelineJobRecord.state == JobState.SCRIPT_APPROVAL_REQUIRED.value, approved(ApprovalGate.SCRIPT)),
-                and_(PipelineJobRecord.state == JobState.PREVIEW_READY.value, approved(ApprovalGate.PREVIEW)),
+                # An approval can be stale (the preview was re-rendered after it was given): the orchestrator then
+                # leaves the job waiting, and without a back-off it would be re-claimed several times a second.
+                and_(PipelineJobRecord.state == JobState.SCRIPT_APPROVAL_REQUIRED.value, approved(ApprovalGate.SCRIPT), or_(PipelineJobRecord.next_retry_at.is_(None), PipelineJobRecord.next_retry_at <= now)),
+                and_(PipelineJobRecord.state == JobState.PREVIEW_READY.value, approved(ApprovalGate.PREVIEW), or_(PipelineJobRecord.next_retry_at.is_(None), PipelineJobRecord.next_retry_at <= now)),
                 and_(PipelineJobRecord.state == JobState.PUBLICATION_APPROVAL_REQUIRED.value, approved(ApprovalGate.PUBLICATION_PREPARATION)),
                 and_(PipelineJobRecord.state == JobState.PUBLICATION_READY.value, approved(ApprovalGate.PUBLISH)),
                 and_(PipelineJobRecord.state == JobState.FAILED_RETRYABLE.value, PipelineJobRecord.next_retry_at <= now),
@@ -1114,6 +1116,7 @@ class ApprovalRepository:
                 if effective.status != status.value:
                     raise ValueError("approval decision conflicts with existing decision")
                 return
+            session.execute(update(PipelineJobRecord).where(PipelineJobRecord.id == job_id, PipelineJobRecord.state.in_([JobState.SCRIPT_APPROVAL_REQUIRED.value, JobState.PREVIEW_READY.value])).values(next_retry_at=None))
             session.add(ApprovalRecord(id=approval_id, job_id=job_id, gate=gate.value, status=status.value, created_at=datetime.now(UTC), actor=actor, reviewed_identity=reviewed_identity, decision_identity=self._decision_identity(reviewed_identity), audit_json=json.dumps(audit or {}, sort_keys=True)))
 
     @staticmethod

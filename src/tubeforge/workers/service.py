@@ -15,6 +15,7 @@ from tubeforge.domain.states import JobState
 from tubeforge.pipeline.orchestrator import PipelineInterrupted, PipelineOrchestrator
 
 
+STALE_APPROVAL_BACKOFF_SECONDS = 60  # a stale approval is re-checked this often; a fresh approval clears the wait at once
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +62,13 @@ class WorkerService:
             return None
         return job_id
 
+    def _event_stale_approval(self, result: PipelineJob) -> None:
+        """Release a job whose recorded approval no longer matches its current script or preview, and re-check later."""
+        now = self._now()
+        self.jobs.defer_verification(result.id, self.worker_id, now=now, next_retry_at=now + timedelta(seconds=STALE_APPROVAL_BACKOFF_SECONDS))
+        _event("approval_stale", job_id=result.id, state=result.state.value, retry_in_seconds=STALE_APPROVAL_BACKOFF_SECONDS)
+        self._record(result.id, "approval_stale", state=result.state.value, retry_in_seconds=STALE_APPROVAL_BACKOFF_SECONDS)
+
     def run_once(self, *, interrupt_after: JobState | None = None) -> PipelineJob | None:
         """Lease one eligible job then execute without a database transaction open."""
         now = self._now()
@@ -101,7 +109,11 @@ class WorkerService:
                 return self._schedule_retry(result)
             if result.state is JobState.PUBLICATION_VERIFICATION_PENDING:
                 return self.jobs.defer_verification(result.id, self.worker_id, now=self._now(), next_retry_at=self._now() + timedelta(seconds=self.orchestrator.verification_config.pending_poll_seconds))
-            if result.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.PUBLICATION_APPROVAL_REQUIRED}:
+            if result.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY} and result.state is job.state:
+                # Claimed because an approval exists, yet still waiting: that approval is for an older script or
+                # preview. Back off instead of re-claiming in a tight loop; a fresh approval clears the back-off.
+                self._event_stale_approval(result)
+            elif result.state in {JobState.SCRIPT_APPROVAL_REQUIRED, JobState.PREVIEW_READY, JobState.PUBLICATION_APPROVAL_REQUIRED}:
                 _event("waiting_for_approval", job_id=result.id, state=result.state.value)
                 self._record(result.id, "waiting_for_approval", state=result.state.value)
             elif result.failure_message:
