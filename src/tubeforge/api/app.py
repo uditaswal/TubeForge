@@ -48,7 +48,7 @@ from tubeforge.pipeline.diagnostics import summarize_stage_events
 from tubeforge.pipeline.usage_report import summarize_ai_usage
 from tubeforge.pipeline.delivery_queue import DeliveryQueue
 from tubeforge.pipeline.publishing_assets import PublishingAssetRegistry, READY_STATES
-from tubeforge.db.repositories import PAUSABLE_STATES
+from tubeforge.db.repositories import PAUSABLE_STATES, AccountGroup, AccountGroupRepository, SocialAccount
 from tubeforge.db.models import DeliveryAttemptRecord, PublishingAssetRecord, SocialAccountRecord
 from tubeforge.publishing_worker.presence import PublisherWorkerPresence
 from tubeforge.security.google_oauth import GoogleAccountOAuth
@@ -218,6 +218,18 @@ class SocialAccountCreateRequest(BaseModel):
     category: str = Field(default="general", min_length=1, max_length=100)
     default_description: str = Field(default="", max_length=5000)
     auth_type: str = Field(default="oauth", pattern=r"^(oauth|manual_handoff)$")
+
+
+class AccountGroupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=200)
+    category: str = Field(default="general", min_length=1, max_length=100)
+    default_description: str = Field(default="", max_length=5000)
+
+
+class AccountConnectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    platform: str = Field(pattern=r"^(youtube|instagram|facebook|snapchat|x)$")
 
 
 class SocialAccountProfileRequest(BaseModel):
@@ -525,6 +537,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = application_settings
     app.state.database = runtime.database
     app.state.runtime = runtime
+    account_groups = AccountGroupRepository(runtime.database.session_factory)
     publishing_assets = PublishingAssetRegistry(
         runtime.database.session_factory, runtime.jobs, runtime.artifacts,
         application_settings.pipeline.voice.artifact_root,
@@ -1055,6 +1068,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(error)) from error
         return {"delivery_id": delivery_id, "action": value.action, "state": resulting_state}
 
+    def _group_view(group: AccountGroup, connections: list[SocialAccount]) -> dict[str, object]:
+        mine = [item for item in connections if item.group_id == group.id and not item.disabled]
+        return {"id": group.id, "name": group.name, "category": group.category, "default_description": group.default_description,
+                "is_default": any(item.is_default for item in mine),
+                "connections": [{"id": item.id, "platform": item.platform, "channel_name": item.display_name, "external_account_id": item.external_account_id, "status": item.status, "is_default": item.is_default, "token_expires_at": item.token_expires_at, "last_validated_at": item.last_validated_at} for item in mine]}
+
+    @app.get("/api/account-groups", tags=["social accounts"])
+    def list_account_groups() -> list[dict[str, object]]:
+        connections = runtime.accounts.list()
+        known = {group.id for group in account_groups.list()}
+        orphans = [item for item in connections if (item.group_id is None or item.group_id not in known) and not item.disabled]
+        if orphans:
+            # A connection made through OAuth without a chosen account gets an account of its own.
+            for item in orphans:
+                account_groups.create(item.id, name=item.display_name, category=item.category, default_description=item.default_description)
+                runtime.accounts.assign_group(item.id, item.id)
+            connections = runtime.accounts.list()
+        return [_group_view(group, connections) for group in account_groups.list()]
+
+    @app.post("/api/account-groups", status_code=status.HTTP_201_CREATED, tags=["social accounts"])
+    def create_account_group(value: AccountGroupRequest) -> dict[str, object]:
+        try:
+            group = account_groups.create(uuid4().hex, name=value.name, category=value.category, default_description=value.default_description)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return _group_view(group, [])
+
+    @app.put("/api/account-groups/{group_id}", tags=["social accounts"])
+    def update_account_group(group_id: str, value: AccountGroupRequest) -> dict[str, object]:
+        try:
+            group = account_groups.update(group_id, name=value.name, category=value.category, default_description=value.default_description)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="account not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return _group_view(group, runtime.accounts.list())
+
+    @app.post("/api/account-groups/{group_id}/connections", status_code=status.HTTP_201_CREATED, tags=["social accounts"])
+    def add_group_connection(group_id: str, value: AccountConnectionRequest) -> dict[str, object]:
+        """Reserve a platform slot under the account; verified connection happens afterwards via OAuth."""
+        group = account_groups.get(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="account not found")
+        if any(item.group_id == group_id and item.platform == value.platform and not item.disabled for item in runtime.accounts.list()):
+            raise HTTPException(status_code=409, detail=f"this account already has a {value.platform} connection")
+        runtime.accounts.create(uuid4().hex, platform=value.platform, display_name=group.name, external_account_id=None, auth_type="oauth", credential_ciphertext=None, scopes=(), capabilities=(), category=group.category, default_description=group.default_description, group_id=group_id)
+        return _group_view(group, runtime.accounts.list())
+
+    @app.put("/api/account-groups/{group_id}/default", tags=["social accounts"])
+    def set_default_account_group(group_id: str) -> dict[str, object]:
+        target = next((item for item in runtime.accounts.list() if item.group_id == group_id and not item.disabled), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="account has no connection to make default")
+        runtime.accounts.set_default(target.id)
+        return {"id": group_id, "is_default": True}
+
     @app.post("/api/social-accounts", status_code=status.HTTP_201_CREATED, tags=["social accounts"])
     def create_social_account(value: SocialAccountCreateRequest) -> dict[str, object]:
         # This endpoint creates a visible placeholder only. A browser-supplied
@@ -1062,6 +1131,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # never create a "connected" publishing destination.
         try:
             account = runtime.accounts.create(uuid4().hex, platform=value.platform, display_name=value.display_name, external_account_id=None, auth_type=value.auth_type, credential_ciphertext=None, scopes=(), capabilities=(), category=value.category, default_description=value.default_description)
+            account_groups.create(account.id, name=value.display_name, category=value.category, default_description=value.default_description)
+            runtime.accounts.assign_group(account.id, account.id)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         return {"id": account.id, "platform": account.platform, "display_name": account.display_name, "category": account.category, "default_description": account.default_description, "status": account.status, "capabilities": account.capabilities}
